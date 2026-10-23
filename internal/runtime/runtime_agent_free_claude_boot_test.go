@@ -156,9 +156,9 @@ func loadAgentFreeRuntimeWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntim
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: agent-free-runtime
 stages: []
 `)
 

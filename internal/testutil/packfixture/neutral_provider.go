@@ -34,7 +34,6 @@ normalized_events:
   send_message:
     category: provider_connector
     handler_type: http
-    effect_class: non_idempotent_write
     credentials: [bot_token]
     input_schema:
       type: object
@@ -56,7 +55,8 @@ normalized_events:
       body: {room: '{{input.room}}', text: '{{input.text}}'}
     response_success: {kind: http_status_2xx}
     response_mapping: {id: '{{response.body.id}}'}
-`),
+`,
+		),
 		"channel.yaml": []byte(`transport: session
 capabilities:
   card_render: true

@@ -30,7 +30,6 @@ func s1ConnectorDirectoryMembers() map[string][]byte {
   send_message:
     category: provider_connector
     handler_type: http
-    effect_class: non_idempotent_write
     description: Send a message using the provider protocol
     credentials: [bot_token]
     http:
@@ -43,7 +42,8 @@ func s1ConnectorDirectoryMembers() map[string][]byte {
         nested: [{credential: '{{credentials.bot_token}}'}, 7, false, null]
         literal: 'credentials.bot_token and telegram.send_message stay literal'
     response_success: {kind: http_status_2xx}
-`),
+`,
+		),
 	}
 }
 
@@ -158,7 +158,6 @@ func TestS1ConnectorBodyManagedRolePreservesGrantPolicy(t *testing.T) {
   send_message:
     category: provider_connector
     handler_type: http
-    effect_class: non_idempotent_write
     managed_credential:
       key: oauth
       header: X-Provider-Token
@@ -167,7 +166,8 @@ func TestS1ConnectorBodyManagedRolePreservesGrantPolicy(t *testing.T) {
       token_request: {client_auth: basic, body: form}
     http: {method: POST, url: 'https://api.example/send', body: {text: '{{input.text}}'}}
     response_success: {kind: http_status_2xx}
-`)
+`,
+		)
 		body := s1CapturedConnectorBody(t, key, members)
 		manifest, err := AdmitBody(body)
 		if err != nil {

@@ -2,11 +2,18 @@ package registration
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/fstest"
 
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providerconnectors"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"gopkg.in/yaml.v3"
 )
 
 func registrationChannelPlanForTest(t testing.TB, overrides map[string]runtimecontracts.ToolSchemaEntry) packs.SatisfactionPlan {
@@ -19,33 +26,72 @@ func registrationChannelPlanForTest(t testing.TB, overrides map[string]runtimeco
 	if err != nil {
 		t.Fatal(err)
 	}
-	var channels []packs.LoadedChannelPack
+	var provider packartifact.AdmittedProvider
 	for _, channel := range packfixture.ChannelPacks(t) {
-		if channel.Envelope.ID == "provider.telegram.hitl_channel" {
-			channels = append(channels, channel)
+		if channel.Key() == "telegram" {
+			if provider.Valid() {
+				t.Fatal("duplicate Telegram channel fixture")
+			}
+			provider = channel
 		}
 	}
-	if len(channels) != 1 || channels[0].Manifest.Provider != "telegram" {
+	if !provider.Valid() {
 		t.Fatal("expected the shipped Telegram channel fixture")
 	}
-	connectors := packfixture.ConnectorRegistry(t).PackDescriptors()
-	for toolID, tool := range overrides {
-		found := false
-		for i := range connectors {
-			if connectors[i].Identity.ID() != channels[0].Envelope.Requires.Packs[packs.TypeConnector] {
-				continue
-			}
-			if _, exists := connectors[i].Tools[toolID]; !exists {
-				t.Fatalf("unknown connector override %s", toolID)
-			}
-			connectors[i].Tools[toolID] = tool
-			found = true
-		}
-		if !found {
-			t.Fatalf("missing accepted connector for %s", toolID)
-		}
+	members := provider.Members()
+	var connectorDocument map[string]any
+	if err := yaml.Unmarshal(members["connector.yaml"], &connectorDocument); err != nil {
+		t.Fatal(err)
 	}
-	plan, err := packs.CompileChannel(registry, channels[0], packfixture.TriggerCatalog(t).PackDescriptors(), connectors)
+	tools, ok := connectorDocument["tools"].(map[string]any)
+	if !ok {
+		t.Fatal("captured Telegram connector has no tool declarations")
+	}
+	for toolID, tool := range overrides {
+		if !strings.HasPrefix(toolID, provider.Key()+".") {
+			t.Fatalf("foreign connector override %s", toolID)
+		}
+		name := strings.TrimPrefix(toolID, provider.Key()+".")
+		if _, exists := tools[name]; !exists {
+			t.Fatalf("unknown connector override %s", toolID)
+		}
+		tools[name] = tool
+	}
+	members["connector.yaml"], err = yaml.Marshal(connectorDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := fstest.MapFS{}
+	for name, body := range members {
+		files[provider.Key()+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	provider, err = packartifact.LoadProviderFS(files, provider.Key(), "0.7.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggerBody, _ := provider.Body(packmodel.BodyTrigger)
+	trigger, err := providertriggers.AdmitBody(triggerBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggerDescriptor, present := catalog.PackDescriptorForProvider(provider.Key())
+	if !present {
+		t.Fatal("captured Telegram trigger descriptor is unavailable")
+	}
+	connectorBody, _ := provider.Body(packmodel.BodyConnector)
+	connector, err := providerconnectors.AdmitBody(connectorBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := packs.NewProviderBodyIdentity(connectorBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := packs.CompileProviderChannel(registry, provider, triggerDescriptor, packs.ConnectorPackDescriptor{Identity: identity, Provider: connector.Provider, Tools: connector.Tools})
 	if err != nil {
 		t.Fatal(err)
 	}

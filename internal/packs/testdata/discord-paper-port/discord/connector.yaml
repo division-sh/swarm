@@ -2,7 +2,6 @@ tools:
   create_message:
     category: provider_connector
     handler_type: http
-    effect_class: non_idempotent_write
     credentials: [discord_bot_token]
     input_schema:
       type: object

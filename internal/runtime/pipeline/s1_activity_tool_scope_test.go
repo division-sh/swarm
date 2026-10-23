@@ -65,12 +65,12 @@ func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semantic
 		files[flow+"/schema.yaml"] = "stages: []\n"
 		files[flow+"/events.yaml"] = "request:\n"
 		files[flow+"/nodes.yaml"] = fmt.Sprintf("scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: send, tool: %s, input: {}}\n", toolID)
-		tool := fmt.Sprintf("provider_write:\n  handler_type: http\n  effect_class: non_idempotent_write\n  input_schema: {type: object, additionalProperties: false}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
+		tool := fmt.Sprintf("provider_write:\n  handler_type: http\n  input_schema: {type: object, additionalProperties: false}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
 		if !directory {
 			files[flow+"/tools.yaml"] = tool
 		} else {
 			files[flow+"/team-bot/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send]}, cannot: [bypass journal]}\n"
-			files[flow+"/team-bot/connector.yaml"] = fmt.Sprintf("tools:\n  send:\n    category: provider_connector\n    handler_type: http\n    effect_class: non_idempotent_write\n    credentials: [token]\n    input_schema: {type: object, additionalProperties: false}\n    output_schema:\n      type: object\n      required: [origin]\n      properties: {origin: {type: string, enum: [%s]}}\n    http:\n      method: POST\n      url: %q\n      headers: {Authorization: 'Bearer {{credentials.token}}'}\n    response_success: {kind: http_status_2xx}\n", flow, server.URL+"/"+flow)
+			files[flow+"/team-bot/connector.yaml"] = fmt.Sprintf("tools:\n  send:\n    category: provider_connector\n    handler_type: http\n    credentials: [token]\n    input_schema: {type: object, additionalProperties: false}\n    output_schema:\n      type: object\n      required: [origin]\n      properties: {origin: {type: string, enum: [%s]}}\n    http:\n      method: POST\n      url: %q\n      headers: {Authorization: 'Bearer {{credentials.token}}'}\n    response_success: {kind: http_status_2xx}\n", flow, server.URL+"/"+flow)
 		}
 	}
 	source := semanticview.Wrap(loadWorkflowTempBundle(t, files))

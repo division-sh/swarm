@@ -406,7 +406,28 @@ func newRuntimeTestProcessCapability(t testing.TB, manager *runtimemanager.Agent
 func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, session *runtimeTestRetainedSession, decorators ...func(*runtimeTestRetainedSession) runtimestartupownership.RetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant, error) {
 	t.Helper()
 	bundleHash := fact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	var coordinate runtimeagenttopology.SourceCoordinate
+	var coordinateErr error
+	if source == nil {
+		rooted, _ := sourceartifactfixture.Rooted(t, "runtime-only", sourceartifactfixture.Artifact())
+		coordinate, coordinateErr = runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	} else {
+		bundle, found := semanticview.Bundle(source)
+		if !found {
+			return nil, nil, errors.New("runtime test source requires its captured bundle")
+		}
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			return nil, nil, err
+		}
+		coordinate, coordinateErr = runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	}
+	if coordinateErr != nil {
+		return nil, nil, coordinateErr
+	}
+	if coordinate.BundleHash != bundleHash {
+		return nil, nil, errors.New("runtime test source differs from its exact source fact")
+	}
 	var desired []runtimeagenttopology.DesiredAgent
 	if source != nil {
 		if manager == nil {

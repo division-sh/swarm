@@ -141,8 +141,9 @@ func loadRootedBudgetSource(t *testing.T, directory, schema string) (sourceartif
 		t.Fatal(err)
 	}
 	for name, body := range map[string]string{
-		"schema.yaml": schema,
-		"policy.yaml": "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   schema,
+		"policy.yaml":   "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -390,13 +391,15 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 
 func TestNewRuntimeConstructsBudgetTrackerFromBackendNeutralStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	store := &budgetSpendStoreCapture{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore:       &minimalRuntimeEventStore{},
 		BudgetSpendStore: store,
 		Options: RuntimeOptions{
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			WorkflowModule:     module,
+			SourceArtifactFact: fact,
+			LLMRuntime:         noopLLMRuntime{},
 		}})
 
 	if err != nil {
