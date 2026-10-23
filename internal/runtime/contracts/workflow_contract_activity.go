@@ -349,7 +349,8 @@ func (b *WorkflowContractBundle) duplicateActivityIDError(id string, first, seco
 		return LoaderDiagnosticLocation{File: record.Source.File, YAMLPath: slot, Line: introduction.Line, Column: introduction.Column}
 	}
 	firstLocation, secondLocation := location(first), location(second)
-	if firstLocation.File == secondLocation.File && firstLocation.Line > secondLocation.Line {
+	if firstLocation.File == secondLocation.File && (firstLocation.Line > secondLocation.Line ||
+		firstLocation.Line == secondLocation.Line && firstLocation.Column > secondLocation.Column) {
 		first, second = second, first
 		secondLocation = firstLocation
 	}
