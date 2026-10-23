@@ -97,6 +97,10 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/runlifecycle/standing_disposition.go", "A10,A27", "2577-native-dormancy,P08,P10,P21"},
 	{"internal/serveapp/public_ingress.go", "A10,A27", "2577-native-boot,2577-native-publication,P08,P10,P21"},
 	{"internal/serveapp/serve_lifecycle_presentation.go", "A10,A27", "2577-native-boot,P08,P10,P21"},
+	// #2730 threads the supplied original through Runtime/Manager admission,
+	// preparation and teardown, without resolving another source or changing
+	// read-only recovery inspection. Native takeover/cancellation, complete
+	// Runtime/Manager and both-store conformance controls retain these reaches.
 	{"internal/runtime/runtime.go", "A05,A08,A11,A13,A18,A23,A24,A25", "P04,P08,P09,P11,P15,P20,P21"},
 	{"internal/runtime/workflow_validation.go", "A05,A06,A07,A08,A09,A10,A13,A14,A29", "P00,P04,P05,P06,P07,P08,P11,P12"},
 	{"internal/runtime/workflow_validation_admission.go", "A05,A06,A07,A08,A09,A10,A13,A14,A29", "P00,P04,P05,P06,P07,P08,P11,P12"},
