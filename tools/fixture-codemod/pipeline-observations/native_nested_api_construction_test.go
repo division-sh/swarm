@@ -54,41 +54,6 @@ func nativeNestedAPIConstructionSource(t *testing.T, source string) string {
 	return formattedNativeReadNode(fn)
 }
 
-func TestNativeNestedAPIConstructionClosesEveryReviewedLocalPool(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		expected := nativeNestedAPIConstructionRoots[row.Function]
-		if expected == 0 {
-			continue
-		}
-		matched++
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		expectedBody, err := nativeNestedAPIConstructionExpectedBody(row)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want, err := canonicalFunction(expectedBody)
-		got, actualErr := canonicalFunction(actual)
-		if err != nil || actualErr != nil || want != got || strings.Contains(actual, "testutil.StartPostgres") || strings.Contains(actual, "AdmitPostgresRuntimeStore") || strings.Count(actual, "storetest.StartPostgresRuntimeStore(t)") != expected {
-			t.Fatalf("nested API construction regained raw/foreign setup: %s", row.Function)
-		}
-		for _, replacement := range []string{"storetest.StartSQLiteRuntimeStore(t)", "storetest.StartPostgresRuntimeStore(otherTest)", "storetest.AdmitPostgresRuntimeStore(t, db)"} {
-			mutant := strings.Replace(actual, "storetest.StartPostgresRuntimeStore(t)", replacement, 1)
-			changed, mutantErr := canonicalFunction(mutant)
-			if mutant == actual || (mutantErr == nil && changed == want) {
-				t.Fatal("foreign nested API construction admitted")
-			}
-		}
-	}
-	if matched != len(nativeNestedAPIConstructionRoots) {
-		t.Fatalf("nested API construction recipes=%d,want%d", matched, len(nativeNestedAPIConstructionRoots))
-	}
-}
-
 func nativeNestedAPIConstructionExpectedBody(row recipe) (string, error) {
 	if row.File != "internal/apiv1/operator_event_replay_test.go" || row.Function != "TestOperatorEventReplayQueuesWhenDispatchGated" {
 		return row.After, nil

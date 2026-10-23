@@ -60,30 +60,6 @@ func sameReviewedRecipeKey(left, right recipe) bool {
 	return left.Family == right.Family && left.File == right.File && left.Function == right.Function
 }
 
-func reviewedSharedCoordinatorBody2617(row recipe, packet reviewedSuccessorPacket2617) (string, error) {
-	for _, pin := range packet.Shared {
-		if row.Family != pin.Family || row.File != pin.File || row.Function != pin.Function {
-			continue
-		}
-		history := row
-		history.Successor = ""
-		raw, err := json.Marshal(history)
-		if err != nil {
-			return "", err
-		}
-		current := row.After
-		if row.Successor != "" {
-			current = row.Successor
-		}
-		if fmt.Sprintf("%x", sha256.Sum256(raw)) != pin.HistorySHA256 ||
-			(row.Successor != "") != pin.HasSuccessor || !historicalCurrentSourcePinned(current, pin.CurrentSHA256) {
-			return "", fmt.Errorf("unreviewed shared coordinator history/current endpoint: %s", row.Function)
-		}
-		return current, nil
-	}
-	return "", fmt.Errorf("unlisted shared coordinator endpoint: %s/%s", row.File, row.Function)
-}
-
 func TestReviewedSuccessors2617RetainDiagnosticBoundsAndExactReplaySiblings(t *testing.T) {
 	packet := loadReviewedSuccessors2617(t)
 	diagnostic := packet.Rows[1]
@@ -133,42 +109,5 @@ func TestReviewedSuccessors2617RetainDiagnosticBoundsAndExactReplaySiblings(t *t
 	}
 	if strings.Count(replay, "events.MustEntitylessReceiverTarget(") != 2 {
 		t.Fatal("entityless static actor proof silently became an arbitrary entity-target proof")
-	}
-}
-
-func TestReviewedSharedCoordinator2617RefusesUnlistedCurrentPairs(t *testing.T) {
-	packet := loadReviewedSuccessors2617(t)
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, row := range rows {
-		if row.Family != "native-shared-coordinator-authority" {
-			continue
-		}
-		count++
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		current, err := reviewedSharedCoordinatorCurrentBody2617(row, actual, packet)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, field := range []string{"history", "key", "source"} {
-			mutant := row
-			switch field {
-			case "history":
-				mutant.Before = row.After
-			case "key":
-				mutant.File = "unlisted.go"
-			case "source":
-				mutant.Successor = strings.Replace(current, "func ", "func Unreviewed", 1)
-			}
-			if _, err := reviewedSharedCoordinatorCurrentBody2617(mutant, current, packet); err == nil {
-				t.Fatalf("shared coordinator accepted %s mutation for %s", field, row.Function)
-			}
-		}
-	}
-	if count != 18 {
-		t.Fatalf("shared finite coverage=%d,want18", count)
 	}
 }

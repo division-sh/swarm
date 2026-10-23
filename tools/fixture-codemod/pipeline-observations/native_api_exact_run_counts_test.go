@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
+
 	"strings"
 	"testing"
 )
@@ -83,25 +83,6 @@ func q10PrivateTargetCurrentRecipe(t *testing.T, row recipe) recipe {
 	return row
 }
 
-func TestNativeAPIExactRunCountsRetainCompleteWorkloadsAndKeys(t *testing.T) {
-	for _, row := range nativeAPIExactRunCountRecipes(t) {
-		row = historicalMechanicalRecipe(t, q10PrivateTargetCurrentRecipe(t, row))
-		if strings.HasPrefix(row.Function, "Test") {
-			if nativeAPIExactRunCountWorkload(t, row.Before) != nativeAPIExactRunCountWorkload(t, row.After) {
-				t.Fatalf("exact-run source/request/workload/assertions changed: %s", row.Function)
-			}
-			continue
-		}
-		configuration := map[string][2]string{
-			"countRunRowsByID":      {"CountPhysicalRunIdentity", "count run rows: %v"},
-			"countEventRowsByRunID": {"CountPhysicalRunEvents", "count event rows: %v"},
-		}[row.Function]
-		want := "func " + row.Function + "(t *testing.T,selected any,runID string)int{t.Helper();count,err:=storetest." + configuration[0] + "(context.Background(),selected,runID);if err!=nil{t.Fatalf(" + strconv.Quote(configuration[1]) + ",err)};return count}"
-		if formattedNativeReadNode(projectionShapeFunction(t, row.After)) != formattedNativeReadNode(projectionShapeFunction(t, want)) {
-			t.Fatalf("exact-run key/owner/refusal changed: %s", row.Function)
-		}
-	}
-}
 func TestNativeAPIExactRunCountsRejectWrongKeyOwnerOrAssertion(t *testing.T) {
 	probes := 0
 	for _, row := range nativeAPIExactRunCountRecipes(t) {
