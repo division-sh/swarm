@@ -365,7 +365,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 		webhookSecret     = "stripe-secret"
 		providerEventID   = "evt_123"
 		agentID           = "stripe-webhook-subscriber"
-		providerEventName = "inbound.stripe"
+		providerEventName = "inbound.stripe.raw"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -467,7 +467,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 		webhookSecret     = "stripe-secret"
 		providerEventID   = "evt_456"
 		agentID           = "stripe-sqlite-webhook-subscriber"
-		providerEventName = "inbound.stripe"
+		providerEventName = "inbound.stripe.raw"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -529,7 +529,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 		webhookSecret     = "twilio-secret"
 		providerEventID   = "SM1234567890abcdef"
 		agentID           = "twilio-webhook-subscriber"
-		providerEventName = "inbound.twilio"
+		providerEventName = "inbound.twilio.raw"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -592,7 +592,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 		webhookSecret     = "twilio-secret"
 		providerEventID   = "SMabcdef1234567890"
 		agentID           = "twilio-sqlite-webhook-subscriber"
-		providerEventName = "inbound.twilio"
+		providerEventName = "inbound.twilio.raw"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -658,7 +658,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 		webhookSecret     = "shopify-secret"
 		providerEventID   = "webhook-123"
 		agentID           = "shopify-webhook-subscriber"
-		providerEventName = "inbound.shopify"
+		providerEventName = "inbound.shopify.raw"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -717,7 +717,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 		webhookSecret     = "shopify-secret"
 		providerEventID   = "webhook-456"
 		agentID           = "shopify-sqlite-webhook-subscriber"
-		providerEventName = "inbound.shopify"
+		providerEventName = "inbound.shopify.raw"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -779,7 +779,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 		webhookSecret     = "telegram-secret"
 		providerEventID   = "123456789"
 		agentID           = "telegram-webhook-subscriber"
-		providerEventName = "inbound.telegram"
+		providerEventName = "inbound.telegram.raw"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -849,7 +849,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		webhookSecret     = "telegram-secret"
 		providerEventID   = "987654321"
 		agentID           = "telegram-sqlite-webhook-subscriber"
-		providerEventName = "inbound.telegram"
+		providerEventName = "inbound.telegram.raw"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -1039,7 +1039,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			providerEventID:   "tf-evt-pg-123",
 			providerEventType: "form_response",
 			agentID:           "typeform-webhook-subscriber",
-			providerEventName: "inbound.typeform",
+			providerEventName: "inbound.typeform.raw",
 			body:              []byte(`{"event_id":"tf-evt-pg-123","event_type":"form_response","form_response":{"token":"abc"}}`),
 			newRequest:        newSignedTypeformRequest,
 		},
@@ -1051,7 +1051,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			providerEventID:   "notif_pg_123",
 			providerEventType: "conversation_user_created",
 			agentID:           "intercom-webhook-subscriber",
-			providerEventName: "inbound.intercom",
+			providerEventName: "inbound.intercom.raw",
 			body:              []byte(`{"id":"notif_pg_123","topic":"conversation.user.created","data":{"item":{"id":"conv_1"}}}`),
 			newRequest:        newSignedIntercomRequest,
 		},
@@ -1132,7 +1132,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			providerEventID:   "tf-evt-sqlite-123",
 			providerEventType: "form_response",
 			agentID:           "typeform-sqlite-webhook-subscriber",
-			providerEventName: "inbound.typeform",
+			providerEventName: "inbound.typeform.raw",
 			body:              []byte(`{"event_id":"tf-evt-sqlite-123","event_type":"form_response","form_response":{"token":"abc"}}`),
 			newRequest:        newSignedTypeformRequest,
 		},
@@ -1144,7 +1144,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			providerEventID:   "notif_sqlite_123",
 			providerEventType: "conversation_user_created",
 			agentID:           "intercom-sqlite-webhook-subscriber",
-			providerEventName: "inbound.intercom",
+			providerEventName: "inbound.intercom.raw",
 			body:              []byte(`{"id":"notif_sqlite_123","topic":"conversation.user.created","data":{"item":{"id":"conv_1"}}}`),
 			newRequest:        newSignedIntercomRequest,
 		},

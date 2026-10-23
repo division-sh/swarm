@@ -9,6 +9,8 @@ const RuntimeLogSchemaReference = "platform-spec.yaml#platform_tables.diagnostic
 
 const JoinOccurrencePayloadReference = "platform-spec.yaml#engine.join_engine.occurrence_routing"
 
+const StageTimerPayloadReference = "platform-spec.yaml#engine.timer_model.boot_validation.stage_timers"
+
 // PayloadProducer separates authored flow coordinates from platform identities.
 // Neither the absence of a flow nor a schema-class label selects a variant.
 type PayloadProducer struct {

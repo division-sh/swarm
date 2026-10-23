@@ -154,14 +154,14 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	}, "inbound.telegram")
+	}, "inbound.telegram.raw")
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
 	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend, bus, source, credentialStore)
 	backend.activityAttempts = pc
 
-	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
+	gateway := newCapturedProviderGateway(t, bus, source, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	validBody := []byte(`{"update_id":123456789,"message":{"message_id":7,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"hello from telegram"}}`)
 	validReq := newSignedTelegramRequest(webhookPath, "telegram-secret", validBody).WithContext(backend.ctx)
@@ -243,14 +243,14 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	}, "inbound.telegram")
+	}, "inbound.telegram.raw")
 	if err != nil {
 		t.Fatalf("%s missing-token NewEventBusWithOptions: %v", backend.name, err)
 	}
 	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend, bus, source, credentialStore)
 	backend.activityAttempts = pc
 
-	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
+	gateway := newCapturedProviderGateway(t, bus, source, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	missingTokenBody := []byte(`{"update_id":123456790,"message":{"message_id":8,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"missing token"}}`)
 	req := newSignedTelegramRequest(webhookPath, "telegram-secret", missingTokenBody).WithContext(backend.ctx)

@@ -2,7 +2,6 @@ package pipeline_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -17,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -46,7 +44,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact),
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -221,7 +219,7 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact),
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -296,7 +294,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			source := semanticview.Wrap(bundle)
 			logger := &exactJoinRuntimeLogger{}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter, Logger: logger,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact), Logger: logger,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -406,7 +404,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				}},
 			}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter, TestLifecycleProbe: lifecycleProbe,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact), TestLifecycleProbe: lifecycleProbe,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -551,7 +549,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			bundle.Semantics.Timers[0].Delay = "200ms"
 			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
-			admitter := newFailOnceWorkflowTimerPayloadAdmitter()
+			admitter := newFailOnceWorkflowTimerPayloadAdmitter(source, fact)
 			defer func() {
 				select {
 				case <-admitter.releaseSecond:
@@ -639,7 +637,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			source := semanticview.Wrap(bundle)
 			failingOwner, failures := failNextWorkflowTimerPipelineDisposition(t, selected.events)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact),
 				PipelineObligations: failingOwner,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
@@ -713,40 +711,35 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 	}
 }
 
-func strictWorkflowTimerPayloadAdmitter(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
-	flowID := payloadProducer.FlowID()
-	if event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
-		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+func strictWorkflowTimerPayloadAdmitter(source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) runtimebus.PayloadAdmitter {
+	return func(_ context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
+		admission, found, err := runtimepipeline.ResolveWorkflowStageTimerPayloadAdmission(source, event, fact.BundleHash())
+		if found || err != nil {
+			return admission, err
+		}
+		return eventtest.PayloadAdmission(event, producer.FlowID(), string(event.Type()))
 	}
-	var decoded map[string]any
-	if err := json.Unmarshal(event.Payload(), &decoded); err != nil {
-		return events.PayloadAdmission{}, err
-	}
-	if err := runtimeeventschema.ValidatePayloadAgainstSchema(map[string]any{
-		"type": "object", "properties": map[string]any{}, "additionalProperties": false,
-	}, decoded); err != nil {
-		return events.PayloadAdmission{}, err
-	}
-	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 
 var errInjectedWorkflowTimerPublishFailure = errors.New("injected workflow timer publish failure")
 
 type failOnceWorkflowTimerPayloadAdmitter struct {
+	payload       runtimebus.PayloadAdmitter
 	attempts      atomic.Int32
 	secondAttempt chan struct{}
 	releaseSecond chan struct{}
 }
 
-func newFailOnceWorkflowTimerPayloadAdmitter() *failOnceWorkflowTimerPayloadAdmitter {
+func newFailOnceWorkflowTimerPayloadAdmitter(source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) *failOnceWorkflowTimerPayloadAdmitter {
 	return &failOnceWorkflowTimerPayloadAdmitter{
+		payload:       strictWorkflowTimerPayloadAdmitter(source, fact),
 		secondAttempt: make(chan struct{}),
 		releaseSecond: make(chan struct{}),
 	}
 }
 
 func (v *failOnceWorkflowTimerPayloadAdmitter) admit(ctx context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
-	admitted, err := strictWorkflowTimerPayloadAdmitter(ctx, event, payloadProducer)
+	admitted, err := v.payload(ctx, event, payloadProducer)
 	if err != nil || event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
 		return admitted, err
 	}

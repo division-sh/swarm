@@ -512,7 +512,7 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal := captureActivityFixtureJournal(t, ctx, fixture.store)
+	journal := activityNativeJournalForFixture(t, fixture)
 	var admittedPayload map[string]json.RawMessage
 	if err := json.Unmarshal(event.Payload(), &admittedPayload); err != nil {
 		t.Fatal(err)

@@ -606,7 +606,7 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	}
-	journal := captureActivityFixtureJournal(t, ctx, fixture.store)
+	journal := activityNativeJournalForFixture(t, fixture)
 	record, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: requestID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: instance, NodeID: owner.Key(), HandlerEventKey: handler, ActivityID: activity, Tool: tool,

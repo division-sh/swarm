@@ -108,7 +108,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	if err != nil {
 		t.Fatal(err)
 	}
-	gateway := newTestInboundGateway(t, bus, nil, nil, selected)
+	gateway := newCapturedProviderGateway(t, bus, source, selected)
 	gateway.SetChannelPlans([]packs.SatisfactionPlan{plan})
 
 	negativeBodies := []struct {
@@ -160,7 +160,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	for _, tc := range negativeBodies {
 		t.Run(tc.name, func(t *testing.T) {
 			response := publishOperatorChannelTelegramUpdate(t, gateway, bus, inboundTarget, ctx, []byte(tc.body))
-			wantEvents := []string{"inbound.telegram"}
+			wantEvents := []string{"inbound.telegram.raw"}
 			if tc.actionIntent {
 				wantEvents = nil
 			}

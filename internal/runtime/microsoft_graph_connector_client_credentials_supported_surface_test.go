@@ -89,7 +89,7 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
-	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
+	gateway := newCapturedProviderGateway(t, bus, source, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "323456789", "send first mail")
@@ -335,7 +335,7 @@ func assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t *testing.T, ba
 	source := backend.source
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
-	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
+	gateway := newCapturedProviderGateway(t, bus, source, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, updateID, label)
 	inboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, updateID)

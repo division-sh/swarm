@@ -131,7 +131,7 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
-	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
+	gateway := newCapturedProviderGateway(t, bus, source, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "123456789", "hello from telegram")
@@ -356,7 +356,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	}, "inbound.github.raw.issue_comment", "inbound.github.raw.issues", "inbound.telegram")
+	}, "inbound.github.raw.issue_comment", "inbound.github.raw.issues", "inbound.telegram.raw")
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
@@ -389,7 +389,7 @@ func assertSlackManagedConnectorMissingCredential(t *testing.T, backend slackMan
 	source := backend.source
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
 	backend.activityAttempts = pc
-	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
+	gateway := newCapturedProviderGateway(t, bus, source, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "123456791", "missing credential")
 	inboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "123456791")

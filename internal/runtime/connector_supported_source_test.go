@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -42,6 +43,25 @@ func seedCapturedProviderTarget(t *testing.T, ctx context.Context, persistence r
 	default:
 		t.Fatalf("unsupported provider fixture store %T", persistence)
 	}
+	catalog := capturedProviderCatalog(t, source)
+	target.AdmissionPlan, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: target.Alias, Provider: provider, SigningSecret: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.Provider, target.SigningSecret = provider, secret
+	return boundedInboundTargetContext(t, ctx, target), target
+}
+
+func capturedProviderCatalog(t *testing.T, source semanticview.Source) *providertriggers.CatalogSnapshot {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("provider catalog requires its captured source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
 	if err != nil {
 		t.Fatal(err)
@@ -54,12 +74,14 @@ func seedCapturedProviderTarget(t *testing.T, ctx context.Context, persistence r
 	if err != nil {
 		t.Fatal(err)
 	}
-	target.AdmissionPlan, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: target.Alias, Provider: provider, SigningSecret: secret})
-	if err != nil {
-		t.Fatal(err)
-	}
-	target.Provider, target.SigningSecret = provider, secret
-	return boundedInboundTargetContext(t, ctx, target), target
+	return catalog
+}
+
+func newCapturedProviderGateway(t *testing.T, bus *runtimebus.EventBus, source semanticview.Source, stores ...runtimepkg.InboundPersistence) *runtimepkg.InboundGateway {
+	t.Helper()
+	gateway := newTestInboundGateway(t, bus, nil, nil, stores...)
+	bus.SetProviderOutputAuthorizationVerifier(capturedProviderCatalog(t, source))
+	return gateway
 }
 
 func capturedTelegramOperatorSource(t *testing.T) semanticview.Source {
