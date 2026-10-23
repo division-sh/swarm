@@ -56,7 +56,8 @@ func TestNativeProcessGenerationTransactionsBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				transact = func(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
-					return backend.RunTransaction(ctx, "native process-generation proof", operation)
+					_, err := backend.RunProcessAcquisitionOutcome(ctx, operation)
+					return err
 				}
 			} else {
 				_, handle, _ := testutil.StartEmptyPostgres(t)
@@ -81,7 +82,11 @@ func TestNativeProcessGenerationTransactionsBothStores(t *testing.T) {
 				if err := schemastore.BindPostgresProcessLease(schema, lease); err != nil {
 					t.Fatal(err)
 				}
-				bootstrap, transact = schema.BootstrapSchema, lease.RunTransaction
+				bootstrap = schema.BootstrapSchema
+				transact = func(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+					_, err := lease.RunProcessAcquisitionOutcome(ctx, operation)
+					return err
+				}
 			}
 			if err := bootstrap(ctx, request); err != nil {
 				t.Fatal(err)
