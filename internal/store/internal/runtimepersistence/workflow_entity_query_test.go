@@ -202,6 +202,7 @@ func openWorkflowEntityQueryBackend(t *testing.T, backend string) (workflowEntit
 	switch backend {
 	case "sqlite":
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+		ctx = storeTestOriginalProcessContext(t, ctx, selected)
 		requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 		return selected, selected.backend.ConstructionHandle(), ctx, runID
 	case "postgres":

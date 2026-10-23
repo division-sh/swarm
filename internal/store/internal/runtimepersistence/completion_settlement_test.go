@@ -1574,6 +1574,7 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	if err != nil || !found {
 		t.Fatalf("load admitted completion agent lifecycle: found=%v err=%v", found, err)
 	}
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 	if sqlite {
 		if memory.Enabled {

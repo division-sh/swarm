@@ -141,6 +141,7 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 		t.Fatal(err)
 	}
 	ctx = worklifetime.WithProcess(ctx, workProcess)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	bus := &sqliteFlowActivationBus{}
 	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle, configureLifecycle)

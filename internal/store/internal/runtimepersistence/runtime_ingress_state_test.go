@@ -17,6 +17,7 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	runID := eventtest.UUID("persisted-projection-run")
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID, StartedAt: now.Add(-time.Second),
 	})

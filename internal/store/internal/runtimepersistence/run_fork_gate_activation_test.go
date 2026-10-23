@@ -271,6 +271,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			}
 			targetCtx := testAuthorActivityContextForBundle(target.BundleHash)
 			registerTestAuthorActivityCatalogForContext(t, selected, targetCtx)
+			targetCtx = storeTestOriginalProcessContext(t, targetCtx, selected)
 			requireRunFixtureForTest(t, targetCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: forkRunID, BundleHash: target.BundleHash, Artifact: rootBundle.SourceArtifact, StartedAt: now})
 			rootGraph, found := rootBundle.WorkflowStageTopology(".")
 			if !found {
@@ -706,6 +707,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 					decisioncard.ProposedEffectStore
 				})
 				now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
+				ctx = storeTestOriginalProcessContext(t, ctx, f.store)
 				requireRunFixtureForTest(t, ctx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: forkRunID, Artifact: f.bundle.SourceArtifact, BundleHash: f.bundle.SourceArtifact.BundleHash()})
 				for _, runID := range []string{sourceRunID, forkRunID} {
 					constructHistoricalSourceFixture(t, runtimecorrelation.WithRunID(ctx, runID), f.store, sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID))

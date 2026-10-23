@@ -62,6 +62,7 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(storeTestWorkContext(t, ctx), runID)
 			ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
 			})

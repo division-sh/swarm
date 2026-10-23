@@ -38,6 +38,7 @@ func Test2376ForkDecisionExecutionSourceBothStores(t *testing.T) {
 				now := time.Date(2026, 10, 2, 22, 0, 0, 0, time.UTC)
 				sourceRun, childRun, entity := uuid.NewString(), uuid.NewString(), uuid.NewString()
 				requireRunningRunForTest(t, sourceCtx, selected, sourceRun, now)
+				targetCtx = storeTestOriginalProcessContext(t, targetCtx, selected)
 				requireRunFixtureForTest(t, targetCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: childRun, BundleHash: targetHash, Artifact: targetBundle.SourceArtifact, StartedAt: now})
 				activation, err := gateruntime.New(sourceRun, "launch/review", entity, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "event-1", now)
 				if err != nil {

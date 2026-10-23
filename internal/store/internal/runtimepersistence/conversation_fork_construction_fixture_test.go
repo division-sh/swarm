@@ -31,6 +31,7 @@ func createConversationForkLifecycleDiagnostic(t *testing.T, ctx context.Context
 	t.Helper()
 	identity := testAgentIdentity(t, "diagnostic-worker", "")
 	now := time.Now().UTC().Truncate(time.Microsecond)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: identity.RunID, Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(), StartedAt: now})
 	if err := agentfixture.UpsertStaticForSource(t, ctx, selected, manager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, actors.AgentConfig{ID: identity.AgentID(), Identity: identity, Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular", ExecutionMode: "live", Config: []byte("{}")}),
