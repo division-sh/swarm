@@ -313,11 +313,6 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	}
 	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
 	controller := runtimeeffects.NewController(c.ports.effects).WithExecutionPosture(c.req.AgentRuntime.Options.ExecutionPosture)
-	if req.SourcePlan.ForkPoint.Kind == runfork.RunForkPointEvent {
-		if err := c.ports.replay.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.SourcePlan.ForkPoint.EventID); err != nil {
-			return err
-		}
-	}
 	process := req.Prepared.processOwner
 	var sourceResult startupownership.PreparedForkSourceEventsResult
 	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, &sourceResult)
