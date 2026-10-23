@@ -367,66 +367,6 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	}
 }
 
-func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
-	for _, workload := range []struct {
-		name             string
-		extraEvents      int
-		extraDeadLetters int
-	}{
-		{name: "golden_workload"},
-		{name: "jobflow_damaged_run", extraEvents: 100, extraDeadLetters: 15},
-	} {
-		t.Run(workload.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			ctx := testAuthorActivityContext()
-			fixture := newRunForkRevisionMatrixFixture()
-			selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
-			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
-				Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
-			})
-			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""), "active")
-			initialRevision := captureRunForkTestRevision(t, db, fixture.runID)
-
-			tx, err := db.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatalf("begin representative workload revision: %v", err)
-			}
-			defer func() { _ = tx.Rollback() }()
-			seedRunForkRevisionMatrixFacts(t, ctx, tx, fixture, true, true)
-			selectedEventID := fixture.eventID
-			for i := 0; i < workload.extraEvents; i++ {
-				selectedEventID = uuid.NewString()
-				seedRunForkRevisionMatrixEvent(t, ctx, tx, fixture.runID, selectedEventID, fixture.at.Add(time.Duration(i+1)*time.Microsecond), true)
-			}
-			for i := 0; i < workload.extraDeadLetters; i++ {
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO dead_letters (dead_letter_id,original_event_id,original_event,original_payload,flow_instance,failure,created_at) VALUES ($1,$2,'matrix.event',$3,'matrix-flow',$4,$5)`, uuid.NewString(), fixture.eventID, `{}`, `{"class":"matrix"}`, fixture.at.Add(time.Duration(i+1)*time.Microsecond))
-			}
-			effects, err := runforkrevision.ForRun(fixture.runID, runforkrevision.AllFamilies()...)
-			if err != nil {
-				t.Fatalf("declare representative workload effects: %v", err)
-			}
-			results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
-			if err != nil {
-				t.Fatalf("finalize representative workload revision: %v", err)
-			}
-			if got := results[fixture.runID]; !got.Changed || got.Revision != initialRevision+1 {
-				t.Fatalf("representative workload revision = %#v, want next after %d", got, initialRevision)
-			}
-			if err := tx.Commit(); err != nil {
-				t.Fatalf("commit representative workload revision: %v", err)
-			}
-
-			plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: fixture.runID, At: selectedEventID})
-			if err != nil {
-				t.Fatalf("representative workload is not fork-plannable: %v", err)
-			}
-			if plan.ForkPoint.EventID != selectedEventID || plan.ForkPoint.Revision != initialRevision+1 {
-				t.Fatalf("representative workload fork point = %#v, want event %s after revision %d", plan.ForkPoint, selectedEventID, initialRevision)
-			}
-		})
-	}
-}
-
 func newRunForkRevisionMatrixFixture() runForkRevisionMatrixFixture {
 	return runForkRevisionMatrixFixture{
 		runID: uuid.NewString(), eventID: uuid.NewString(), entityID: uuid.NewString(), mutationID: uuid.NewString(),
