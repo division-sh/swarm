@@ -458,7 +458,7 @@ func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	if len(*wsRequests) != 0 {
 		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
 	}
-	for _, want := range []string{"run started: run_id=9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355", "input published: event_id=00000000-0000-4000-8000-000000000003", "reattach: swarm run start --reattach 9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355"} {
+	for _, want := range []string{"run started: run_id=9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355", "input published: event_id=00000000-0000-4000-8000-000000000003", "reattach: swarm run start --connect " + server.URL + " --reattach 9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -724,6 +724,7 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 			case "run.get", "run.diagnose":
 				run := validDiagnosticRunHeader("09c3d378-ceed-5289-b4b3-028de530bb72")
 				result := runCommandReadResult(req.Method, run)
+				result["next_wake_at"] = "2030-01-01T01:00:00Z"
 				result["instances"] = []operatorread.RunInstanceOperationalStatus{
 					{FlowInstance: "unrelated/one", Stage: "waiting", Revision: 1, Disposition: "waiting"},
 					{FlowInstance: "unrelated/two", Stage: "waiting", Revision: 1, Disposition: "waiting"},
@@ -767,7 +768,7 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 		}
 	}
 	assertRunCommandTraceSubscription(t, wsRequests, "09c3d378-ceed-5289-b4b3-028de530bb72", true)
-	for _, want := range []string{"id=evt-foreground", "delivery=in progress", "run settled: run_id=09c3d378-ceed-5289-b4b3-028de530bb72", "2 waiting (waiting) | 0 live"} {
+	for _, want := range []string{"id=evt-foreground", "delivery=in progress", "run settled: run_id=09c3d378-ceed-5289-b4b3-028de530bb72", "2 waiting (waiting) | 0 live", "next wake 2030-01-01T01:00:00Z"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -785,6 +786,7 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 					return runStartCommandResult("7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab", "running")
 				case "run.diagnose":
 					result := runCommandReadResult(req.Method, validDiagnosticRunHeader("7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab"))
+					result["next_wake_at"] = "2030-01-01T01:00:00Z"
 					result["instances"] = []operatorread.RunInstanceOperationalStatus{
 						{FlowInstance: "unrelated/active", Stage: "processing", Revision: 1, Disposition: "active", Work: operatorread.RunInstanceWork{Deliveries: 1}},
 					}
@@ -808,7 +810,66 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 		if !strings.Contains(stdout.String(), "1 processing (active) | 1 live") || strings.Contains(stdout.String(), "unrelated/active") {
 			t.Fatalf("timeout lost run-wide counts or named another invocation's instance: %s", stdout.String())
 		}
+		if !strings.Contains(stdout.String(), "next wake 2030-01-01T01:00:00Z") {
+			t.Fatalf("timeout lost the canonical future wake: %s", stdout.String())
+		}
 		assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.diagnose"})
+	})
+	t.Run("continuation_keeps_resolved_port_and_auth", func(t *testing.T) {
+		const token = "private-continuation-token"
+		tokenFile := writeCLIAPITokenFile(t, token)
+		config := writeCLIAPIConfigFile(t, map[string]string{"serve_api_token_file": tokenFile})
+		const runID = "7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab"
+		server, _, _ := newRunCommandServer(t, runCommandServerOptions{
+			expectedToken: token, strictAuth: true,
+			rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+				switch req.Method {
+				case "health.check":
+					return runCommandHealthResult()
+				case "run.start":
+					return runStartCommandResult(runID, "running")
+				case "run.get", "run.diagnose":
+					run := validDiagnosticRunHeader(runID)
+					run["status"], run["ended_at"] = "completed", "2026-05-13T10:01:00Z"
+					return runCommandReadResult(req.Method, run)
+				default:
+					t.Errorf("unexpected method: %s", req.Method)
+					return nil
+				}
+			},
+		})
+		defer server.Close()
+		port := server.URL[strings.LastIndex(server.URL, ":")+1:]
+		args := []string{"run", "start", ".", "--api-port", port, "--config", config, "--event", "scan.requested", "--payload", payloadPath}
+		for _, mode := range []string{"--timeout", "--no-follow"} {
+			var stdout, stderr bytes.Buffer
+			command := append([]string{}, args...)
+			command = append(command, mode)
+			wantCode, marker := 0, "reattach: "
+			if mode == "--timeout" {
+				command = append(command, "1ns")
+				wantCode, marker = 8, "Check: "
+			}
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), command, &stdout, &stderr, defaultRootCommandOptions())
+			text := stdout.String() + stderr.String()
+			if code != wantCode || strings.Contains(text, token) {
+				t.Fatalf("code=%d, leaked token=%t", code, strings.Contains(text, token))
+			}
+			at := strings.Index(text, marker)
+			if at < 0 {
+				t.Fatalf("missing continuation: %s", text)
+			}
+			next := strings.SplitN(text[at+len(marker):], "\n", 2)[0]
+			if !strings.Contains(next, server.URL) || !strings.Contains(next, tokenFile) || !strings.Contains(next, config) {
+				t.Fatalf("continuation lost target/auth: %s", next)
+			}
+			stdout.Reset()
+			stderr.Reset()
+			code = executeRootCommandWithOptions(context.Background(), t.TempDir(), strings.Fields(next)[1:], &stdout, &stderr, defaultRootCommandOptions())
+			if code != 0 {
+				t.Fatalf("continuation code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+		}
 	})
 }
 
@@ -1107,7 +1168,7 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "blank retired bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "  "}, wantCode: 2, wantStderr: "unknown flag"},
 		{name: "retired bundle flag rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, retiredBundleIdentityFlag(), "sha256:BAD"}, wantCode: 2, wantStderr: "unknown flag"},
 		{name: "reattach rejects bundle hash", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "unknown flag: --bundle-hash"},
-		{name: "reattach rejects config flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --config"},
+		{name: "reattach refuses missing config before effects", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "read swarm.yaml config"},
 		{name: "reattach rejects backend flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --backend"},
 		{name: "reattach rejects local source", token: "test-token", args: []string{"run", "start", "contracts", "--connect", "http://127.0.0.1:1", "--reattach", "run-1"}, wantCode: 2, wantStderr: "a source directory cannot be used with --reattach"},
 		{name: "reattach rejects data flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--data", "reference-data"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --data"},
@@ -1118,7 +1179,7 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with MCP listener 127.0.0.1:8082"},
 		{name: "mcp port zero rejected when explicit", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "0"}, wantCode: 2, wantStderr: "--mcp-port must be between 1 and 65535"},
 		{name: "api port rejects custom mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "9000", "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--api-port 9000 conflicts with MCP listener 127.0.0.1:9000"},
-		{name: "connect rejects config local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--config requires local foreground mode"},
+		{name: "connect refuses missing config before effects", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "read swarm.yaml config"},
 		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
 		{name: "connect rejects local source", token: "test-token", args: []string{"run", "start", "contracts", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "a source directory requires local foreground mode"},
 		{name: "platform spec retired on connect", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "unknown flag: --platform-spec"},

@@ -194,6 +194,7 @@ func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Serve
 	}
 	methods := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
+		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: runs}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
 		apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: dataOwner}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: observability}),

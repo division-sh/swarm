@@ -66,6 +66,7 @@ type RunInstanceFacts struct {
 // Incomplete facts may explain uncertainty but cannot prove quiescence.
 type RunOperationalFacts struct {
 	ObservedAt      time.Time
+	NextWakeAt      *time.Time
 	LastProgressAt  time.Time
 	Complete        bool
 	UnscopedWork    RunInstanceWork

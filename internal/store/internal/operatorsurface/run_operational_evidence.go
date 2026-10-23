@@ -137,6 +137,10 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 		if timer.Status != "active" {
 			continue
 		}
+		if facts.NextWakeAt == nil || timer.DueAt.Before(*facts.NextWakeAt) {
+			due := timer.DueAt
+			facts.NextWakeAt = &due
+		}
 		if i, ok := byPath[timer.FlowInstance]; ok {
 			facts.Instances[i].Work.Timers++
 		} else {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -904,6 +905,16 @@ func requireSingleRunTraceDetachFact(t *testing.T, raw string) runTraceObserverD
 
 func assertRunTraceDetachFact(t *testing.T, fact runTraceObserverDetachedFact, reason runTraceDetachReason, runID, reattach string) {
 	t.Helper()
+	if path := os.Getenv("SWARM_CONFIG"); path != "" {
+		config, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: t.TempDir(), ExplicitPath: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reattach += " --config " + path
+		if config.Connection.APITokenFile != "" {
+			reattach += " --api-token-file " + config.Connection.APITokenFile
+		}
+	}
 	want := runTraceObserverDetachedFact{
 		Type:            runTraceObserverDetachedType,
 		Severity:        runTraceObserverWarning,
