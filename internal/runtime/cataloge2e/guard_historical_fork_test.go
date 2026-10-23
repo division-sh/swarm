@@ -63,11 +63,12 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 			if h.sqlite != nil {
 				artifacts = h.sqlite
 			}
-			loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, artifacts)
+			loader, selection, loaded := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, artifacts)
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
 			fork, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: point, AllowSourceFreeze: true,
+				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), SourceArtifactFact: loaded.SourceArtifactFact,
 				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
 			})

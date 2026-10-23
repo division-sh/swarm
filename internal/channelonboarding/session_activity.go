@@ -2,6 +2,7 @@ package channelonboarding
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packs"
@@ -35,8 +36,8 @@ func (p CompiledSessionActivityTarget) PublicationGeneration() ChannelActivation
 }
 
 // Qualification checks declaration ownership only; it cannot select a session.
-func QualifySessionActivityDeclaration(source semanticview.Source, site contracts.ActivitySite) error {
-	_, _, _, err := compileSessionActivityDeclaration(source, site)
+func QualifySessionActivityDeclaration(source semanticview.Source, site contracts.ActivitySite, trigger packs.TriggerPackDescriptor) error {
+	_, _, _, err := compileSessionActivityDeclaration(source, site, trigger)
 	return err
 }
 
@@ -64,7 +65,7 @@ func ResolveSessionActivitySite(source semanticview.Source, node identity.Execut
 }
 
 func CompileSessionActivityTarget(source semanticview.Source, bundleHash string, site contracts.ActivitySite,
-	publication ChannelActivationPublication,
+	publication ChannelActivationPublication, trigger packs.TriggerPackDescriptor,
 ) (CompiledSessionActivityTarget, error) {
 	var absent CompiledSessionActivityTarget
 	if source == nil || bundleHash == "" || bundleHash != strings.TrimSpace(bundleHash) || !publication.Executable() {
@@ -73,7 +74,7 @@ func CompileSessionActivityTarget(source semanticview.Source, bundleHash string,
 	if err := publication.Validate(); err != nil {
 		return absent, err
 	}
-	tool, selector, packID, err := compileSessionActivityDeclaration(source, site)
+	tool, selector, packID, err := compileSessionActivityDeclaration(source, site, trigger)
 	if err != nil {
 		return absent, err
 	}
@@ -135,7 +136,7 @@ func matchSessionActivityConnector(activation CompiledActivation, toolID, toolHa
 	return selected, found, nil
 }
 
-func compileSessionActivityDeclaration(source semanticview.Source, site contracts.ActivitySite) (contracts.ToolSchemaEntry, string, string, error) {
+func compileSessionActivityDeclaration(source semanticview.Source, site contracts.ActivitySite, trigger packs.TriggerPackDescriptor) (contracts.ToolSchemaEntry, string, string, error) {
 	var absent contracts.ToolSchemaEntry
 	scope, err := semanticview.ResolveExecutableNodeSemanticScope(source, site.Node)
 	if err != nil {
@@ -154,36 +155,16 @@ func compileSessionActivityDeclaration(source semanticview.Source, site contract
 	if !native || target != contracts.ToolInProcessWhatsAppSendText {
 		return absent, "", "", fmt.Errorf("session activity has no supported private write contract")
 	}
-	schema, declared := source.FlowSchemaByID(flow.ID)
-	if !declared || schema.Ingress == nil {
-		return absent, "", "", fmt.Errorf("session activity requires explicit ingress in its owning flow")
-	}
-	providers := 0
-	var provider contracts.ProjectFlowIngressProvider
-	for _, ingress := range schema.Ingress.Providers {
-		if ingress.Provider == target.Provider() {
-			providers++
-			provider = ingress
-		}
-	}
-	if providers != 1 {
-		return absent, "", "", fmt.Errorf("session activity requires exactly one explicit provider ingress declaration, found %d", providers)
-	}
-	if provider.Admission.Kind != "" && provider.Admission.Kind != "pack" {
-		return absent, "", "", fmt.Errorf("session activity requires pack-admitted ingress, not raw or unknown admission")
+	if trigger.Provider != target.Provider() || trigger.Identity.ID() != target.Provider() ||
+		trigger.Transport != packs.ChannelTransportSession || !trigger.Generation.Valid() ||
+		trigger.Identity.Source().Path() != path.Join(flow.ID, target.Provider(), "trigger.yaml") {
+		return absent, "", "", fmt.Errorf("session activity requires its exact owning-flow session trigger declaration")
 	}
 	selector := "ingress:" + flow.ID + ":" + target.Provider()
 	if _, err := packs.ParseChannelRegistrationTarget(selector); err != nil {
 		return absent, "", "", err
 	}
-	packID := ""
-	if provider.Admission.Pack != nil {
-		packID = provider.Admission.Pack.ID
-		if packID == "" || packID != strings.TrimSpace(packID) {
-			return absent, "", "", fmt.Errorf("session activity has a non-canonical explicit trigger pack")
-		}
-	}
-	return tool, selector, packID, nil
+	return tool, selector, trigger.Identity.ID(), nil
 }
 
 func sessionActivitySiteDeclared(site contracts.ActivitySite, handlers map[string]contracts.SystemNodeEventHandler) bool {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -134,7 +135,11 @@ func validateActivityToolTransport(source semanticview.Source, reference runtime
 		activityID := resultEvents.ActivityID
 		site, err := channelonboarding.ResolveSessionActivitySite(source, reference.Node, reference.HandlerEventKey, toolID, activityID)
 		if err == nil {
-			err = channelonboarding.QualifySessionActivityDeclaration(source, site)
+			trigger, triggerErr := packadmission.SessionActivityTrigger(source, site)
+			err = triggerErr
+			if err == nil {
+				err = channelonboarding.QualifySessionActivityDeclaration(source, site, trigger)
+			}
 		}
 		if err != nil {
 			return []error{fmt.Errorf("%s: private native activity: %w", context, err)}

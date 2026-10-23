@@ -201,7 +201,7 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects, err := runtime.ProviderTriggerCapabilitySubjects(context.Background(), semanticview.Wrap(bundle), catalog, owner)
+	subjects, err := runtime.ProviderTriggerCapabilitySubjects(context.Background(), semanticview.Wrap(bundle), catalog, owner, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -236,7 +236,7 @@ func TestS1EffectiveProviderTriggerSchemasBindRawAndTemplatePinsWithoutIngress(t
 			if len(ingress) != 1 || len(ingress["."]) != 1 || ingress["."][0] != event {
 				t.Fatalf("provider declaration borrowed an unlisted input or non-holder: %+v", ingress)
 			}
-			declarations, err := ResolveStandingTargetDeclarations(source, nil)
+			declarations, err := ResolveStandingTargetDeclarations(source, nil, nil)
 			if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "." || declarations[0].Alias != rooted.Admission().RootDirectory() || len(declarations[0].Ingress) != 1 {
 				t.Fatalf("directory holder lost its exact standing declaration: %+v, %v", declarations, err)
 			}

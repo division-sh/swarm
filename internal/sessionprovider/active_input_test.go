@@ -44,6 +44,7 @@ type activeInputStore interface {
 	sessionInputSelectedStore
 	pipeline.StandingServicePersistence
 	sourceartifactfixture.RootedWriter
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }
 
 type activeInputFixture struct {

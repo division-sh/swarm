@@ -552,10 +552,12 @@ pins:
 	writeClosedVariantFile(t, root, prefix+"events.yaml", events)
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
 	writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  result: text\n")
+	copyTree(t, filepath.Join(RepoRoot(t), "packs", "providers", "telegram"), filepath.Join(root, prefix, "telegram"))
 	return root
 }
 
 func writeLifecycleLoopConnected(t testing.TB, root string) {
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: lifecycle-loop
 stages:
   waiting: {}

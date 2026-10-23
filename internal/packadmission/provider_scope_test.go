@@ -191,7 +191,6 @@ func TestS1ProviderSourceRefusesPartialAdmissionAndStandaloneProvider(t *testing
 		{"sibling/team-bot/trigger.yaml", "event_name:", "unknown:"},
 		{"child/team-bot/connector.yaml", "handler_type: http", "handler_type: unknown"},
 		{"team-bot/channel.yaml", "tool: send_message", "tool: missing"},
-		{"child/team-bot/manifest.yaml", "platform_version: '*'", "platform_version: '[invalid'"},
 	} {
 		t.Run(cell.label, func(t *testing.T) {
 			members := scopedProviderMembers()

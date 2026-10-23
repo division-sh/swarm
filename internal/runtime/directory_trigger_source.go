@@ -71,34 +71,45 @@ func sourceWithDirectoryTriggerSchemas(source semanticview.Source, providers pac
 	if err != nil {
 		return nil, err
 	}
-	declarations, err := resolveDirectoryStandingDeclarations(schemaSource, bundle, providers)
-	if err != nil {
-		return nil, err
-	}
 	authorizations := map[string][]runtimeprovideroutput.Authorization{}
 	scopeGenerations := map[string]triggergeneration.Generation{}
 	ingressEvents := map[string][]string{}
-	for _, declaration := range declarations {
-		for _, binding := range declaration.Ingress {
-			scopeGenerations[declaration.FlowPath] = binding.AdmissionPlan.Generation()
-			identity, _ := binding.AdmissionPlan.PackIdentity()
-			for _, pin := range schemaSource.FlowInputEventPins(declaration.FlowPath) {
-				for _, output := range binding.AdmissionPlan.Outputs() {
+	for _, flow := range providers.FlowPaths() {
+		scope, err := providers.Scope(flow)
+		if err != nil {
+			return nil, err
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			return nil, err
+		}
+		var inputEvents []string
+		for _, pin := range schemaSource.FlowInputEventPins(flow) {
+			inputEvents = append(inputEvents, pin.EventType())
+		}
+		for _, definition := range scope.ConsumedTriggerProviders(inputEvents) {
+			entry, found := catalog.EntryByProvider(definition.Provider().Key())
+			if !found {
+				return nil, fmt.Errorf("flow %q consumed provider %q is absent from its exact captured catalog", flow, definition.Provider().Key())
+			}
+			scopeGenerations[flow] = catalog.Generation()
+			for _, pin := range schemaSource.FlowInputEventPins(flow) {
+				for _, output := range entry.Manifest.OutputManifest() {
 					if output.Kind == providertriggers.OutputKindRaw {
 						if output.EventName.Accepts(pin.EventType()) {
-							ingressEvents[declaration.FlowPath] = append(ingressEvents[declaration.FlowPath], pin.EventType())
+							ingressEvents[flow] = append(ingressEvents[flow], pin.EventType())
 						}
 						continue
 					}
 					if output.Event != pin.EventType() {
 						continue
 					}
-					authorization, err := runtimeprovideroutput.NewAuthorization(binding.Provider, output.Event, identity.ID, identity.Version, identity.ManifestHash, binding.AdmissionPlan.Generation())
+					authorization, err := runtimeprovideroutput.NewAuthorization(entry.Manifest.Provider(), output.Event, entry.Identity.ID, entry.Identity.Version, entry.Identity.ManifestHash, catalog.Generation())
 					if err != nil {
 						return nil, err
 					}
-					authorizations[declaration.FlowPath] = append(authorizations[declaration.FlowPath], authorization)
-					ingressEvents[declaration.FlowPath] = append(ingressEvents[declaration.FlowPath], output.Event)
+					authorizations[flow] = append(authorizations[flow], authorization)
+					ingressEvents[flow] = append(ingressEvents[flow], output.Event)
 				}
 			}
 		}

@@ -17,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -51,30 +50,11 @@ func standingSessionRuntimeFixture(t *testing.T) (*Runtime, *standingSessionBind
 			t.Fatal(err)
 		}
 	}
-	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
-		if entry.Provider().Key() != "whatsapp" {
-			continue
-		}
-		directory := filepath.Join(root, "whatsapp")
-		if err := os.Mkdir(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		for name, body := range entry.Provider().Members() {
-			if err := os.WriteFile(filepath.Join(directory, name), body, 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, root,
 		runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := packadmission.FromBundle(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "whatsapp")
 	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +66,14 @@ func standingSessionRuntimeFixture(t *testing.T) (*Runtime, *standingSessionBind
 	scope, err := providers.Scope(".")
 	if err != nil {
 		t.Fatal(err)
+	}
+	provider, present := scope.Provider("whatsapp")
+	if !present {
+		t.Fatal("captured session provider is missing")
+	}
+	plan, present := provider.ChannelPlan()
+	if !present {
+		t.Fatal("captured session channel is missing")
 	}
 	catalog, err := scope.TriggerCatalog()
 	if err != nil {

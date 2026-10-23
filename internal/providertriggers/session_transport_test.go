@@ -219,6 +219,12 @@ func TestTriggerWebhookTransportIsExplicitOrOmittedWithoutProviderGuessing(t *te
 			if _, err := plan.AdmitRequest(Request{Payload: map[string]any{}}); err != nil {
 				t.Fatal(err)
 			}
+			for _, token := range []string{"true", "unsigned", " unsigned_webhook", "unsigned_webhook "} {
+				if plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: provider,
+					Declaration: AdmissionDeclaration{Acknowledge: token}}); err == nil || plan.Valid() {
+					t.Fatalf("noncanonical deployment consent %q admitted", token)
+				}
+			}
 		}
 	}
 }

@@ -333,6 +333,7 @@ func verifyWorkflowContractValidationOptions(configResult RuntimeConfigLoadResul
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("admit pack metadata: %w", err)
 	}
 	opts := runtime.StructuralWorkflowContractValidationOptions()
+	opts.TriggerEntries = configResult.Config.Triggers
 	opts.ModelAliases = configResult.Config.LLM.Models
 	opts.ProviderTriggerCatalog = metadata.ProviderTriggers
 	opts.ChannelPlans = metadata.ChannelPlans

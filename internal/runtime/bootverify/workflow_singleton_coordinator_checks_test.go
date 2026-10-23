@@ -13,11 +13,11 @@ import (
 
 func TestRun_ValidatesSingletonCoordinatorWithContainedState(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
 pins:
   inputs:
     - job.received
-`, singletonCoordinatorEntitiesYAML(), "", "")
+`,
+		singletonCoordinatorEntitiesYAML(), "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -28,11 +28,11 @@ pins:
 
 func TestRun_AllowsStatelessSingletonWithIndependentAgentMemory(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
 pins:
   inputs:
     - job.received
-`, `
+`,
+		`
 coordinator_state: {}
 `, `
 memory-agent:
@@ -53,12 +53,12 @@ memory-agent:
 func TestRun_AllowsTemplateContainedDeclarationWithoutCoordinatorDemand(t *testing.T) {
 
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
 instance: vertical_id
 pins:
   inputs:
     - job.received
-`, `
+`,
+		`
 coordinator_state:
   vertical_id: text
   verticals: map[text]VerticalState
@@ -73,11 +73,11 @@ coordinator_state:
 
 func TestRun_RejectsSingletonCoordinatorUnresolvedContainedType(t *testing.T) {
 	root := writeSingletonCoordinatorFixtureRoot(t, `
-name: coordinator
 pins:
   inputs:
     - job.received
-`, `
+`,
+		`
 coordinator_state:
   verticals: map[text]MissingType
 `, "", "")
@@ -101,11 +101,11 @@ coordinator_state:
 
 func TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
 pins:
   inputs:
     - job.received
-`, `
+`,
+		`
 coordinator_state:
   status: text
 `, "", "")
@@ -119,11 +119,11 @@ coordinator_state:
 
 func TestRun_SingletonCoordinatorRejectsDynamicContainedTargetPath(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
 pins:
   inputs:
     - job.received
-`, singletonCoordinatorEntitiesYAML(), "", `
+`,
+		singletonCoordinatorEntitiesYAML(), "", `
 coordinator-node:
   execution_type: system_node
   subscribes_to: [job.received]
@@ -231,15 +231,15 @@ coordinator-node:
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			bundle := loadSingletonCoordinatorFixtureBundle(t, `name: coordinator
-stages:
+			bundle := loadSingletonCoordinatorFixtureBundle(t, `stages:
   active: {}
   done: {final: true}
   failed: {final: true}
 pins:
   inputs:
     - job.received
-`, tc.entities, "", tc.nodes)
+`,
+				tc.entities, "", tc.nodes)
 			demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
 			var matched *SingletonCoordinatorDemand
 			for _, demand := range demands {
@@ -281,11 +281,11 @@ func TestBuildSingletonCoordinatorDemandProjection_PreservesDuplicateScopedNodeI
 
 func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatQuerySelectAsExpression(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
 pins:
   inputs:
     - job.received
-`, `
+`,
+		`
 coordinator_state:
   verticals:
     type: map[text]VerticalState
@@ -409,11 +409,11 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 				return
 			}
 			bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
 pins:
   inputs:
     - job.received
-`, `
+`,
+				`
 coordinator_state:
   verticals:
     type: map[text]VerticalState
@@ -438,7 +438,6 @@ coordinator-node:
 
 func TestBuildSingletonCoordinatorDemandProjection_TreatsLoopFromAsStageIdentifier(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
 stages:
   entity.verticals: {}
   review: {}
@@ -452,7 +451,8 @@ loops:
 pins:
   inputs:
     - job.received
-`, `
+`,
+		`
 coordinator_state:
   verticals:
     type: map[text]VerticalState

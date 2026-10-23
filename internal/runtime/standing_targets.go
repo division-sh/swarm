@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -89,7 +90,7 @@ func (t StandingTarget) CapabilitySubject() (packs.Subject, error) {
 	})
 }
 
-func ResolveStandingTargetDeclarations(source semanticview.Source, _ *providertriggers.CatalogSnapshot) ([]StandingTargetDeclaration, error) {
+func ResolveStandingTargetDeclarations(source semanticview.Source, _ *providertriggers.CatalogSnapshot, triggers map[string]config.TriggerConfig) ([]StandingTargetDeclaration, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		return nil, fmt.Errorf("standing target declarations require a bundle-backed semantic source")
@@ -102,11 +103,12 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, _ *providertr
 	if err != nil {
 		return nil, err
 	}
-	return resolveDirectoryStandingDeclarations(source, bundle, providers)
+	return resolveDirectoryStandingDeclarations(source, bundle, providers, triggers)
 }
 
-func resolveDirectoryStandingDeclarations(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, providers packadmission.ProviderSource) ([]StandingTargetDeclaration, error) {
+func resolveDirectoryStandingDeclarations(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, providers packadmission.ProviderSource, triggers map[string]config.TriggerConfig) ([]StandingTargetDeclaration, error) {
 	declarations := make([]StandingTargetDeclaration, 0)
+	selectedTriggers := make(map[string]struct{})
 	clocks := make(map[string][]semanticview.ClockSchedule)
 	for _, declaration := range semanticview.ClockSchedules(source) {
 		clocks[declaration.FlowID] = append(clocks[declaration.FlowID], declaration)
@@ -131,7 +133,12 @@ func resolveDirectoryStandingDeclarations(source semanticview.Source, bundle *ru
 			inputs = append(inputs, pin.EventType())
 		}
 		for _, definition := range scope.ConsumedTriggerProviders(inputs) {
-			entry, _ := catalog.EntryByProvider(definition.Provider().Key())
+			member := definition.Provider().Directory() + "/trigger.yaml"
+			selectedTriggers[member] = struct{}{}
+			entry, found := catalog.EntryByProvider(definition.Provider().Key())
+			if !found {
+				return nil, fmt.Errorf("flow %q consumed provider %q is absent from its exact captured catalog", flowID, definition.Provider().Key())
+			}
 			alias, present := bundle.FlowIngressAlias(flowID)
 			if !present {
 				return nil, fmt.Errorf("%s has no compiled directory webhook alias", location)
@@ -143,9 +150,10 @@ func resolveDirectoryStandingDeclarations(source semanticview.Source, bundle *ru
 			}
 			plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
 				Alias: alias, Provider: definition.Provider().Key(), SigningSecret: secret,
+				Declaration: providertriggers.AdmissionDeclaration{Acknowledge: triggers[member].Acknowledge},
 			})
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", location, err)
+				return nil, fmt.Errorf("%s deployment triggers[%q]: %w", location, member, err)
 			}
 			raw, present := plan.RawOutput()
 			if !present {
@@ -170,18 +178,23 @@ func resolveDirectoryStandingDeclarations(source semanticview.Source, bundle *ru
 		}
 		declarations = append(declarations, decl)
 	}
+	for member := range triggers {
+		if _, selected := selectedTriggers[member]; !selected {
+			return nil, fmt.Errorf("deployment triggers[%q] does not select a consumed captured trigger BODY in this source", member)
+		}
+	}
 	sort.Slice(declarations, func(i, j int) bool {
 		return declarations[i].FlowPath < declarations[j].FlowPath
 	})
 	return declarations, nil
 }
 
-func baseStandingIngressCapabilitySubjects(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]packs.Subject, error) {
+func baseStandingIngressCapabilitySubjects(source semanticview.Source, catalog *providertriggers.CatalogSnapshot, triggers map[string]config.TriggerConfig) ([]packs.Subject, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		return nil, fmt.Errorf("effective standing ingress capability subjects require a bundle-backed semantic source")
 	}
-	declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+	declarations, err := ResolveStandingTargetDeclarations(source, catalog, triggers)
 	if err != nil {
 		return nil, err
 	}
@@ -289,8 +302,8 @@ func evaluateStandingIngressCapabilitySubject(ctx context.Context, target Standi
 	return evaluateProviderTriggerCapabilitySubject(ctx, expected, projection)
 }
 
-func EffectiveStandingIngressCapabilitySubjects(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, owner *runtimecredentials.SnapshotOwner) ([]packs.Subject, error) {
-	base, err := baseStandingIngressCapabilitySubjects(source, catalog)
+func EffectiveStandingIngressCapabilitySubjects(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, owner *runtimecredentials.SnapshotOwner, triggers map[string]config.TriggerConfig) ([]packs.Subject, error) {
+	base, err := baseStandingIngressCapabilitySubjects(source, catalog, triggers)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +332,7 @@ func evaluateProviderTriggerCapabilitySubjects(ctx context.Context, base []packs
 
 // ProviderTriggerCapabilitySubjects is the canonical installed-plus-effective
 // trigger projection for contract verification surfaces.
-func ProviderTriggerCapabilitySubjects(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, owner *runtimecredentials.SnapshotOwner) ([]packs.Subject, error) {
+func ProviderTriggerCapabilitySubjects(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, owner *runtimecredentials.SnapshotOwner, triggers map[string]config.TriggerConfig) ([]packs.Subject, error) {
 	var subjects []packs.Subject
 	if catalog != nil {
 		installed, err := catalog.InstalledCapabilitySubjects()
@@ -328,7 +341,7 @@ func ProviderTriggerCapabilitySubjects(ctx context.Context, source semanticview.
 		}
 		subjects = append(subjects, installed...)
 	}
-	effective, err := EffectiveStandingIngressCapabilitySubjects(ctx, source, catalog, owner)
+	effective, err := EffectiveStandingIngressCapabilitySubjects(ctx, source, catalog, owner, triggers)
 	if err != nil {
 		return nil, err
 	}

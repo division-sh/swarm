@@ -140,7 +140,7 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execNativeReadFile contracts: %v", err)
 	}
-	if got := readContracts.(map[string]any)["content"]; got != "name: source\n" {
+	if got := readContracts.(map[string]any)["content"]; got != "stages: []\n" {
 		t.Fatalf("contracts read content = %#v", got)
 	}
 

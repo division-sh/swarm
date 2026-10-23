@@ -38,8 +38,16 @@ func humanTaskConstructedRequester(t *testing.T, ctx context.Context, selected h
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("requester construction requires its admitted source artifact")
 	}
-	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), bundle.SourceArtifact)
-	if _, err := storetest.ReviseRunSource(ctx, selected.(storetest.RunFixtureStore), runlifecycle.SourceRevisionRequest{RunID: runID, Source: fact}); err != nil {
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selected.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
+	if _, err := storetest.ReviseRunSource(ctx, selected.(storetest.RunFixtureStore), runlifecycle.SourceRevisionRequest{RunID: runID, Source: fact, RootAdmission: rooted.Admission()}); err != nil {
 		t.Fatalf("admit requester run source: %v", err)
 	}
 	ctx = correlation.WithSourceArtifactFact(ctx, fact)

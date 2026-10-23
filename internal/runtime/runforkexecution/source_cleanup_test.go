@@ -368,7 +368,7 @@ func TestSelectedSourceStagedCleanupOwnership(t *testing.T) {
 				store.binding, store.bindingOK = binding, true
 				store.bundleAvailability = availability
 			}
-			result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{ForkRunID: binding.ForkRunID, Store: store, ExecutionOwner: owner, SourceLoader: &fakeSelectedContractSourceLoader{loaded: selected, original: &original}})
+			result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{ForkRunID: binding.ForkRunID, Store: store, ExecutionOwner: owner, AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability}, SourceLoader: &fakeSelectedContractSourceLoader{loaded: selected, original: &original}})
 			if !errors.Is(err, errSourceRelease) || calls != 1 || process.ActiveCount() != 1 {
 				t.Fatalf("staged cleanup lost ownership: calls=%d active=%d err=%v", calls, process.ActiveCount(), err)
 			}

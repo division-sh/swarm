@@ -647,7 +647,7 @@ func scopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	for _, flowID := range []string{"flow-a", "flow-b"} {
 		dir := filepath.Join(root, flowID)
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\n")
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "# fixture: "+flowID+"\n\nstages: []\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()

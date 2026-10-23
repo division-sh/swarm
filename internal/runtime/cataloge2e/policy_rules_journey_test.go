@@ -106,11 +106,12 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 			if h.sqlite != nil {
 				artifact = h.sqlite
 			}
-			loader, selection, _ := selectedContractForkFixtureSelection(t, ctx, repoRootFromCatalogE2E(t), fixture.Root, artifact)
+			loader, selection, loaded := selectedContractForkFixtureSelection(t, ctx, repoRootFromCatalogE2E(t), fixture.Root, artifact)
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
 			result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: point, AllowSourceFreeze: true,
+				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), SourceArtifactFact: loaded.SourceArtifactFact,
 				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
 			})

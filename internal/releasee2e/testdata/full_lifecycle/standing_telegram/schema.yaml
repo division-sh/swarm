@@ -1,6 +1,31 @@
 # fixture: telegram-lifecycle
+stages:
+  warming:
+    timers:
+      - id: warmup
+        after: 100ms
+        advances_to: review
+  review:
+    gate:
+      decision: lifecycle_ready
+      title: Confirm lifecycle readiness
+      outcomes:
+        approve:
+          label: Continue
+          advances_to: serving
+        reject:
+          label: Retire
+          advances_to: retired
+  serving: {}
+  retired:
+    final: true
+pins:
+  inputs:
+    - inbound.telegram.text_message
+  outputs:
+    - inbound.telegram.text_message
 connect:
   - event: inbound.telegram.text_message
-    from: telegram-ingress
+    from: .
     to: telegram-chat
     resolution: select-or-create

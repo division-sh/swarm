@@ -25,7 +25,7 @@ func WriteManagerMockAlternatives(t testing.TB) string {
   mock: {kind: python, module: mocks/agent.py}
 `,
 		"static-support/mocks/agent.py":   "def handle(input):\n    return {'text': 'mock'}\n",
-		"template-support/mocks/agent.py": "def handle(input):\n    return {'text': 'mock'}\n",
+		"template-support/mocks/agent.py": "def handle(input):\n    return {'text': 'mock'}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "static-support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "template-support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		writeClosedVariantFile(t, root, relative, source)
 	}

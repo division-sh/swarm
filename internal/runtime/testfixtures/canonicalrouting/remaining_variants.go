@@ -39,8 +39,10 @@ func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandl
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "pins:\n  inputs:\n    - opco.spend_requested\n  outputs:\n    - opco.spend_requested\nconnect:\n  - {event: opco.spend_requested, from: ., to: treasury}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "opco.spend_requested:\n  entity_id: uuid\n  vertical_id: text\n  amount_usd: number\n")
+	writeClosedVariantFile(t, root, "treasury/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "treasury/schema.yaml", `# fixture: treasury
 stages:
   active: {}

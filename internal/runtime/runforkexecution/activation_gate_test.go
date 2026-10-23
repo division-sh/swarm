@@ -34,9 +34,11 @@ func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testin
 	}
 	fakeStore := &fakeSelectedContractActivationStore{activation: activation, originalRunID: activation.SourceRunID}
 	_, _, loader := rootedActivationGateFixture(t, forkRunID)
+	owner := selectedContractGateOwnerForTest(t)
 
 	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ExecutionOwner: owner,
+		AgentRuntime:   SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability},
 		ForkRunID:      forkRunID,
 		Store:          fakeStore,
 		SourceLoader:   loader,

@@ -175,7 +175,10 @@ func TestConnectionRenamedConcreteEventAndNodeProof(t *testing.T) {
 					writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 					writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), strings.ReplaceAll(string(raw), "to: worker,", "to: worker, rename: "+local+","))
 				}
-				writeBootverifyFixtureFile(t, filepath.Join(root, "worker/child/schema.yaml"), "name: child\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "worker/child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "worker/child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "worker/child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "worker/child/schema.yaml"), "stages: []\n")
 				writeBootverifyFixtureFile(t, filepath.Join(root, "worker/child/events.yaml"), local+":\n  child_only: text\n")
 				repo := repoRootForBootverifyTest(t)
 				bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))

@@ -28,7 +28,7 @@ func CopyRootInputFeed(t testing.TB, kind DeploymentFeedRoot) string {
 		"events.yaml":            "item.registered:\n  key: item_id\n  item_id: text\n",
 		"registry/schema.yaml":   "instance: item_id\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [item.registered]\n",
 		"registry/entities.yaml": "Item:\n  item_id: text\n",
-		"registry/nodes.yaml":    "register:\n  event_handlers:\n    item.registered: {advances_to: done}\n",
+		"registry/nodes.yaml":    "register:\n  event_handlers:\n    item.registered: {advances_to: done}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "registry/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	switch kind {
 	case DeploymentFeedConnectedRoot:
