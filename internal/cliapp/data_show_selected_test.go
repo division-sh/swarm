@@ -15,7 +15,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -37,7 +37,7 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 			var selected interface {
 				apiv1.DurableDataStore
 				Ping(context.Context) error
-				EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
+				storetest.RootedDataCatalogStore
 			}
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)
@@ -46,7 +46,9 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 				selected = storetest.AdmitPostgresRuntimeStore(t, db)
 			}
 			ctx := context.Background()
-			artifact := sourceartifactfixture.New("schema.yaml", []byte("name: data-show-cli\n"))
+			artifact := sourceartifactfixture.Artifact()
+			rooted, _ := sourceartifactfixture.Rooted(t, "data-show-cli", artifact)
+			ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(artifact)), rooted.Admission())
 			ref, err := durabledata.ParseDeclarationRef(".", "records.loaded")
 			if err != nil {
 				t.Fatal(err)
@@ -70,7 +72,7 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 				{BundleHash: artifact.BundleHash(), Declaration: positionRef, SchemaDigest: positionCompiled.Manifest.SchemaDigest, Fields: []durabledata.ImportShapeField{{Name: "body", Required: true, Text: true}}},
 				shape,
 			}}
-			if _, err := selected.EnsureSourceArtifactWithData(ctx, artifact, catalog); err != nil {
+			if _, err := selected.EnsureRootedSourceWithData(ctx, rooted, catalog); err != nil {
 				t.Fatal(err)
 			}
 			var input strings.Builder

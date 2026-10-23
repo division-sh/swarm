@@ -41,9 +41,8 @@ func LoadWorkflowContractBundleWithOptions(repoRoot, workflowDirOverride, platfo
 	return loadWorkflowContractBundleFromSource(repoRoot, workflowDirOverride, platformSpecFileOverride, options)
 }
 func loadWorkflowContractBundleFromSource(repoRoot, sourceRoot, platformSpecFile string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
-	sourceRoot = strings.TrimSpace(sourceRoot)
 	if sourceRoot == "" {
-		sourceRoot = strings.TrimSpace(repoRoot)
+		sourceRoot = repoRoot
 	}
 	if strings.TrimSpace(platformSpecFile) == "" {
 		platformSpecFile = DefaultPlatformSpecFile(repoRoot)
@@ -52,15 +51,20 @@ func loadWorkflowContractBundleFromSource(repoRoot, sourceRoot, platformSpecFile
 	if err != nil {
 		return nil, err
 	}
-	return LoadWorkflowContractBundleFromArtifact(repoRoot, artifact, platformSpecFile, options)
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	return LoadWorkflowContractBundleFromRootedSource(repoRoot, rooted, platformSpecFile, options)
 }
 
-// LoadWorkflowContractBundleFromArtifact compiles an already-admitted source
-// snapshot. It never receives or reconstructs the source's ambient host path.
-func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceartifact.AdmittedSourceArtifact, platformSpecFile string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
-	if artifact == nil {
-		return nil, fmt.Errorf("admitted source artifact is required")
+// LoadWorkflowContractBundleFromRootedSource consumes the selected responsibility's
+// frozen root and member bytes, never an ambient host path or content-only decode.
+func LoadWorkflowContractBundleFromRootedSource(repoRoot string, rooted sourceartifact.RootedSource, platformSpecFile string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
+	if err := rooted.Validate(); err != nil {
+		return nil, fmt.Errorf("rooted source is required for executable compilation: %w", err)
 	}
+	artifact := rooted.Artifact()
 	if strings.TrimSpace(platformSpecFile) == "" {
 		platformSpecFile = DefaultPlatformSpecFile(repoRoot)
 	}
@@ -70,6 +74,7 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	}
 	paths := ContractPaths{PlatformSpecFile: platformSpecFile}
 	bundle := &WorkflowContractBundle{
+		rootedSource:          rooted,
 		SourceArtifact:        artifact,
 		FlowSources:           flowSources,
 		Paths:                 paths,
@@ -165,15 +170,11 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	if err := artifact.ValidatePlatformVersion(bundle.Platform.Platform.Version); err != nil {
 		return nil, err
 	}
-	projectPacks, err := packartifact.LoadProjectPackSetFS(artifact.FS())
-	if err != nil {
-		return nil, err
-	}
 	base, err := resolveWorkflowPlatformPackBase(options, strings.TrimSpace(bundle.Platform.Platform.Version))
 	if err != nil {
 		return nil, err
 	}
-	effective, err := packartifact.NewEffectivePackInventory(base, projectPacks.Sources)
+	effective, err := packartifact.NewEffectivePackInventory(base)
 	if err != nil {
 		return nil, fmt.Errorf("resolve effective pack inventory: %w", err)
 	}
@@ -186,10 +187,9 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 			return nil, fmt.Errorf("admitted pack projection does not own effective inventory %s", effective.Digest())
 		}
 		bundle.PackAdmission = admission
-	} else if base.SelectionMode() == packartifact.SelectionDevelopmentOverride || len(projectPacks.Sources) > 0 {
+	} else if base.SelectionMode() == packartifact.SelectionDevelopmentOverride {
 		return nil, fmt.Errorf("body-specific pack admission is required for development or project pack inventory")
 	}
-	bundle.ProjectPacks = projectPacks
 	bundle.PackInventory = effective
 	if err := finalizeWorkflowContractBundle(bundle); err != nil {
 		return nil, err

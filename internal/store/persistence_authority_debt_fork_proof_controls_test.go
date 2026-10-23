@@ -125,7 +125,7 @@ func debtForkProofHostility(t *testing.T, original authorityDebtSite, old, curre
 func TestPersistenceAuthorityDebtForkProofCollectorIsPinned(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo && digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo && digest != debtQ1ReopenCollectorTo && digest != debtDeploymentRegistrationCollectorTo) {
+	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo && digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo && digest != debtQ1ReopenCollectorTo && digest != debtDeploymentRegistrationCollectorTo && digest != debtS1CollectorTo) {
 		t.Fatalf("fork/process collector=%s/%s actual=%s error=%v", debtForkProofCollectorTo, debtProcessLeaseCollectorTo, digest, err)
 	}
 	// The original fork-only transition is immutable. Test its exact historical

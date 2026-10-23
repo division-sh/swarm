@@ -61,7 +61,7 @@ func TestRewriteNamesOnlyPreservesOtherSourceAndIsIdempotent(t *testing.T) {
 		t.Fatalf("expected one rewrite, got %v", plan)
 	}
 	text := string(after["schema.yaml"])
-	if !strings.HasPrefix(text, "# original heading\nname: 'unchanged'\n") || !strings.HasSuffix(text, canonicalrouting.PinRewriteSyntaxSource(t, "RewriteNamesOnlyPreservesOtherSourceAndIsIdempotent-2")) {
+	if !strings.HasPrefix(text, "# original heading\n# fixture: 'unchanged'\n") || !strings.HasSuffix(text, canonicalrouting.PinRewriteSyntaxSource(t, "RewriteNamesOnlyPreservesOtherSourceAndIsIdempotent-2")) {
 		t.Fatalf("unrelated source changed:\n%s", text)
 	}
 	doc, err := parseTestSource(after["schema.yaml"])

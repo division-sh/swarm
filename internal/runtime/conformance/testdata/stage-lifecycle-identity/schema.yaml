@@ -1,4 +1,4 @@
-name: stage-lifecycle-identity-root
+# fixture: stage-lifecycle-identity-root
 stages: []
 pins:
   inputs:

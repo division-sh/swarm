@@ -19,7 +19,8 @@ import (
 
 func VerifySQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRowsForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: initial-value-proof\nstages:\n  created: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  created: {}\n",
 		"entities.yaml": "test_entity:\n  region: {type: text, initial: \"west\"}\n  tier: {type: integer, initial: 1}\n",
 	})
 	fixture, _, ctx := nativePilotPipelineForTest(t, "sqlite", bundle, open)
@@ -87,7 +88,8 @@ func VerifyNativeInitialValueMutationRequiresExistingCanonicalRunBeforeMutationF
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: missing-initial-run\nstages:\n  ready: {}\n",
+				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"schema.yaml":   "stages:\n  ready: {}\n",
 				"entities.yaml": "test_entity:\n  region: {type: text, initial: \"west\"}\n",
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
@@ -220,7 +222,8 @@ func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTes
 
 func VerifySQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunnerForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: termination-proof\nstages:\n  running: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  running: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 	})
 	fixture, coordinator, ctx := nativePilotPipelineForTest(t, "sqlite", bundle, open)

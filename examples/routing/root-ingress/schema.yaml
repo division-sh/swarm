@@ -1,4 +1,4 @@
-name: routing-root-ingress
+# fixture: routing-root-ingress
 stages:
   pending: {}
   processed: {}

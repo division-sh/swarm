@@ -62,8 +62,7 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 	}
 	source := sourceartifactfixture.Require(t, context.Background(), f.store)
 	manifest := sessionInputManifestFixture(t)
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-		Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "1.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

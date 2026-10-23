@@ -45,7 +45,7 @@ func NewInvocationRoot(raw string) (InvocationRoot, error) {
 }
 
 func requireInvocationRootPath(raw string) (string, error) {
-	path := strings.TrimSpace(raw)
+	path := raw
 	if path == "" {
 		return "", fmt.Errorf("CLI invocation root is required")
 	}

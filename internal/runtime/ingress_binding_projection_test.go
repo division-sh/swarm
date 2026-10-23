@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/google/uuid"
 )
 
 type ingressBindingSequenceStore struct {
@@ -57,9 +58,14 @@ func testIngressBindingProjectionSharedKey(
 ) {
 	t.Helper()
 	ctx := context.Background()
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	primary := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
+	survivorCatalog, survivorSource := runtimeAdmissionTestCatalog(t, "a", "survivor")
+	survivor := runtimeAdmissionTestContext(t, survivorSource, survivorCatalog, uuid.NewString())
+	sharedKey := primary.StandingTargets[0].SigningSecret
+	if primary.BundleHash() == survivor.BundleHash() || sharedKey == "" || survivor.StandingTargets[0].SigningSecret != sharedKey {
+		t.Fatal("projection requires unequal captured sources with the same credential identity")
+	}
 	manager, err := newTestRuntimeContextManager(t, nil, primary, survivor)
 	if err != nil {
 		t.Fatal(err)
@@ -72,8 +78,8 @@ func testIngressBindingProjectionSharedKey(
 		}
 		base = append(base, subject)
 	}
-	bound := runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: "webhook_signing.acme", Present: true}, "secret-a")
-	unbound := runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: "webhook_signing.acme"}, "")
+	bound := runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: sharedKey, Present: true}, "secret-a")
+	unbound := runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: sharedKey}, "")
 	for _, tc := range []struct {
 		name      string
 		snapshots []runtimecredentials.AtomicSnapshot

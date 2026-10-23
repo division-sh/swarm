@@ -10,7 +10,7 @@ import (
 func CopyReceiverConfigHistory(t testing.TB) string {
 	t.Helper()
 	root := CopyTemplateInstanceRoute(t, TemplateInstanceRouteOptions{Consumer: TemplateInstanceAgentConsumer})
-	writeClosedVariantFile(t, root, "consumer/schema.yaml", `name: consumer
+	writeClosedVariantFile(t, root, "consumer/schema.yaml", `# fixture: consumer
 instance: vertical_id
 pins:
   inputs:

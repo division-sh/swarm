@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -72,13 +73,19 @@ func TestGroupInstancePlanningOverlappingRequestsKeepBothReadStrengths(t *testin
 
 func groupReadStrengthObservations(t *testing.T, change string) (pipeline.FlowInstanceObservation, pipeline.FlowInstanceObservation) {
 	t.Helper()
-	artifact := sourceartifactfixture.Artifact()
-	root := &contracts.FlowContractView{Paths: contracts.FlowContractPaths{FlowPath: "."}}
-	source := semanticview.Wrap(&contracts.WorkflowContractBundle{
-		SourceArtifact: artifact, Semantics: contracts.WorkflowSemanticView{Version: "original"},
-		RootSchema: &contracts.FlowSchemaDocument{},
-		FlowTree:   contracts.FlowTree{Root: root, ByID: map[string]*contracts.FlowContractView{".": root}},
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: {pending: {}, completed: {final: true}}\n"),
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", artifact)
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(pipeline.WorkflowRepoRoot(), rooted, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
 	fact := sourceartifactfixture.FactFor(artifact)
 	const runID = "11111111-1111-1111-1111-111111111111"
 	identity, err := flowidentity.StandingForGeneration(source, ".", runID)
@@ -90,10 +97,10 @@ func groupReadStrengthObservations(t *testing.T, change string) (pipeline.FlowIn
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	instance := pipeline.WorkflowInstance{WorkflowName: ".", WorkflowVersion: "original", Mode: "static", Status: "active", InstanceID: runID, StorageRef: runID, EntityID: runID, CurrentState: "pending", StageDefined: true, Revision: 1, CreatedAt: at, UpdatedAt: at}
-	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
-	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: "original", BundleHash: fact.BundleHash(), Fields: map[string]any{"seed": "original"}}
-	readiness := pipeline.DynamicFlowRuntimeReadiness{Plan: pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: "original", ExecutionMode: executionmode.Live}, OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active", Phase: pipeline.FlowAttachmentReady, AttemptState: "accepted", AttemptOrdinal: 1}
+	instance := pipeline.WorkflowInstance{WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", Status: "active", InstanceID: runID, StorageRef: runID, EntityID: runID, CurrentState: "pending", StageDefined: true, Revision: 1, CreatedAt: at, UpdatedAt: at}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
+	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: source.WorkflowVersion(), BundleHash: fact.BundleHash(), Fields: map[string]any{"seed": "original"}}
+	readiness := pipeline.DynamicFlowRuntimeReadiness{Plan: pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live}, OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active", Phase: pipeline.FlowAttachmentReady, AttemptState: "accepted", AttemptOrdinal: 1}
 	admit := func() pipeline.FlowInstanceObservation {
 		t.Helper()
 		plan, err := readiness.Plan.Normalized()
@@ -162,13 +169,21 @@ func TestGroupInstancePlanningInventoryRetainsFixedHistoricalConstruction(t *tes
 			}
 			const sourceRun = "22222222-2222-2222-2222-222222222222"
 			history := pipeline.HistoricalFlowInstanceConstruction{Identity: native.Identity(), SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRun, Route: flowidentity.StoredRoute(".", sourceRun, sourceRun)}, SourceRevision: 2, WorkflowVersion: instance.WorkflowVersion}
+			bundle, ok := semanticview.Bundle(native.Selection().Source())
+			if !ok {
+				t.Fatal("historical observation requires its captured source")
+			}
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
 			admit := func() pipeline.FlowInstanceObservation {
 				t.Helper()
 				origin, err := runlifecycle.ForkMaterializationRunOrigin(history.SourceOwner.RunID, runlifecycle.ForkOriginPointDeploymentRevision, history.SourceRevision, "")
 				if err != nil {
 					t.Fatal(err)
 				}
-				run := runlifecycle.Snapshot{RunID: native.Owner().RunID, State: native.RunState(), Origin: origin, BundleHash: native.SourceFact().BundleHash(), StartedAt: instance.CreatedAt}
+				run := runlifecycle.Snapshot{RunID: native.Owner().RunID, State: native.RunState(), Origin: origin, BundleHash: native.SourceFact().BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: instance.CreatedAt}
 				observation, err := pipeline.AdmitHistoricalFlowInstanceObservation(native.Selection(), instance, run, 3, history, nil)
 				if err != nil {
 					t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -32,6 +35,7 @@ import (
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -84,11 +88,12 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 
 func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *testing.T) {
 	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	copyRegistrationFixtureTelegram(t, sourceRoot)
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
-	catalog := testProviderTriggerCatalog(t)
+	rooted, catalog := registrationFixtureTriggerCatalog(t, bundle, ".")
 	source := processIngressTransportSource(t, bundle, catalog)
 	persistence := &processIngressProofStore{}
 	bundleHash := bundle.SourceArtifact.BundleHash()
@@ -152,11 +157,13 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatal(err)
 	}
 	gateway.SetCredentialAdmission(rt.AdmitInboundCredentials)
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash), Source: source,
-		Runtime: rt, WorkOwner: workOwner,
+		RootAdmission: rooted.Admission(), ProviderTriggerCatalog: catalog,
+		PackInventoryDigest: bundle.PackInventory.Digest(),
+		Runtime:             rt, WorkOwner: workOwner,
 		StandingTargets: []runtimepkg.StandingTarget{target}, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -226,7 +233,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	pair := runtimepublicingress.RegistrationPair{
 		BindingID: "telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
-		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
+		CredentialKeys: map[string]string{"telegram.telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:.:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
 			FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
@@ -476,11 +483,12 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 
 func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T) {
 	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	copyRegistrationFixtureTelegram(t, sourceRoot)
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
-	catalog := testProviderTriggerCatalog(t)
+	rooted, catalog := registrationFixtureTriggerCatalog(t, bundle, ".")
 	source := processIngressTransportSource(t, bundle, catalog)
 	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
@@ -513,9 +521,12 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 
-	bundleHash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
+	bundleHash := bundle.SourceArtifact.BundleHash()
 	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
-	bus, err := runtimebus.NewEphemeralEventBus(nil)
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash), WorkOwner: workOwner,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 	if err != nil {
 		t.Fatalf("NewEphemeralEventBus: %v", err)
 	}
@@ -535,16 +546,23 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+	installed, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash),
-		Source:             source,
+		RootAdmission:      rooted.Admission(), ProviderTriggerCatalog: catalog,
+		PackInventoryDigest: bundle.PackInventory.Digest(), InstalledTriggerSubjects: installed,
+		Source: source,
 		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, ChannelActivations: activationOwner,
 			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), WorkflowModule: module,
+				SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
 				ProviderTriggerCatalog: catalog, ProviderCredentials: credentialStore}},
 		WorkOwner:                 workOwner,
 		StandingTargets:           []runtimepkg.StandingTarget{target},
 		ProviderTriggerGeneration: catalog.Generation(),
-	}))
+	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -553,7 +571,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	plan := loadSupportedTelegramChannelPlan(t)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
-		map[string]string{"telegram_bot_token": "bot"},
+		map[string]string{"telegram.telegram_bot_token": "bot"},
 		"ingress:.:telegram_raw",
 	)
 	if err != nil {
@@ -570,7 +588,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		Coordinate: coordinate,
 		Plan:       binding,
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{{
-			Role: "telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved,
+			Role: "telegram.telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved,
 			ValueSeal: botSeal.Seal,
 		}},
 	}
@@ -600,7 +618,7 @@ func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
 	plan := loadSupportedTelegramChannelPlan(t)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
-		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "signing"},
+		map[string]string{"telegram.telegram_bot_token": "bot", "telegram.webhook_signing_secret": "signing"},
 		"ingress:telegram-ingress:telegram",
 	)
 	if err != nil {
@@ -636,15 +654,18 @@ func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
 func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T) {
 	ctx := context.Background()
 	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
+	for _, flow := range []string{".", "telegram-ingress", "telegram-chat"} {
+		copyRegistrationFixtureTelegram(t, filepath.Join(sourceRoot, flow))
+	}
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog := testProviderTriggerCatalog(t)
+	rooted, catalog := registrationFixtureTriggerCatalog(t, bundle, "telegram-ingress")
 	source := processIngressTransportSource(t, bundle, catalog)
 	plan := loadSupportedTelegramChannelPlan(t)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration("telegram", plan, "42", nil,
-		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "webhook_signing.telegram"}, "ingress:telegram-ingress:telegram")
+		map[string]string{"telegram.telegram_bot_token": "bot", "telegram.webhook_signing_secret": "webhook_signing.telegram"}, "ingress:telegram-ingress:telegram")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +673,15 @@ func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	hash := bundle.SourceArtifact.BundleHash()
+	identity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
 	workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{
 		WorkOwner: workOwner, ContractBundle: source, SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
@@ -661,13 +690,16 @@ func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash), Source: source,
-		BundleIdentity: runtimecontracts.BundleIdentity{WorkflowName: "telegram", WorkflowVersion: "1", BundleHash: hash},
+		RootAdmission: rooted.Admission(), ProviderTriggerCatalog: catalog,
+		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
+		BundleIdentity: identity,
 		Runtime: &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{
+			WorkflowModule: module, SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash), ProviderTriggerCatalog: catalog,
 			RuntimeInstanceID: uuid.NewString(), DeclaredChannelPublication: declared, ChannelPlans: []packs.SatisfactionPlan{plan},
 		}}, WorkOwner: workOwner, ChannelPlans: []packs.SatisfactionPlan{plan},
-	}))
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,6 +735,45 @@ func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T)
 	}
 }
 
+func copyRegistrationFixtureTelegram(t testing.TB, directory string) {
+	t.Helper()
+	writeStandingCandidateFile(t, filepath.Join(directory, "manifest.yaml"), "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n")
+	if changed, err := packartifact.ImportEmbeddedPack(directory, "telegram", packfixture.EmbeddedBase(t)); err != nil || !changed {
+		t.Fatalf("copy flow-local Telegram provider: changed=%t err=%v", changed, err)
+	}
+	file := filepath.Join(directory, "schema.yaml")
+	body, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStandingCandidateFile(t, file, strings.ReplaceAll(string(body), "    - inbound.telegram\n", "    - inbound.telegram.raw\n"))
+}
+
+func registrationFixtureTriggerCatalog(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, flow string) (sourceartifact.RootedSource, *providertriggers.CatalogSnapshot) {
+	t.Helper()
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, found := scope.Provider("telegram")
+	if !found || provider.Provider().DeclaringFlow() != flow {
+		t.Fatal("registration fixture has no flow-local Telegram directory")
+	}
+	catalog, found := provider.TriggerCatalog()
+	if !found {
+		t.Fatal("registration fixture has no admitted trigger BODY")
+	}
+	return rooted, catalog
+}
+
 func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegistration {
 	t.Helper()
 	plan := loadSupportedTelegramChannelPlan(t)
@@ -733,14 +804,18 @@ func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	triggers := packfixture.TriggerCatalog(t)
 	var connector packs.ConnectorPackDescriptor
 	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
-		if candidate.Identity.ID() == "provider.telegram.connector" {
+		if candidate.Identity.ID() == "telegram" {
 			connector = candidate
 			break
 		}
 	}
-	plan, err := packs.CompileChannel(registry, channels[0], triggers.PackDescriptors(), []packs.ConnectorPackDescriptor{connector})
+	trigger, present := triggers.PackDescriptorForProvider(channels[0].Key())
+	if !present {
+		t.Fatal("Telegram trigger descriptor is missing")
+	}
+	plan, err := packs.CompileProviderChannel(registry, channels[0], trigger, connector)
 	if err != nil {
-		t.Fatalf("CompileChannel: %v", err)
+		t.Fatalf("CompileProviderChannel: %v", err)
 	}
 	return plan
 }

@@ -23,11 +23,13 @@ func TestTerminalPanicFinalizationBothStores(t *testing.T) {
 				} else {
 					selected = storetest.StartSQLiteRuntimeStore(t)
 				}
+				ctx := manager.TerminalPanicFixtureContext()
 				rec := manager.TerminalPanicFixture(t)
 				rec.Topology = agenttopology.Admission{}
 				rec.Config.LLMBackend = "anthropic"
 				rec.Config.ResolvedLLMBackend = "anthropic"
-				storetest.RequireStaticAgentFixture(t, manager.TerminalPanicFixtureContext(), selected, rec)
+				storetest.RequireRunningRun(t, ctx, selected.(storetest.RunFixtureStore), rec.Config.Identity.RunID, rec.StartedAt)
+				storetest.RequireStaticAgentFixture(t, ctx, selected, rec)
 				state, found, err := selected.LoadAgentLifecycleState(context.Background(), rec.Config.Identity)
 				if err != nil || !found {
 					t.Fatalf("admitted panic fixture: found=%t err=%v", found, err)
@@ -40,7 +42,7 @@ func TestTerminalPanicFinalizationBothStores(t *testing.T) {
 				rec.ProcessBinding = state.ProcessBinding
 				persistence := storetest.AgentLifecycleFixture(t, selected)
 				if mode == "success" {
-					manager.ProveTerminalPanicFinalization(t, persistence, selected, rec, false)
+					manager.ProveTerminalPanicFinalization(t, ctx, persistence, selected, rec, false)
 					return
 				}
 				const failure = "exact panic terminal mutation rollback"
@@ -59,7 +61,7 @@ func TestTerminalPanicFinalizationBothStores(t *testing.T) {
 				if _, err := db.ExecContext(context.Background(), ddl); err != nil {
 					t.Fatal(err)
 				}
-				manager.ProveTerminalPanicMutationFailure(t, persistence, selected, rec, failure, mode == "commit_and_finalizer_failure")
+				manager.ProveTerminalPanicMutationFailure(t, ctx, persistence, selected, rec, failure, mode == "commit_and_finalizer_failure")
 			})
 		}
 	}

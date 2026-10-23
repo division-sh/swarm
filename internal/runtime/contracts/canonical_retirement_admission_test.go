@@ -12,7 +12,7 @@ import (
 func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	platformSpec := DefaultPlatformSpecFile(repoRoot)
-	baseSchema := "name: retirement-proof\n"
+	baseSchema := "stages: []\n# fixture: retirement-proof\n"
 	cases := []struct {
 		name      string
 		file      string
@@ -61,6 +61,7 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), baseSchema)
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n  work_id: text\nwork.completed:\n  work_id: text\n")
 			writeFixtureFile(t, filepath.Join(root, tc.file), tc.canonical)

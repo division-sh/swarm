@@ -851,15 +851,9 @@ func loadRuntimeBundleRoot(t *testing.T, root string) *runtimecontracts.Workflow
 
 func templateInstanceDeliveryFixtureFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml": "name: test\n",
-		"operating/schema.yaml": `name: operating
-instance: instance_id
-stages:
-  initializing: {}
-  ready: {final: true}
-auto_emit_on_create:
-  event: opco.product_initialization_requested
-`,
+		"schema.yaml":           "stages: []\n",
+		"operating/schema.yaml": "instance: instance_id\nstages:\n  initializing: {}\n  ready: {final: true}\nauto_emit_on_create:\n  event: opco.product_initialization_requested\n",
+
 		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string?
@@ -873,7 +867,7 @@ opco.ceo_ready:
   event_handlers:
     opco.product_initialization_requested:
       emit: opco.ceo_ready
-`,
+`, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 }
 

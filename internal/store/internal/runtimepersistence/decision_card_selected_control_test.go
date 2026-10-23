@@ -47,10 +47,11 @@ func TestDecisionCardSelectedControlMutationBoundariesBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				bindingID := uuid.NewString()
+				rooted := decisionCardTestRootedSource(t, ctx, store, runID)
 				if err := selectedDecisionControlTx(ctx, store, func(ctx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings
-						(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,mode,created_at)
-						VALUES ($1,$2,$3,'deployment_revision',1,'selected_contracts',$4)`, bindingID, runID, runID, now)
+						(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,mode,target_bundle_hash,source_root_directory,created_at)
+						VALUES ($1,$2,$3,'deployment_revision',1,'selected_contracts',$4,$5,$6)`, bindingID, runID, runID, rooted.Admission().BundleHash(), rooted.Admission().RootDirectory(), now)
 					return err
 				}); err != nil {
 					t.Fatal(err)

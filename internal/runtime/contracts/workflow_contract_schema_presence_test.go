@@ -10,7 +10,7 @@ import (
 // M/N/E/S/O/P/Z/Q denote missing/null/empty-text/scalar/empty-map/map/empty-list/list.
 func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	type row struct{ path, template, key, scalar, object, list, admit string }
-	root := "name: presence\nstages: []\n%s\n"
+	root := "stages: []\nrequired_agents: []\n%s\n"
 	stage := "stages:\n  waiting:\n    final: false\n    description: ''\n    %s\n  done: {final: true}\n"
 	gate := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes: {approve: {advances_to: done}}\n      %s\n"
 	outcome := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes:\n        approve:\n          advances_to: done\n          %s\n"
@@ -20,14 +20,7 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	required := "required_agents:\n  - role: worker\n    %s\n"
 	connect := "connect:\n  - event: work.requested\n    from: source\n    to: worker\n    %s\n"
 	outputPin := "pins:\n  outputs:\n    - event: work.completed\n      %s\n"
-	ingress := "ingress:\n  alias: hooks\n  providers: [{provider: partner}]\n  %s\n"
-	provider := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      %s\n"
-	admission := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: pack\n        pack: {id: partner}\n        %s\n"
-	rawAdmission := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: raw\n        authentication: {kind: token, header: X-Token}\n        delivery_id: {source: body_sha256}\n        event: work.received\n        payload: json\n        %s\n"
-	authentication := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: raw\n        delivery_id: {source: body_sha256}\n        event: work.received\n        payload: json\n        authentication:\n          kind: hmac_sha256\n          header: X-Signature\n          %s\n"
-	delivery := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: raw\n        authentication: {kind: token, header: X-Token}\n        event: work.received\n        payload: json\n        delivery_id:\n          source: header\n          header: X-Id\n          %s\n"
 	rows := []row{
-		{"name", root, "name", "Example", "", "", "MES"},
 		{"mode", root, "mode", "static", "", "", "M"},
 		{"instance", root, "instance", "work_id", "", "", "MS"},
 		{"stages", root, "stages", "x", "{waiting: {}, done: {final: true}}", "[x]", "MPZ"},
@@ -75,34 +68,6 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"connect.replies_to", connect, "replies_to", "work.sent", "", "", "MS"},
 		{"connect.correlation_key", strings.ReplaceAll(connect, "    %s", "    replies_to: work.sent\n    %s"), "correlation_key", "work_id", "", "", "MS"},
 		{"connect.key_from", strings.ReplaceAll(connect, "    %s", "    resolution: create\n    %s"), "key_from", "event.id", "", "", "MS"},
-		{"imports", root, "imports", "x", "{connector_packs: [{provider: telegram, tool: telegram.send_message}]}", "", "MP"},
-		{"imports.connector_packs", "imports:\n  %s\n", "connector_packs", "x", "", "[{provider: telegram, tool: telegram.send_message}]", "Q"},
-		{"imports.provider_trigger_events", "imports:\n  %s\n", "provider_trigger_events", "x", "", "[{provider: telegram, event: inbound.telegram.text_message}]", "Q"},
-		{"import.connector.provider", "imports:\n  connector_packs:\n    - tool: telegram.send_message\n      %s\n", "provider", "telegram", "", "", "S"},
-		{"import.connector.tool", "imports:\n  connector_packs:\n    - provider: telegram\n      %s\n", "tool", "telegram.send_message", "", "", "S"},
-		{"import.trigger.provider", "imports:\n  provider_trigger_events:\n    - event: inbound.telegram.text_message\n      %s\n", "provider", "telegram", "", "", "S"},
-		{"import.trigger.event", "imports:\n  provider_trigger_events:\n    - provider: telegram\n      %s\n", "event", "inbound.telegram.text_message", "", "", "S"},
-		{"ingress", root, "ingress", "x", "{alias: hooks, providers: [{provider: partner}]}", "", "MP"},
-		{"ingress.alias", ingress, "alias", "hooks", "", "", "MS"},
-		{"ingress.providers", ingress, "providers", "x", "", "[{provider: partner}]", "Q"},
-		{"provider.provider", provider, "provider", "partner", "", "", "S"},
-		{"provider.signing_secret", provider, "signing_secret", "TOKEN", "", "", "MS"},
-		{"provider.admission", provider, "admission", "x", "{kind: pack, pack: {id: partner}}", "", "MP"},
-		{"admission.kind", admission, "kind", "pack", "", "", "MS"},
-		{"admission.acknowledge", admission, "acknowledge", "empty", "", "", "MS"},
-		{"admission.pack", admission, "pack", "x", "{id: partner}", "", "MP"},
-		{"admission.pack.id", "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        pack:\n          %s\n", "id", "partner", "", "", "S"},
-		{"admission.authentication", rawAdmission, "authentication", "x", "{kind: token, header: X-Token}", "", "P"},
-		{"admission.event", rawAdmission, "event", "work.received", "", "", "S"},
-		{"admission.payload", rawAdmission, "payload", "json", "", "", "S"},
-		{"admission.delivery_id", rawAdmission, "delivery_id", "x", "{source: body_sha256}", "", "P"},
-		{"authentication.kind", authentication, "kind", "token", "", "", "S"},
-		{"authentication.header", authentication, "header", "X-Signature", "", "", "S"},
-		{"authentication.prefix", authentication, "prefix", "Token", "", "", "MES"},
-		{"authentication.encoding", authentication, "encoding", "hex", "", "", "MS"},
-		{"delivery.source", delivery, "source", "header", "", "", "S"},
-		{"delivery.header", delivery, "header", "X-Id", "", "", "S"},
-		{"delivery.json_path", strings.ReplaceAll(delivery, "source: header\n          header: X-Id", "source: json_path"), "json_path", "$.id", "", "", "S"},
 		{"pins", root, "pins", "x", "{inputs: [work.requested]}", "", "MP"},
 		{"pins.inputs", "pins:\n  outputs: [work.completed]\n  %s\n", "inputs", "x", "{events: [work.requested]}", "[work.requested]", "MQ"},
 		{"pins.outputs", "pins:\n  inputs: [work.requested]\n  %s\n", "outputs", "x", "{events: [work.completed]}", "[work.completed]", "MQ"},
@@ -183,39 +148,6 @@ func TestSchemaAdmissionBooleanKindsAndLiteralDefaultPresence(t *testing.T) {
 			if _, err := admitSchemaFragment("stages: {waiting: {" + key + ": " + raw + "}}\n"); err == nil {
 				t.Fatalf("%s admitted %s", key, raw)
 			}
-		}
-	}
-}
-
-func TestSchemaAdmissionIngressBranchPresenceMatrix(t *testing.T) {
-	type branch struct {
-		name, template string
-		forbidden      []string
-	}
-	provider := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        %s\n"
-	raw := "kind: raw\n        event: work.received\n        payload: json\n        authentication: {kind: token, header: X-Token}\n        delivery_id: {source: body_sha256}\n        %s"
-	branches := []branch{
-		{"pack", fmt.Sprintf(provider, "kind: pack\n        pack: {id: partner}\n        %s"), []string{"authentication", "event", "delivery_id", "payload"}},
-		{"raw", fmt.Sprintf(provider, raw), []string{"pack"}},
-		{"none", fmt.Sprintf(provider, "kind: raw\n        event: work.received\n        payload: json\n        delivery_id: {source: body_sha256}\n        authentication:\n          kind: none\n          %s"), []string{"header", "prefix", "encoding"}},
-		{"token", fmt.Sprintf(provider, "kind: raw\n        event: work.received\n        payload: json\n        delivery_id: {source: body_sha256}\n        authentication:\n          kind: token\n          header: X-Token\n          %s"), []string{"encoding"}},
-	}
-	for _, delivery := range []struct{ mode, required, forbidden string }{{"header", "header: X-Id", "json_path"}, {"json_path", "json_path: $.id", "header"}, {"body_sha256", "", "header"}, {"body_sha256", "", "json_path"}} {
-		branches = append(branches, branch{"delivery-" + delivery.mode + "-" + delivery.forbidden, fmt.Sprintf(provider, "kind: raw\n        event: work.received\n        payload: json\n        authentication: {kind: token, header: X-Token}\n        delivery_id:\n          source: "+delivery.mode+"\n          "+delivery.required+"\n          %s"), []string{delivery.forbidden}})
-	}
-	for _, b := range branches {
-		for _, key := range b.forbidden {
-			t.Run(b.name+"/"+key, func(t *testing.T) {
-				for _, raw := range []string{"null", "''", "false", "value", "{}", "{a: b}", "[]", "[a]"} {
-					_, err := admitSchemaFragment(fmt.Sprintf(b.template, key+": "+raw))
-					if err == nil || !strings.Contains(err.Error(), key) {
-						t.Fatalf("forbidden %s=%s: %v", key, raw, err)
-					}
-				}
-				if _, err := admitSchemaFragment(fmt.Sprintf(b.template, "")); err != nil {
-					t.Fatalf("valid omitted branch: %v", err)
-				}
-			})
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestSelectedRootPinBoundaryArtifactParity(t *testing.T) {
@@ -18,6 +19,8 @@ func TestSelectedRootPinBoundaryArtifactParity(t *testing.T) {
 	if err := os.CopyFS(root, os.DirFS(filepath.Join(repo, "tests/tier8-boot-verification/test-boot-missing-pin"))); err != nil {
 		t.Fatal(err)
 	}
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "deep", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "deep", "schema.yaml"), "stages: []\n")
 	if err := os.CopyFS(filepath.Join(root, "deep/grandchild"), os.DirFS(filepath.Join(root, "child"))); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +34,7 @@ func TestSelectedRootPinBoundaryArtifactParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, artifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +70,7 @@ func TestSelectedRootPinBoundaryArtifactParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, decoded, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, original.artifact, decoded), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

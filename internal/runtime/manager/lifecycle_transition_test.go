@@ -91,13 +91,13 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 	}
 	manager := newTestAgentManagerWithOptions(t, managerBus, func(runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.transition"), Topology: managerTestEphemeralTopologyAdmission(t),
+	}, AgentManagerOptions{DeliveryStore: native, SemanticSource: native.SemanticSource, SourceArtifactFact: native.Authority.SourceArtifact()})
+	if err := manager.spawnAgentInternal(native.Context, PersistedAgent{
+		Config: managerRootAgentConfig(agent.id, "test.transition"), Topology: managerTestEphemeralTopologyAdmissionForSource(t, native.SemanticSource),
 	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	runCtx, cancelRun := context.WithCancel(native.normalRunContext(t))
 	t.Cleanup(func() {
 		cancelRun()
 		unblock()
@@ -108,7 +108,7 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-transition"), events.EventType("test.transition"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
-	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+	if err := eventBus.Publish(native.Context, inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	select {

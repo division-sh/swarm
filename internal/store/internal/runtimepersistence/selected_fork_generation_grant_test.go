@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -196,7 +197,16 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 			if err := grant.ProveCurrent(ctx); err != nil {
 				t.Fatalf("copied evidence mutated capability: %v", err)
 			}
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64)}}, nil)
+			unrelated, _ := sourceartifactfixture.Rooted(t, "unrelated", sourceartifactfixture.New("agents.yaml", []byte("# unrelated selected grant source\nagents: {}\n")))
+			sourceartifactfixture.RequireArtifact(t, ctx, store.(sourceartifactfixture.Writer), unrelated.Artifact())
+			if unrelated.Admission().BundleHash() == req.BundleHash {
+				t.Fatal("unrelated source-set control must differ from the selected source")
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(unrelated.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,4 +1,4 @@
-name: template-select-existing
+# fixture: template-select-existing
 pins:
   inputs:
     - account.setup.requested

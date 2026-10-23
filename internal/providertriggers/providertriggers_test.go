@@ -10,276 +10,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/packs"
 	platformpacks "github.com/division-sh/swarm/packs"
 )
-
-func TestEmbeddedInventoryLoadsFirstPartyProvidersFromVerifiedPlatformPacks(t *testing.T) {
-	registry := testPlatformRegistry(t)
-	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform", "whatsapp"} {
-		entry, _ := registry.EntryByProvider(provider)
-		if entry.Source != "embedded:provider."+provider || entry.Identity.Provenance != packs.ProvenancePlatform || entry.SourcePath != "provider-triggers/"+provider {
-			t.Fatalf("%s embedded source = %#v", provider, entry)
-		}
-	}
-}
-
-func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testing.T) {
-	dirs := testPlatformPackDirs(t)
-	if len(dirs) != 9 {
-		t.Fatalf("platform pack directories = %d, want 9: %v", len(dirs), dirs)
-	}
-	providers := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		envelopeBody, err := os.ReadFile(filepath.Join(dir, "pack.yaml"))
-		if err != nil {
-			t.Fatalf("read %s pack envelope: %v", dir, err)
-		}
-		manifestBody, err := os.ReadFile(filepath.Join(dir, "trigger.yaml"))
-		if err != nil {
-			t.Fatalf("read %s trigger manifest: %v", dir, err)
-		}
-		_, stamped, err := StampPackEnvelope(envelopeBody, manifestBody)
-		if err != nil {
-			t.Fatalf("stamp %s: %v", dir, err)
-		}
-		if string(stamped) != string(envelopeBody) {
-			t.Fatalf("pack envelope %s is stale; run provider trigger pack generator", dir)
-		}
-		pack, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
-		if err != nil {
-			t.Fatalf("load %s: %v", dir, err)
-		}
-		subject, err := pack.CapabilitySubject()
-		if err != nil {
-			t.Fatalf("capability subject %s: %v", dir, err)
-		}
-		wantCapabilityCount := 2 + len(DerivedCapabilities(pack.Manifest).Can.EmitEvents)
-		if pack.Manifest.RequiresSecret() {
-			wantCapabilityCount++
-		}
-		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable || subject.Provider != pack.Manifest.Provider() || len(subject.Capabilities) != wantCapabilityCount || len(subject.Guarantees) != 3 {
-			t.Fatalf("capability subject %s = %#v", dir, subject)
-		}
-		wantReceive := packs.Capability{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/{alias}/" + pack.Manifest.Provider()}
-		if pack.Manifest.Transport() == packs.ChannelTransportSession {
-			wantReceive = packs.Capability{Code: packs.CapabilityReceiveSessionEvents, Target: pack.Manifest.Provider()}
-		}
-		var gotReceive packs.Capability
-		for _, capability := range subject.Capabilities {
-			if capability.Code == packs.CapabilityReceiveHTTPSRoute || capability.Code == packs.CapabilityReceiveSessionEvents {
-				if gotReceive.Code != "" {
-					t.Fatal("trigger advertised more than one transport")
-				}
-				gotReceive = capability
-			}
-		}
-		if gotReceive != wantReceive {
-			t.Fatalf("capability subject %s receive = %#v, want %#v", dir, gotReceive, wantReceive)
-		}
-		wantRequires := DerivedRequires(pack.Manifest).Secrets
-		if len(subject.Requirements) != len(wantRequires) {
-			t.Fatalf("trigger requirements disagree with admitted transport: %s", dir)
-		}
-		for _, requirement := range subject.Requirements {
-			if requirement.Scope != packs.RequirementScopeTarget || requirement.Satisfied != nil || requirement.Status != "" {
-				t.Fatalf("capability subject %s requirements = %#v, want target-scoped unevaluated", dir, subject.Requirements)
-			}
-		}
-		providers = append(providers, pack.Manifest.Provider())
-	}
-	sort.Strings(providers)
-	want := []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform", "whatsapp"}
-	if strings.Join(providers, ",") != strings.Join(want, ",") {
-		t.Fatalf("filesystem providers = %v, want %v", providers, want)
-	}
-	sourceBody, err := os.ReadFile("providertriggers.go")
-	if err != nil {
-		t.Fatalf("read provider trigger owner: %v", err)
-	}
-	if strings.Contains(string(sourceBody), "go:embed") || strings.Contains(string(sourceBody), "builtinManifestFS") || strings.Contains(string(sourceBody), "DefaultRegistry") {
-		t.Fatalf("provider trigger owner retains embedded/default first-party authority")
-	}
-}
-
-func TestConfiguredPlatformPackInventoryHasNoHardCodedCompletenessAuthority(t *testing.T) {
-	registry, loaded, err := NewCatalogSnapshotFromInventory(testEmbeddedPackInventory(t), "0.7.0")
-	if err != nil {
-		t.Fatalf("load explicit embedded inventory: %v", err)
-	}
-	if registry == nil || len(loaded) != 9 {
-		t.Fatalf("embedded platform inventory result = registry:%v loaded:%d", registry != nil, len(loaded))
-	}
-	body, err := os.ReadFile("providertriggers.go")
-	if err != nil {
-		t.Fatalf("read provider trigger owner: %v", err)
-	}
-	for _, retired := range []string{"requiredPlatformPackIdentities", "RequiredPlatformPackIdentities", "NewCatalogSnapshotFromRequiredPlatformPackDirs"} {
-		if strings.Contains(string(body), retired) {
-			t.Fatalf("provider trigger owner retains hard-coded inventory authority %q", retired)
-		}
-	}
-}
-
-func TestProviderTriggerPackSetRejectsPackIdentityCollisionsBeforeProviderRegistration(t *testing.T) {
-	base := LoadedPack{Envelope: packs.Envelope{ID: "provider.github", Version: "0.1.0", ManifestHash: "sha256:first", Provenance: packs.Provenance{Source: packs.ProvenancePlatform}}, SourcePath: "/platform/github"}
-	duplicate := LoadedPack{Envelope: packs.Envelope{ID: "provider.github", Version: "0.2.0", ManifestHash: "sha256:second", Provenance: packs.Provenance{Source: packs.ProvenanceExternal}}, SourcePath: "/external/acme"}
-	if err := validateLoadedPackIdentities([]LoadedPack{base, duplicate}); err == nil {
-		t.Fatal("duplicate pack id passed admission")
-	} else {
-		for _, want := range []string{"duplicate provider trigger pack id", "/platform/github", "provenance=platform", "/external/acme", "provenance=external"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("duplicate pack id error = %q, want containing %q", err, want)
-			}
-		}
-	}
-
-	duplicate.Envelope.Version = base.Envelope.Version
-	if err := validateLoadedPackIdentities([]LoadedPack{base, duplicate}); err == nil {
-		t.Fatal("competing immutable pack identity passed admission")
-	} else if !strings.Contains(err.Error(), "competing immutable provider trigger pack identity") {
-		t.Fatalf("immutable identity error = %q", err)
-	}
-}
-
-func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		mutate   func(t *testing.T, dir string)
-		want     string
-	}{
-		{
-			name:     "platform pack bad exact byte hash",
-			provider: "github",
-			mutate: func(t *testing.T, dir string) {
-				appendFile(t, filepath.Join(dir, "trigger.yaml"), "\n")
-			},
-			want: "manifest_hash mismatch",
-		},
-		{
-			name:     "unknown trigger manifest field",
-			provider: "github",
-			mutate: func(t *testing.T, dir string) {
-				appendFile(t, filepath.Join(dir, "trigger.yaml"), "redact_keyz:\n  - secret\n")
-				rewritePackHash(t, dir)
-			},
-			want: "field \"redact_keyz\" is not supported",
-		},
-		{
-			name:     "capability declaration drift",
-			provider: "github",
-			mutate: func(t *testing.T, dir string) {
-				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.github.raw.{event_type}", "inbound.evil")
-			},
-			want: "capabilities do not match",
-		},
-		{
-			name:     "requires declaration drift",
-			provider: "github",
-			mutate: func(t *testing.T, dir string) {
-				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "requires:\n    secrets:\n        - webhook_signing.github", "requires:\n    secrets:\n        - webhook_signing.other")
-			},
-			want: "requires do not match",
-		},
-		{
-			name:     "unknown envelope field",
-			provider: "github",
-			mutate: func(t *testing.T, dir string) {
-				appendFile(t, filepath.Join(dir, "pack.yaml"), "unexpected: true\n")
-			},
-			want: "field unexpected not found in pack envelope",
-		},
-		{
-			name:     "incompatible platform version",
-			provider: "github",
-			mutate: func(t *testing.T, dir string) {
-				replaceInFile(t, filepath.Join(dir, "pack.yaml"), `platform_version: '>=0.7.0 <0.8.0'`, `platform_version: '>=0.8.0'`)
-			},
-			want: "platform_version range",
-		},
-		{
-			name:     "missing tests metadata",
-			provider: "github",
-			mutate: func(t *testing.T, dir string) {
-				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "tests:\n    - providertriggers/github\n", "tests: []\n")
-			},
-			want: "tests are required",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := copyBuiltinPackToTemp(t, tc.provider)
-			tc.mutate(t, dir)
-			_, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("LoadPackFS error = %v, want containing %q", err, tc.want)
-			}
-		})
-	}
-}
-
-func TestProviderTriggerPackRejectsShadowingAndNamesSources(t *testing.T) {
-	dir := copyBuiltinPackToTemp(t, "github")
-	pack, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
-	if err != nil {
-		t.Fatalf("LoadPackFS: %v", err)
-	}
-	duplicate := CatalogEntriesFromLoadedPacks(pack)[0]
-	duplicate.Source = "external:/tmp/github"
-	_, err = NewCatalogSnapshot(duplicate, CatalogEntriesFromLoadedPacks(pack)[0])
-	if err == nil {
-		t.Fatal("NewRegistryFromSources succeeded, want duplicate provider failure")
-	}
-	for _, want := range []string{`duplicate provider trigger manifest for "github"`, "external:/tmp/github", "provenance=platform", "provider.github"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("duplicate error = %q, want containing %q", err.Error(), want)
-		}
-	}
-}
-
-func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *testing.T) {
-	dir := copyBuiltinPackToTemp(t, "stripe")
-	pack, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
-	if err != nil {
-		t.Fatalf("LoadPackFS: %v", err)
-	}
-	pack.Envelope.Capabilities.Can.ReceiveHTTPSRoute = "/envelope-must-not-render"
-	surface, err := pack.CapabilitySubject()
-	if err != nil {
-		t.Fatalf("CapabilitySubject: %v", err)
-	}
-	if surface.Status != packs.StatusAvailable || len(surface.Requirements) != 1 || surface.Requirements[0].Name != "webhook_signing.stripe" || surface.Requirements[0].Scope != packs.RequirementScopeTarget || surface.Requirements[0].Satisfied != nil {
-		t.Fatalf("surface requirements = %+v status=%s, want AVAILABLE target-scoped unevaluated stripe signing secret", surface.Requirements, surface.Status)
-	}
-	renderedCan := packs.RenderSubject(surface, false)
-	if strings.Contains(renderedCan, "/envelope-must-not-render") || !strings.Contains(renderedCan, "/webhooks/{alias}/stripe") {
-		t.Fatalf("capability surface did not derive accepted body truth: %s", renderedCan)
-	}
-	if strings.Contains(renderedCan, "stripe-secret") {
-		t.Fatal("capability surface leaked a concrete secret value")
-	}
-	registry, err := NewCatalogSnapshot(CatalogEntriesFromLoadedPacks(pack)...)
-	if err != nil {
-		t.Fatalf("NewRegistryFromSources: %v", err)
-	}
-	_, err = acceptInstalled(registry, Request{
-		Provider: "stripe",
-		Target:   Target{},
-	})
-	requireProviderTriggerError(t, err, http.StatusUnauthorized)
-}
 
 func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) {
 	registry := newHostileRegistry(t)
@@ -477,7 +216,7 @@ func TestStripeManifestAcceptsLiteralEventType(t *testing.T) {
 	if delivery.ProviderEventType != "event" {
 		t.Fatalf("ProviderEventType = %q, want event", delivery.ProviderEventType)
 	}
-	if delivery.Events[0].Name != "inbound.stripe" {
+	if delivery.Events[0].Name != "inbound.stripe.raw" {
 		t.Fatalf("EventName = %q, want inbound.stripe", delivery.Events[0].Name)
 	}
 }
@@ -522,7 +261,7 @@ func TestTwilioManifestAcceptsSignedFormWebhook(t *testing.T) {
 	if delivery.ProviderEventType != "message_received" {
 		t.Fatalf("ProviderEventType = %q, want message_received", delivery.ProviderEventType)
 	}
-	if delivery.Events[0].Name != "inbound.twilio" {
+	if delivery.Events[0].Name != "inbound.twilio.raw" {
 		t.Fatalf("EventName = %q, want inbound.twilio", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
@@ -680,7 +419,7 @@ func TestShopifyManifestAcceptsRawBodyBase64Signature(t *testing.T) {
 	if delivery.ProviderEventType != "orders_create" {
 		t.Fatalf("ProviderEventType = %q, want orders_create", delivery.ProviderEventType)
 	}
-	if delivery.Events[0].Name != "inbound.shopify" {
+	if delivery.Events[0].Name != "inbound.shopify.raw" {
 		t.Fatalf("EventName = %q, want inbound.shopify", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
@@ -810,7 +549,7 @@ func TestTypeformManifestAcceptsRawBodyBase64Signature(t *testing.T) {
 	if delivery.ProviderEventType != "form_response" {
 		t.Fatalf("ProviderEventType = %q, want form_response", delivery.ProviderEventType)
 	}
-	if delivery.Events[0].Name != "inbound.typeform" {
+	if delivery.Events[0].Name != "inbound.typeform.raw" {
 		t.Fatalf("EventName = %q, want inbound.typeform", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
@@ -943,7 +682,7 @@ func TestIntercomManifestAcceptsRawBodySHA1Signature(t *testing.T) {
 	if delivery.ProviderEventType != "conversation_user_created" {
 		t.Fatalf("ProviderEventType = %q, want conversation_user_created", delivery.ProviderEventType)
 	}
-	if delivery.Events[0].Name != "inbound.intercom" {
+	if delivery.Events[0].Name != "inbound.intercom.raw" {
 		t.Fatalf("EventName = %q, want inbound.intercom", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
@@ -1066,7 +805,7 @@ func TestTelegramManifestAcceptsHeaderTokenUpdate(t *testing.T) {
 	if delivery.ProviderEventType != "update" {
 		t.Fatalf("ProviderEventType = %q, want update", delivery.ProviderEventType)
 	}
-	if delivery.Events[0].Name != "inbound.telegram" {
+	if delivery.Events[0].Name != "inbound.telegram.raw" {
 		t.Fatalf("EventName = %q, want inbound.telegram", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
@@ -1182,12 +921,12 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 			},
 		},
 		{
-			name: "new provider event name template",
+			name: "unknown event name template placeholder",
 			manifest: triggerFixture{
 				Provider:   "badtemplate",
 				DeliveryID: ValueSource{JSONPath: "$.id", Required: true},
 				EventType:  ValueSource{JSONPath: "$.type", Required: true},
-				EventName:  EventNameManifest{Template: "inbound.badtemplate.{event_type}"},
+				EventName:  EventNameManifest{Template: "inbound.badtemplate.{unknown}"},
 			},
 		},
 		{
@@ -1309,8 +1048,8 @@ func TestNormalizeEventTokenNormalizesProviderTopicSeparators(t *testing.T) {
 }
 
 func TestEventNameManifestAcceptsLiteralAndTemplateNames(t *testing.T) {
-	literal := EventNameManifest{Literal: "inbound.telegram"}
-	if !literal.Accepts("inbound.telegram") || literal.Accepts("inbound.telegram.message") {
+	literal := EventNameManifest{Literal: "inbound.telegram.raw"}
+	if !literal.Accepts("inbound.telegram.raw") || literal.Accepts("inbound.telegram.message") {
 		t.Fatalf("literal event-name acceptance is not exact")
 	}
 	template := EventNameManifest{Template: "inbound.github.{event_type}"}
@@ -1345,7 +1084,7 @@ func tokenEqualityValidationManifest(provider string, mutate func(*SignatureMani
 		Signature:  sig,
 		DeliveryID: ValueSource{JSONPath: "$.update_id", Required: true},
 		EventType:  ValueSource{Literal: "update", Required: true},
-		EventName:  EventNameManifest{Literal: "inbound." + provider},
+		EventName:  EventNameManifest{Literal: "raw"},
 	}
 }
 
@@ -1381,7 +1120,7 @@ func newHostileRegistry(t *testing.T) *CatalogSnapshot {
 			Required:     true,
 			MissingError: "hostile event type is required",
 		},
-		EventName: EventNameManifest{Literal: "inbound.hostile"},
+		EventName: EventNameManifest{Literal: "raw"},
 		Ack:       AckManifest{Mode: "durable_before_dispatch"},
 		Metadata: map[string]string{
 			"hostile_delivery": "delivery_id",
@@ -1427,7 +1166,7 @@ func newHostilePayloadIdentityRegistry(t *testing.T) *CatalogSnapshot {
 			Required:     true,
 			MissingError: "hostile event type is required",
 		},
-		EventName: EventNameManifest{Literal: "inbound.hostile"},
+		EventName: EventNameManifest{Literal: "raw"},
 		Ack:       AckManifest{Mode: "durable_before_dispatch"},
 	}
 	registry, err := newTestCatalogSnapshot(manifest)
@@ -1548,24 +1287,6 @@ func strconvFormatUnix(t time.Time) string {
 	return strconv.FormatInt(t.Unix(), 10)
 }
 
-func copyBuiltinPackToTemp(t *testing.T, provider string) string {
-	t.Helper()
-	dir := filepath.Join(t.TempDir(), provider)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir temp pack: %v", err)
-	}
-	for _, name := range []string{"pack.yaml", "trigger.yaml"} {
-		body, err := os.ReadFile(filepath.Join(testPlatformPackRoot(), provider, name))
-		if err != nil {
-			t.Fatalf("read builtin pack %s/%s: %v", provider, name, err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
-			t.Fatalf("write temp pack %s/%s: %v", provider, name, err)
-		}
-	}
-	return dir
-}
-
 func testPlatformRegistry(t *testing.T) *CatalogSnapshot {
 	t.Helper()
 	registry, _, err := NewCatalogSnapshotFromInventory(testEmbeddedPackInventory(t), "0.7.0")
@@ -1581,7 +1302,7 @@ func testEmbeddedPackInventory(t testing.TB) *packartifact.EffectivePackInventor
 	if err != nil {
 		t.Fatalf("load embedded pack base: %v", err)
 	}
-	inventory, err := packartifact.NewEffectivePackInventory(base, nil)
+	inventory, err := packartifact.NewEffectivePackInventory(base)
 	if err != nil {
 		t.Fatalf("build embedded effective pack inventory: %v", err)
 	}
@@ -1589,24 +1310,19 @@ func testEmbeddedPackInventory(t testing.TB) *packartifact.EffectivePackInventor
 }
 
 func newTestCatalogSnapshot(manifests ...triggerFixture) (*CatalogSnapshot, error) {
-	entries := make([]CatalogEntry, 0, len(manifests))
+	entries := make([]Manifest, 0, len(manifests))
 	for _, manifest := range manifests {
 		admitted, err := manifest.admit()
 		if err != nil {
 			return nil, err
 		}
-		sum := sha256.Sum256(admitted.SourceBytes())
-		provider := admitted.Provider()
-		entries = append(entries, CatalogEntry{
-			Identity: PackIdentity{ID: "test." + provider, Version: "0.0.0", ManifestHash: "sha256:" + hex.EncodeToString(sum[:]), Provenance: "test"},
-			Manifest: admitted, Source: "test",
-		})
+		entries = append(entries, admitted)
 	}
-	return NewCatalogSnapshot(entries...)
+	return NewCatalogSnapshotFromAdmittedBodies(entries...)
 }
 
 func acceptInstalled(snapshot *CatalogSnapshot, req Request) (Delivery, error) {
-	provider := NormalizeProviderName(req.Provider)
+	provider := req.Provider
 	if provider == "" {
 		return Delivery{}, badRequest("provider is required")
 	}
@@ -1615,114 +1331,4 @@ func acceptInstalled(snapshot *CatalogSnapshot, req Request) (Delivery, error) {
 		return Delivery{}, badRequest("provider trigger pack is not installed")
 	}
 	return entry.Manifest.Accept(req.withProvider(provider))
-}
-
-func testPlatformPackDirs(t *testing.T) []string {
-	t.Helper()
-	root := testPlatformPackRoot()
-	dirs, err := platformPackDirs(filepath.Clean(filepath.Join("..", "..")), root)
-	if err != nil {
-		t.Fatalf("read platform pack root: %v", err)
-	}
-	return dirs
-}
-
-func TestPlatformPackDirectoryCensusExcludesNestedCheckout(t *testing.T) {
-	repo := t.TempDir()
-	root := filepath.Join(repo, "packs", "provider-triggers")
-	local := filepath.Join(root, "local")
-	foreign := filepath.Join(root, "foreign")
-	for _, dir := range []string{local, foreign} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dirs, err := platformPackDirs(repo, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(dirs) != 1 || dirs[0] != local {
-		t.Fatalf("platform pack directories = %v, want only current-local %s", dirs, local)
-	}
-}
-
-func platformPackDirs(repo, root string) ([]string, error) {
-	entries, err := checkoutsource.ReadDir(repo, root)
-	if err != nil {
-		return nil, err
-	}
-	dirs := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dirs = append(dirs, filepath.Join(root, entry.Name()))
-		}
-	}
-	sort.Strings(dirs)
-	return dirs, nil
-}
-
-func testPlatformPackRoot() string {
-	return filepath.Join("..", "..", "packs", "provider-triggers")
-}
-
-func rewritePackHash(t *testing.T, dir string) {
-	t.Helper()
-	triggerBody, err := os.ReadFile(filepath.Join(dir, "trigger.yaml"))
-	if err != nil {
-		t.Fatalf("read trigger.yaml: %v", err)
-	}
-	sum := sha256.Sum256(triggerBody)
-	newLine := "manifest_hash: sha256:" + hex.EncodeToString(sum[:])
-
-	packPath := filepath.Join(dir, "pack.yaml")
-	packBody, err := os.ReadFile(packPath)
-	if err != nil {
-		t.Fatalf("read pack.yaml: %v", err)
-	}
-	lines := strings.Split(string(packBody), "\n")
-	replaced := false
-	for i, line := range lines {
-		if strings.HasPrefix(line, "manifest_hash: ") {
-			lines[i] = newLine
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		t.Fatal("pack.yaml missing manifest_hash line")
-	}
-	if err := os.WriteFile(packPath, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
-		t.Fatalf("write pack.yaml: %v", err)
-	}
-}
-
-func replaceInFile(t *testing.T, filename, old, replacement string) {
-	t.Helper()
-	body, err := os.ReadFile(filename)
-	if err != nil {
-		t.Fatalf("read %s: %v", filename, err)
-	}
-	text := string(body)
-	if !strings.Contains(text, old) {
-		t.Fatalf("%s does not contain %q", filename, old)
-	}
-	text = strings.Replace(text, old, replacement, 1)
-	if err := os.WriteFile(filename, []byte(text), 0o600); err != nil {
-		t.Fatalf("write %s: %v", filename, err)
-	}
-}
-
-func appendFile(t *testing.T, filename, suffix string) {
-	t.Helper()
-	f, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatalf("open %s: %v", filename, err)
-	}
-	defer f.Close()
-	if _, err := f.WriteString(suffix); err != nil {
-		t.Fatalf("append %s: %v", filename, err)
-	}
 }

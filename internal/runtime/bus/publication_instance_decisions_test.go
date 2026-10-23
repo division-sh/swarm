@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type publicationDecisionTestReader struct {
@@ -127,7 +128,15 @@ func TestPublicationAgentDecisionBindsNegativeEligibilityAfterIdentity(t *testin
 				header.TerminatedAt = header.CreatedAt.Add(time.Second)
 				readiness.InstanceStatus, readiness.InstanceTerminatedAt = header.Status, header.TerminatedAt
 			}
-			run := runlifecycle.Snapshot{RunID: base.Owner().RunID, State: base.RunState(), Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: base.SourceFact().BundleHash(), StartedAt: header.CreatedAt}
+			bundle, found := semanticview.Bundle(projection.source)
+			if !found || bundle == nil {
+				t.Fatal("publication decision fixture requires its captured source")
+			}
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			run := runlifecycle.Snapshot{RunID: base.Owner().RunID, State: base.RunState(), Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: base.SourceFact().BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: header.CreatedAt}
 			observed, err := pipeline.AdmitNativeFlowInstanceObservation(base.Selection(), header, run, base.RunRevision(), receipt, readiness)
 			if err != nil {
 				t.Fatal(err)

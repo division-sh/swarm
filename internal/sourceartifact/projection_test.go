@@ -15,6 +15,9 @@ func TestRuntimeProjectionReleaseRetriesFailedDeletionWithoutReopening(t *testin
 	parent := t.TempDir()
 	t.Setenv("TMPDIR", parent)
 	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(source, "schema.yaml"), []byte("name: release-retry\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +56,9 @@ func TestRuntimeProjectionReleaseRetriesFailedDeletionWithoutReopening(t *testin
 
 func TestRuntimeProjectionHandleReadsAndReleaseAreSynchronized(t *testing.T) {
 	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: admitted\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +117,9 @@ func TestRuntimeProjectionHandleReadsAndReleaseAreSynchronized(t *testing.T) {
 
 func TestRuntimeProjectionOwnsExactGenerationAndLifetime(t *testing.T) {
 	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: admitted\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -147,6 +156,9 @@ func TestRuntimeProjectionOwnsExactGenerationAndLifetime(t *testing.T) {
 	defer peer.Release()
 	if peer.Identity() == projectionIdentity || peer.PrivateRoot() == projectionRoot {
 		t.Fatalf("separate same-hash projection reused process identity or root: first=%q/%q peer=%q/%q", projectionIdentity, projectionRoot, peer.Identity(), peer.PrivateRoot())
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: mutated\n"), 0o600); err != nil {
 		t.Fatal(err)

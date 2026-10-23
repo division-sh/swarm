@@ -1,4 +1,4 @@
-name: producer
+# fixture: producer
 pins:
   inputs:
     - work.requested

@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -29,20 +28,12 @@ import (
 func nativeActivityStructuralPlan(t *testing.T) packs.SatisfactionPlan {
 	t.Helper()
 	root := filepath.Join("..", "..", "..")
-	body, err := os.ReadFile(filepath.Join(root, "packs/provider-triggers/whatsapp/trigger.yaml"))
+	body, err := os.ReadFile(filepath.Join(root, "packs/providers/whatsapp/trigger.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := providertriggers.ParseManifest(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-		Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "0.1.0", ManifestHash: packs.ManifestHash(body), Provenance: "test"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return packfixture.WhatsAppSessionChannel(t, filepath.Join(root, "platform-spec.yaml"), catalog)
+	_, plan := packfixture.WhatsAppSessionProvider(t, filepath.Join(root, "platform-spec.yaml"), body)
+	return plan
 }
 
 func nativeActivityHandoffFixture(t *testing.T) (channelonboarding.CompiledActivation, contracts.ToolSchemaEntry, engine.ActivityIntent, ActivityAttemptRecord, map[string]any) {

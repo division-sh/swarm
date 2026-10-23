@@ -274,9 +274,13 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 		t.Fatal(err)
 	}
 
+	rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cancelledCtx, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := selected.MaterializeRunFork(cancelledCtx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID}); err == nil {
+	if _, err := selected.MaterializeRunFork(cancelledCtx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID, RootAdmission: rooted.Admission()}); err == nil {
 		t.Fatal("pre-cancelled fork materialization succeeded")
 	}
 	var cancelledForks int
@@ -287,14 +291,14 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 		t.Fatalf("pre-cancelled fork materialization created %d runs", cancelledForks)
 	}
 
-	materialized, err := selected.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	materialized, err := selected.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("materialize selected-store run fork: %v", err)
 	}
 	if materialized.ForkRunStatus != runfork.RunForkMaterializedStatus || materialized.MaterializedEntityCount != 1 || !materialized.ExecutionReady {
 		t.Fatalf("selected-store materialization = %#v", materialized)
 	}
-	repeated, err := selected.RequireMaterializedRunFork(ctx, materialized.ForkRunID, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	repeated, err := selected.RequireMaterializedRunFork(ctx, materialized.ForkRunID, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("repeat exact fork materialization: %v", err)
 	}

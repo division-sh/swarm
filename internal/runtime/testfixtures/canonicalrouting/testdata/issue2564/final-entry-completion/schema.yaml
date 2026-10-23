@@ -1,4 +1,4 @@
-name: issue2564-final-entry-completion
+# fixture: issue2564-final-entry-completion
 stages: {active: {}, done: {final: true}}
 pins: {inputs: [overlap.start, overlap.arm, overlap.finish, overlap.root_closed]}
 connect:

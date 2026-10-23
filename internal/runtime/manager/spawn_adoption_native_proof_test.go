@@ -8,8 +8,13 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -44,14 +49,21 @@ func (s *spawnCommitFault) CommitAgentLifecycleTransition(ctx context.Context, r
 	return result, err
 }
 
-func ProveAgentRowNativeSpawnAdoption(t *testing.T, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, rec PersistedAgent, snapshot func() any, retireProcess func(), cut string) {
+func ProveAgentRowNativeSpawnAdoption(t *testing.T, ownerCtx context.Context, rooted sourceartifact.RootedSource, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, rec PersistedAgent, snapshot func() any, retireProcess func(), cut string) {
 	t.Helper()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	binding := store.(processExecutionBindingProvider)
 	fault := &spawnCommitFault{agentRowResponseLoss: &agentRowResponseLoss{AgentLifecyclePersistence: store, binding: binding, runOwner: store.(RunExecutionOwner)}}
 	readback := &spawnReadbackFault{AgentLifecycleStateReader: reader}
 	bus := newProjectionTestBus()
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{LLMBackend: rec.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: readback, LifecycleOutcome: outcomes}})
-	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
+		BaseContext: ownerCtx, SemanticSource: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+		LLMBackend: rec.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: readback, LifecycleOutcome: outcomes},
+	})
+	ctx, cancel := context.WithCancel(ownerCtx)
 	defer cancel()
 	builds := 0
 	build := func() (Agent, error) {
@@ -142,7 +154,7 @@ func ProveAgentRowNativeSpawnAdoption(t *testing.T, store AgentLifecyclePersiste
 		if err := register(ctx, rec); err != nil || fault.commits != 1 || builds != 2 {
 			t.Fatalf("fresh post-reset registration: commits=%d builds=%d error=%v", fault.commits, builds, err)
 		}
-		proveSpawnAdoptionJoinedExecution(t, am)
+		proveSpawnAdoptionJoinedExecution(t, ownerCtx, am)
 		return
 	}
 	switch cut {
@@ -175,7 +187,7 @@ func ProveAgentRowNativeSpawnAdoption(t *testing.T, store AgentLifecyclePersiste
 		if firstErr != nil || builds != 1 || am.lifecycle.cells[rec.Config.Identity] == nil {
 			t.Fatalf("known committed spawn was stranded by caller cancellation: %v", firstErr)
 		}
-		proveSpawnAdoptionJoinedExecution(t, am)
+		proveSpawnAdoptionJoinedExecution(t, ownerCtx, am)
 		return
 	}
 	if firstErr == nil {
@@ -220,12 +232,12 @@ func ProveAgentRowNativeSpawnAdoption(t *testing.T, store AgentLifecyclePersiste
 	if cell == nil || cell.execution == nil || cell.view.LastTransitionID != view.LastTransitionID || cell.execution.token.Generation != view.Generation {
 		t.Fatal("spawn adoption published something other than the exact current outcome")
 	}
-	proveSpawnAdoptionJoinedExecution(t, am)
+	proveSpawnAdoptionJoinedExecution(t, ownerCtx, am)
 }
 
-func proveSpawnAdoptionJoinedExecution(t *testing.T, am *AgentManager) {
+func proveSpawnAdoptionJoinedExecution(t *testing.T, ctx context.Context, am *AgentManager) {
 	t.Helper()
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, ctx)); err != nil {
 		t.Fatalf("run exact adopted spawn: %v", err)
 	}
 	if err := am.Shutdown(); err != nil {

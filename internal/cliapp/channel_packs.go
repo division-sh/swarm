@@ -19,7 +19,6 @@ import (
 )
 
 type ChannelPackLoad struct {
-	Loaded            []packs.LoadedChannelPack
 	Plans             []packs.SatisfactionPlan
 	Bindings          []packs.OutboundBindingPlan
 	credentialSources []runtimecredentials.SourceFact
@@ -41,7 +40,7 @@ func LoadConfiguredChannelPacks(ctx context.Context, cfgResult RuntimeConfigLoad
 		return ChannelPackLoad{}, err
 	}
 	return ChannelPackLoad{
-		Loaded: projection.LoadedChannelPacks, Plans: projection.ChannelPlans, Bindings: bindings,
+		Plans: projection.ChannelPlans, Bindings: bindings,
 		credentialSources: sources,
 	}, nil
 }

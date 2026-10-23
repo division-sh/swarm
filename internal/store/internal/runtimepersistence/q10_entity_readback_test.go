@@ -31,11 +31,11 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":           "name: q10-readback\nstages:\n  unknown: {}\n  done:\n    final: true\n",
+				"schema.yaml":           "stages:\n  unknown: {}\n  done:\n    final: true\n",
 				"entities.yaml":         "record:\n  marker: text?\n  current_state: text?\n",
-				"nostage/schema.yaml":   "name: nostage\n",
+				"nostage/schema.yaml":   "stages: []\n",
 				"nostage/entities.yaml": "record:\n  marker: text?\n  current_state: text?\n  score: integer?\n",
-				"fieldless/schema.yaml": "name: fieldless\n",
+				"fieldless/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "nostage/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "fieldless/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			runID, importID := uuid.NewString(), uuid.NewString()
 			ctx := correlation.WithRunID(f.ctx, runID)

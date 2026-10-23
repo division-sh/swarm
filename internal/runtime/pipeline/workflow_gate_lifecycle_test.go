@@ -476,8 +476,8 @@ func assertGateLifecycleState(t *testing.T, store *workflowInstanceStore, ctx co
 func gateLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": `name: gate-test
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   awaiting_review:
     gate:
       decision: launch_review

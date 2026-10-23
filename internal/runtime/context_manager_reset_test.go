@@ -7,9 +7,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 func TestStandingRecoveryCancellationWinsWithdrawnOwnerLookup(t *testing.T) {
@@ -64,8 +67,11 @@ func TestRecoveredRuntimeContextsStayFencedUntilExactPublicationRelease(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	b := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	a := capturedOrdinaryRuntimeContext(t, "alpha.requested")
+	b := capturedOrdinaryRuntimeContext(t, "beta.requested")
+	if a.BundleHash() == b.BundleHash() {
+		t.Fatal("recovered publication requires distinct captured sources")
+	}
 	if err := manager.StageRecoveredRuntimeContexts(a, b); err != nil {
 		t.Fatal(err)
 	}
@@ -105,19 +111,44 @@ func TestRecoveredRuntimeContextsStayFencedUntilExactPublicationRelease(t *testi
 }
 
 func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *testing.T) {
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	a := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "first")
+	a := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	serviceID := a.StandingTargets[0].ServiceID
-	b := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	bundleB, rootedB, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\npins: {inputs: [beta.requested]}\n"),
+		"events.yaml":   []byte("beta.requested:\n"),
+	})
+	providersB, err := packadmission.AdmitProviderSource(rootedB, bundleB.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopeB, err := providersB.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogB, err := scopeB.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceB, err := SourceWithProviderTriggerEvents(semanticview.Wrap(bundleB), catalogB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := runtimeAdmissionTestContext(t, sourceB, catalogB, uuid.NewString())
+	if a.BundleHash() == b.BundleHash() || len(b.StandingTargets) != 0 {
+		t.Fatal("reset requires distinct captured sources with an ordinary second context")
+	}
 	availability := fakeRunBundleAvailability{rows: map[string]runbundle.Availability{
-		"run-first": {RunID: "run-first", BundleHash: runtimeContextTestHashA, SourceArtifactPresent: true},
+		a.StandingTargets[0].RunID: {RunID: a.StandingTargets[0].RunID, BundleHash: a.BundleHash(), SourceArtifactPresent: true,
+			RootReference: a.RootAdmission.Reference(), RootAdmissionPresent: true},
 	}}
 	manager, err := newTestRuntimeContextManager(t, availability, a, b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nextA := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
-	nextB := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	nextA := runtimeAdmissionTestContext(t, source, catalog, a.StandingTargets[0].RunID)
+	nextB := runtimeAdmissionTestContext(t, sourceB, catalogB, uuid.NewString())
 	staged := false
 	t.Cleanup(func() {
 		if !staged {
@@ -146,7 +177,7 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 		t.Fatal(err)
 	}
 	staged = true
-	for _, hash := range []string{runtimeContextTestHashA, runtimeContextTestHashB} {
+	for _, hash := range []string{a.BundleHash(), b.BundleHash()} {
 		use, lookup, err := manager.AcquireBundleHash(context.Background(), hash)
 		if use != nil {
 			_ = use.Done()
@@ -161,7 +192,7 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 	if err := manager.PublishResetRuntimeContexts(nextA, nextB); err != nil {
 		t.Fatal(err)
 	}
-	for _, hash := range []string{runtimeContextTestHashA, runtimeContextTestHashB} {
+	for _, hash := range []string{a.BundleHash(), b.BundleHash()} {
 		use, _, err := manager.AcquireBundleHash(context.Background(), hash)
 		if use != nil {
 			_ = use.Done()
@@ -177,7 +208,7 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 	}
 	checks := map[string]func() (*RuntimeContextUse, error){
 		"run": func() (*RuntimeContextUse, error) {
-			use, _, _, err := manager.AcquireRun(context.Background(), "run-first")
+			use, _, _, err := manager.AcquireRun(context.Background(), a.StandingTargets[0].RunID)
 			return use, err
 		},
 		"standing": func() (*RuntimeContextUse, error) {
@@ -185,7 +216,7 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 			return use, err
 		},
 		"channel": func() (*RuntimeContextUse, error) {
-			use, _, err := manager.AcquireIngress(context.Background(), "first", "acme")
+			use, _, err := manager.AcquireIngress(context.Background(), a.StandingTargets[0].Alias, "acme")
 			return use, err
 		},
 	}
@@ -202,7 +233,7 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := manager.BeginStandingRunRecovery(context.Background(), "run-first", origin)
+	lease, err := manager.BeginStandingRunRecovery(context.Background(), a.StandingTargets[0].RunID, origin)
 	if lease != nil {
 		_ = lease.Done()
 	}
@@ -251,8 +282,8 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 func TestResetStandingSuppressionComesFromReconstructedEpoch(t *testing.T) {
 	for _, suspended := range []bool{false, true} {
 		t.Run(fmt.Sprintf("successor_suspended_%t", suspended), func(t *testing.T) {
-			catalog := runtimeAdmissionTestCatalog(t, "a")
-			old := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
+			catalog, source := runtimeAdmissionTestCatalog(t, "a", "first")
+			old := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 			serviceID := old.StandingTargets[0].ServiceID
 			manager, err := newTestRuntimeContextManager(t, nil, old)
 			if err != nil {
@@ -266,7 +297,7 @@ func TestResetStandingSuppressionComesFromReconstructedEpoch(t *testing.T) {
 					t.Fatal(result.ShutdownErr)
 				}
 			}
-			next := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
+			next := runtimeAdmissionTestContext(t, source, catalog, old.StandingTargets[0].RunID)
 			if err := manager.StageResetRuntimeContexts(next); err != nil {
 				t.Fatal(err)
 			}
@@ -284,7 +315,7 @@ func TestResetStandingSuppressionComesFromReconstructedEpoch(t *testing.T) {
 			if err := manager.ReleaseResetExecution(next); err != nil {
 				t.Fatal(err)
 			}
-			use, lookup, err := manager.AcquireIngress(context.Background(), "first", "acme")
+			use, lookup, err := manager.AcquireIngress(context.Background(), old.StandingTargets[0].Alias, "acme")
 			if use != nil {
 				if err := use.Done(); err != nil {
 					t.Fatal(err)

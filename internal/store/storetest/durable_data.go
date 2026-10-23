@@ -14,6 +14,10 @@ type DurableDataCatalogStore interface {
 	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, runtimedata.Catalog) (sourceartifact.EnsureResult, error)
 }
 
+type RootedDataCatalogStore interface {
+	EnsureRootedSourceWithData(context.Context, sourceartifact.RootedSource, runtimedata.Catalog) (sourceartifact.RootedEnsureResult, error)
+}
+
 // RequireDurableDataCatalog registers the exact empty data catalog claimed by
 // a test run. Tests with authored declarations must register their full catalog.
 func RequireDurableDataCatalog(t testing.TB, ctx context.Context, selected DurableDataCatalogStore, bundleHash string) {
@@ -25,13 +29,17 @@ func RequireDurableDataCatalog(t testing.TB, ctx context.Context, selected Durab
 
 // RequireBundleDataCatalog registers the loader-owned bundle projection and
 // its exact declaration/static-data catalog as one selected-store fact.
-func RequireBundleDataCatalog(t testing.TB, ctx context.Context, selected DurableDataCatalogStore, bundle *runtimecontracts.WorkflowContractBundle) {
+func RequireBundleDataCatalog(t testing.TB, ctx context.Context, selected RootedDataCatalogStore, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
 	if err != nil {
 		t.Fatalf("build exact bundle data catalog: %v", err)
 	}
-	if _, err := selected.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatalf("read exact compiled bundle root: %v", err)
+	}
+	if _, err := selected.EnsureRootedSourceWithData(ctx, rooted, catalog); err != nil {
 		t.Fatalf("register exact source artifact and data catalog %s: %v", catalog.BundleHash, err)
 	}
 }

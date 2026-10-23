@@ -9,7 +9,7 @@ import (
 func RenameStoppedRunReadinessSource(t testing.TB, root string) {
 	t.Helper()
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"name: routing-root-ingress\n", "name: audit2277-new-source\n")
+		"# fixture: routing-root-ingress\n", "# fixture: audit2277-new-source\n")
 }
 
 func CopyForkReceiverMailboxGate(t testing.TB) string {

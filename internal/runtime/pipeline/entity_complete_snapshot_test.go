@@ -14,6 +14,7 @@ import (
 
 func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  active: {}\n",
 		"entities.yaml": "test_entity:\n  revision_count: integer?\n",
 		"events.yaml":   "work.clear:\n",
@@ -85,6 +86,7 @@ func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open
 
 func VerifySelectedHandlerSparsePresenceWriteAndEmitBothStoresForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  active: {}\n",
 		"entities.yaml": "test_entity:\n  kill_reason: text?\n  observed_absence: boolean?\n",
 		"events.yaml":   "work.ready:\nwork.emitted:\n  observed_absence: boolean\n",
@@ -136,7 +138,8 @@ func VerifySelectedHandlerSparseEqualityMutationsBothStoresForTest(t *testing.T,
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml": "stages:\n  active: {}\n",
+				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"schema.yaml":   "stages:\n  active: {}\n",
 				"entities.yaml": `test_entity:
   left: text?
   right:

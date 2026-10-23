@@ -1,10 +1,5 @@
-ingress:
-  alias: chat
-  providers:
-    - provider: telegram
-      signing_secret: webhook_signing.telegram
 pins:
   inputs:
-    - inbound.telegram
+    - inbound.telegram.raw
   outputs:
     - inbound.telegram.text_message

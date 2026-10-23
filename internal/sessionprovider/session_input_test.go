@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
-	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
@@ -132,8 +134,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				}
 			}
 			manifest := sessionInputManifestFixture(t)
-			catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-				Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "1.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
+			catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -280,8 +281,19 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 					}
 				})
 			}
-			foreignGeneration, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-				Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "2.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
+			foreignProvider, err := packartifact.LoadProviderFS(fstest.MapFS{
+				"whatsapp/manifest.yaml": {Data: []byte("version: 2.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n")},
+				"whatsapp/trigger.yaml":  {Data: manifest.SourceBytes()},
+			}, "whatsapp", "0.7.0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreignBody, _ := foreignProvider.Body(packmodel.BodyTrigger)
+			foreignManifest, err := providertriggers.AdmitBody(foreignBody)
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreignGeneration, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(foreignManifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -358,7 +370,15 @@ func sessionInputManifestFixture(t *testing.T) providertriggers.Manifest {
             address: {type: string, minLength: 5, maxLength: 32}
       provider_timestamp_ms:
 `)
-	manifest, err := providertriggers.ParseManifest([]byte(body))
+	provider, err := packartifact.LoadProviderFS(fstest.MapFS{
+		"whatsapp/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n")},
+		"whatsapp/trigger.yaml":  {Data: []byte(body)},
+	}, "whatsapp", "0.7.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, _ := provider.Body(packmodel.BodyTrigger)
+	manifest, err := providertriggers.AdmitBody(trigger)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-name: test-agent-emits-to-node
+# fixture: test-agent-emits-to-node
 stages:
   pending: {}
   assigned: {}

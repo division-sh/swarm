@@ -18,6 +18,7 @@ func TestForkOperationConcurrentInitialBindBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := forkOperationTestDatabase(t, backend)
+			root := forkOperationTargetRoot(t)
 			db.SetMaxOpenConns(4)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -42,9 +43,10 @@ func TestForkOperationConcurrentInitialBindBothStores(t *testing.T) {
 			base := runfork.ForkOperationRequest{
 				Actor: "bearer:operator", IdempotencyKey: "same-first-key",
 				TransportHash: "sha256:same-first-transport", SourceRunID: uuid.NewString(),
-				TargetBundleHash:  "sha256:bundle",
-				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
-				ResolvedPoint:     &runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 1},
+				TargetBundleHash:    root.BundleHash,
+				TargetRootReference: root,
+				ContractSelection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+				ResolvedPoint:       &runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 1},
 			}
 			type outcome struct {
 				childID   string

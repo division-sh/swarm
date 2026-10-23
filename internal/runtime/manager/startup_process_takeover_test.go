@@ -11,6 +11,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -102,28 +103,40 @@ func (s *startupProcessTakeoverStore) CommitAgentLifecycleTransition(_ context.C
 }
 
 func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndResumes(t *testing.T) {
-	staticTopology := managerTestTopologyAdmission(t)
+	staticTopology := managerTestTopologyAdmissionForSource(t, loadRootAndFlowStaticAgentSource(t))
 	readinessTopology, err := runtimeagenttopology.FlowReadinessAdmission(uuid.NewString(), "review/instance-1", "plan-v1")
 	if err != nil {
 		t.Fatalf("FlowReadinessAdmission: %v", err)
 	}
+	otherRoot, _ := sourceartifactfixture.Rooted(t, "other", sourceartifactfixture.New("events.yaml", []byte("other.input:\n")))
+	otherCoordinate, err := runtimeagenttopology.NewSourceCoordinate(otherRoot.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherCoordinate.BundleHash == staticTopology.Authority.Static.BundleHash {
+		t.Fatal("unrelated source fixture must have independent captured bytes")
+	}
+	otherPlan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{otherCoordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	otherTopology, err := runtimeagenttopology.StaticAdmission(
-		"other-source-revision",
-		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		otherPlan.Revision,
+		otherCoordinate.BundleHash,
 		runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatalf("StaticAdmission for unrelated source: %v", err)
 	}
 	predecessor := startupProcessBinding(
-		managerTestTopologyBundleHash,
+		staticTopology.Authority.Static.BundleHash,
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 		"cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 		"dddddddd-dddd-4ddd-8ddd-dddddddddddd", 1,
 	)
 	successor := startupProcessBinding(
-		managerTestTopologyBundleHash,
+		staticTopology.Authority.Static.BundleHash,
 		"11111111-1111-4111-8111-111111111111",
 		"22222222-2222-4222-8222-222222222222",
 		"33333333-3333-4333-8333-333333333333",

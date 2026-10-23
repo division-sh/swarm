@@ -112,15 +112,21 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		eventSchema += "  matrix: boolean?\n  items: json?\n"
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
-		"schema.yaml":           "name: fixed-fork-history\n",
-		flow + "/schema.yaml":   fmt.Sprintf("name: %s\ninstance: %s\nstages:\n  %s: {}\n  done: {final: true}\npins:\n  inputs: [%s]\n", flow, keyField, stage, input),
+		"schema.yaml":           "stages: []\n",
+		flow + "/schema.yaml":   fmt.Sprintf("instance: %s\nstages:\n  %s: {}\n  done: {final: true}\npins:\n  inputs: [%s]\n", keyField, stage, input),
+		flow + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		flow + "/entities.yaml": declarations.String(),
-		flow + "/events.yaml":   eventSchema,
+		flow + "/events.yaml":   eventSchema, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	})
 	ctx := correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: event.CreatedAt().Add(-time.Minute),
-		Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),
+		Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(), RootAdmission: rooted.Admission(),
 	})
 	workflows := configureAgentFixtureFlowLifecycle(t, selected, &sqliteFlowActivationBus{}, bundle)
 	source := semanticview.Wrap(bundle)

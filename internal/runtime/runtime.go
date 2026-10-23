@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -68,6 +70,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -80,6 +83,7 @@ type AuthorActivityCatalogRegistrar interface {
 }
 
 type RuntimeOptions struct {
+	TriggerEntries                   map[string]config.TriggerConfig
 	ExecutionPosture                 executionposture.Posture
 	EnableDeclaredClockBinding       bool
 	SelfCheck                        bool
@@ -153,7 +157,7 @@ type RuntimeDeps struct {
 	DataAccessStore               durabledata.ResourceAccessStore
 	HumanTaskStore                runtimetools.HumanTaskCardStore
 	BudgetSpendStore              budgetspend.Store
-	BudgetStageSourceLoader       func(context.Context, string) (semanticview.Source, error)
+	BudgetStageSourceLoader       func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error)
 	InboundStore                  InboundPersistence
 	RuntimeIngressStore           runtimeingress.Store
 	ScenarioExecutionProfiles     runtimepipeline.ScenarioExecutionProfileReader
@@ -763,10 +767,10 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
-	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil)
+	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil, opts.TriggerEntries)
 }
 
-func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases, triggers map[string]config.TriggerConfig) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -777,6 +781,7 @@ func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmse
 		}
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials, posture)
+	validationOpts.TriggerEntries = triggers
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderCredentials = opts.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
@@ -889,7 +894,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	}
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
 		WorkflowModule: opts.WorkflowModule, SourceArtifactFact: opts.SourceArtifactFact,
-		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
+		ChannelPlans: opts.ChannelPlans,
 	})
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("admit effective source projection: %w", err)
@@ -900,7 +905,8 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models)
+	opts.TriggerEntries = maps.Clone(cfg.Triggers)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models, cfg.Triggers)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -1189,12 +1195,24 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	payloadAdmitter := boot.payloadAdmitter(rt.Logger)
 	rt.payloadAdmitter = payloadAdmitter
 	constructionOwner := runtimeFlowConstructionOwner{current: func() *runtimemanager.AgentManager { return managerRef }}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		return nil, fmt.Errorf("provider output admission requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		return nil, err
+	}
 	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.ExecutionPosture, boot.SourceArtifactFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadAdmitter, constructionOwner, constructionOwner, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
+	}, payloadAdmitter, constructionOwner, constructionOwner, providers, opts.TestLifecycleProbe)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
@@ -1312,7 +1330,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 
 	if runtimeDeps.BudgetSpendStore != nil {
 		rt.Budget = NewBudgetTracker(runtimeDeps.BudgetSpendStore, rt.Bus, cfg, runtimeDeps.MailboxStore, rt.Logger, source, rt.ExecutionPosture, BudgetRecoveryStageSources{
-			CurrentBundleHash: boot.SourceArtifactFact.BundleHash(), Load: runtimeDeps.BudgetStageSourceLoader,
+			Load: runtimeDeps.BudgetStageSourceLoader,
 		})
 	}
 

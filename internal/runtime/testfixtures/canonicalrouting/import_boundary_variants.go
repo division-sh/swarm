@@ -22,8 +22,9 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 	root := CopyExample(t, ParentConnect)
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root,
-		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
-		"consumer/nodes.yaml", "consumer/schema.yaml", "consumer")
+		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer/manifest.yaml", "producer",
+		"consumer/nodes.yaml", "consumer/schema.yaml", "consumer/manifest.yaml", "consumer")
+	writeClosedVariantFile(t, root, "worker/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	parentSubscription := "parent.lead_enriched"
 	connected := false
 	instance := ""
@@ -43,7 +44,7 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 	}
 
 	connect := ""
-	rootSchema := "name: import-boundary-alias\n"
+	rootSchema := "stages: []\n# fixture: import-boundary-alias\n"
 	rootEvents := "\nparent.lead_captured:\nparent.lead_enriched:\n"
 	if connected {
 		connect = `
@@ -58,7 +59,7 @@ connect:
     rename: parent.lead_enriched
 `
 		rootSchema = `
-name: import-boundary-alias
+# fixture: import-boundary-alias
 pins:
   inputs:
     - parent.lead_enriched
@@ -78,8 +79,9 @@ parent-listener:
     parent.lead_enriched: {}
 `)
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
-name: worker
+	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `stages: []
+
+# fixture: worker
 `+instance+`pins:
   inputs:
     - work.requested

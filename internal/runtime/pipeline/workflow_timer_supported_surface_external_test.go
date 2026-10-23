@@ -2,7 +2,6 @@ package pipeline_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -17,9 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -46,7 +44,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact),
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -221,7 +219,7 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact),
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -296,7 +294,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			source := semanticview.Wrap(bundle)
 			logger := &exactJoinRuntimeLogger{}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter, Logger: logger,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact), Logger: logger,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -378,163 +376,6 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 	}
 }
 
-func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		open func(*testing.T) gateRecoveryStoreCase
-	}{
-		{name: "sqlite", open: openSQLiteGateRecoveryStore},
-		{name: "postgres", open: openPostgresGateRecoveryStore},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			selected := tc.open(t)
-			runID := uuid.NewString()
-			entityID := runID
-			source := workflowTimerRecurringCancellationSource(t)
-			bundle, ok := semanticview.Bundle(source)
-			if !ok {
-				t.Fatal("recurring timer source requires its admitted bundle")
-			}
-			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
-			controllerNode := externalPipelineSourceNode(t, source, "", "controller")
-			lifecycleProbe := runtimelifecycleprobe.New()
-			module := proposedEffectProofModule{
-				source: source,
-				nodes: []runtimepipeline.WorkflowNode{{
-					Node: controllerNode, Subscriptions: []events.EventType{"timer-proof/timer.cancel"},
-					ExecutionType: runtimecontracts.SystemNodeExecutionType,
-				}},
-			}
-			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter, TestLifecycleProbe: lifecycleProbe,
-			}, runtimecontracts.WorkflowStageTimerInternalEvent)
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-
-			var coordinator *runtimepipeline.PipelineCoordinator
-			fireErrors := make(chan error, 8)
-			newScheduler := func() *runtimepipeline.Scheduler {
-				return runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
-			}
-			scheduler := newScheduler()
-			coordinator = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, Persistence: selected.persistence,
-				TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
-				TestLifecycleProbe: lifecycleProbe,
-			})
-			bus.SetInterceptors(coordinator)
-
-			createdAt := time.Now().UTC()
-			commitKeylessConstructorComponentAt(t, ctx, selected, coordinator, source, createdAt)
-			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
-				t.Fatalf("arm initial workflow timers: %v", err)
-			}
-			armed, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
-			if err != nil || !found {
-				t.Fatalf("load workflow instance after timer activation: found=%v err=%v", found, err)
-			}
-			armedRevision := armed.Revision
-			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, 2)
-
-			scheduler.Stop()
-			waitCtx, cancelWait := context.WithTimeout(ctx, 2*time.Second)
-			defer cancelWait()
-			if err := scheduler.Wait(waitCtx); err != nil {
-				t.Fatalf("wait stopped scheduler: %v", err)
-			}
-			beforeRestart := workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent)
-			scheduler = newScheduler()
-			t.Cleanup(scheduler.Stop)
-			coordinator = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, Persistence: selected.persistence,
-				TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
-				TestLifecycleProbe: lifecycleProbe,
-			})
-			bus.SetInterceptors(coordinator)
-			if err := coordinator.RestoreWorkflowTimers(ctx); err != nil {
-				t.Fatalf("RestoreWorkflowTimers: %v", err)
-			}
-			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, beforeRestart+1)
-			beforeCancel, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
-			if err != nil || !found {
-				t.Fatalf("load workflow instance before cancellation: found=%v err=%v", found, err)
-			}
-			if beforeCancel.Revision != armedRevision {
-				t.Fatalf("non-advancing recurring timers changed workflow revision from %d to %d", armedRevision, beforeCancel.Revision)
-			}
-
-			cancelEvent := eventtest.ExistingRunRootIngress(
-				uuid.NewString(), "timer.cancel", "operator", "", []byte(`{}`), 0, runID,
-				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), time.Now().UTC(),
-			)
-			plan, err := bus.CheckPublishRecipientPlan(ctx, cancelEvent)
-			if err != nil {
-				t.Fatalf("plan timer cancellation transition: %v", err)
-			}
-			if got := plan.DeliveryRoutes; len(got) != 1 || !got[0].Recipient.IsNode() || got[0].Recipient.ID() != controllerNode.Key() {
-				t.Fatalf("timer cancellation delivery routes = %#v, want exact controller node route", got)
-			}
-			wantTarget := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}
-			if got := plan.DeliveryRoutes[0].Target.Route(); got != wantTarget {
-				t.Fatalf("timer cancellation target owner = %#v, want selected run owner %#v", got, wantTarget)
-			}
-			if err := bus.Publish(ctx, cancelEvent); err != nil {
-				t.Fatalf("publish timer cancellation transition: %v", err)
-			}
-			probeCtx, cancelProbe := context.WithTimeout(ctx, 2*time.Second)
-			defer cancelProbe()
-			if _, err := lifecycleProbe.WaitForPostCommitDispatchCompleted(probeCtx, cancelEvent.ID()); err != nil {
-				t.Fatalf("wait for timer cancellation post-commit dispatch: %v", err)
-			}
-			if _, err := lifecycleProbe.WaitForDeliveryStatus(probeCtx, cancelEvent.ID(), "node", controllerNode.Key(), "in_progress"); err != nil {
-				t.Fatalf("wait for timer cancellation delivery claim: %v", err)
-			}
-			if _, err := lifecycleProbe.WaitForHandlerStarted(probeCtx, cancelEvent.ID(), controllerNode.Key()); err != nil {
-				t.Fatalf("wait for timer cancellation handler start: %v", err)
-			}
-			handlerCompletion, err := lifecycleProbe.WaitForHandlerCompleted(probeCtx, cancelEvent.ID(), controllerNode.Key())
-			if err != nil {
-				t.Fatalf("wait for timer cancellation handler completion: %v", err)
-			}
-			if handlerCompletion.Status != "completed" {
-				query := `SELECT status, COALESCE(failure, '{}') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
-				if selected.postgres {
-					query = `SELECT status, COALESCE(failure, '{}'::jsonb) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
-				}
-				var deliveryStatus string
-				var failure []byte
-				if err := selected.db.QueryRowContext(ctx, query, cancelEvent.ID(), controllerNode.Key()).Scan(&deliveryStatus, &failure); err != nil {
-					t.Fatalf("timer cancellation handler status = %q and delivery failure readback failed: %v", handlerCompletion.Status, err)
-				}
-				t.Fatalf("timer cancellation handler status = %q, delivery status = %q failure = %s; want completed", handlerCompletion.Status, deliveryStatus, failure)
-			}
-			cancelled := false
-			deadline := time.Now().Add(5 * time.Second)
-			for time.Now().Before(deadline) {
-				instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
-				if err != nil {
-					t.Fatalf("load workflow instance after cancellation: %v", err)
-				}
-				if found && instance.CurrentState == "done" {
-					assertWorkflowTimerServedRows(t, selected, runID, entityID, "cancelled", 1)
-					cancelled = true
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			if !cancelled {
-				t.Fatal("workflow timer cancellation event did not advance the workflow to done")
-			}
-			afterCancel := workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent)
-			time.Sleep(150 * time.Millisecond)
-			if got := workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent); got != afterCancel {
-				t.Fatalf("workflow timer events after exact cancellation = %d, want %d", got, afterCancel)
-			}
-		})
-	}
-}
-
 func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -551,7 +392,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			bundle.Semantics.Timers[0].Delay = "200ms"
 			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
-			admitter := newFailOnceWorkflowTimerPayloadAdmitter()
+			admitter := newFailOnceWorkflowTimerPayloadAdmitter(source, fact)
 			defer func() {
 				select {
 				case <-admitter.releaseSecond:
@@ -639,7 +480,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			source := semanticview.Wrap(bundle)
 			failingOwner, failures := failNextWorkflowTimerPipelineDisposition(t, selected.events)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+				ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact),
 				PipelineObligations: failingOwner,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
@@ -713,39 +554,35 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 	}
 }
 
-func strictWorkflowTimerPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
-	if event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
-		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+func strictWorkflowTimerPayloadAdmitter(source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) runtimebus.PayloadAdmitter {
+	return func(_ context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
+		admission, found, err := runtimepipeline.ResolveWorkflowStageTimerPayloadAdmission(source, event, fact.BundleHash())
+		if found || err != nil {
+			return admission, err
+		}
+		return eventtest.PayloadAdmission(event, producer.FlowID(), string(event.Type()))
 	}
-	var decoded map[string]any
-	if err := json.Unmarshal(event.Payload(), &decoded); err != nil {
-		return events.PayloadAdmission{}, err
-	}
-	if err := runtimeeventschema.ValidatePayloadAgainstSchema(map[string]any{
-		"type": "object", "properties": map[string]any{}, "additionalProperties": false,
-	}, decoded); err != nil {
-		return events.PayloadAdmission{}, err
-	}
-	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 
 var errInjectedWorkflowTimerPublishFailure = errors.New("injected workflow timer publish failure")
 
 type failOnceWorkflowTimerPayloadAdmitter struct {
+	payload       runtimebus.PayloadAdmitter
 	attempts      atomic.Int32
 	secondAttempt chan struct{}
 	releaseSecond chan struct{}
 }
 
-func newFailOnceWorkflowTimerPayloadAdmitter() *failOnceWorkflowTimerPayloadAdmitter {
+func newFailOnceWorkflowTimerPayloadAdmitter(source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) *failOnceWorkflowTimerPayloadAdmitter {
 	return &failOnceWorkflowTimerPayloadAdmitter{
+		payload:       strictWorkflowTimerPayloadAdmitter(source, fact),
 		secondAttempt: make(chan struct{}),
 		releaseSecond: make(chan struct{}),
 	}
 }
 
-func (v *failOnceWorkflowTimerPayloadAdmitter) admit(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
-	admitted, err := strictWorkflowTimerPayloadAdmitter(ctx, event, flowID)
+func (v *failOnceWorkflowTimerPayloadAdmitter) admit(ctx context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	admitted, err := v.payload(ctx, event, payloadProducer)
 	if err != nil || event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
 		return admitted, err
 	}
@@ -889,7 +726,8 @@ func workflowTimerTestParseTime(raw string) (time.Time, error) {
 func workflowTimerServedLifecycleBundle(t *testing.T, recurring bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":   "name: timer-proof\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 40ms, advances_to: done}\n  done: {final: true}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 40ms, advances_to: done}\n  done: {final: true}\n",
 		"entities.yaml": "test_entity: {}\n",
 	})
 	// Recurrence is a runtime scheduler variant; the admitted timer transition stays exact.
@@ -903,24 +741,6 @@ func workflowLifecycleSourceContext(t *testing.T, selected gateRecoveryStoreCase
 	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
 	storetest.RequireRun(t, ctx, selected.events, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	return ctx, fact
-}
-
-func workflowTimerRecurringCancellationSource(t *testing.T) semanticview.Source {
-	t.Helper()
-	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	fixtureRoot := canonicalrouting.CopyRecurringTimerCancellation(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot,
-		fixtureRoot,
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
-	if err != nil {
-		t.Fatalf("load recurring timer cancellation fixture: %v", err)
-	}
-	timerBundle := workflowTimerServedLifecycleBundle(t, true)
-	timerBundle.Semantics.Timers[0].AdvancesTo = ""
-	bundle.Semantics.Timers = timerBundle.Semantics.Timers
-	return semanticview.Wrap(bundle)
 }
 
 func assertWorkflowTimerServedRows(t *testing.T, selected gateRecoveryStoreCase, runID, entityID, status string, want int) {

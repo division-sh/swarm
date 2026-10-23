@@ -357,7 +357,7 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, fmt.Errorf("construct runtime log payload admission event: %w", err)
 	}
-	record.PayloadAdmission, err = payloadAdmitter(ctx, admissionEvent, "")
+	record.PayloadAdmission, err = payloadAdmitter(ctx, admissionEvent, events.PlatformPayloadProducer(admissionEvent))
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, fmt.Errorf("admit runtime log payload: %w", err)
 	}

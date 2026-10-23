@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +27,8 @@ func TestFanOutGrantedBatchObservationReadOnlyBothStores(t *testing.T) {
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 64, time.Now().UTC())
-			unregistered := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), storeTestSourceArtifact("unregistered-observed-source"))
+			unregisteredRooted, _ := sourceartifactfixture.Rooted(t, "unregistered", storeTestSourceArtifact("unregistered-observed-source"))
+			unregistered := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), unregisteredRooted.Artifact())
 			process, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
 			executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 8), done: make(chan struct{})}
 			workers := 1
@@ -292,7 +294,8 @@ func TestFanOutGrantedSourceRefreshRegistrationWindowBothStores(t *testing.T) {
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 1, time.Now().UTC())
-			extra := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 0, time.Now().UTC(), storeTestSourceArtifact("refresh-extra-source"))
+			extraRooted, _ := sourceartifactfixture.Rooted(t, "extra", storeTestSourceArtifact("refresh-extra-source"))
+			seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 0, time.Now().UTC(), extraRooted.Artifact())
 			process, grants, occurrences, originalPlan := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
 			executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 8), done: make(chan struct{})}
 			workers := 1
@@ -313,7 +316,11 @@ func TestFanOutGrantedSourceRefreshRegistrationWindowBothStores(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("predecessor claim: found=%v err=%v", found, err)
 			}
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fixture.bundleHash}, {BundleHash: extra.bundleHash}}, nil)
+			extraCoordinate, err := agenttopology.NewSourceCoordinate(extraRooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{originalPlan.Sources[0], extraCoordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

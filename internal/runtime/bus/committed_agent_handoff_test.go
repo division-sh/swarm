@@ -170,7 +170,7 @@ func TestCommittedAgentTransitionRevalidatesDispatchCoverage(t *testing.T) {
 
 func agentTransitionActivation(t *testing.T, bus *EventBus, runID string) CommittedFlowInstanceActivation {
 	t.Helper()
-	source, _ := topologyOperationFixture(t)
+	source := bus.semanticSource
 	identity := ConstructedFlowInstanceIdentityFixture(source, "workers", "alpha", runID)
 	activation := CommittedFlowInstanceActivation{Acknowledged: true, ReadinessAttemptOrdinal: 1, Plan: pipeline.FlowInstanceActivationPlan{
 		Identity: identity, Readiness: pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: bus.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: "live"},

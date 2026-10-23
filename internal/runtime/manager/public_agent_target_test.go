@@ -23,6 +23,7 @@ type publicAgentTargetFixture struct {
 	manager    *AgentManager
 	probe      *terminalSetPersistenceProbe
 	operations *publicTargetDirectiveStore
+	record     PersistedAgent
 	identities []runtimeagentidentity.Identity
 	agents     []*chatTestAgent
 	tokens     []runtimeeffects.LifecycleToken
@@ -44,18 +45,22 @@ func (s *publicTargetDirectiveStore) ReserveDirectiveOperation(ctx context.Conte
 
 func newPublicAgentTargetFixture(t *testing.T, instances ...string) *publicAgentTargetFixture {
 	t.Helper()
+	source := loadRootAndFlowStaticAgentSource(t)
+	ctx, record, owner := newLifecycleCacheFixtureForSource(t, source)
+	options, _, _ := sourceSetFixtureAdmission(t, source)
 	f := &publicAgentTargetFixture{
-		ctx:   testAuthorActivityContext(context.Background()),
-		probe: &terminalSetPersistenceProbe{AgentLifecyclePersistence: newLifecyclePersistenceProbe(), agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)},
+		ctx: ctx, record: record,
+		probe: &terminalSetPersistenceProbe{AgentLifecyclePersistence: owner, agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)},
 	}
 	bus := &directiveTestBus{store: &directiveEventStore{}}
 	f.operations = &publicTargetDirectiveStore{DirectiveOperationStore: bus.store}
-	f.manager = newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
-		LifecycleStore: f.probe, PersistenceRoles: PersistenceRoles{DirectiveOperations: f.operations},
-	}, &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{Mode: runtimeagentcontrol.RunResolutionSpecified}})
+	options.BaseContext, options.LifecycleStore = ctx, f.probe
+	options.PersistenceRoles.DirectiveOperations = f.operations
+	f.manager = newTestAgentManagerWithOptions(t, bus, nil, options,
+		&directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{Mode: runtimeagentcontrol.RunResolutionSpecified}})
 	records := make([]PersistedAgent, len(instances))
 	for i, instance := range instances {
-		rec := lifecycleTestPersistedAgent(t)
+		rec := f.record
 		rec.Config.ID = "public-target-worker"
 		rec.Config.Identity = runtimeagentidentitytest.RuntimeForRun(t, rec.Config.Identity.RunID, rec.Config.ID, "public-target-test", "review", instance, "review/"+instance)
 		rec.Config.FlowPath = rec.Config.Identity.FlowInstance()
@@ -67,7 +72,7 @@ func newPublicAgentTargetFixture(t *testing.T, instances ...string) *publicAgent
 		f.agents = append(f.agents, agent)
 		records[i] = rec
 	}
-	runCtx, started, err := f.manager.lifecycle.beginRun(managedExecutionTestContext(t, f.ctx), AgentRunModeStandard, f.manager.workOwner)
+	runCtx, started, err := f.manager.lifecycle.beginRun(managedExecutionTestContextForCapturedSource(t, f.ctx), AgentRunModeStandard, f.manager.workOwner)
 	if err != nil || !started {
 		t.Fatalf("begin owned Manager run: started=%t err=%v", started, err)
 	}
@@ -363,7 +368,7 @@ func TestPublicAgentTargetConcurrentFenceNeverReroutesDirective(t *testing.T) {
 
 func TestPublicAgentTargetForeignRunCandidateIsSeparate(t *testing.T) {
 	f := newPublicAgentTargetFixture(t, "hidden", "visible")
-	rec := lifecycleTestPersistedAgent(t)
+	rec := f.record
 	rec.Config.ID = f.identities[0].AgentID()
 	rec.Config.Identity = runtimeagentidentitytest.RuntimeForRun(t, uuid.NewString(), rec.Config.ID, "public-target-test", "review", "visible", "review/visible")
 	rec.Config.FlowPath = rec.Config.Identity.FlowInstance()

@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -169,7 +170,11 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original})
+			rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: original})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -450,7 +455,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 				if err := acknowledgePipelineEventFixture(childCtx, fresh, childEventID); err != nil {
 					t.Fatalf("accept replay through the existing pipeline settlement/handoff owner: %v", err)
 				}
-				children = admitHistoricalReplayReceiverClaimFixtures(t, childCtx, fresh, children, fact)
+				children = admitHistoricalReplayReceiverClaimFixtures(t, childCtx, fresh, children, fact, rooted.Admission())
 				immutableBefore := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 				inventory, err := fresh.InspectDeliveryRecovery(childCtx, fact)
 				if err != nil {
@@ -569,9 +574,12 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 	}
 }
 
-func admitHistoricalReplayReceiverClaimFixtures(t *testing.T, ctx context.Context, selected deliverylifecycle.Store, pending []deliverylifecycle.Snapshot, source correlation.SourceArtifactFact) []deliverylifecycle.Snapshot {
+func admitHistoricalReplayReceiverClaimFixtures(t *testing.T, ctx context.Context, selected deliverylifecycle.Store, pending []deliverylifecycle.Snapshot, source correlation.SourceArtifactFact, rootAdmission sourceartifact.RootAdmission) []deliverylifecycle.Snapshot {
 	t.Helper()
-	coordinate := agenttopology.SourceCoordinate{BundleHash: source.BundleHash()}
+	coordinate, err := agenttopology.NewSourceCoordinate(rootAdmission)
+	if err != nil {
+		t.Fatal(err)
+	}
 	records := make([]manager.PersistedAgent, len(pending))
 	desired := make([]agenttopology.DesiredAgent, len(pending))
 	for i, delivery := range pending {

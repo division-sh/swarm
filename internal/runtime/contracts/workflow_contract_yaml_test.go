@@ -89,7 +89,7 @@ http:
 func TestFlowSchemaDocumentDecodeStagesKeyedMap(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
-name: validation
+# fixture: validation
 stages:
   queued:
     description: Waiting for work
@@ -119,7 +119,7 @@ stages:
 func TestFlowSchemaDocumentDecodeStageTimersUseCanonicalSyntax(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
-name: validation
+# fixture: validation
 stages:
   awaiting_review:
     timers:
@@ -153,7 +153,7 @@ stages:
 func TestFlowSchemaDocumentDecodeTypedStageGate(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
-name: launch
+# fixture: launch
 stages:
   awaiting_launch_approval:
     gate:
@@ -232,7 +232,7 @@ outcomes:
 func TestFlowSchemaDocumentRejectsGateOutcomeWithoutAdvance(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
-name: launch
+# fixture: launch
 stages:
   awaiting:
     gate:
@@ -249,7 +249,7 @@ stages:
 func TestFlowSchemaDocumentRejectsUnknownGateField(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
-name: launch
+# fixture: launch
 stages:
   awaiting:
     gate:
@@ -336,7 +336,7 @@ func TestFlowSchemaDocumentDecodeStageTimersRejectSupersededFields(t *testing.T)
 		t.Run(field, func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := decodeNodeTestYAML([]byte(fmt.Sprintf(`
-name: validation
+# fixture: validation
 stages:
   awaiting_review:
     timers:
@@ -354,7 +354,7 @@ stages:
 func TestFlowSchemaDocumentDecodeStageTimersRequireExplicitIDOnDerivedCollision(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
-name: validation
+# fixture: validation
 stages:
   awaiting_review:
     timers:
@@ -371,7 +371,7 @@ stages:
 func TestFlowSchemaDocumentDecodeStageTimersRejectExplicitIDCollisionAcrossStages(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
-name: validation
+# fixture: validation
 stages:
   awaiting_review:
     timers:
@@ -394,7 +394,7 @@ stages:
 func TestFlowSchemaDocumentDecodeStagesExplicitEmpty(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
-name: discovery
+# fixture: discovery
 stages: []
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -483,7 +483,7 @@ func TestSystemNodeHandlerDecodeJoinRejectsUnsupportedFields(t *testing.T) {
 func TestFlowSchemaDocumentDecodeRejectsNonEmptyStageSequence(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
-name: validation
+# fixture: validation
 stages:
   - id: queued
     initial: true
@@ -636,7 +636,7 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredCarriesBeforeNestedSource(t *test
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
-name: invalid-output-pins
+# fixture: invalid-output-pins
 pins:
   outputs:
     - event: deploy.done
@@ -723,7 +723,7 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := decodeNodeTestYAML([]byte("name: invalid-schema\n"+tc.field+"\n"), &doc)
+			err := decodeNodeTestYAML([]byte("stages: []\n# fixture: invalid-schema\n"+tc.field+"\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
 			}
@@ -760,7 +760,7 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 func TestFlowTemplateInstanceDecodeAcceptsScalarIdentity(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
-name: template-flow
+# fixture: template-flow
 instance: scope_id
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -795,7 +795,7 @@ func TestFlowTemplateInstanceDecodeRejectsRetiredMappingForms(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := decodeNodeTestYAML([]byte("name: template-flow\ninstance: "+tc.instance+"\n"), &doc)
+			err := decodeNodeTestYAML([]byte("# fixture: template-flow\ninstance: "+tc.instance+"\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), "instance: <field>") {
 				t.Fatalf("yaml.Unmarshal error = %v, want scalar instance teaching error", err)
 			}
@@ -805,8 +805,9 @@ func TestFlowTemplateInstanceDecodeRejectsRetiredMappingForms(t *testing.T) {
 
 func TestFlowSchemaDocumentDecode_DerivesKeylessStaticShape(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte(`
-name: coordinator-flow
+	if err := decodeNodeTestYAML([]byte(`stages: []
+
+# fixture: coordinator-flow
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2014,7 +2015,7 @@ delay: 7d
 func TestFlowSchemaDocumentDecode_PreservesRequiredAgentSubscribesTo(t *testing.T) {
 	var schema FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
-name: worker
+# fixture: worker
 required_agents:
   - role: analyst
     subscribes_to: [task.requested]
@@ -2033,9 +2034,9 @@ func TestFlowSchemaDocumentDecode_TracksRequiredAgentsPresence(t *testing.T) {
 		yamlText string
 		declared bool
 	}{
-		{name: "omitted", yamlText: "name: worker\n", declared: false},
-		{name: "explicit empty", yamlText: "name: worker\nrequired_agents: []\n", declared: true},
-		{name: "explicit entries", yamlText: "name: worker\nrequired_agents:\n  - role: analyst\n", declared: true},
+		{name: "omitted", yamlText: "stages: []\n# fixture: worker\n", declared: false},
+		{name: "explicit empty", yamlText: "# fixture: worker\nrequired_agents: []\n", declared: true},
+		{name: "explicit entries", yamlText: "# fixture: worker\nrequired_agents:\n  - role: analyst\n", declared: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2125,7 +2126,7 @@ scoring_phase:
 func TestRetiredEntitySchemaAdmissionRejectsScalarInitialSuffix(t *testing.T) {
 	for _, field := range []string{"integer initial 0", "text indexed nullable default pending"} {
 		t.Run(field, func(t *testing.T) {
-			_, err := loadSchemaFragment(t, "name: retired\nentity:\n  state_field: scoring_phase\n  fields:\n    revision_count: "+field+"\n")
+			_, err := loadSchemaFragment(t, "# fixture: retired\nentity:\n  state_field: scoring_phase\n  fields:\n    revision_count: "+field+"\n")
 			if err == nil || !strings.Contains(err.Error(), "is not supported") {
 				t.Fatalf("retired entity-schema grammar admitted: %v", err)
 			}

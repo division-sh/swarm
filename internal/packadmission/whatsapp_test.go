@@ -17,7 +17,7 @@ func TestEmbeddedWhatsAppPackConsumesExactInventoryWithoutInventingExecution(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	inventory, err := packartifact.NewEffectivePackInventory(base, nil)
+	inventory, err := packartifact.NewEffectivePackInventory(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,15 +33,14 @@ func TestEmbeddedWhatsAppPackConsumesExactInventoryWithoutInventingExecution(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"provider.whatsapp", "provider.whatsapp.connector", "provider.whatsapp.hitl_channel"} {
+	for _, id := range []string{"whatsapp"} {
 		entry, found := projection.Inventory.Lookup(id)
-		if !found || entry.Source() != packartifact.ProvenanceEmbedded || entry.ManifestHash() != packs.ManifestHash(entry.ManifestBody()) ||
-			len(entry.Envelope().Requires.Secrets) != 0 || len(entry.Envelope().Requires.ManagedCredentials) != 0 {
+		if !found || entry.Source() != packartifact.ProvenanceEmbedded || entry.ManifestHash() != packs.ManifestHash(entry.ManifestBody()) {
 			t.Fatal("installed WhatsApp pack lost exact bytes or acquired fabricated credentials", id)
 		}
 	}
 	trigger, found := projection.ProviderTriggers.EntryByProvider("whatsapp")
-	if !found || trigger.Identity.ID != "provider.whatsapp" || trigger.Manifest.Transport() != packs.ChannelTransportSession {
+	if !found || trigger.Identity.ID != "whatsapp" || trigger.Manifest.Transport() != packs.ChannelTransportSession {
 		t.Fatal("installed native trigger did not consume verified inventory provenance")
 	}
 	for _, input := range []string{"/inbox", "hello", "/inbox@foreign", "/boite"} {

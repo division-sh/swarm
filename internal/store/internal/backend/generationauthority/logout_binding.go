@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -34,7 +33,7 @@ func FreezeLogoutProcessTx(ctx context.Context, tx *sql.Tx, binding processbindi
 	if err != nil {
 		return zero, err
 	}
-	if !found || plan.Revision != grant.SourceSetRevision || !SourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: binding.BundleHash}) {
+	if !found || plan.Revision != grant.SourceSetRevision || !SourceSetContainsBundle(plan, binding.BundleHash) {
 		return zero, fmt.Errorf("logout original generation source set is not current")
 	}
 	return current, ctx.Err()

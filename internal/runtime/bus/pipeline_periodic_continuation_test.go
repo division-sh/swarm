@@ -69,6 +69,7 @@ func (s *periodicContinuationStore) CloseScan(_ context.Context, scan runtimepip
 func TestPeriodicSweeperRetainsCursorAcrossTicksUntilExplicitExhaustion(t *testing.T) {
 	owner := newPeriodicContinuationStore()
 	bus, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		ContractBundle:      busRuntimeControlSource(t),
 		PipelineObligations: owner,
 	})
 	if err != nil {
@@ -180,6 +181,7 @@ func TestSweepTreatsFailedScanCloseAsTerminal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			owner := newTerminalScanCloseStore(tc.persistent)
 			bus, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+				ContractBundle:      busRuntimeControlSource(t),
 				PipelineObligations: owner,
 			})
 			if err != nil {

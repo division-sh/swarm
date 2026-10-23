@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +27,9 @@ func TestIssue2589ComposedConsumersPreserveResultsBothStores(t *testing.T) {
 			at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 
 			t.Run("scenario_multiple_entities_and_diffs", func(t *testing.T) {
-				requireDefaultSourceArtifactForTest(t, ctx, selected)
+				rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+				fact := sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+				ctx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
 				runID := uuid.NewString()
 				request := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at}
 				for _, alias := range []string{"one", "two"} {
@@ -74,7 +77,11 @@ func TestIssue2589ComposedConsumersPreserveResultsBothStores(t *testing.T) {
 					}
 					switch operation {
 					case "fork_materialization":
-						fork, err := owner.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+						rooted, err := selected.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						fork, err := owner.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 						// The shared fixture constructs the root and its keyed child.
 						if err != nil || !fork.ExecutionReady || fork.MaterializedEntityCount != 2 {
 							t.Fatalf("real fork materialization = %+v, %v", fork, err)
@@ -147,7 +154,7 @@ func TestIssue2589NativeAdmissionFrameIsolationBothStores(t *testing.T) {
 						return runSelectedFixtureMutation(ctx, opened.store, "issue2589 native admission controls", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 							return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 								for _, runID := range runs {
-									if _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
+									if _, _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
 										t.Fatalf("fresh native frame reused admission: cached=%t err=%v", cached, err)
 									}
 								}
@@ -167,7 +174,7 @@ func TestIssue2589NativeAdmissionFrameIsolationBothStores(t *testing.T) {
 												return err
 											}
 											for _, runID := range runs {
-												fact, cached, err := mutationprotocol.CachedActiveRunSource(nestedctx, nestedtx, runID)
+												fact, _, cached, err := mutationprotocol.CachedActiveRunSource(nestedctx, nestedtx, runID)
 												if err != nil || !cached || fact.BundleHash() != authorActivityTestBundleHash {
 													t.Fatalf("nested exact admission for %s = %t %+v %v", runID, cached, fact, err)
 												}

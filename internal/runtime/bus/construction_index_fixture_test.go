@@ -60,6 +60,10 @@ func admitConstructionIndexTestObservation(source semanticview.Source, runID str
 	if !found || bundle.SourceArtifact == nil {
 		return pipeline.FlowInstanceObservation{}, fmt.Errorf("fixture requires admitted source artifact")
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return pipeline.FlowInstanceObservation{}, err
+	}
 	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
 		return pipeline.FlowInstanceObservation{}, err
@@ -82,7 +86,7 @@ func admitConstructionIndexTestObservation(source semanticview.Source, runID str
 	if entity, declared := entityruntime.ResolveForFlow(source, identity.TemplateID); declared {
 		instance.EntityType = entity.EntityType
 	}
-	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key, WorkflowVersion: instance.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := pipeline.DynamicFlowRuntimeReadiness{
 		Plan:            pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
