@@ -305,7 +305,7 @@ func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
 }
 
 func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T) {
-	pipeline.VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t, workflowActivityNativeToolFixture)
 }
 
 func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {

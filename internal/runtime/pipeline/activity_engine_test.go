@@ -1416,24 +1416,20 @@ func VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTes
 	}
 }
 
-func VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t *testing.T, open func(*testing.T, string, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runTelegramConnectorRoundTripThroughInboundDelivery(t, open(t, backend))
+			runTelegramConnectorRoundTripThroughInboundDelivery(t, func(t *testing.T, tools map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest {
+				return open(t, backend, tools)
+			})
 		})
 	}
 }
 
-func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, fixture WorkflowActivityNativeFixtureForTest) {
+func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	t.Helper()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(fixture.Context, runID)
-	if err := fixture.RequireRun(ctx, runID); err != nil {
-		t.Fatal(err)
-	}
-	store := fixture.Persistence.store
-
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -1471,11 +1467,15 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, fixture W
 	delivery, inboundEvent := acceptedTelegramInboundDeliveryEvent(t, entityID, runID)
 	chatID, incomingText := telegramInboundChatAndText(t, delivery.Events[0].Payload)
 	credentialStore := testActivityCredentialStore(t, "telegram_bot_token", "provider-secret")
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": testTelegramConnectorTool(server.URL),
-		},
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{
+		"telegram.send_message": testTelegramConnectorTool(server.URL),
 	})
+	source := fixture.Source
+	ctx := runtimecorrelation.WithRunID(fixture.Context, runID)
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	store := fixture.Persistence.store
 	bus := &recordingPipelineBus{}
 	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source}, Credentials: credentialStore,
