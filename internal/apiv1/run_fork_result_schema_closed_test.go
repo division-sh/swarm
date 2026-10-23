@@ -26,6 +26,16 @@ func TestRunForkResultSchemaKeepsPointArmsClosed(t *testing.T) {
 	if err := validator.validateValue("$.run.fork.result", schema, deployment); err != nil {
 		t.Fatalf("eventless deployment fork result rejected: %v", err)
 	}
+	state := copyRunForkResultFields(deployment)
+	state["fork_point_kind"] = "state_revision"
+	if err := validator.validateValue("$.run.fork.result", schema, state); err != nil {
+		t.Fatalf("committed state fork result rejected: %v", err)
+	}
+	if err := validateRunForkExecutionResult(RunForkExecutionResult{
+		ForkPointKind: "state_revision", ForkRevision: 1, SourceRunStatus: "paused",
+	}); err != nil {
+		t.Fatalf("strict result reader rejected committed state point: %v", err)
+	}
 	for _, test := range []struct {
 		name   string
 		base   map[string]any
@@ -34,6 +44,9 @@ func TestRunForkResultSchemaKeepsPointArmsClosed(t *testing.T) {
 		{"event_without_id", event, func(value map[string]any) { delete(value, "fork_event_id") }},
 		{"deployment_with_event_id", deployment, func(value map[string]any) { value["fork_event_id"] = event["fork_event_id"] }},
 		{"deployment_with_null_event_id", deployment, func(value map[string]any) { value["fork_event_id"] = nil }},
+		{"state_with_event_id", state, func(value map[string]any) { value["fork_event_id"] = event["fork_event_id"] }},
+		{"state_with_null_event_id", state, func(value map[string]any) { value["fork_event_id"] = nil }},
+		{"state_zero_revision", state, func(value map[string]any) { value["fork_revision"] = float64(0) }},
 		{"missing_shared_owner", deployment, func(value map[string]any) { delete(value, "owner") }},
 		{"extra_field", event, func(value map[string]any) { value["unexpected"] = true }},
 		{"zero_revision", event, func(value map[string]any) { value["fork_revision"] = float64(0) }},

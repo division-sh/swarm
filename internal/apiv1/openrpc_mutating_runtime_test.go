@@ -670,7 +670,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			s.runControl.errs["continue"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: runID, CurrentStatus: "running"}
 		}}},
 		{Method: "run.continue", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunFlowAlreadyLiveCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["continue"] = &runtimerunlifecycle.LiveRunConflictError{Scope: runtimerunlifecycle.LiveRunScope{Deployment: "fixture", FlowPath: "."}, LiveRunID: "11111111-1111-4111-8111-111111111111"}
+			s.runControl.errs["continue"] = &runtimerunlifecycle.LiveRunConflictError{Scope: runtimerunlifecycle.LiveRunScope{FlowPath: "."}, LiveRunID: "11111111-1111-4111-8111-111111111111"}
 		}}},
 
 		{Method: "mailbox.acknowledge", Params: map[string]any{"mailbox_id": "missing", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.notifyErr = mailbox.ErrV1NotFound }}},

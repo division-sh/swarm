@@ -77,7 +77,7 @@ func (o SelectedContractExecutionOwner) prepareResetBindingHistory(ctx context.C
 	}
 	request := runfork.RunForkPlanRequest{SourceRunID: binding.SourceRunID,
 		At: binding.ForkPoint.EventID, AtStart: binding.ForkPoint.Kind == runfork.RunForkPointRunStart}
-	if binding.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision {
+	if binding.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision || binding.ForkPoint.Kind == runfork.RunForkPointStateRevision {
 		request.ResolvedPoint = &binding.ForkPoint
 	}
 	plan, err := o.ports.fork.PlanRunFork(ctx, request)

@@ -242,6 +242,22 @@ func TestForkOperationRecordRequiresExactResolvedPoint(t *testing.T) {
 	if err := record.Validate(); err != nil {
 		t.Fatalf("exact child pin refused: %v", err)
 	}
+	live := record
+	statePoint := RunForkPoint{Kind: RunForkPointStateRevision, Revision: point.Revision}
+	live.Request.ResolvedPoint = &statePoint
+	liveResult := *record.Result
+	live.Result = &liveResult
+	live.Result.ForkPoint = statePoint
+	live.Result.ForkRunStatus, live.Result.SourceRunStatus, live.Result.SourceFrozen = RunForkLiveStatus, "paused", false
+	live.Result.DataPins = append([]durabledata.Pin(nil), record.Result.DataPins...)
+	live.Result.DataPins[0].RunState = RunForkLiveStatus
+	if err := live.Validate(); err != nil {
+		t.Fatalf("exact live state-revision acknowledgment refused: %v", err)
+	}
+	live.Result.DataPins[0].RunState = RunForkActivatedStatus
+	if err := live.Validate(); err == nil {
+		t.Fatal("live acknowledgment accepted a pin from a different lifecycle state")
+	}
 	record.Result.DataPins = []durabledata.Pin{pin, pin}
 	if err := record.Validate(); err == nil {
 		t.Fatal("duplicate declaration in durable fork result was accepted")

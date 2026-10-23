@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -24,13 +25,21 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 		ContinueRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 		StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 		SelectLiveRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time) (string, error)
+		InsertRunForkRunTx(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact) error
 		RunDispatchBlocked(context.Context, string) (bool, error)
 	})
 	reader := fixture.store.(runtimerunlifecycle.LiveRunReader)
-	scope := runtimerunlifecycle.LiveRunScope{Deployment: "run-control-fixture", FlowPath: "."}
+	scope := runtimerunlifecycle.LiveRunScope{FlowPath: "."}
 	source, _ := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	first, second := uuid.NewString(), uuid.NewString()
 	request := runtimerunlifecycle.CreateRequest{RunID: first, Source: source, Origin: runtimerunlifecycle.DeploymentRunOrigin(), StartedAt: time.Now().UTC(), LiveScope: scope}
+	for _, invalid := range []string{"../source", "one//two", `one\two`, " first"} {
+		invalidRequest := request
+		invalidRequest.LiveScope.FlowPath = invalid
+		if _, err := owner.CreateRun(ctx, invalidRequest); err == nil {
+			t.Fatalf("noncanonical live flow admitted: %q", invalid)
+		}
+	}
 	if _, err := owner.CreateRun(ctx, request); err != nil {
 		t.Fatalf("create live run: %v", err)
 	}
@@ -92,6 +101,39 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	}
 	if _, err := owner.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: second}); !errors.Is(err, runtimeruncontrol.ErrNotPaused) {
 		t.Fatalf("live stop did not require pause: %v", err)
+	}
+	third := uuid.NewString()
+	err = runSelectedFixtureMutation(ctx, fixture.store, "fork older paused sibling", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		if err := owner.InsertRunForkRunTx(ctx, attempt, third, first,
+			runfork.RunForkPoint{Kind: runfork.RunForkPointStateRevision, Revision: 1}, time.Now().UTC(), source); err != nil {
+			return err
+		}
+		previous, err := owner.SelectLiveRunTx(ctx, attempt, third, time.Now().UTC())
+		if err != nil || previous != second {
+			return errors.Join(err, errors.New("fork of older sibling did not pause the current live sibling"))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live, found, err := reader.LoadLiveRun(ctx, scope); err != nil || !found || live.RunID != third {
+		t.Fatalf("fork lost its inherited flow selection: %+v found=%v err=%v", live, found, err)
+	}
+	for runID, want := range map[string]string{first: "paused", second: "paused", third: "live"} {
+		state, err := fixture.store.LoadRunLifecycleSnapshot(ctx, runID)
+		if err != nil || state.Status != want {
+			t.Fatalf("fork switch changed sibling %s: %+v want=%s err=%v", runID, state, want, err)
+		}
+	}
+	if err := runSelectedFixtureMutation(ctx, fixture.store, "replay live selection", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		previous, err := owner.SelectLiveRunTx(ctx, attempt, third, time.Now().UTC())
+		if err != nil || previous != "" {
+			return errors.Join(err, errors.New("replayed switch paused its own live run"))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

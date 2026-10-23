@@ -143,7 +143,7 @@ func loadRequiredRunForkPlan(ctx context.Context, tx *sql.Tx, postgres bool, for
 	if origin.Kind() != runtimerunlifecycle.OriginForkMaterialization || origin.SourceRunID() != strings.TrimSpace(req.SourceRunID) {
 		return runfork.RunForkPlan{}, fmt.Errorf("fork materialization %s conflicts with persisted lifecycle state", forkRunID)
 	}
-	if req.AtStart || origin.ForkPointKind() != runfork.RunForkPointEvent {
+	if req.AtStart || (origin.ForkPointKind() != runfork.RunForkPointEvent && origin.ForkPointKind() != runfork.RunForkPointStateRevision) {
 		return runfork.RunForkPlan{}, fmt.Errorf("deployment revision materialization requires selected fork operation authority")
 	}
 	selector := strings.TrimSpace(req.At)
@@ -154,9 +154,13 @@ func loadRequiredRunForkPlan(ctx context.Context, tx *sql.Tx, postgres bool, for
 	if postgres {
 		validate, resolve = runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint
 	}
-	// The retained child selects its original cut. An omitted selector never
-	// resolves today's latest source event or discovers a same-cut sibling.
-	plan, err := planRunForkSnapshot(ctx, tx, runfork.RunForkPlanRequest{SourceRunID: origin.SourceRunID(), At: origin.SourceEventID()}, validate, resolve)
+	// The retained child selects its committed cut, never today's latest head.
+	point := runfork.RunForkPoint{Kind: origin.ForkPointKind(), Revision: origin.ForkRevision(), EventID: origin.SourceEventID(), Input: selector}
+	planRequest := runfork.RunForkPlanRequest{SourceRunID: origin.SourceRunID(), At: origin.SourceEventID()}
+	if point.Kind == runfork.RunForkPointStateRevision {
+		planRequest.ResolvedPoint = &point
+	}
+	plan, err := planRunForkSnapshot(ctx, tx, planRequest, validate, resolve)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}

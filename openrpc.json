@@ -9955,9 +9955,6 @@
                 "additionalProperties": false,
                 "description": "Pause the named live sibling before continuing this run. The partial unique index owns refusal; no second claim check is performed.",
                 "properties": {
-                  "deployment": {
-                    "type": "string"
-                  },
                   "flow_path": {
                     "type": "string"
                   },
@@ -9971,7 +9968,6 @@
                 "required": [
                   "run_id",
                   "live_run_id",
-                  "deployment",
                   "flow_path"
                 ],
                 "type": "object"
@@ -10220,7 +10216,7 @@
         {
           "name": "fork_event_id",
           "required": false,
-          "description": "Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves the latest event or deployment revision once; retries reuse the permanent resolved point.",
+          "description": "Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves state_revision at the committed run_fork_revision_heads head for every source origin; retries reuse the permanent resolved point. No event is synthesized for this cut.",
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
           }
@@ -22772,7 +22768,8 @@
               "fork_point_kind": {
                 "enum": [
                   "deployment_revision",
-                  "run_start"
+                  "run_start",
+                  "state_revision"
                 ],
                 "type": "string"
               },
@@ -23072,7 +23069,11 @@
             "additionalProperties": false,
             "properties": {
               "fork_point_kind": {
-                "const": "deployment_revision",
+                "enum": [
+                  "deployment_revision",
+                  "run_start",
+                  "state_revision"
+                ],
                 "type": "string"
               },
               "fork_revision": {
@@ -26929,9 +26930,6 @@
               "additionalProperties": false,
               "description": "Pause the named live sibling before continuing this run. The partial unique index owns refusal; no second claim check is performed.",
               "properties": {
-                "deployment": {
-                  "type": "string"
-                },
                 "flow_path": {
                   "type": "string"
                 },
@@ -26945,7 +26943,6 @@
               "required": [
                 "run_id",
                 "live_run_id",
-                "deployment",
                 "flow_path"
               ],
               "type": "object"

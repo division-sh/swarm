@@ -178,7 +178,7 @@ func validateCapturedOriginBoundary(origin runlifecycle.RunOrigin, snapshot *run
 	if snapshot.StartProjection != nil {
 		return fmt.Errorf("captured construction cannot use a start projection as an inclusive cut")
 	}
-	if origin.ForkPointKind() == runlifecycle.ForkOriginPointDeploymentRevision {
+	if origin.ForkPointKind() == runlifecycle.ForkOriginPointDeploymentRevision || origin.ForkPointKind() == runlifecycle.ForkOriginPointStateRevision {
 		return nil
 	}
 	for _, event := range snapshot.Events {
