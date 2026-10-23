@@ -251,7 +251,7 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selectedFixture)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, selectedFixture, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	initialRevision := captureRunForkTestRevision(t, db, runID, runforkrevision.FamilyEvents)
 	before := snapshotForkHistoricalExecutionTables(t, db, true)
 
@@ -311,7 +311,7 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	runID := uuid.NewString()
 	firstEventID := uuid.NewString()
 	secondEventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, selectedFixture, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	initialRevision := captureRunForkTestRevision(t, db, runID, runforkrevision.FamilyEvents)
 
 	first, err := db.BeginTx(ctx, nil)
@@ -561,7 +561,7 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 	sort.Strings(runIDs)
 	initialRevisions := map[string]int64{}
 	for _, runID := range runIDs {
-		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		requireRunFixtureForTest(t, ctx, selectedFixture, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 		initialRevisions[runID] = captureRunForkTestRevision(t, db, runID, runforkrevision.FamilyEvents)
 	}
 	type workerResult struct {
@@ -739,7 +739,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	agentID := "revision-session-agent"
 	sessionID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "session.projection", events.EventProducerPlatform, "revision-test", "", "", at)
 	seedRunForkSessionProjection(t, db, runID, agentID, sessionID, "active", at)
 	firstRevision := captureRunForkTestRevision(t, db, runID)
