@@ -272,6 +272,7 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID,
 		State: storerunlifecycle.StateCompleted,
@@ -340,6 +341,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	createdAt := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Microsecond)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID, StartedAt: createdAt.Add(-time.Minute),
 	})
@@ -513,12 +515,12 @@ func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing
 func TestPostgresRegistry_ResetAllMarksActiveSessionsOrphaned(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
-	summary, err := pg.ResetAll(runtimesessions.ResetMetadata{Source: "builder_api"})
+	summary, err := pg.ResetAll(ctx, runtimesessions.ResetMetadata{Source: "builder_api"})
 	if err != nil {
 		t.Fatalf("ResetAll: %v", err)
 	}

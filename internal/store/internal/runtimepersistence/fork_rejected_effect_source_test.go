@@ -44,6 +44,7 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 				now := time.Date(2026, 10, 2, 22, 0, 0, 0, time.UTC)
 				sourceRun, childRun := uuid.NewString(), uuid.NewString()
 				requireRunningRunForTest(t, sourceCtx, selected, sourceRun, now)
+				targetCtx = storeTestOriginalProcessContext(t, targetCtx, selected)
 				requireRunFixtureForTest(t, targetCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: childRun, BundleHash: target.BundleHash, Artifact: targetBundle.SourceArtifact, StartedAt: now})
 				card, effect := newRootProposedEffectTestCard(t, sourceRun, now)
 				card, effect = runForkProposedEffectWithoutReplyForTest(t, card, effect)

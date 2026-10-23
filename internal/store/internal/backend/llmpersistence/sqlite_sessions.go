@@ -448,7 +448,7 @@ func (s *LLMSQLiteOwner) IncrementTurnOutcome(ctx context.Context, lease *runtim
 	return runtimesessions.TurnIncrementResult{Acknowledged: true}, result.Err()
 }
 
-func (s *LLMSQLiteOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
+func (s *LLMSQLiteOwner) ResetAll(ctx context.Context, metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
 	if s == nil || s.backend == nil {
 		return runtimesessions.ResetSummary{}, nil
 	}
@@ -457,7 +457,6 @@ func (s *LLMSQLiteOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runti
 	}
 	source := strings.TrimSpace(metadata.Source)
 	now := s.now()
-	ctx := context.Background()
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite session reset", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimesessions.ResetSummary, error) {
 		var summary runtimesessions.ResetSummary
 		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {

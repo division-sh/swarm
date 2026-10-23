@@ -491,12 +491,11 @@ func (s *LLMPostgresOwner) IncrementTurnOutcome(ctx context.Context, lease *runt
 	return runtimesessions.TurnIncrementResult{Acknowledged: true}, result.Err()
 }
 
-func (s *LLMPostgresOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
+func (s *LLMPostgresOwner) ResetAll(ctx context.Context, metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
 	if s == nil || s.backend == nil {
 		return runtimesessions.ResetSummary{}, nil
 	}
 	source := strings.TrimSpace(metadata.Source)
-	ctx := context.Background()
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(sqlCtx context.Context, attempt *mutationprotocol.Attempt) (runtimesessions.ResetSummary, error) {
 		var summary runtimesessions.ResetSummary
 		err := attempt.WithSQL(sqlCtx, func(sqlCtx context.Context, tx *sql.Tx) error {

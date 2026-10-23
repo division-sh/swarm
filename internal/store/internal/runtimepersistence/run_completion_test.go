@@ -36,6 +36,7 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 		flowTemplate = "example"
 	}
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		RunID: runID, Origin: semanticEventRunOriginForTest(t, eventID, "example.started"),
 		StartedAt: time.Now().UTC(),
