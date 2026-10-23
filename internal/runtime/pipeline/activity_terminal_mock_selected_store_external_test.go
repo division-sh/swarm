@@ -89,6 +89,8 @@ func testActivityMockTerminalTimestampReplay(t *testing.T, method string) {
 				t.Fatal(err)
 			}
 			selected = reopen()
+			ctx = activityReplayContext(t, selected, source, runID)
+			ctx = effects.WithExecutionMode(ctx, intent.ExecutionMode)
 
 			restartBus := newActivityJournalProofBus(t, selected, source)
 			credentials := &activityReplayCredentialProbe{}

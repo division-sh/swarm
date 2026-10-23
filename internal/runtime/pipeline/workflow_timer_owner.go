@@ -904,7 +904,7 @@ func (l *WorkflowTimerLifecycle) ReconcileWakeup(ctx context.Context, ref timeri
 // on failure, enters the lifecycle's existing coalesced recovery loop.
 func (l *WorkflowTimerLifecycle) ReconcileWakeupWithRecovery(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) (bool, error) {
 	if err := l.ReconcileWakeup(ctx, ref); err != nil {
-		return l.startWakeupRecovery(ref), err
+		return l.startWakeupRecovery(ctx, ref), err
 	}
 	return false, nil
 }
@@ -940,7 +940,7 @@ func (l *WorkflowTimerLifecycle) queueWakeupReconcile(ctx context.Context, ref t
 	if err := l.reconcileWakeupImmediately(ctx, ref); err != nil {
 		l.logFailure(ctx, "workflow_timer_reconcile_failed", ref, err)
 		if !errors.Is(err, errWorkflowTimerSchedulerRequired) {
-			l.startWakeupRecovery(ref)
+			l.startWakeupRecovery(ctx, ref)
 		}
 		return nil
 	}
@@ -1037,7 +1037,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		recoveryCtx := ctx
 		if registerErr := l.reconcileWakeupImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
-			l.startWakeupRecovery(occurrence.Activation)
+			l.startWakeupRecovery(recoveryCtx, occurrence.Activation)
 			return WorkflowTimerFireRetry, false, errors.Join(err, fmt.Errorf("re-register workflow timer: %w", registerErr))
 		}
 		return WorkflowTimerFireRetry, false, err
@@ -1322,7 +1322,7 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 	for _, activation := range activations {
 		if err := l.reconcileWakeupImmediately(ctx, activation.Ref); err != nil {
 			l.logFailure(ctx, "workflow_timer_restore_register_failed", activation.Ref, err)
-			if !l.startWakeupRecovery(activation.Ref) {
+			if !l.startWakeupRecovery(ctx, activation.Ref) {
 				return fmt.Errorf("restore workflow timer %s: %w", activation.Ref.ActivationID, err)
 			}
 		}
@@ -1330,16 +1330,16 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) startWakeupRecovery(ref timeridentity.WorkflowTimerActivationRef) bool {
+func (l *WorkflowTimerLifecycle) startWakeupRecovery(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) bool {
 	ref = ref.Normalize()
-	return l.startRecovery("reconcile\x00"+ref.ActivationID, func(ctx context.Context) error {
+	return l.startRecovery(ctx, "reconcile\x00"+ref.ActivationID, func(ctx context.Context) error {
 		return l.ReconcileWakeup(ctx, ref)
 	}, func(ctx context.Context, err error) {
 		l.logFailure(ctx, "workflow_timer_reconcile_retry_failed", ref, err)
 	})
 }
 
-func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(context.Context) error, onFailure func(context.Context, error)) bool {
+func (l *WorkflowTimerLifecycle) startRecovery(ctx context.Context, key string, operation func(context.Context) error, onFailure func(context.Context, error)) bool {
 	if l == nil || operation == nil {
 		return false
 	}
@@ -1363,8 +1363,12 @@ func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(contex
 		l.projectionMu.Unlock()
 		return false
 	}
-	lease, err := l.workOwner.Begin(l.recoveryCtx)
+	recoveryCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(l.recoveryCtx, cancel)
+	lease, err := l.workOwner.Begin(recoveryCtx)
 	if err != nil {
+		stop()
+		cancel()
 		l.recoveryMu.Unlock()
 		l.projectionMu.Unlock()
 		return false
@@ -1376,6 +1380,8 @@ func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(contex
 
 	go func() {
 		defer func() {
+			stop()
+			cancel()
 			l.recoveryMu.Lock()
 			delete(l.recovering, key)
 			l.recoveryMu.Unlock()

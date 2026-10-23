@@ -1035,7 +1035,7 @@ func ProveNativeProcessEventRenewsExactClaimAroundAgentHandler(t *testing.T, new
 	nativeDelivery := newNativeDelivery(t)
 	baseStore := nativeDelivery
 	deliveryStore := &renewalTrackingManagerDeliveryStore{Store: baseStore}
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore, BaseContext: nativeDelivery.Context, MutationContext: nativeDelivery.MutationContext, CarryMutationContext: nativeDelivery.CarryMutationContext})
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("agent-claim-renewal"), events.EventType("task.started"), "", "", nil, 0, eventtest.UUID("agent-claim-renewal-run"), "", events.EventEnvelope{}, time.Time{})
 	agent := &traceRecordingAgent{}
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
@@ -1065,7 +1065,7 @@ func ProveNativeProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim(t *te
 	baseStore := nativeDelivery
 	shortStore := &shortLeaseManagerDeliveryStore{ManagerDeliveryNativeFixture: baseStore, leaseTTL: 1500 * time.Millisecond}
 	bus := &blockingOutputBus{blocked: make(chan struct{}), release: make(chan struct{})}
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: shortStore})
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: shortStore, BaseContext: nativeDelivery.Context, MutationContext: nativeDelivery.MutationContext, CarryMutationContext: nativeDelivery.CarryMutationContext})
 	agent := singleOutputAgent{id: "agent-a"}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.received", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
@@ -1080,7 +1080,7 @@ func ProveNativeProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim(t *te
 		t.Fatal("output publication did not block")
 	}
 	time.Sleep(3 * shortStore.leaseTTL)
-	secondClaim, err := baseStore.ClaimDelivery(testAuthorActivityContext(context.Background()), baseStore.Authority, evt, managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
+	secondClaim, err := baseStore.ClaimDelivery(nativeDelivery.Context, baseStore.Authority, evt, managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil || secondClaim.Disposition != runtimedelivery.ClaimBusy {
 		t.Fatalf("second reclaimer = %#v, err=%v; want current renewed claim", secondClaim, err)
 	}
@@ -1107,7 +1107,7 @@ func ProveNativeProcessEventSettlementFailureIsNotReportedAsReplayed(t *testing.
 	nativeDelivery := newNativeDelivery(t)
 	baseStore := nativeDelivery
 	deliveryStore := &failingSettlementManagerDeliveryStore{Store: baseStore}
-	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: deliveryStore, BaseContext: nativeDelivery.Context, MutationContext: nativeDelivery.MutationContext, CarryMutationContext: nativeDelivery.CarryMutationContext})
 	agent := &traceRecordingAgent{}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.received", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
@@ -1356,7 +1356,7 @@ func ProveNativeWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransition
 				t.Fatalf("claim delivery: %v", err)
 			}
 			if tc.exhaust {
-				am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claim.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
+				am.writeReceipt(managerAgentClaimContext(nativeDelivery.Context, claim.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 				deliveryStore.makeDeliveryDueNow(t, evt, "agent-a")
 				claim, err = deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRouteForRun(evt.RunID(), "agent-a"))
 				if err != nil {
@@ -1364,7 +1364,7 @@ func ProveNativeWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransition
 				}
 				bus.runtimeLogs = nil
 			}
-			am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claim.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
+			am.writeReceipt(managerAgentClaimContext(nativeDelivery.Context, claim.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 			if len(bus.runtimeLogs) != 1 {
 				t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
 			}
@@ -1405,7 +1405,7 @@ func ProveNativeWriteReceiptUsesCanonicalHandlerRetryBase(t *testing.T, newNativ
 			if err != nil {
 				t.Fatal(err)
 			}
-			settled, err := am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claimed.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
+			settled, err := am.writeReceipt(managerAgentClaimContext(nativeDelivery.Context, claimed.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1427,7 +1427,7 @@ func ProveNativeWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForL
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
-	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+	ctx, cancel := context.WithCancel(nativeDelivery.Context)
 	cancel()
 	if _, err := am.writeReceipt(managerAgentClaimContext(ctx, claimed.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed")); err == nil {
 		t.Fatal("writeReceipt error = nil, want canceled settlement failure")
@@ -1454,7 +1454,7 @@ func ProveNativeWriteReceiptLongRunningClaimUsesExactRenewalTime(t *testing.T, n
 	}
 	agedAt := time.Now().Add(-15 * time.Minute).UTC()
 	deliveryStore.AgeClaim(t, claimed.Claim, agedAt)
-	settled, err := am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claimed.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
+	settled, err := am.writeReceipt(managerAgentClaimContext(nativeDelivery.Context, claimed.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 	if err != nil {
 		t.Fatalf("settle long-running claim: %v", err)
 	}

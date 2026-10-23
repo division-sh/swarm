@@ -32,6 +32,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -143,17 +144,26 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore, runID string, w
 	if err != nil {
 		t.Fatalf("construct run status delivery authority: %v", err)
 	}
-	if err := pg.ActivateDeliveryAuthority(runStatusAuthorActivityContext(sourceFact), authority); err != nil {
+	original := serveFixtureProcessContext(t, runStatusAuthorActivityContext(sourceFact), pg)
+	capability, err := agentfixture.ProcessCapability(t, original, pg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pg.ActivateDeliveryAuthority(original, authority); err != nil {
 		t.Fatalf("activate run status delivery authority: %v", err)
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		ContractBundle:      source,
-		ExecutionPosture:    executionposture.Live,
-		RuntimeInstanceID:   runStatusTestRuntimeInstanceID,
-		SourceArtifactFact:  sourceFact,
-		WorkOwner:           workOwner,
-		PipelineObligations: pg.PipelineObligations(),
-		DeliveryAuthority:   authority,
+		MutationContext: func(ctx context.Context) (context.Context, error) {
+			return startupownership.WithProcessMutationAuthority(ctx, capability)
+		},
+		CarryMutationContext: startupownership.CarryMutationAuthority,
+		ContractBundle:       source,
+		ExecutionPosture:     executionposture.Live,
+		RuntimeInstanceID:    runStatusTestRuntimeInstanceID,
+		SourceArtifactFact:   sourceFact,
+		WorkOwner:            workOwner,
+		PipelineObligations:  pg.PipelineObligations(),
+		DeliveryAuthority:    authority,
 		Durable: runtimebus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 
@@ -183,13 +193,13 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore, runID string, w
 		t.Fatal("run-status constructor coordinator was not admitted")
 	}
 	planner := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		BaseContext: runStatusAuthorActivityContext(sourceFact), SemanticSource: source, SourceArtifactFact: sourceFact,
+		BaseContext: original, SemanticSource: source, SourceArtifactFact: sourceFact,
 		WorkflowInstances: coordinator, WorkOwner: workOwner, ExecutionPosture: executionposture.Live,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	// Completion controls use a prepared native root; they do not qualify
 	// public launch or attachment. Publication consumes its exact index evidence.
-	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(runStatusAuthorActivityContext(sourceFact), runID), runtimeeffects.ExecutionModeLive)
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(original, runID), runtimeeffects.ExecutionModeLive)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: sourceFact.BundleHash(), Artifact: bundle.SourceArtifact,
 	})
@@ -233,6 +243,7 @@ func startRunStatusReceiverDeliveries(t *testing.T, pg interface {
 }, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, source runtimecorrelation.SourceArtifactFact, identity agentidentity.Identity) {
 	t.Helper()
 	ctx := runStatusAuthorActivityContext(source)
+	ctx = serveFixtureProcessContext(t, ctx, pg)
 	state, found, err := pg.LoadAgentLifecycleState(ctx, identity)
 	if err != nil || !found || state.Identity != identity || state.Phase != runtimemanager.AgentLifecycleRunning ||
 		state.RunMode != runtimemanager.AgentRunModeStandard || state.ProcessBinding.Validate() != nil || state.ProcessBinding.BundleHash != source.BundleHash() {
@@ -303,7 +314,7 @@ func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtim
 		t.Fatalf("load completion candidate identity: %v", err)
 	}
 	if _, err := storetest.ExecuteRunCompletionCandidate(
-		runStatusAuthorActivityContext(source), pg, bundleHash, runID,
+		serveFixtureProcessContext(t, runStatusAuthorActivityContext(source), pg), pg, bundleHash, runID,
 		stagecatalogfixture.NewFinalCatalog([]string{"ready"}, map[string][]string{".": {"ready"}}),
 	); err != nil {
 		t.Fatalf("execute normal run completion candidate: %v", err)

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/google/uuid"
 )
@@ -179,7 +180,11 @@ func TestOrdinaryPublicationPlanningPoolBoundariesBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			direct, err := newStoreTestEventBus(t, boundedStore, bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: evidence.RuntimeInstanceID, DeliveryAuthority: authority})
+			direct, err := newStoreTestEventBus(t, boundedStore, bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: evidence.RuntimeInstanceID, DeliveryAuthority: authority,
+				MutationContext: func(ctx context.Context) (context.Context, error) {
+					return startupownership.WithRuntimeMutationAuthority(ctx, f.grant)
+				},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

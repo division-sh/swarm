@@ -24,6 +24,7 @@ func TestObservabilityReceiptFaultsUseOriginalWriterAndExactFixedRowsBothStores(
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			at := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
 			for _, cell := range []struct {
 				conflict                     ObservabilityReceiptConflict

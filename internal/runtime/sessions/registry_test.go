@@ -218,7 +218,7 @@ func TestInMemoryRegistryResetTerminatesAllMemory(t *testing.T) {
 			t.Fatalf("acquire: %v", err)
 		}
 	}
-	summary, err := sr.ResetAll(ResetMetadata{Source: "runtime reset"})
+	summary, err := sr.ResetAll(context.Background(), ResetMetadata{Source: "runtime reset"})
 	if err != nil {
 		t.Fatalf("ResetAll: %v", err)
 	}

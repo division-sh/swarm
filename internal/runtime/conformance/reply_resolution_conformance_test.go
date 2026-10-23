@@ -303,6 +303,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 			ctx := testAuthorActivityContext(context.Background())
 			source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 			backend := tc.setup(t)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			runID := uuid.NewString()
 			seedDurableReplyConformanceRun(t, ctx, backend, runID, source)
 			ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(ctx, conformanceSourceArtifactFact(t, source)), runID)
@@ -408,6 +409,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 			ctx := testAuthorActivityContext(context.Background())
 			source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 			backend := backendCase.setup(t)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			runID := uuid.NewString()
 			seedDurableReplyConformanceRun(t, ctx, backend, runID, source)
 			ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(ctx, conformanceSourceArtifactFact(t, source)), runID)
@@ -523,6 +525,7 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 				t.Fatalf("human-task continuation fixture hard invalidities = %#v", findings)
 			}
 			backend := backendCase.setup(t)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			cards, ok := backend.(replyHumanTaskConformanceStore)
 			if !ok {
 				t.Fatalf("%T lacks typed human-task conformance surface", backend)

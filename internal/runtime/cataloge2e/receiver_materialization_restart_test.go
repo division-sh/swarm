@@ -109,6 +109,7 @@ func TestReceiverMaterializationPendingAgentRestartBothStores(t *testing.T) {
 				logSelectedForkRecoveryFailure(t, recoveredCtx, reopened, catalogRuntimeRunID, err)
 				t.Fatalf("recover pending agent after committed materializer: %v", err)
 			}
+			reopened.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
 			afterNode, err := recovered.Snapshot(recoveredCtx, node.DeliveryID)
 			if err != nil || !reflect.DeepEqual(node, afterNode) {
 				t.Fatalf("restart rewrote historical materializer: %+v %v", afterNode, err)

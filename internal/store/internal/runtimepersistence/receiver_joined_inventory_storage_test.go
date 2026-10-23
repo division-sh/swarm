@@ -19,6 +19,7 @@ func TestReceiverJoinedInventoryPreservesExactPhysicalOracleBothStores(t *testin
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID, sibling := seedReceiverJoinedInventoryStorage(t, fixture, ctx)
 			want := receiverJoinedInventoryStorageOracle(t, ctx, fixture.db, runID)
 			if len(want) != 3 || want[0].CurrentState != "active" || want[1].CurrentState != "done" || want[2].CurrentState != "queued" {
@@ -114,6 +115,7 @@ func TestReceiverJoinedInventoryRefusesInvalidCancelledClosedAndPartialEvidenceB
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID, _ := seedReceiverJoinedInventoryStorage(t, fixture, ctx)
 			want := receiverJoinedInventoryStorageOracle(t, ctx, fixture.db, runID)
 			for _, invalid := range []string{"", "bad", uuid.Nil.String(), strings.ToUpper("abcdef01-1111-4111-8111-111111111111"), " " + runID} {

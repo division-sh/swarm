@@ -27,6 +27,7 @@ func TestReviewer2589TerminalSnapshotUUIDAlias(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := "abcdefab-cdef-4abc-8def-abcdefabcdef"
 			started := time.Now().UTC().Round(time.Microsecond)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, started)
@@ -76,6 +77,7 @@ func TestIssue2589StagedEventFixturesMaintainPhysicalCountersBothStores(t *testi
 	eachExactFactStore(t, func(t *testing.T, s exactFactStore) {
 		f := newExactFactFixture(t, s)
 		ctx := testAuthorActivityContext()
+		ctx = originalStoreFixtureContext(t, ctx, s.selected)
 		dialect := authoractivity.DialectSQLite
 		if s.postgres {
 			dialect = authoractivity.DialectPostgres

@@ -234,12 +234,12 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					}
 				})
 			}
+			foreignRun := uuid.NewString()
+			foreignSource := stateOnlyRootAcquisitionSource(t, "foreign-replay-parent")
+			foreignBundle, _ := semanticview.Bundle(foreignSource)
+			foreignCtx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, foreignRun, foreignSource), foreignRun)
+			constructHistoricalSourceFixture(t, foreignCtx, fixture.store.(agentFixtureFlowStore), sqliteFlowActivationRequest(foreignBundle, ".", foreignRun, "", foreignRun))
 			t.Run("wrong_run", func(t *testing.T) {
-				foreignRun := uuid.NewString()
-				foreignSource := stateOnlyRootAcquisitionSource(t, "foreign-replay-parent")
-				foreignBundle, _ := semanticview.Bundle(foreignSource)
-				foreignCtx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, foreignRun, foreignSource), foreignRun)
-				constructHistoricalSourceFixture(t, foreignCtx, fixture.store.(agentFixtureFlowStore), sqliteFlowActivationRequest(foreignBundle, ".", foreignRun, "", foreignRun))
 				if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET run_id=$1, parent_instance=$4 WHERE run_id=$2 AND entity_id=$3`, foreignRun, child.ForkRunID, receiver.EntityID, foreignRun); err != nil {
 					t.Fatal(err)
 				}
@@ -430,6 +430,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if !reflect.DeepEqual(after, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
 				t.Fatal("duplicate activation mutated durable history")
 			}
+			ownerT := t
 			t.Run("fresh_claim_recovery_and_exact_settlement", func(t *testing.T) {
 				childCtx := correlation.WithRunID(ctx, child.ForkRunID)
 				fresh := restartedEventDeliveryRouteReadbackStore(t, childCtx, fixture).(deliverylifecycle.Store)
@@ -450,7 +451,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 				if err := acknowledgePipelineEventFixture(childCtx, fresh, childEventID); err != nil {
 					t.Fatalf("accept replay through the existing pipeline settlement/handoff owner: %v", err)
 				}
-				children = admitHistoricalReplayReceiverClaimFixtures(t, childCtx, fresh, children, fact)
+				children = admitHistoricalReplayReceiverClaimFixtures(ownerT, childCtx, fixture.store.(deliverylifecycle.Store), children, fact)
 				immutableBefore := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 				inventory, err := fresh.InspectDeliveryRecovery(childCtx, fact)
 				if err != nil {

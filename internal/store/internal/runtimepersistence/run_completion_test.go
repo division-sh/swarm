@@ -23,9 +23,8 @@ type normalRunCompletionFixture struct {
 	EntityID string
 }
 
-func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstance, flowTemplate string) normalRunCompletionFixture {
+func seedNormalRunCompletionFixture(t *testing.T, ctx context.Context, db *sql.DB, state, flowInstance, flowTemplate string) normalRunCompletionFixture {
 	t.Helper()
-	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -36,6 +35,7 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 		flowTemplate = "example"
 	}
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		RunID: runID, Origin: semanticEventRunOriginForTest(t, eventID, "example.started"),
 		StartedAt: time.Now().UTC(),
@@ -99,8 +99,8 @@ func assertRunCompletionStatus(t *testing.T, db *sql.DB, runID, want string, wan
 func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAndIdle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	fixture := seedNormalRunCompletionFixture(t, db, "done", "review/inst-1", "review")
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
+	fixture := seedNormalRunCompletionFixture(t, ctx, db, "done", "review/inst-1", "review")
 	if err := acknowledgePipelineEventFixture(ctx, pg, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
@@ -134,8 +134,8 @@ func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAnd
 func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWithMissingPipelineReceipt(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
+	fixture := seedNormalRunCompletionFixture(t, ctx, db, "done", "", "")
 	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
@@ -145,8 +145,8 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWithMissingPipelin
 func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActive(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
+	fixture := seedNormalRunCompletionFixture(t, ctx, db, "done", "", "")
 	deliveryEvent := eventtest.PersistedChildForProducer(
 		uuid.NewString(), events.EventType("completion.agent.delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
 		fixture.RunID, fixture.EventID, events.EventEnvelope{}, time.Now().UTC(),
@@ -182,8 +182,8 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliverySettled(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
+	fixture := seedNormalRunCompletionFixture(t, ctx, db, "done", "", "")
 	deliveryEvent := eventtest.PersistedChildForProducer(
 		uuid.NewString(), events.EventType("completion.node.delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
 		fixture.RunID, fixture.EventID, events.EventEnvelope{}, time.Now().UTC(),
@@ -219,8 +219,8 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveThenCompletesAfterTimerSettled(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
+	fixture := seedNormalRunCompletionFixture(t, ctx, db, "done", "", "")
 	if err := acknowledgePipelineEventFixture(ctx, pg, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
@@ -242,8 +242,8 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveTh
 func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseActive(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
+	fixture := seedNormalRunCompletionFixture(t, ctx, db, "done", "", "")
 	if err := acknowledgePipelineEventFixture(ctx, pg, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
@@ -290,8 +290,8 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTerminal(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	fixture := seedNormalRunCompletionFixture(t, db, "working", "", "")
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
+	fixture := seedNormalRunCompletionFixture(t, ctx, db, "working", "", "")
 	if err := acknowledgePipelineEventFixture(ctx, pg, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}

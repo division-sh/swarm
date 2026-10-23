@@ -15,6 +15,7 @@ func TestSelectedForkAuthoredMutationRetainsEveryCoordinateBothStores(t *testing
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			f, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, f.store)
 			claim, foreign := seedDeliveryRecoveryClaim(t, f, ctx), seedDeliveryRecoveryClaim(t, f, ctx)
 			entity, mutation := uuid.NewString(), uuid.NewString()
 			if _, err := f.db.ExecContext(ctx, `INSERT INTO entity_mutations
@@ -64,6 +65,7 @@ func TestVersionOneDeliveredSettlementCountRetainsOutcomeAndVersionBothStores(t 
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			f, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, f.store)
 			claim := seedDeliveryRecoveryClaim(t, f, ctx)
 			read := func(id string, want int) {
 				t.Helper()

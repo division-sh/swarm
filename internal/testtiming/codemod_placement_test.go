@@ -16,7 +16,6 @@ func reviewedCodemodRoot(name string, seconds float64) RootTime {
 
 func TestTestTimeReviewedCodemodPlacementIsFiniteAndFullyCharged(t *testing.T) {
 	roots := []string{
-		"TestReviewedSnapshotCandidateOverlayTypeChecks",
 		"TestNativeTimerSuccessorObserverRejectsRepublicationBothStores",
 		"TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores",
 		"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts",
@@ -28,7 +27,7 @@ func TestTestTimeReviewedCodemodPlacementIsFiniteAndFullyCharged(t *testing.T) {
 		for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
 			for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
 				t.Run(name+"/"+tier+"/"+string(mode), func(t *testing.T) {
-					approved := tier == testplanning.ProfileFull || tier == testplanning.ProfileLifecycle && name != roots[0]
+					approved := tier == testplanning.ProfileFull || tier == testplanning.ProfileLifecycle
 					candidate := append(slices.Clone(base), reviewedCodemodRoot(name, 40))
 					row, problems := compareTimingTier(reference, candidate, rootTimingPolicy(), tier, mode, true)
 					if row.AddedSeconds != 40 || row.Growth != 40 || row.Allowance != 100 || len(problems) != 0 || len(row.Warnings) != 1 || (row.StrictStatus == BudgetPass) != approved {

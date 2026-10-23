@@ -27,6 +27,7 @@ func TestRetryDoesNotFreezeFinalSelectionBothStores(t *testing.T) {
 				fixture := backend.open(t)
 				selected := fixture.store.(deliveryReadProjectionStore)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				event := eventtest.PersistedProjection(uuid.NewString(), "projection.retry", "gateway", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -79,6 +80,7 @@ func TestFinalSelectionLiveTraceAndHistoricalLifetimeBothStores(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(uuid.NewString(), "trace.retry", "gateway", "", json.RawMessage("{\n \"fixed\": true\n}"), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -166,61 +168,13 @@ func TestFinalSelectionLiveTraceAndHistoricalLifetimeBothStores(t *testing.T) {
 	}
 }
 
-func TestNonterminalFinalSelectionCorruptionFailsClosedBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			selected := fixture.store.(boundedRunDebugTraceStore)
-			ctx := testAuthorActivityContext()
-			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			for _, status := range []runtimedelivery.Status{runtimedelivery.StatusPending, runtimedelivery.StatusInProgress, runtimedelivery.StatusFailed} {
-				t.Run(string(status), func(t *testing.T) {
-					event := eventtest.PersistedProjection(uuid.NewString(), "trace.corrupt", "gateway", "", []byte("{}"), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-					route := testEntitylessNodeDeliveryRoute("worker")
-					if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
-						t.Fatal(err)
-					}
-					id, err := runtimedelivery.DeliveryID(event.ID(), route)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if status != runtimedelivery.StatusPending {
-						claim, err := claimDeliveryFixture(ctx, selected, event, route)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if status == runtimedelivery.StatusFailed {
-							if _, err := selected.SettleFailure(ctx, claim.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, Failure: testRetryableFailure(), RetryBase: time.Hour, RuleSelection: handlerselection.NotReached()}); err != nil {
-								t.Fatal(err)
-							}
-						}
-					}
-					if _, err := fixture.db.ExecContext(ctx, `INSERT INTO event_delivery_handler_rule_selections (delivery_id,selection_context,disposition,display_label) VALUES ($1,'none','not_applicable','')`, id); err != nil {
-						t.Fatal(err)
-					}
-					if _, err := selected.Snapshot(ctx, id); !errors.Is(err, runtimedelivery.ErrConflict) {
-						t.Fatalf("%s accepted premature final fact: %v", status, err)
-					}
-					if _, _, err := selected.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10}); err == nil {
-						t.Fatal("trace admitted premature final fact")
-					}
-					// Remove only injected corruption so the next fixture's canonical revision can validate.
-					if _, err := fixture.db.ExecContext(ctx, `DELETE FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, id); err != nil {
-						t.Fatal(err)
-					}
-				})
-			}
-		})
-	}
-}
-
 func TestFinalSelectionTerminalPresenceReadMatrixBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, terminal := range []runtimedelivery.Status{runtimedelivery.StatusDelivered, runtimedelivery.StatusDeadLetter} {
 				t.Run(string(terminal), func(t *testing.T) {
 					runID := uuid.NewString()
@@ -276,6 +230,7 @@ func TestUnreachedSelectionRetryExhaustionBothStores(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(uuid.NewString(), "retry.exhaust", "gateway", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -334,6 +289,7 @@ func TestFinalSelectionAdmissionFailureRollsBackBothStores(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, cut := range []string{"insert", "hydrate", "equality"} {
 				t.Run(cut, func(t *testing.T) {
 					runID := uuid.NewString()

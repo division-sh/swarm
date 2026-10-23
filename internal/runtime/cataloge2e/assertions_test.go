@@ -1,7 +1,6 @@
 package cataloge2e
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -51,14 +50,14 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	grandchildID := "33333333-3333-3333-3333-333333333333"
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "root.started", "child.started", "grandchild.done")
-	ctx := catalogRuntimeContext()
+	ctx := originalCatalogFixtureContext(t, catalogRuntimeContext(), pg)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 	startedAt := time.Now().UTC().Add(-time.Second)
 
 	rootEventID := uuid.NewString()
 	childEventID := uuid.NewString()
 	grandchildEventID := uuid.NewString()
-	fixtureCtx := testAuthorActivityContext(context.Background())
+	fixtureCtx := testAuthorActivityContext(ctx)
 	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.ExistingRunRootIngress(
 		rootEventID,
 		"root.started",

@@ -18,6 +18,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -59,7 +60,12 @@ func assertNativeRuntimeStartCarriesMemoryIdentity(t *testing.T, variant canonic
 			}
 			runID := uuid.NewString()
 			ctx := startupRecoverySourceContext(sourceFact, runID)
-			seedStartupRecoverySourceRun(t, ctx, selected, sourceFact, artifact, runID)
+			prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+			constructionCtx, err := startupownership.WithProcessMutationAuthority(ctx, prepared)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedStartupRecoverySourceRun(t, constructionCtx, selected, sourceFact, artifact, runID)
 			process := worklifetime.NewProcess()
 			rt, err := runtimepkg.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, runtimepkg.RuntimeDeps{
 				Config:     &config.Config{LLM: config.LLMConfig{Backend: "anthropic"}},
@@ -76,7 +82,7 @@ func assertNativeRuntimeStartCarriesMemoryIdentity(t *testing.T, variant canonic
 			if err != nil {
 				t.Fatalf("NewRuntime: %v", err)
 			}
-			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt)
+			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt, prepared)
 			t.Cleanup(func() {
 				if err := closeExternalRuntimeTestGeneration(rt, process, capability); err != nil {
 					t.Errorf("close memory-identity generation: %v", err)

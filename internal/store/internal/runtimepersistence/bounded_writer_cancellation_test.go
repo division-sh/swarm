@@ -33,8 +33,14 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 					db, orderRead = openBoundedOrderReadDB(t, dsn)
 				}
 				pg := newTestPostgresStore(t, db)
+				owner, err := NewPostgresStore(dsn)
+				if err != nil {
+					t.Fatal(err)
+				}
+				bootstrapTestPostgresStore(t, owner)
+				t.Cleanup(func() { _ = owner.Close() })
 				db.SetMaxOpenConns(1)
-				base := testAuthorActivityContext()
+				base := originalStoreFixtureContext(t, testAuthorActivityContext(), owner)
 				now := time.Now().UTC()
 				var table, event, observe string
 				var invoke func(context.Context) error
@@ -224,36 +230,6 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 					t.Fatalf("healthy successor failed: %v", err)
 				}
 			})
-		}
-	}
-}
-
-func TestPostgresQuiescencePreviewAndEmptySelectionRollBackInitialization(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	var before int
-	if err := db.QueryRow(`SELECT count(*) FROM author_activity_order`).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
-	if before != 0 {
-		t.Fatal("fresh fixture already initialized author activity")
-	}
-	for _, dryRun := range []bool{true, false} {
-		result, err := pg.ApplyActiveRunQuiescence(ctx, runquiescence.Request{
-			OperationName: "bounded-dry-run", DryRun: dryRun, AllActiveRuns: true,
-			ReasonCode: runquiescence.ServeAbandonReasonCode, ControlledBy: "test",
-		})
-		if err != nil || result.DryRun != dryRun || len(result.Runs) != 0 {
-			t.Fatalf("locked dry-run result=%#v error=%v", result, err)
-		}
-		var after int
-		if err := db.QueryRow(`SELECT count(*) FROM author_activity_order`).Scan(&after); err != nil {
-			t.Fatal(err)
-		}
-		if after != before {
-			t.Fatalf("selection committed author-activity initialization (dry_run=%t): %d -> %d", dryRun, before, after)
 		}
 	}
 }

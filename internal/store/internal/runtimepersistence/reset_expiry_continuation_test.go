@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -19,8 +20,8 @@ func TestResetContinuationReevaluatesDirectiveExpiryBothStores(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
-				ctx := testAuthorActivityContext()
-				seedDirectiveOperationRun(t, backend.db, backend.name == "postgres")
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)
+				seedDirectiveOperationRun(t, ctx, backend.db, backend.name == "postgres")
 				created := time.Now().UTC()
 				reserved, err := backend.store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, uuid.NewString(), uuid.NewString(), "reset-expiry", "reset-expiry", created))
 				if err != nil {
@@ -42,7 +43,7 @@ func TestResetContinuationReevaluatesDirectiveExpiryBothStores(t *testing.T) {
 					destructivereset.LockManager
 					destructivereset.QuiescenceStore
 				})
-				capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("reset-expiry"))
+				capability, err := agentfixture.ProcessCapability(t, ctx, backend.store.(agentfixture.Store))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -70,7 +71,14 @@ func TestResetContinuationReevaluatesDirectiveExpiryBothStores(t *testing.T) {
 					if err := capability.Release(context.Background()); err != nil {
 						t.Fatal(err)
 					}
-					capability, err = selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("reset-expiry-recovered"))
+					request := testStartupAcquireRequest("reset-expiry-recovered")
+					request.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+					successor, err := selected.AcquireProcessCapability(testAuthorActivityContext(), request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					capability = successor
+					ctx, err = startupownership.WithProcessMutationAuthority(testAuthorActivityContext(), capability)
 					if err != nil {
 						t.Fatal(err)
 					}

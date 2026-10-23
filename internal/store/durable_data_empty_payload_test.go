@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +23,14 @@ func TestDurableDataEmptyHeadAdvancePreservesReceiptsAndPinsBothStores(t *testin
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
 			ctx := context.Background()
+			process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
 			catalog, ref := durableDataTestCatalog(t)
 			if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 				t.Fatal(err)

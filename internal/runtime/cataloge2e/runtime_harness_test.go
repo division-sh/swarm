@@ -297,6 +297,11 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	}
 	processOwner := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, processOwner)
+	var selected runtimestartupownership.Store = pg
+	if pg == nil {
+		selected = sqlite
+	}
+	ctx, processTopology := acquireCatalogRuntimeProcess(t, ctx, selected)
 	var runSetup storetest.RunFixtureStore = pg
 	if pg == nil {
 		runSetup = sqlite
@@ -330,13 +335,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	var selected runtimestartupownership.Store
-	if pg != nil {
-		selected = pg
-	} else {
-		selected = sqlite
-	}
-	processTopology := installCatalogRuntimeStartupGrant(t, ctx, selected, rt, !start)
+	installCatalogRuntimeStartupGrant(t, ctx, processTopology, rt, !start)
 	if !start {
 		installCatalogHarnessDeliveryAuthority(t, ctx, rt, pg, sqlite)
 	}
@@ -388,15 +387,39 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	return h
 }
 
+func acquireCatalogRuntimeProcess(t testing.TB, ctx context.Context, selected runtimestartupownership.Store) (context.Context, runtimestartupownership.ProcessCapability) {
+	t.Helper()
+	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "catalog-runtime-harness", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("acquire catalog runtime process capability: %v", err)
+	}
+	t.Cleanup(func() {
+		select {
+		case <-capability.Done():
+		default:
+			if err := capability.Release(context.Background()); err != nil {
+				t.Errorf("release catalog runtime process capability: %v", err)
+			}
+		}
+	})
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatalf("bind catalog runtime original process: %v", err)
+	}
+	return ctx, capability
+}
+
 func installCatalogRuntimeStartupGrant(
 	t testing.TB,
 	ctx context.Context,
-	selected runtimestartupownership.Store,
+	capability runtimestartupownership.ProcessCapability,
 	rt *runtime.Runtime,
 	componentExecution bool,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
-	if selected == nil || rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {
+	if capability == nil || rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {
 		t.Fatal("catalog runtime startup grant requires a selected store and constructed runtime")
 	}
 	bundleHash := rt.Options.SourceArtifactFact.BundleHash()
@@ -408,12 +431,6 @@ func installCatalogRuntimeStartupGrant(
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
 	if err != nil {
 		t.Fatalf("construct catalog runtime source set: %v", err)
-	}
-	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "catalog-runtime-harness", BootID: uuid.NewString(), RuntimeInstanceID: rt.Options.RuntimeInstanceID,
-	})
-	if err != nil {
-		t.Fatalf("acquire catalog runtime process capability: %v", err)
 	}
 	release := true
 	defer func() {
@@ -690,6 +707,11 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), catalogRuntimeRunID))
 	processOwner := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, processOwner)
+	var selected runtimestartupownership.Store = pg
+	if pg == nil {
+		selected = sqlite
+	}
+	ctx, processTopology := acquireCatalogRuntimeProcess(h.t, ctx, selected)
 	var workflowPersistence runtimepipeline.WorkflowPersistence
 	var deps runtime.RuntimeDeps
 	if pg != nil {
@@ -704,13 +726,7 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 		cancel()
 		h.t.Fatalf("reopen catalog runtime: %v", err)
 	}
-	var selected runtimestartupownership.Store
-	if pg != nil {
-		selected = pg
-	} else {
-		selected = sqlite
-	}
-	processTopology := installCatalogRuntimeStartupGrant(h.t, ctx, selected, rt, false)
+	installCatalogRuntimeStartupGrant(h.t, ctx, processTopology, rt, false)
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		cancel()
 		h.t.Fatalf("prepare reopened author activity catalog: %v", err)

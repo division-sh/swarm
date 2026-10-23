@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 // Preparation observes the original live owner. It neither opens a connection
@@ -109,7 +110,7 @@ func (c *RuntimeConnection) beginLogoutSettlement() (*worklifetime.Lease, error)
 	if !ok {
 		return nil, errRuntimeConnection
 	}
-	return process.Begin(context.Background())
+	return process.Begin(startupownership.CarryMutationAuthority(context.Background(), c.ctx))
 }
 
 func (c *RuntimeConnection) admitSessionLogout(ctx context.Context, op channelonboarding.TeardownOperation) (context.Context, *runtimeeffects.Handle, *clientOccurrence, error) {

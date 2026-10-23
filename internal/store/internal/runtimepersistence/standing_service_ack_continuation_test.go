@@ -61,6 +61,7 @@ func TestStandingServiceAcknowledgedCleanupErrorStillSignalsContinuationBothStor
 			}
 			workflow := newWorkflowTestCoordinator(t, db, runtimepipeline.NewWorkflowPersistence(owner), selected)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			artifact := storeTestSourceArtifact("standing-ack-continuation-" + backend)
 			seedStoreTestPersistedArtifact(t, db, artifact)
 			source := mustStoreTestSourceArtifactFact(artifact.BundleHash())

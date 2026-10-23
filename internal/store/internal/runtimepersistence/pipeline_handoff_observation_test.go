@@ -17,6 +17,7 @@ func TestServedPipelineHandoffObservationPreservesEveryORArmBothStores(t *testin
 		for _, cut := range []string{"complete", "pending", "in_progress", "missing_handoff", "missing_receipt", "foreign_subscriber", "foreign_event"} {
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				claim := seedDeliveryRecoveryClaim(t, fixture, ctx)
 				sibling := seedDeliveryRecoveryClaim(t, fixture, ctx)
 				if cut != "in_progress" {

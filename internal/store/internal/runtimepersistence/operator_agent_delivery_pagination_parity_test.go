@@ -33,6 +33,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(operatorAgentDeliveryPageStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			now := time.Now().UTC().Truncate(time.Second)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)

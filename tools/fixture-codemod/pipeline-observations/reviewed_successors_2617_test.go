@@ -60,30 +60,6 @@ func sameReviewedRecipeKey(left, right recipe) bool {
 	return left.Family == right.Family && left.File == right.File && left.Function == right.Function
 }
 
-func reviewedSharedCoordinatorBody2617(row recipe, packet reviewedSuccessorPacket2617) (string, error) {
-	for _, pin := range packet.Shared {
-		if row.Family != pin.Family || row.File != pin.File || row.Function != pin.Function {
-			continue
-		}
-		history := row
-		history.Successor = ""
-		raw, err := json.Marshal(history)
-		if err != nil {
-			return "", err
-		}
-		current := row.After
-		if row.Successor != "" {
-			current = row.Successor
-		}
-		if fmt.Sprintf("%x", sha256.Sum256(raw)) != pin.HistorySHA256 ||
-			(row.Successor != "") != pin.HasSuccessor || !historicalCurrentSourcePinned(current, pin.CurrentSHA256) {
-			return "", fmt.Errorf("unreviewed shared coordinator history/current endpoint: %s", row.Function)
-		}
-		return current, nil
-	}
-	return "", fmt.Errorf("unlisted shared coordinator endpoint: %s/%s", row.File, row.Function)
-}
-
 func TestReviewedSuccessors2617RetainDiagnosticBoundsAndExactReplaySiblings(t *testing.T) {
 	packet := loadReviewedSuccessors2617(t)
 	diagnostic := packet.Rows[1]

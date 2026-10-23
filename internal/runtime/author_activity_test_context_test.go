@@ -533,6 +533,54 @@ func runtimeTestEphemeralManagerLifecycle(t testing.TB) (runtimestartupownership
 	return grant, runtimemanager.PersistenceRoles{LifecycleState: session, LifecycleOutcome: session}
 }
 
+// These are unit row facts only. Native delivery permission still comes from
+// the independently supplied original process, never this model's attribution.
+type runtimeTestEphemeralLifecycleRows struct {
+	*runtimeTestRetainedSession
+	binding runtimemanager.ProcessExecutionBinding
+}
+
+func (s *runtimeTestEphemeralLifecycleRows) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
+	return s.binding, s.binding.Validate()
+}
+
+func (s *runtimeTestEphemeralLifecycleRows) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	if !req.ProcessBinding.IsZero() && req.ProcessBinding != s.binding {
+		return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("unit lifecycle row attribution differs from its explicit model")
+	}
+	req.ProcessBinding = s.binding
+	return s.runtimeTestRetainedSession.CommitAgentLifecycleTransition(ctx, req)
+}
+
+func (s *runtimeTestEphemeralLifecycleRows) ReadAgentLifecycleOutcome(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+	if !req.ProcessBinding.IsZero() && req.ProcessBinding != s.binding {
+		return runtimemanager.AgentLifecycleTransitionResult{}, false, errors.New("unit lifecycle row attribution differs from its explicit model")
+	}
+	req.ProcessBinding = s.binding
+	return s.runtimeTestRetainedSession.ReadAgentLifecycleOutcome(ctx, req)
+}
+
+func (s *runtimeTestEphemeralLifecycleRows) InspectRunExecutionOwnership(ctx context.Context, runID string) (runtimemanager.RunExecutionOwnership, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if runID != agentidentitytest.DefaultRunID {
+		return runtimemanager.RunExecutionForeign, nil
+	}
+	return runtimemanager.RunExecutionOwned, nil
+}
+
+func runtimeTestEphemeralManagerRows(t testing.TB) (runtimemanager.AgentLifecyclePersistence, runtimemanager.PersistenceRoles) {
+	t.Helper()
+	session := newRuntimeTestRetainedSession(t)
+	rows := &runtimeTestEphemeralLifecycleRows{runtimeTestRetainedSession: session, binding: runtimemanager.ProcessExecutionBinding{
+		ProcessAuthorityID: session.authority.AuthorityID, ProcessOwnerID: session.authority.OwnerID,
+		ProcessBootID: session.authority.BootID, GenerationGrantID: uuid.NewString(),
+		BundleHash: runtimeTestBundleHash, RuntimeInstanceID: session.authority.RuntimeInstanceID, RuntimeGeneration: 1,
+	}}
+	return rows, runtimemanager.PersistenceRoles{LifecycleState: session, LifecycleOutcome: rows}
+}
+
 type runtimeTestUnavailableProposedEffects struct {
 	decisioncard.ProposedEffectStore
 }
@@ -775,6 +823,26 @@ func testAuthorActivityContextForBundle(ctx context.Context, bundleHash string) 
 }
 
 func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, decorators ...func(*runtimeTestRetainedSession) runtimestartupownership.RetainedSession) (*Runtime, error) {
+	return newScopedTestRuntimeWithCapability(t, ctx, deps, nil, decorators...)
+}
+
+func newScopedNativeTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, capability runtimestartupownership.ProcessCapability) (*Runtime, error) {
+	t.Helper()
+	if capability == nil {
+		return nil, fmt.Errorf("native runtime fixture requires its original process capability")
+	}
+	authority, err := capability.Evidence()
+	if err != nil {
+		return nil, err
+	}
+	if deps.Options.RuntimeInstanceID != "" && deps.Options.RuntimeInstanceID != authority.RuntimeInstanceID {
+		return nil, fmt.Errorf("native runtime fixture differs from its original process coordinate")
+	}
+	deps.Options.RuntimeInstanceID = authority.RuntimeInstanceID
+	return newScopedTestRuntimeWithCapability(t, ctx, deps, capability)
+}
+
+func newScopedTestRuntimeWithCapability(t testing.TB, ctx context.Context, deps RuntimeDeps, capability runtimestartupownership.ProcessCapability, decorators ...func(*runtimeTestRetainedSession) runtimestartupownership.RetainedSession) (*Runtime, error) {
 	t.Helper()
 	if deps.Options.WorkflowModule != nil {
 		if bundle, ok := semanticview.Bundle(deps.Options.WorkflowModule.SemanticSource()); ok {
@@ -833,7 +901,13 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, d
 			if deps.Options.WorkflowModule != nil {
 				source = deps.Options.WorkflowModule.SemanticSource()
 			}
-			_, grant, grantErr := newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.SourceArtifactFact, deps.Options.RuntimeInstanceID, retainedSession, decorators...)
+			var grant runtimestartupownership.LiveGenerationGrant
+			var grantErr error
+			if capability == nil {
+				_, grant, grantErr = newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.SourceArtifactFact, deps.Options.RuntimeInstanceID, retainedSession, decorators...)
+			} else {
+				grant, grantErr = nativeRuntimeTestGrant(ctx, runtime, capability)
+			}
 			if grantErr != nil {
 				return nil, grantErr
 			}
@@ -862,6 +936,25 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, d
 		})
 	}
 	return runtime, err
+}
+
+func nativeRuntimeTestGrant(ctx context.Context, runtime *Runtime, capability runtimestartupownership.ProcessCapability) (runtimestartupownership.LiveGenerationGrant, error) {
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+	desired, err := runtime.Manager.CompileStaticTopologyDesiredAgents(runtime.Options.WorkflowModule.SemanticSource(), coordinate)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		return nil, err
+	}
+	return capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: coordinate.BundleHash, RuntimeInstanceID: runtime.Options.RuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
 }
 
 func completeRuntimeRecoveryTestDeps(t testing.TB, deps RuntimeDeps) RuntimeDeps {

@@ -30,6 +30,7 @@ func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *te
 			fixture := backend.open(t)
 			selected := fixture.store.(deliveryReadProjectionStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
@@ -97,6 +98,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(deliveryReadProjectionStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)

@@ -26,6 +26,7 @@ func TestProposedEffectCompletionUsesFrozenPublicationIdentityBothStores(t *test
 				t.Run(backend+"/"+scope.name+"/"+verdict, func(t *testing.T) {
 					ctx := testAuthorActivityContext()
 					cards, runID := decisionCardTestStore(t, backend)
+					ctx = originalStoreFixtureContext(t, ctx, cards)
 					store := cards.(decisioncard.ProposedEffectStore)
 					now := time.Now().UTC()
 					card, continuation := newProposedEffectTestCard(t, runID, now, attemptgeneration.Generation{})

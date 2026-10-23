@@ -250,6 +250,8 @@ type AgentManagerOptions struct {
 	LifecycleDiagnosticOrigin      LifecycleDiagnosticOrigin
 	ExecutionPosture               executionposture.Posture
 	BaseContext                    context.Context
+	MutationContext                func(context.Context) (context.Context, error)
+	CarryMutationContext           func(context.Context, context.Context) context.Context
 	SourceArtifactFact             runtimecorrelation.SourceArtifactFact
 	LifecycleStore                 AgentLifecyclePersistence
 	DeliveryStore                  runtimedelivery.Store

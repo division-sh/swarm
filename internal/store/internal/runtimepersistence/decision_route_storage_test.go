@@ -17,6 +17,7 @@ func TestDecisionRouteStoragePreservesExactEventAndOriginalReadBothStores(t *tes
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cards, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cards)
 			now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)
 			if err := cards.CreateDecisionCard(ctx, card); err != nil {

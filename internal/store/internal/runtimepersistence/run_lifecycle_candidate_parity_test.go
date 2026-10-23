@@ -44,6 +44,7 @@ func TestRunLifecycleTerminalAbsorbsCandidateParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, state := range []runtimerunlifecycle.State{
 				runtimerunlifecycle.StateCompleted,
 				runtimerunlifecycle.StateFailed,
@@ -96,6 +97,7 @@ func TestRunLifecycleTimestampAdmissionParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 12, 0, 0, 987654321, time.FixedZone("offset", -4*60*60))
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
@@ -130,6 +132,7 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			if store, ok := fixture.store.(*SQLiteRuntimeStore); ok {
 				store.nowFn = func() time.Time {
 					return time.Date(2026, 7, 29, 12, 0, 0, 987654321, time.UTC)
@@ -254,6 +257,7 @@ func TestRunLifecycleCompletionRetriesBeforeRunStartParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			startedAt := time.Now().UTC().Add(time.Hour)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
@@ -295,6 +299,7 @@ func TestRunLifecycleTerminalCandidateDuplicateConflictAndRollbackParity(t *test
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			startedAt := time.Date(2026, 7, 29, 13, 0, 0, 0, time.UTC)
 
 			t.Run("exact_duplicate_and_conflict", func(t *testing.T) {
@@ -351,6 +356,7 @@ func TestRunLifecycleCandidateTerminalRaceParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			startedAt := time.Date(2026, 7, 29, 13, 30, 0, 0, time.UTC)
 
 			t.Run("current_revision", func(t *testing.T) {
@@ -413,6 +419,7 @@ func TestRunLifecycleCandidateTerminalRaceParity(t *testing.T) {
 func TestRunLifecycleTerminalAbsorbsCandidatePostgres(t *testing.T) {
 	fixture := openRunLifecycleCandidateParityFixture(t, "postgres")
 	ctx := testAuthorActivitySourceArtifactContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	startedAt := time.Date(2026, 7, 29, 13, 45, 0, 0, time.UTC)
 	sourceRunID := uuid.NewString()
 	childRunID := uuid.NewString()
@@ -457,6 +464,7 @@ func TestRunLifecycleCreateIsInsertOrExactNoopParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			sourceartifactfixture.Require(t, ctx, fixture.store)
 			source, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 			if err != nil {
@@ -519,6 +527,7 @@ func TestRunLifecycleEligibilityOriginParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			at := time.Date(2026, 7, 29, 15, 0, 0, 0, time.UTC)
 
 			t.Run("operator_continue_and_duplicate_resume", func(t *testing.T) {

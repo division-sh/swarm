@@ -1,6 +1,7 @@
 package llmpersistence
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
@@ -28,7 +29,7 @@ func TestSQLiteSessionResetRejectsStaleSchemaBeforeMutation(t *testing.T) {
 		requireCurrent: func() error { return stale },
 		nowFn:          time.Now,
 	}
-	if _, err := owner.ResetAll(runtimesessions.ResetMetadata{}); !errors.Is(err, stale) {
+	if _, err := owner.ResetAll(context.Background(), runtimesessions.ResetMetadata{}); !errors.Is(err, stale) {
 		t.Fatalf("reset must refuse before opening a mutation: %v", err)
 	}
 }

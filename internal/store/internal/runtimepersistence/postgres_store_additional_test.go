@@ -165,6 +165,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -234,6 +235,7 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	eventEntityA := uuid.NewString()
@@ -269,6 +271,7 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -335,6 +338,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -431,6 +435,7 @@ func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButR
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
@@ -484,6 +489,7 @@ func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
@@ -514,11 +520,12 @@ func TestPostgresRegistry_ResetAllMarksActiveSessionsOrphaned(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
-	summary, err := pg.ResetAll(runtimesessions.ResetMetadata{Source: "builder_api"})
+	summary, err := pg.ResetAll(ctx, runtimesessions.ResetMetadata{Source: "builder_api"})
 	if err != nil {
 		t.Fatalf("ResetAll: %v", err)
 	}
@@ -560,6 +567,7 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
@@ -720,6 +728,7 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	validEntityID := uuid.NewString()
 	validEventID := uuid.NewString()
@@ -868,6 +877,7 @@ func TestPostgresStore_AppendEvent_RejectsPayloadAdmissionFailureBeforePersisten
 		return events.PayloadAdmission{}, err
 	})
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	eventID := uuid.NewString()
 
 	event := eventtest.RunCreatingRootIngress(eventID,
@@ -918,9 +928,9 @@ func currentPlatformPayloadAdmitterForStoreTest(t testing.TB) runtimebus.Payload
 func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 
-	completedFixture := seedNormalRunCompletionFixture(t, db, "done", "review/inst-1", "review")
+	completedFixture := seedNormalRunCompletionFixture(t, ctx, db, "done", "review/inst-1", "review")
 	completedRunID := completedFixture.RunID
 	if err := acknowledgePipelineEventFixture(ctx, pg, completedFixture.EventID); err != nil {
 		t.Fatalf("seed completed run receipt: %v", err)
@@ -999,6 +1009,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	parentID := uuid.NewString()
@@ -1055,6 +1066,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	eventID := uuid.NewString()
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, eventtest.RunCreatingRootIngress(eventID,
@@ -1269,6 +1281,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1340,6 +1353,7 @@ func TestManagerStore_ConversationPersistenceUsesExactFlowInstanceIdentity(t *te
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	baseCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	baseCtx = originalStoreFixtureContext(t, baseCtx, pg)
 	resetAgentSessionsSpecTable(t, baseCtx, pg)
 	entityID := uuid.NewString()
 	identity := specMemoryIdentity("entity-agent", "review/inst-1")
@@ -1389,6 +1403,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_PersistsObservedToolCalls(t *te
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1444,6 +1459,7 @@ func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t 
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
@@ -1479,6 +1495,7 @@ func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
@@ -1582,6 +1599,7 @@ func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalRuntimeStat
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1606,6 +1624,7 @@ func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalWatchdogRun
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1630,6 +1649,7 @@ func TestManagerStore_UpdateLiveSessionWatchdog_RoundTripsThroughLoadActiveConve
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1671,6 +1691,7 @@ func TestManagerStore_UpdateLiveSessionWatchdogRejectsMalformedWrite(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1705,6 +1726,7 @@ func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *tes
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1755,6 +1777,7 @@ func TestManagerStore_AppendStatelessAgentTurnPersistsTurnBlocks(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
@@ -1790,6 +1813,7 @@ func TestManagerStore_AppendStatelessAgentTurnCanonicalizesTurnBlocksThroughSing
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
@@ -1824,6 +1848,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_LeavesLiveSessionRuntimeStateFo
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1885,6 +1910,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_PreservesLiveSessionRetryLineag
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -1937,6 +1963,7 @@ func TestManagerStore_ManagedTurnReadbackFixtureRollsBackStatelessAuditAndTurnWh
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	installFailAgentTurnInsertTrigger(t, ctx, db)
 
@@ -1979,6 +2006,7 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
@@ -2028,6 +2056,7 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
@@ -2082,6 +2111,7 @@ func TestManagerStore_AppendStatelessTurnCreatesCanonicalAuditRow(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
@@ -2119,6 +2149,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
@@ -2191,6 +2222,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
@@ -2263,6 +2295,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_FailsOnMalformedCanonicalRuntim
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecMemoryRun(t, ctx, db)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
@@ -2293,6 +2326,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_FailsOnNonStringCanonicalRuntim
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecMemoryRun(t, ctx, db)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
@@ -2622,6 +2656,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), specEntityStateRunID)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
@@ -2793,6 +2828,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{

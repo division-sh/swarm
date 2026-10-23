@@ -38,6 +38,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
@@ -56,6 +57,13 @@ func TestIssue2394PublicationGroupDeferredAgentSIGKILLBothStores(t *testing.T) {
 				source := loadPublicationGroupAgentCrashSource(t, root)
 				ctx, seeded := seedPublicationGroupAgentIntent(t, backend, fixture, source)
 				requirePublicationGroupCrashWorkflowLoad(t, ctx, fixture, seeded.runID)
+				setup, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := setup.Release(ctx); err != nil {
+					t.Fatal(err)
+				}
 				env := []string{"SWARM_FAN_OUT_CRASH_BACKEND=" + backend, "SWARM_FAN_OUT_CRASH_LOCATION=" + location,
 					"SWARM_FAN_OUT_CRASH_ROOT=" + root, "SWARM_FAN_OUT_CRASH_RUN=" + seeded.runID, "SWARM_FAN_OUT_CRASH_CUT=" + cut,
 					"SWARM_PUBLICATION_GROUP_CRASH_RECEIVER=agent"}
@@ -158,6 +166,10 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 		}
 	}
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(request.RuntimeInstanceID, fact.BundleHash()))
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +205,13 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	if err := selected.ActivateDeliveryAuthority(ctx, deliveryAuthority); err != nil {
 		t.Fatal(err)
 	}
-	eventBus, err := newStoreTestEventBus(t, selected, bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: work, RuntimeInstanceID: request.RuntimeInstanceID, DeliveryAuthority: deliveryAuthority, ExecutionPosture: executionposture.MockOnly})
+	eventBus, err := newStoreTestEventBus(t, selected, bus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: fact, WorkOwner: work, RuntimeInstanceID: request.RuntimeInstanceID,
+		DeliveryAuthority: deliveryAuthority, ExecutionPosture: executionposture.MockOnly,
+		MutationContext: func(work context.Context) (context.Context, error) {
+			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +262,10 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 		}
 	}
 	live, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: fact.BundleHash(), RuntimeInstanceID: request.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, live)
 	if err != nil {
 		t.Fatal(err)
 	}

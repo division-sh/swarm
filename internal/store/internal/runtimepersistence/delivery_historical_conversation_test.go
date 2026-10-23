@@ -24,7 +24,7 @@ func proveDeliveryHistoricalEmitterSessionPredicatesBothStores(t *testing.T) {
 			fixture := backend.open(t)
 			store := fixture.store.(completionSettlementTestStore)
 			completion := newCompletionSettlementFixture(t, store, fixture.db, backend.name == "sqlite")
-			ctx := testAuthorActivityContext()
+			ctx := completion.original
 			source := managedCompletionTestEvent(completion.authority)
 			publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", source.RunID())
 			owner := fixture.store.(runForkSelectedLifecycleStore)

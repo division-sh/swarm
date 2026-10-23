@@ -21,8 +21,10 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -80,6 +82,14 @@ func selectedHTTPSettlementContext(t *testing.T, selected httpSettlementSelected
 	runtimeID := uuid.NewString()
 	fixtureCtx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeID)
 	fixtureCtx = runtimeauthoractivity.WithScope(fixtureCtx, runtimeauthoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
+	process, err := agentfixture.ProcessCapability(t, fixtureCtx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureCtx, err = startupownership.WithProcessMutationAuthority(fixtureCtx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := storetest.UpsertStaticAgentFixture(t, fixtureCtx, selected, runtimemanager.PersistedAgent{
 		Config: actor, Status: "active", HiredBy: "http-settlement-test", StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -95,6 +105,7 @@ func selectedHTTPSettlementContext(t *testing.T, selected httpSettlementSelected
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
+	ctx = startupownership.CarryMutationAuthority(ctx, fixtureCtx)
 	return runtimetools.WithActor(ctx, actor), actor
 }
 

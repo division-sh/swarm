@@ -28,6 +28,7 @@ func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 23, 3, 30, 0, 0, time.UTC)
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -85,6 +86,7 @@ func TestRunDebugTraceProjectsPersistedHandlerRuleSelectionWithoutContractLookup
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(

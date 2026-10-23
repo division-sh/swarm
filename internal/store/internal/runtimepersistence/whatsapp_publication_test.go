@@ -42,6 +42,7 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 			candidate.FlowPath = "."
 			candidate.ServiceID = runtimeflowidentity.StandingServiceID(candidate.FlowPath)
 			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
+			ctx = originalStoreFixtureContext(t, ctx, f.selected)
 			scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 			if !ok {
 				t.Fatal("publication component fixture requires its exact source scope")

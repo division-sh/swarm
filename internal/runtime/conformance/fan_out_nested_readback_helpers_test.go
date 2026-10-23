@@ -135,11 +135,14 @@ func assertNestedExactBarrier(t *testing.T, ctx context.Context, db *sql.DB, key
 		key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&gotStatus, &raw); err != nil {
 		t.Fatal(err)
 	}
+	if gotStatus != status {
+		t.Fatalf("nested exact-intent barrier %+v status = %s, want %s", key, gotStatus, status)
+	}
 	var got fanoutbarrier.Summary
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if gotStatus != status || got != want {
+	if got != want {
 		t.Fatalf("nested exact-intent barrier %+v = %s/%+v, want %s/%+v", key, gotStatus, got, status, want)
 	}
 }

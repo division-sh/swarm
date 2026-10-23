@@ -276,6 +276,7 @@ func seedActiveAPIV1RuntimeBusAgentNewRun(t *testing.T, ctx context.Context, own
 	if _, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); !ok {
 		ctx = testAuthorActivityContext(ctx)
 	}
+	ctx = originalAPIFixtureContext(t, ctx, owner)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	seedActiveAPIV1RuntimeBusAgentForRun(t, ctx, owner, runID, agentID, "")
@@ -292,6 +293,7 @@ func seedActiveAPIV1RuntimeBusAgentForRun(t *testing.T, ctx context.Context, own
 	if source.Validate() != nil {
 		t.Fatalf("seed active API runtime-bus agent %s received invalid bundle source", agentID)
 	}
+	ctx = originalAPIFixtureContext(t, ctx, owner)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	identity := runtimebustest.IdentityForRun(t, runID, agentID, flowPath)
 	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, owner, runtimemanager.PersistedAgent{

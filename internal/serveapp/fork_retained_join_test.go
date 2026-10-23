@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
+
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"

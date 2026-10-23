@@ -426,13 +426,14 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 
 func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context.Context, string, string) {
 	t.Helper()
+	fixtureCtx := toolFixtureProcessContext(t, unmanagedToolTestContext(), persistence)
 	runID := uuid.NewString()
 	requestEventID := uuid.NewString()
 	// Force precision that Postgres cannot retain so idempotent replay proves
 	// admission canonicalizes before snapshot and selected-store persistence.
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
-	storetest.RequireRun(t, unmanagedToolTestContext(), persistence, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash})
-	storetest.CommitSemanticEvent(t, unmanagedToolTestContext(), persistence, eventtest.PersistedChildForProducer(
+	storetest.RequireRun(t, fixtureCtx, persistence, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash})
+	storetest.CommitSemanticEvent(t, fixtureCtx, persistence, eventtest.PersistedChildForProducer(
 		requestEventID, events.EventType("provider.requested"),
 		eventtest.Producer(events.EventProducerNode, "requester"), "", []byte(`{}`), 0,
 		runID, eventtest.UUID("provider-request-parent:"+requestEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, now,
@@ -455,7 +456,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		UpdatedAt:            now,
 	}
 	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
-	if err := persistence.CreateReplyContext(unmanagedToolTestContext(), record); err != nil {
+	if err := persistence.CreateReplyContext(fixtureCtx, record); err != nil {
 		t.Fatalf("seed reply tool context: %v", err)
 	}
 	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: record.Origin.EntityID})
@@ -474,7 +475,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: record.Origin.EntityID}),
 		source, now,
 	)
-	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), runID), inbound)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(fixtureCtx, runID), inbound)
 	ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}})
 	return ctx, record.ID, requestEventID
 }

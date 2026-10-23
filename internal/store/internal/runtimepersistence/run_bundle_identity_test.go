@@ -23,6 +23,7 @@ func TestPostgresStore_RunConsumesCanonicalSourceArtifactIdentity(t *testing.T) 
 
 	runID := uuid.NewString()
 	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	registerTestAuthorActivityCatalogForContext(t, pg, ctx)
 	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "scan.requested", "test", "", []byte(`{}`), 0,
@@ -45,7 +46,7 @@ func TestRunLifecycleOwnerRejectsSourceWithoutArtifact(t *testing.T) {
 	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
 
-	_, err := pg.CreateRun(testAuthorActivityContext(), storerunlifecycle.CreateRequest{
+	_, err := pg.CreateRun(originalStoreFixtureContext(t, testAuthorActivityContext(), pg), storerunlifecycle.CreateRequest{
 		RunID: runID, Origin: storerunlifecycle.ScenarioSetupRunOrigin(),
 		Source: mustStoreTestSourceArtifactFact(testCanonicalBundleHash), StartedAt: time.Now().UTC(),
 	})

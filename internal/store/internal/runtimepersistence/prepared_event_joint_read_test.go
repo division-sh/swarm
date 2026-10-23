@@ -19,6 +19,7 @@ func TestPreparedEventJointReadRejectsCorruptionAndReadsFreshFactsBothStores(t *
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "prepared.joint", "gateway", "", []byte(`{"version":1}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticEventFixture(ctx, fixture.store.(eventRecordContractStore), event); err != nil {
 				t.Fatal(err)

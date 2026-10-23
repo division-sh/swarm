@@ -12,9 +12,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -48,6 +50,14 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 				t.Fatal(err)
 			}
 			ctx := testAuthorActivityContext()
+			process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
 			runID := uuid.NewString()
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC()})
 			// A sorted live directory remains graph-valid but changes entry. Neither
@@ -55,10 +65,14 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 			if err := os.WriteFile(path, []byte("name: ordered-retained\nstages: {cooling: {}, Done: {final: true}, registered: {}}\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
+			if err := process.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
 			if err := selected.Close(); err != nil {
 				t.Fatal(err)
 			}
 			reloaded := reopen()
+			ctx = originalStoreFixtureContext(t, testAuthorActivityContext(), reloaded)
 			persisted, err := reloaded.GetSourceArtifact(ctx, bundle.SourceArtifact.BundleHash())
 			if err != nil {
 				t.Fatal(err)

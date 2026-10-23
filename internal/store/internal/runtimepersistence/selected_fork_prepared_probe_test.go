@@ -51,6 +51,7 @@ func TestPreparedSelectedForkProbeSurfaceBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			if err := store.SaveManagedCapabilitySurface(ctx, surface); err != nil {
 				t.Fatalf("save non-executable preparation diagnostic: %v", err)
 			}

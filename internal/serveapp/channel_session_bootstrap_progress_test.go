@@ -73,9 +73,9 @@ func requireSessionPendingResult(t *testing.T, result channelonboarding.Result, 
 	}
 }
 
-func startHeldSessionRequest(t *testing.T, service *channelonboarding.Service, adapter *serveSessionBootstrap, cut *sessionConstructionCut, key string) (channelonboarding.Operation, func()) {
+func startHeldSessionRequest(t *testing.T, ctx context.Context, service *channelonboarding.Service, adapter *serveSessionBootstrap, cut *sessionConstructionCut, key string) (channelonboarding.Operation, func()) {
 	t.Helper()
-	caller, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	caller, cancel := context.WithTimeout(ctx, 5*time.Second)
 	finished := make(chan error, 1)
 	go func() {
 		_, err := service.Start(caller, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
@@ -229,8 +229,7 @@ func requireExplicitSessionContinuation(t *testing.T, service *channelonboarding
 
 func requireSessionPrivateOpenFailure(t *testing.T, backend string) {
 	t.Helper()
-	ctx := context.Background()
-	service, sessions := installedSessionBootstrapFixture(t, backend)
+	service, sessions, ctx := installedSessionBootstrapFixture(t, backend)
 	adapter := sessions.(*serveSessionBootstrap)
 	file, err := os.CreateTemp(t.TempDir(), "not-a-session-directory")
 	if err != nil {
@@ -280,11 +279,10 @@ func requireSessionPrivateOpenFailure(t *testing.T, backend string) {
 
 func requireSessionPendingRequestProgress(t *testing.T, backend string, retirement bool) {
 	t.Helper()
-	ctx := context.Background()
-	service, sessions := installedSessionBootstrapFixture(t, backend)
+	service, sessions, ctx := installedSessionBootstrapFixture(t, backend)
 	adapter := sessions.(*serveSessionBootstrap)
 	cut, selections, release := installSessionConstructionCut(t, adapter)
-	op, cancel := startHeldSessionRequest(t, service, adapter, cut, "pending-private-preparation")
+	op, cancel := startHeldSessionRequest(t, ctx, service, adapter, cut, "pending-private-preparation")
 	cancel()
 	requirePendingConcurrentSessionRequests(t, service, ctx, op)
 	adapter.mu.Lock()
@@ -328,8 +326,7 @@ func requireSessionPendingRequestProgress(t *testing.T, backend string, retireme
 
 func requireSessionRetryPendingConstruction(t *testing.T, backend string) {
 	t.Helper()
-	ctx := context.Background()
-	service, sessions := installedSessionBootstrapFixture(t, backend)
+	service, sessions, ctx := installedSessionBootstrapFixture(t, backend)
 	adapter := sessions.(*serveSessionBootstrap)
 	started, err := service.Start(ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
 		Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}, IdempotencyKey: "owned-construction-progress"})

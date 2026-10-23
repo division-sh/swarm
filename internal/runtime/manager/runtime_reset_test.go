@@ -69,7 +69,7 @@ func (*resetTestRegistry) Rotate(context.Context, *sessions.Lease, sessions.Rota
 func (*resetTestRegistry) IncrementTurnOutcome(context.Context, *sessions.Lease) (sessions.TurnIncrementResult, error) {
 	return sessions.TurnIncrementResult{Acknowledged: true}, nil
 }
-func (r *resetTestRegistry) ResetAll(sessions.ResetMetadata) (sessions.ResetSummary, error) {
+func (r *resetTestRegistry) ResetAll(context.Context, sessions.ResetMetadata) (sessions.ResetSummary, error) {
 	return r.summary, nil
 }
 

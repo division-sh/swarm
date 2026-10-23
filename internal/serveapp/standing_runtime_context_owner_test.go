@@ -29,6 +29,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -146,6 +147,10 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			selectedCtx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(runtimeInstanceID, selectedHash))
 			selectedCtx = runtimecorrelation.WithSourceArtifactFact(selectedCtx, selectedFact)
 			selectedCtx = worklifetime.WithRuntimeOccurrence(selectedCtx, selected.WorkOccurrence())
+			selectedCtx, err = runtimestartupownership.WithRuntimeMutationAuthority(selectedCtx, grant)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if _, err := grant.MarkProbesSettled(selectedCtx, nil); err != nil {
 				t.Fatalf("settle selected standing probes: %v", err)
 			}

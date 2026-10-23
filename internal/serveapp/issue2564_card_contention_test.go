@@ -60,6 +60,10 @@ func TestIssue2564DecisionCardReevaluatesSameLeaseAfterRealCASLossBothStores(t *
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
 			ctx = worklifetime.WithProcess(ctx, rt.Runtime.Options.ProcessWorkOwner)
 			ctx = worklifetime.WithOccurrence(ctx, rt.Runtime.WorkOccurrence())
+			ctx, err := rt.Runtime.Bus.AdmitSourceArtifactFact(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
 			cardID := storetest.ObservePendingFixtureCard(t, ctx, rt.selected, seed.RunID)
 			card, err := rt.persistence.deps.DecisionCards.GetDecisionCard(ctx, cardID)
 			if err != nil {

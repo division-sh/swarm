@@ -543,7 +543,7 @@ func (eb *EventBus) bindClaimedRunWork(
 		_ = lease.Done()
 		return ctx, nil, errors.New("standing-generation pipeline recovery admission omitted its exact occurrence")
 	}
-	return bindWorkContext(ctx, lease, contextOwner), lease, nil
+	return bindWorkContext(ctx, lease, contextOwner, eb.carryMutationContext), lease, nil
 }
 
 func (eb *EventBus) logStartupRecoveryPipelineAftermath(

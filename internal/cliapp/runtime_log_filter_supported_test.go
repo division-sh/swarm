@@ -53,6 +53,7 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 			fact := sourceartifactfixture.Fact()
 			ctx := correlation.WithSourceArtifactFact(correlation.WithRuntimeInstanceID(context.Background(), instance), fact)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(instance, fact.BundleHash()))
+			ctx = cliFixtureProcessContext(t, ctx, selected)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# runtime-log-consumer-foreign\n"))
