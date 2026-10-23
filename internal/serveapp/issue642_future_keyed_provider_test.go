@@ -220,7 +220,7 @@ func issue642RequireKeyedProviderResult(t *testing.T, rt issue2564ServedFixture,
 		t.Fatalf("keyed provider did not keep its exact entity result: %+v err=%v", worker, err)
 	}
 	root, err := rt.selected.LoadOperatorEntity(t.Context(), runID, runID)
-	if err != nil || root.Entity.CurrentState == nil || *root.Entity.CurrentState != "done" || root.Fields["counter"] != float64(1) {
+	if err != nil || root.Entity.CurrentState == nil || *root.Entity.CurrentState != "done" || root.Fields["counter"] != json.Number("1") {
 		t.Fatalf("root did not consume the keyed result exactly once: %+v err=%v", root, err)
 	}
 	reader, ok := rt.persistence.deps.EventStore.(operatorread.AgentReader)
