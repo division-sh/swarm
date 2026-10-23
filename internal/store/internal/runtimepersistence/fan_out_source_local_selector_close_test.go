@@ -61,7 +61,7 @@ func TestFanOutClosingSourceFailedRetirementPreservesHealthyProgressBothStores(t
 				}
 				return result.Intents[0].Runtime
 			}
-			if observed := read(healthy); observed.Reason != "registration_pending" || observed.Eligible != nil {
+			if observed := read(healthy); observed.Reason != "runtime_observation_unavailable" || observed.Eligible != nil || observed.ObservedAt != nil {
 				t.Fatalf("closing A suppressed never-registered B's admission gap: %+v", observed)
 			}
 			starting, err := startupownership.RegisterFanOutServing(ctx, grants[1], occurrences[1], &workers)
@@ -69,7 +69,7 @@ func TestFanOutClosingSourceFailedRetirementPreservesHealthyProgressBothStores(t
 				t.Fatal(err)
 			}
 			t.Cleanup(starting.Close)
-			if observed := read(healthy); observed.Reason != "registration_pending" || observed.Eligible != nil {
+			if observed := read(healthy); observed.Reason != "runtime_observation_unavailable" || observed.Eligible != nil || observed.ObservedAt != nil {
 				t.Fatalf("starting B without an executor falsely completed the census: %+v", observed)
 			}
 			starting.Close()

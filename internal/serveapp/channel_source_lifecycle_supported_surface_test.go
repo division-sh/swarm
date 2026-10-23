@@ -24,7 +24,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 		for _, operation := range []string{"disk", "new_process", "retained_reset", "source_reset", "fork"} {
 			t.Run(string(backend)+"/"+operation, func(t *testing.T) {
 				var deliveryReader servedRunDeliveryReader
-				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+				var receiverReader receiverProofStateReader
+				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+					deliveryReader = p.deps.DeliveryStore.SummarizeRun
+					receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
 				var standingRun string
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
@@ -285,6 +289,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if err := json.Unmarshal(response.Result, &fork); err != nil {
 						t.Fatal(err)
 					}
+					waitServedSelectedForkFrontier(t, receiverReader, deliveryReader, fork.ForkRunID, frontier.EventID)
 					var supersessionCount, exactLineageCount int
 					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_superseded'`, fork.ForkRunID).Scan(&supersessionCount); err != nil {
 						t.Fatal(err)

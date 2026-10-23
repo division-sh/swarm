@@ -429,7 +429,12 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								if !reflect.DeepEqual(prior.Entities, plan.Entities) || prior.ForkPoint != plan.ForkPoint {
 									t.Fatalf("later imported history poisoned the earlier clean cut: before=%+v after=%+v", plan, prior)
 								}
-								valid, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+								var valid runfork.RunForkMaterialization
+								if phase == "exact_replay" {
+									valid, err = f.store.RequireMaterializedRunFork(f.ctx, forkRunID, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+								} else {
+									valid, err = f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+								}
 								if err != nil || (phase == "exact_replay" && valid.ForkRunID != forkRunID) {
 									t.Fatalf("earlier admitted import cut stopped materializing: %+v %v", valid, err)
 								}

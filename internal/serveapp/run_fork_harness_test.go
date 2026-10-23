@@ -29,7 +29,7 @@ import (
 
 // runForkRuntimeOwnerHarness preserves internal runtime/store fork owner coverage for targeted tests.
 // The public `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--allow-source-freeze] [--idempotency-key <key>]` command consumes /v1/rpc run.fork rather than this harness.
-func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer) (code int) {
+func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer, observe ...func(context.Context, runtimerunforkexecution.SelectedContractExecutionResult) error) (code int) {
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "Path to swarm.yaml config")
@@ -407,6 +407,12 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				fmt.Fprintf(out, "fork failed: %v\n", err)
 			}
 			return 1
+		}
+		for _, observation := range observe {
+			if err := observation(ctx, result); err != nil {
+				fmt.Fprintf(out, "fork failed: observe retained execution: %v\n", err)
+				return 1
+			}
 		}
 		if *asJSON {
 			enc := json.NewEncoder(out)

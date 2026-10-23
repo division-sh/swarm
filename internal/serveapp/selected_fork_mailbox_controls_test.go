@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/google/uuid"
 )
 
 func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
@@ -39,6 +40,7 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 				"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true,
 				"idempotency_key": "selected-card-fork",
 			})
+			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
 			var cardID, contentHash, bindingID string
 			if err := rt.DB.QueryRow(`SELECT card_id,card_content_hash FROM decision_cards WHERE run_id=$1`, fork.ForkRunID).Scan(&cardID, &contentHash); err != nil || cardID == sourceCard {
 				t.Fatalf("fork did not own its distinct decision card: card=%q err=%v", cardID, err)
@@ -60,7 +62,7 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 					{"mailbox.decide", map[string]any{"verdict": "approve", "observed_content_hash": contentHash, "fields": map[string]any{}}},
 					{"mailbox.defer", map[string]any{"until": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)}},
 					{"mailbox.begin_input", map[string]any{"verdict": "approve", "observed_content_hash": contentHash}},
-					{"mailbox.cancel_input", map[string]any{"input_draft_id": "not-admitted"}},
+					{"mailbox.cancel_input", map[string]any{"input_draft_id": uuid.NewString()}},
 				} {
 					t.Run(phase+"/"+operation.name, func(t *testing.T) {
 						operation.params["card_id"] = cardID
@@ -68,8 +70,16 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 						before := snapshotForkReceiverApplication(t, rt)
 						refusal := requireServedJSONRPCError(t, rt.Endpoint, operation.name, operation.params)
 						details, ok := refusal.Data["details"].(map[string]any)
-						if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != operation.name {
-							t.Fatalf("mailbox control did not reject the exact selected binding: %+v", refusal)
+						if phase == "active" {
+							want := "MAILBOX_ALREADY_DECIDED"
+							if operation.name == "mailbox.cancel_input" {
+								want = "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY"
+							}
+							if refusal.Data["code"] != want || !ok || details["card_id"] != cardID {
+								t.Fatalf("admitted selected control lost its exact terminal-card refusal: %+v", refusal)
+							}
+						} else if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != operation.name {
+							t.Fatalf("mailbox control did not reject the exact retired binding: %+v", refusal)
 						}
 						after := snapshotForkReceiverApplication(t, rt)
 						if phase == "retired" && !reflect.DeepEqual(before, after) {

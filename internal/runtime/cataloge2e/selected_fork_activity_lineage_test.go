@@ -13,25 +13,38 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
+
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
 type activityLineageProofStore struct {
 	forkexecution.SelectedContractForkLifecycle
+	forkexecution.SelectedContractRuntimeExecutionLifecycle
 	t           *testing.T
 	h           *runtimeHarness
 	calls       *atomic.Int32
 	hostile     bool
 	hostileLoop bool
 	rejectFinal bool
+	settled     chan error
 }
 
-func (p *activityLineageProofStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+type activityLineageSettlement struct {
+	authority             effects.Authority
+	ForkRunID             string
+	AllowedSourceEventIDs []string
+	ExecutionSource       semanticview.Source
+}
+
+func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowed []string, source semanticview.Source) (err error) {
+	defer func() { p.settled <- err }()
+	req := activityLineageSettlement{authority: authority, ForkRunID: authority.SelectedFork.ForkRunID, AllowedSourceEventIDs: allowed, ExecutionSource: source}
 	t := p.t
 	observed := activityLineageEvents(t, ctx, p.h, req.ForkRunID)
 	var request, result, diagnostic operatorread.OperatorEventFull
@@ -52,7 +65,7 @@ func (p *activityLineageProofStore) ActivateRunForkForSelectedContractExecution(
 	}
 	if p.rejectFinal {
 		p.writePayload(ctx, request.EventID, map[string]any{})
-		return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+		return p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source)
 	}
 	if p.hostileLoop {
 		requestOwner, err := activityidentity.ParseOwnerKey(request.Payload["node_id"].(string))
@@ -282,7 +295,7 @@ func (p *activityLineageProofStore) ActivateRunForkForSelectedContractExecution(
 			p.requireRejected(t, ctx, req)
 		})
 	}
-	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+	return p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source)
 }
 
 // Preserve every admitted envelope coordinate while reminting the request's
@@ -347,19 +360,19 @@ func (p *activityLineageProofStore) remintRequest(ctx context.Context, request o
 	return func() { p.update(ctx, "DELETE FROM events WHERE event_id=$1", id) }
 }
 
-func (p *activityLineageProofStore) requireRejected(t *testing.T, ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) {
+func (p *activityLineageProofStore) requireRejected(t *testing.T, ctx context.Context, req activityLineageSettlement) {
 	t.Helper()
 	before := activityLineageStateSnapshot(t, ctx, p.h, req.ForkRunID)
 	for attempt := 0; attempt < 2; attempt++ {
-		result, err := p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
-		if err == nil || result.Activated || (!strings.Contains(err.Error(), "fork activity lineage") && !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage")) {
-			t.Fatalf("lineage must reject before activation: activated=%t err=%v", result.Activated, err)
+		err := p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, req.authority, req.AllowedSourceEventIDs, req.ExecutionSource)
+		if err == nil || (!strings.Contains(err.Error(), "fork activity lineage") && !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage")) {
+			t.Fatalf("lineage must reject final settlement: %v", err)
 		}
 		if p.calls.Load() != 1 {
 			t.Fatalf("reverification repeated HTTP: %d", p.calls.Load())
 		}
 		if after := activityLineageStateSnapshot(t, ctx, p.h, req.ForkRunID); before != after {
-			t.Fatal("rejected activation mutated durable state")
+			t.Fatal("rejected settlement mutated durable state")
 		}
 	}
 }

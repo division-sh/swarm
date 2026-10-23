@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -201,7 +202,8 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if current := readFixed(); !reflect.DeepEqual(current, original) {
 				t.Fatal("current source progress changed the captured observation")
 			}
-			if replayed, err := forks.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, forkRequest); err == nil || replayed.ForkRunID != "" || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {
+			var conflict *runfork.RunForkMaterializationConflictError
+			if replayed, err := forks.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, forkRequest); err == nil || replayed.ForkRunID != "" || !errors.As(err, &conflict) || conflict.ForkRunID != fork.ForkRunID {
 				t.Fatalf("source progress rewrote frozen fork eligibility: %+v err=%v", replayed, err)
 			}
 			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {

@@ -591,12 +591,24 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 				selected := owner.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
-				handle := seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
+				entityID := uuid.NewString()
+				handle := seedFanOutDeliveryBarrierRecord(t, ctx, db, fixture, entityID, attemptgeneration.Generation{}, base)
 				advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(time.Second))
-				event := fanOutBarrierChildEvent(t, fixture, 200, base.Add(2*time.Second))
+				activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
+				activation, found, err := owner.(runtimegenericschedule.Store).LoadGenericScheduleActivation(ctx, activationID)
+				if err != nil || !found {
+					t.Fatalf("load exact barrier completion schedule: found=%t err=%v", found, err)
+				}
+				payload, err := canonicaljson.Encode(activation.Command.Payload)
+				if err != nil {
+					t.Fatal(err)
+				}
+				event := eventtest.RuntimeControlWithRoutingSource(runtimegenericschedule.OccurrenceEventID(activationID, activation.CurrentDueAt), events.EventType(activation.Command.EventType), runtimegenericschedule.OccurrenceProducerID(), handle.TaskID(), payload, 0, fixture.runID, "",
+					events.EventEnvelope{EntityID: entityID}, activation.Command.RoutingSource, activation.CurrentDueAt)
 				var routes []events.DeliveryRoute
 				if !noRoute {
-					routes = []events.DeliveryRoute{fanOutBarrierRoute("failed-outcome")}
+					ref, _ := handle.JoinRef()
+					routes = []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ref.FlowPath(), FlowInstance: "root", EntityID: entityID})}}
 				}
 				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, routes); err != nil {
 					t.Fatal(err)
@@ -604,9 +616,7 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 				if !noRoute {
 					settleFanOutBarrierRouteDeadLetter(t, ctx, selected, event, routes[0])
 				}
-				if _, err := db.ExecContext(ctx, `UPDATE timers SET status='fired',occurrence_event_id=$1,occurrence_admitted_at=$2,fired_at=$2,accepted_at=$2 WHERE run_id=$3 AND schedule_key=$4`, event.ID(), base.Add(3*time.Second), fixture.runID, handle.TaskID()); err != nil {
-					t.Fatal(err)
-				}
+				markFanOutBarrierScheduleFired(t, ctx, db, activationID, event.ID(), base.Add(3*time.Second))
 				advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(4*time.Second))
 				want := fanoutbarrier.Summary{Total: 0}
 				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusOutcomeDeadLettered, &want, handle.TaskID())

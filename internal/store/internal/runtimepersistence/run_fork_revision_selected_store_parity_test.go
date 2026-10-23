@@ -384,6 +384,7 @@ func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 			})
 			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""), "active")
+			initialRevision := captureRunForkTestRevision(t, db, fixture.runID)
 
 			tx, err := db.BeginTx(ctx, nil)
 			if err != nil {
@@ -407,8 +408,8 @@ func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
 			if err != nil {
 				t.Fatalf("finalize representative workload revision: %v", err)
 			}
-			if got := results[fixture.runID]; !got.Changed || got.Revision != 1 {
-				t.Fatalf("representative workload revision = %#v, want changed revision 1", got)
+			if got := results[fixture.runID]; !got.Changed || got.Revision != initialRevision+1 {
+				t.Fatalf("representative workload revision = %#v, want next after %d", got, initialRevision)
 			}
 			if err := tx.Commit(); err != nil {
 				t.Fatalf("commit representative workload revision: %v", err)
@@ -418,8 +419,8 @@ func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
 			if err != nil {
 				t.Fatalf("representative workload is not fork-plannable: %v", err)
 			}
-			if plan.ForkPoint.EventID != selectedEventID || plan.ForkPoint.Revision != 1 {
-				t.Fatalf("representative workload fork point = %#v, want event %s at revision 1", plan.ForkPoint, selectedEventID)
+			if plan.ForkPoint.EventID != selectedEventID || plan.ForkPoint.Revision != initialRevision+1 {
+				t.Fatalf("representative workload fork point = %#v, want event %s after revision %d", plan.ForkPoint, selectedEventID, initialRevision)
 			}
 		})
 	}

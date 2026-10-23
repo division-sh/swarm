@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -21,27 +22,29 @@ import (
 
 type diagnosticForkActivationProbe struct {
 	forkexecution.SelectedContractForkLifecycle
+	forkexecution.SelectedContractRuntimeExecutionLifecycle
 	t        *testing.T
 	h        *runtimeHarness
 	scenario string
-	checked  bool
+	settled  chan error
 }
 
-func (p *diagnosticForkActivationProbe) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	p.checked = true
+func (p *diagnosticForkActivationProbe) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowed []string, source semanticview.Source) (err error) {
+	defer func() { p.settled <- err }()
+	forkRunID := authority.SelectedFork.ForkRunID
 	var observations, pending int
-	if err := p.h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NOT NULL`, req.ForkRunID).Scan(&observations); err != nil {
+	if err := p.h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NOT NULL`, forkRunID).Scan(&observations); err != nil {
 		p.t.Fatal(err)
 	}
-	if err := p.h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NULL`, req.ForkRunID).Scan(&pending); err != nil {
+	if err := p.h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NULL`, forkRunID).Scan(&pending); err != nil {
 		p.t.Fatal(err)
 	}
 	if observations == 0 || pending != 0 {
-		p.t.Fatalf("pre-activation diagnostic projection acknowledged=%d pending=%d", observations, pending)
+		p.t.Fatalf("terminal diagnostic projection acknowledged=%d pending=%d", observations, pending)
 	}
 	if p.scenario != "clean" {
 		var id string
-		if err := p.h.db.QueryRowContext(ctx, `SELECT outbox_id FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NOT NULL ORDER BY created_at,outbox_id LIMIT 1`, req.ForkRunID).Scan(&id); err != nil {
+		if err := p.h.db.QueryRowContext(ctx, `SELECT outbox_id FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NOT NULL ORDER BY created_at,outbox_id LIMIT 1`, forkRunID).Scan(&id); err != nil {
 			p.t.Fatal(err)
 		}
 		id = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:lifecycle-diagnostic:"+id)).String()
@@ -66,7 +69,7 @@ func (p *diagnosticForkActivationProbe) ActivateRunForkForSelectedContractExecut
 				parent = id
 			} else {
 				detail["runtime_lineage_owner"] = runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner
-				detail["runtime_lineage_run_id"] = req.ForkRunID
+				detail["runtime_lineage_run_id"] = forkRunID
 				detail["runtime_lineage_row_category"] = "diagnostic"
 				detail["runtime_lineage_selected_fork_owner"] = runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner
 				detail["runtime_lineage_classification"] = "fork_local"
@@ -82,12 +85,12 @@ func (p *diagnosticForkActivationProbe) ActivateRunForkForSelectedContractExecut
 			if err != nil {
 				p.t.Fatal(err)
 			}
-			if err := selected.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{EventID: uuid.NewString(), CreatedAt: time.Now().UTC(), RunID: req.ForkRunID, ParentEventID: parent, ExecutionMode: executionmode.Live, Payload: admission.Payload(), PayloadAdmission: admission}); err != nil {
+			if err := selected.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{EventID: uuid.NewString(), CreatedAt: time.Now().UTC(), RunID: forkRunID, ParentEventID: parent, ExecutionMode: executionmode.Live, Payload: admission.Payload(), PayloadAdmission: admission}); err != nil {
 				p.t.Fatal(err)
 			}
 		}
 	}
-	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+	return p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source)
 }
 
 func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
@@ -111,22 +114,31 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 					installCatalogSelectedSourceTopology(t, ctx, h, loaded)
 					cfg := testRuntimeConfig()
 					cfg.LLM.Backend = "anthropic"
-					probe := &diagnosticForkActivationProbe{SelectedContractForkLifecycle: forkStore, t: t, h: h, scenario: scenario}
+					probe := &diagnosticForkActivationProbe{
+						SelectedContractForkLifecycle:             forkStore,
+						SelectedContractRuntimeExecutionLifecycle: forkStore.(forkexecution.SelectedContractRuntimeExecutionLifecycle),
+						t: t, h: h, scenario: scenario, settled: make(chan error, 1),
+					}
 					result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
 						SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
 						Owner: selectedContractExecutionOwnerForCatalogHarness(t, h, probe), SourceLoader: loader, ContractSelection: selection,
 						AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
 					})
-					if !probe.checked {
-						t.Fatalf("never reached final fork validation: %v", err)
+					if err != nil || !result.Activation.Activated {
+						t.Fatalf("activation acknowledgment: %+v err=%v", result.Activation, err)
+					}
+					select {
+					case err = <-probe.settled:
+					case <-time.After(10 * time.Second):
+						t.Fatal("never reached native final settlement")
 					}
 					if scenario == "clean" {
-						if err != nil || !result.Activation.Activated {
-							t.Fatalf("clean lifecycle activation: %v", err)
+						if err != nil {
+							t.Fatalf("clean lifecycle settlement: %v", err)
 						}
 					} else {
-						if err == nil || result.Activation.Activated {
-							t.Fatalf("hostile %s activated: %v", scenario, err)
+						if err == nil {
+							t.Fatalf("hostile %s settled", scenario)
 						}
 						if scenario != "corrupt_ack" && !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
 							t.Fatalf("wrong refusal: %v", err)

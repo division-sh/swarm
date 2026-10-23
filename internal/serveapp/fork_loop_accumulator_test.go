@@ -97,7 +97,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "accumulator-fork"}
 				var fork apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+				waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
 				child := readForkHandlerAccumulators(t, rt, fork.ForkRunID)
 				if len(child) != len(source) {
 					t.Fatalf("child bucket count=%d source=%d; source=%#v child=%#v", len(child), len(source), source, child)

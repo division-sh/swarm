@@ -48,7 +48,7 @@ func (b *receiverForkPublicationBarrier) NotifyLifecycle(ctx context.Context, si
 
 func TestReceiverCompositionForkBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		for _, surface := range []string{"admitted", "admitted_http", "historical_refusal", "pending_refusal", "fieldless_settled", "fieldless_post_output_refusal"} {
+		for _, surface := range []string{"admitted", "admitted_http", "pending_refusal", "fieldless_settled"} {
 			t.Run(string(backend)+"/"+surface, func(t *testing.T) {
 				admitted := strings.HasPrefix(surface, "admitted") || surface == "fieldless_settled"
 				fieldless := strings.HasPrefix(surface, "fieldless_")
@@ -279,8 +279,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				rootPhase := "planned"
 				rootRevision := 2
 				if fieldless {
-					// Historical source-only headers do not acquire attachment.
-					rootPhase = ""
+					// The retained root is planned without inventing a field companion.
 					rootRevision = 1
 				}
 				requireReceiverConstructedInstance(t, rt, forkRunID, forkRunID, ".", forkRunID, rootType, rootState, "", rootPhase, rootRevision, rootFields)
