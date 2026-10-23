@@ -33,6 +33,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 

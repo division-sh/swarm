@@ -8,7 +8,7 @@ generation:
     profile:
         path: catalog/generator-profiles/acme.yaml
         schema_version: "1"
-        sha256: sha256:f8d12f45330f0605d918e2735322f2c63c42757a483f9dd26530431d2b7ad555
+        sha256: sha256:c5718bba54eb9b68256d1e8ba3c864ff74d1db9dc56ee04a63d1fcde3bfd38a3
     operations:
         - operation_id: widgets/create
           tool_id: create_widget

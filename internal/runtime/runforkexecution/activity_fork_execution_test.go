@@ -338,7 +338,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 		t.Fatal(err)
 	}
 	parent := eventtest.ExistingRunRootIngressWithRoutingSource(request.SourceEventID, "flow_a/review.requested", "source-runtime", "", parentPayload, 0, runID, envelope, source, at.Add(-time.Microsecond))
-	parentAdmission, err := admitter(ctx, parent, "flow_a")
+	parentAdmission, err := admitter(ctx, parent, events.EventPayloadProducer(parent, "flow_a"))
 	if err != nil {
 		t.Fatalf("admit source activity cause: %v", err)
 	}
@@ -366,7 +366,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 	}
 	event := eventtest.ChildForProducerWithRoutingSource(eventID, "platform.activity_requested", producer, "", payload, request.ChainDepth+1,
 		events.EventLineage{RunID: runID, ParentEventID: parent.ID(), ExecutionMode: executionmode.Live}, envelope, source, at)
-	admission, err := admitter(ctx, event, "flow_a")
+	admission, err := admitter(ctx, event, events.EventPayloadProducer(event, "flow_a"))
 	if err != nil {
 		t.Fatalf("admit source activity request: %v", err)
 	}

@@ -909,7 +909,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				if err != nil {
 					t.Fatal(err)
 				}
-				admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, request, continuation.FlowID)
+				admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, request, events.EventPayloadProducer(request, continuation.FlowID))
 				if err != nil {
 					t.Fatalf("admit exact approved activity request: %v", err)
 				}
@@ -965,7 +965,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				forkRunID := child.ForkRunID
 				var prepared runfork.RunForkSelectedContractSourceEvent
 				beforePrepare := historicalContextDatabaseRows(t, db, backend.name == "postgres")
-				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, materializationRequest.OriginalLoopCarriage)
+				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, materializationRequest.OriginalLoopCarriage, originalRootAdmissionForRun(t, cards, sourceRunID))
 				if err != nil {
 					recordedCard, cardErr := cards.GetDecisionCard(ctx, card.CardID)
 					recordedContinuation, continuationErr := cards.LoadProposedEffectContinuation(ctx, card.CardID)

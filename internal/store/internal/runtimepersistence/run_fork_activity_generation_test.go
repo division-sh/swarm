@@ -92,7 +92,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
+	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint), originalRootAdmissionForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestSelectedContractForkProjectsUnissuedActivityWithoutAttempt(t *testing.T
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint), originalRootAdmissionForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint), originalRootAdmissionForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
