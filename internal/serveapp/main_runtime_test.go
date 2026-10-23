@@ -1768,7 +1768,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := rt.DB.QueryRowContext(context.Background(), forkCountQuery, started.RunID, published.EventID).Scan(&forkRows); err != nil || forkRows != 1 {
 		t.Fatalf("%s durable fork rows = %d, err=%v, want 1", rt.Backend, forkRows, err)
 	}
-	waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, published.EventID)
+	waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, published.EventID)
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var candidateSettled bool

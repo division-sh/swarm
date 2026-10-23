@@ -59,7 +59,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			if fork.ExecutedEventCount != 0 || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
 				t.Fatalf("fork result: %+v", fork)
 			}
-			waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, published.EventID)
+			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, published.EventID)
 			requireServedRunStatus(t, rt.Endpoint, fork.ForkRunID, "completed")
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
