@@ -78,7 +78,15 @@ func emitInstanceObservation(t testing.TB, source semanticview.Source, identity 
 	if entity, declared := entityruntime.ResolveForFlow(source, identity.TemplateID); declared {
 		header.EntityType = entity.EntityType
 	}
-	run := runlifecycle.Snapshot{RunID: toolTestRunID, BundleHash: fact.BundleHash(), State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), StartedAt: at}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("emit observation requires its captured source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := runlifecycle.Snapshot{RunID: toolTestRunID, BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), StartedAt: at}
 	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := pipeline.DynamicFlowRuntimeReadiness{
 		Plan:            pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: toolTestRunID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},

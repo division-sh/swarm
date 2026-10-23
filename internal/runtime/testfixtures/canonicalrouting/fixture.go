@@ -125,11 +125,8 @@ func CopyTelegramChatWithoutIngress(t testing.TB) string {
 			t.Fatalf("remove Telegram %s branch: %v", branch, err)
 		}
 	}
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: telegram-agent
-imports:
-  provider_trigger_events:
-    - provider: telegram
-      event: inbound.telegram.text_message
 pins:
   inputs:
     - inbound.telegram.text_message

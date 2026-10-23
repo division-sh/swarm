@@ -66,7 +66,7 @@ func writeJoinRetirementSource(t *testing.T, owner, body string) string {
 		stages = "stages:\n  awaiting: {}\n  done: {final: true}\n  failed: {final: true}\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: join-retirement\n"+stages+`pins:
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: join-retirement\n"+stages+`pins:
   inputs:
     - item.reported
 `)

@@ -410,7 +410,7 @@ root-node:
 	} {
 		dir := filepath.Join(root, child.name)
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+child.name+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "# fixture: "+child.name+"\n\nstages: []\n")
 		module := "mocks/shared-worker.py"
 		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, child.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
 		if !child.live {

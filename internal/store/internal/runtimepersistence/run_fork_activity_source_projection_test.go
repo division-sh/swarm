@@ -759,7 +759,7 @@ func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFi
 		t.Fatal(err)
 	}
 	ctx := correlation.WithRootAdmission(correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID), rooted.Admission())
-	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
+	ctx = requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(),
 		StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	})

@@ -14994,7 +14994,7 @@ flow_model:
       - ingress on a non-standing or non-singleton flow
       - missing provider, required signing-secret reference, verified pack for pack-required admission, valid compiled admission plan, or compatible external event pin
       - raw admission selected by omission, fallback, provider-pack collision, partial policy, or heuristic request interpretation
-      - unsigned pack without `acknowledge: unsigned_webhook`, invalid acknowledgement token, or acknowledgement on authenticated admission
+      - unsigned trigger without exact selected deployment `triggers[<provider-directory>/trigger.yaml].acknowledge: unsigned_webhook`, invalid acknowledgement token, or acknowledgement on authenticated/session admission
       - catalog-generation mismatch or incomplete all-context compilation during boot
       - unknown or unloaded alias/provider target
       - unbound signing-secret value at request time
@@ -24220,6 +24220,19 @@ configuration_source_authority:
             id/type set. Relative entries resolve from the selected document's directory. Missing, empty,
             partial, extra, duplicate, malformed, or incompatible replacement inventory fails before stores with no embedded
             fallback. Project-owned pack customization uses explicit `packs/manifest.yaml`, not config paths.
+        triggers:
+          keys:
+            '<captured-trigger-member>.acknowledge': supported_explicit_unsigned_webhook_consent
+          owner: providertriggers.CompileAdmission
+          shape: >
+            A typed map keyed by the exact captured selected-root-relative trigger BODY member, such as
+            `acme/trigger.yaml` or `child/acme/trigger.yaml`. Its only leaf is `acknowledge: unsigned_webhook`.
+            The key selects the consumed provider directory, not a provider basename, sibling, normalized alias,
+            inherited replacement, or reopened deployment filesystem path. Unselected or malformed keys refuse.
+            Trigger BODY and authored flow declarations carry no deployment acknowledgement. BODY schemas and
+            declared output metadata can compile without granting request admission. The one trigger admission
+            owner requires the unchanged exact token for unsigned webhook admission, rejects other tokens and
+            rejects any acknowledgement on authenticated webhook or session transport. No boolean, default or alias.
         provider_triggers:
           keys:
             packs.platform_dirs: split_unsupported_retired

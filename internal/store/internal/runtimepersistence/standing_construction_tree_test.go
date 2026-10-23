@@ -128,8 +128,8 @@ func TestDormantStandingPreparationDoesNotConstructBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":         "name: dormant-root\n",
-				"service/schema.yaml": "name: service\n",
+				"schema.yaml":         "stages: []\n",
+				"service/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "service/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			source := semanticview.Wrap(f.bundle)
 			fact, found := correlation.SourceArtifactFactFromContext(f.ctx)

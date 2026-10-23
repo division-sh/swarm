@@ -21,6 +21,7 @@ func CopyPublicationStateResult(t testing.TB, mode string) string {
 	if flow == "." {
 		schema += connect
 	} else {
+		writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: result-root\npins:\n  inputs: [document.requested]\n  outputs: [document.requested]\n"+connect+"  - {event: document.requested, from: ., to: source}\n")
 		writeClosedVariantFile(t, root, "events.yaml", "document.requested:\n  request_id: text\n  content: text\n  result_kind: text\n")
 	}
@@ -85,6 +86,7 @@ result.rejected:
             event: result.rejected
             fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
 `+local)
+	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n    - result.accepted\n    - result.rejected\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	return root

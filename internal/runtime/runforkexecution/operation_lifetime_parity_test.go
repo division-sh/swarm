@@ -348,9 +348,15 @@ func seedSelectedOperationSource(t *testing.T, ctx context.Context, selected any
 		Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(), StartedAt: at.Add(-time.Minute),
 	})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
-		events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+		events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at, executionmode.Mock)
 	if len(input) == 1 {
 		event = input[0]
+	} else {
+		var err error
+		event, err = eventtest.AdmitPayload(event, ".", string(event.Type()))
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)

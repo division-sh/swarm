@@ -9,7 +9,7 @@ func ConversationForkConstructionDocuments() map[string]string {
 		"flow/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"flow/schema.yaml":   "instance: name\nstages:\n  draft: {}\n  after: {}\npins:\n  inputs: [conversation.created]\n",
 		"flow/entities.yaml": "default:\n  name: text\n  current_state: {type: 'text?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  gates: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  accumulator: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  bookkeeping: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n",
-		"flow/nodes.yaml":    "advance:\n  execution_type: system_node\n  event_handlers:\n    conversation.created:\n      advances_to: after\n",
+		"flow/nodes.yaml":    "advance:\n  execution_type: system_node\n  event_handlers:\n    conversation.created:\n      advances_to: after\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 }
 

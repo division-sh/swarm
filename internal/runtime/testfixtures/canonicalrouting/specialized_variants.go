@@ -249,6 +249,7 @@ func CopyServedTestSetup(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: served-test-setup
 stages:
   waiting: {}
@@ -474,6 +475,7 @@ func CopyScenarioRootSetup(t testing.TB) string {
 	root := CopyServedTestSetup(t)
 	removeInheritedScenarios(t, root)
 
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: scenario-root-setup-fixture\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - widget.scored\n")
 	writeClosedVariantFile(t, root, "events.yaml", "widget.scored:\n  delta: integer\n")
 	writeClosedVariantFile(t, root, "tests/root-setup.yaml", `# fixture: root setup and expectation

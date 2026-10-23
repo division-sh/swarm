@@ -24,7 +24,7 @@ func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testi
 	if err != nil {
 		t.Fatalf("load root ingress artifact: %v", err)
 	}
-	declarations, err := ResolveStandingTargetDeclarations(semanticview.Wrap(bundle), nil)
+	declarations, err := ResolveStandingTargetDeclarations(semanticview.Wrap(bundle), nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestA9NoProducerCannotRetain(t *testing.T) {
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: registry,
 		SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()), EnableDeclaredClockBinding: true,
 	}}
-	declarations, err := ResolveStandingTargetDeclarations(source, registry)
+	declarations, err := ResolveStandingTargetDeclarations(source, registry, nil)
 	if err != nil || len(declarations) != 0 {
 		t.Fatalf("source without a producer declared a standing service: %+v err=%v", declarations, err)
 	}
@@ -108,7 +108,7 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	if !present {
 		t.Fatal("captured coordinator has no compiled directory webhook alias")
 	}
-	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog)
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog, nil)
 	if err != nil || len(declarations) != 1 {
 		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
 	}
@@ -177,7 +177,7 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	if !present {
 		t.Fatal("captured coordinator has no compiled directory webhook alias")
 	}
-	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog)
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog, nil)
 	if err != nil || len(declarations) != 1 {
 		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
 	}
@@ -270,7 +270,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 	if !present {
 		t.Fatal("captured coordinator has no compiled directory webhook alias")
 	}
-	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog)
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog, nil)
 	if err != nil || len(declarations) != 1 {
 		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
 	}

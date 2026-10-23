@@ -51,6 +51,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		} else if scope != "." {
 			extraOutput = "  outputs: [work.ack]\n"
 		}
+		writeClosedVariantFile(t, root, filepath.Join(flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, filepath.Join(flow, "schema.yaml"), schema+extraOutput)
 		events := "work.requested:\n  case_id: text\nwork.started:\n  case_id: text\nwork.result:\n  value: " + kind + "\nwork.ack:\n  value: " + kind + "\n" + extraEvent
 		if scope != "." && !sibling {

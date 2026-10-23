@@ -2086,14 +2086,14 @@ func TestRun_ErrorsWhenDeclaredStageIsUnreachable(t *testing.T) {
 
 func TestRun_ErrorsWhenStagesMixWithLegacyLifecycleFields(t *testing.T) {
 	root := writeStagedLifecycleFixture(t, `
-name: support
 initial_state: waiting
 stages:
   waiting:
     {}
   done:
     final: true
-`)
+`,
+	)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	if err == nil || !strings.Contains(err.Error(), "schema field \"initial_state\" is not supported") || !strings.Contains(err.Error(), "Valid fields:") {
 		t.Fatalf("expected source retirement before lifecycle coherence, got %v", err)
@@ -2102,12 +2102,12 @@ stages:
 
 func TestRun_StagesUseOrderedEntryAndOptionalFinal(t *testing.T) {
 	root := writeStagedLifecycleFixture(t, `
-name: support
 stages:
   waiting: {}
   active: {}
   done: {}
-`)
+`,
+	)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -2254,7 +2254,7 @@ root-missing-model:
 
 func TestRun_AcceptsFlowAgentMemoryInStatelessFlow(t *testing.T) {
 	root := writeAgentMemoryValidationFixture(t, "", `
-name: support
+stages: []
 `, `
 entity-agent:
   intent: {inline: "Exercise stateless flow memory."}
@@ -2272,11 +2272,11 @@ entity-agent:
 }
 
 func TestRun_AcceptsExplicitFlowAgentMemoryDeclarations(t *testing.T) {
-	root := writeAgentMemoryValidationFixture(t, "", `name: support
-stages:
+	root := writeAgentMemoryValidationFixture(t, "", `stages:
   waiting: {}
   done: {}
-`, `
+`,
+		`
 flow-agent:
   intent: {inline: "Exercise flow memory."}
   model: regular
@@ -2320,11 +2320,11 @@ root-global:
 }
 
 func TestRun_AcceptsPackageBackedFlowAgentMemoryDeclarations(t *testing.T) {
-	root := writePackageBackedAgentMemoryValidationFixture(t, `name: support
-stages:
+	root := writePackageBackedAgentMemoryValidationFixture(t, `stages:
   waiting: {}
   done: {}
-`, `
+`,
+		`
 flow-agent:
   intent: {inline: "Exercise package flow memory."}
   model: regular
@@ -2351,7 +2351,7 @@ entity-agent:
 
 func TestRun_AcceptsPackageBackedFlowAgentMemoryInStatelessFlow(t *testing.T) {
 	root := writePackageBackedAgentMemoryValidationFixture(t, `
-name: support
+stages: []
 `, `
 entity-agent:
   intent: {inline: "Exercise package stateless memory."}
@@ -6752,14 +6752,14 @@ support-node:
 
 func writeStagedReachabilityFixture(t *testing.T) string {
 	return writeStagedLifecycleFixture(t, `
-name: support
 stages:
   waiting: {}
   active: {}
   review: {}
   done:
     final: true
-`)
+`,
+	)
 }
 
 func writeStagedLifecycleFixture(t *testing.T, schema string) string {

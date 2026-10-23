@@ -23,7 +23,7 @@ import (
 )
 
 type nativeBusinessProcessFixture struct {
-	Backend, Location, BasePath, OperationID string
+	Backend, Location, BasePath, OperationID, RunID string
 }
 
 type nativeBusinessDeathStore struct {
@@ -66,11 +66,15 @@ func reopenNativeBusinessProcessFixture(t *testing.T, config nativeBusinessProce
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
-	f.ctx = correlation.WithSourceArtifactFact(context.Background(), source)
+	f.rooted, err = f.selected.LoadRunRootedSource(context.Background(), config.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := sourceartifactfixture.FactFor(f.rooted.Artifact())
+	f.ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(context.Background(), source), f.rooted.Admission())
 	var found bool
 	f.standing, found, err = f.selected.LoadReconciledStandingService(f.ctx, pipeline.StandingServiceCandidate{
-		ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", BindingEnabled: true, Source: source})
+		ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", BindingEnabled: true, Source: source, RootAdmission: f.rooted.Admission()})
 	if err != nil || !found {
 		t.Fatalf("original native standing responsibility: found=%t %v", found, err)
 	}
@@ -176,7 +180,7 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 				if err := f.state.close(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				runNativeBusinessDeathChild(t, phase, nativeBusinessProcessFixture{Backend: backend, Location: f.location, BasePath: f.basePath, OperationID: f.operation.OperationID})
+				runNativeBusinessDeathChild(t, phase, nativeBusinessProcessFixture{Backend: backend, Location: f.location, BasePath: f.basePath, OperationID: f.operation.OperationID, RunID: f.standing.RunID})
 				var err error
 				f.operation, err = f.selected.GetChannelOnboarding(context.Background(), f.operation.OperationID)
 				if err != nil {

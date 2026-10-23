@@ -53,7 +53,7 @@ func TestDormantIngressReadbackCannotHotActivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+	declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
 	if err != nil || len(declarations) != 1 {
 		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
 	}
@@ -150,7 +150,7 @@ func TestStandingIngressAdmissionDistinguishesAbsentFromInvalid(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+			declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
 			if err != nil || len(declarations) != 1 {
 				t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
 			}
@@ -258,7 +258,7 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+			declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
 			if err != nil || len(declarations) != 1 {
 				t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
 			}

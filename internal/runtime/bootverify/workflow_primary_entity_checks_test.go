@@ -11,11 +11,11 @@ import (
 )
 
 func TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow(t *testing.T) {
-	bundle := loadPrimaryEntityFixtureBundle(t, `name: scoring
-stages:
+	bundle := loadPrimaryEntityFixtureBundle(t, `stages:
   pending: {}
   done: {final: true}
-`, `
+`,
+		`
 vertical:
   name: text
 `)
@@ -28,11 +28,11 @@ vertical:
 }
 
 func TestRun_AllowsFieldlessStagedStaticFlow(t *testing.T) {
-	bundle := loadPrimaryEntityFixtureBundle(t, `name: scoring
-stages:
+	bundle := loadPrimaryEntityFixtureBundle(t, `stages:
   pending: {}
   done: {final: true}
-`, "")
+`,
+		"")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -43,12 +43,12 @@ stages:
 
 func TestRun_AllowsFieldlessExpandedStages(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `
-name: scoring
 stages:
   pending: {}
   done:
     final: true
-`, "")
+`,
+		"")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -59,7 +59,7 @@ stages:
 
 func TestRun_AllowsStatelessFlowWithoutPrimaryEntity(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `
-name: scoring
+stages: []
 `, "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

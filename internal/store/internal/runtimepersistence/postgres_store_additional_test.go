@@ -112,7 +112,7 @@ func seedSpecMemoryRun(t *testing.T, ctx context.Context, db *sql.DB) {
 
 func seedManagerRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	ctx = requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 }
 
 func specMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {

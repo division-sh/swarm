@@ -45,6 +45,9 @@ func Test2376LocalIdentitySelectorsUseAdmittedSource(t *testing.T) {
 func identitySource2376(t *testing.T) (string, *sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
 	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte("description: identity selector fixture\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

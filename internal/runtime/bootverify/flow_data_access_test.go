@@ -106,6 +106,8 @@ func writeNestedBootFlowDataAccessFixture(t *testing.T) string {
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "parent", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "parent", "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
 	flowRoot := filepath.Join(root, "parent", "child", "support")
 

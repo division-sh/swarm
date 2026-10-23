@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -56,6 +57,7 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 		for _, first := range []string{"writer", "activation"} {
 			for _, outcome := range []string{"commit", "rollback", "cancel_winner", "cancel_loser"} {
 				t.Run(backend.name+"/"+first+"/"+outcome, func(t *testing.T) {
+					backend := backend
 					barrier := newForkContentionBarrier(t, backend.name, outcome == "rollback" || outcome == "cancel_loser")
 					if selected && backend.name == "postgres" {
 						backend.open = func(t *testing.T) authorActivityReceiptFixture {
@@ -69,6 +71,12 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 							store := admitTestPostgresStore(t, db)
 							registerTestAuthorActivityCatalog(t, store)
 							return authorActivityReceiptFixture{store: store, db: db, dialect: authoractivityfixture.DialectPostgres}
+						}
+					}
+					if selected && backend.name == "sqlite" && first == "writer" {
+						backend.open = func(t *testing.T) authorActivityReceiptFixture {
+							store := barrier.observeSQLiteStore(t, filepath.Join(t.TempDir(), "contention.db"))
+							return authorActivityReceiptFixture{store: store, db: store.backend.ConstructionHandle(), dialect: authoractivityfixture.DialectSQLite}
 						}
 					}
 					f := newForkActivationFrontierFixture(t, backend, selected)
@@ -87,7 +95,9 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 						other := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 						writer = other
 						if first == "writer" {
-							f.store = barrier.observeSQLiteStore(t, path)
+							if !selected {
+								f.store = barrier.observeSQLiteStore(t, path)
+							}
 						} else {
 							writer = barrier.observeSQLiteStore(t, path)
 						}

@@ -286,7 +286,7 @@ func requireRunFixtureForTest(
 	ctx context.Context,
 	selected any,
 	fixture semanticRunFixture,
-) {
+) context.Context {
 	t.Helper()
 	if fixture.Artifact == nil && fixture.RootAdmission == (sourceartifact.RootAdmission{}) {
 		_, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash)
@@ -322,6 +322,13 @@ func requireRunFixtureForTest(
 	if err := materializeRunFixtureForTest(ctx, selected, fixture); err != nil {
 		t.Fatalf("materialize semantic run fixture %s: %v", fixture.RunID, err)
 	}
+	if captured, present := fixture.Artifact.RootAdmission(); present {
+		fixture.RootAdmission = captured
+	}
+	if err := fixture.RootAdmission.Validate(); err != nil {
+		t.Fatalf("materialized run fixture has no captured root: %v", err)
+	}
+	return runtimecorrelation.WithRootAdmission(ctx, fixture.RootAdmission)
 }
 
 func ensureRunFixtureSourceArtifactForTest(
@@ -368,7 +375,7 @@ func requireRunningRunForTest(
 	startedAt time.Time,
 ) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID:     runID,
 		State:     runtimerunlifecycle.StateRunning,
 		StartedAt: startedAt,

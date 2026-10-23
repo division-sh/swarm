@@ -108,7 +108,9 @@ func CopyDeadEventSchemaExternalSource(t testing.TB) string {
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: dead-event-schema-external-source\n")
+	writeClosedVariantFile(t, root, "support/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "support/schema.yaml", "# fixture: support\nstages:\n  idle: {}\n  done: {final: true}\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "ticket.ready:\n  swarm:\n    source: external (manual handoff)\n")
 	return root
@@ -207,12 +209,14 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	} else {
 		childEvents += "ticket.closed:\n  entity_id: string\n"
 	}
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: timer-validation\npins:\n  inputs: "+inputs+"\n  outputs: "+inputs+"\nconnect:\n"+connections)
 	writeClosedVariantFile(t, root, "events.yaml", rootEvents)
 	flowPins := "pins:\n  inputs: " + inputs + "\n"
 	if settings.flowOutput {
 		flowPins += "  outputs:\n    - timer.reminder\n"
 	}
+	writeClosedVariantFile(t, root, "support/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "support/schema.yaml", "# fixture: support\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\n"+flowPins)
 	agents := ""
 	if settings.flowAgent {
@@ -310,6 +314,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	for _, event := range inputs {
 		connections += "  - {event: " + event + ", from: ., to: support}\n"
 	}
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: timer-state-cancel-reachability\npins:\n  inputs: ["+pinList+"]\n  outputs: ["+pinList+"]\nconnect:\n"+connections)
 	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\nticket.closed:\n  entity_id: string\n")
 	reviewMetadata := "{}"
@@ -326,6 +331,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 			waiting += "      - {id: global_review, after: 1h, advances_to: review}\n"
 		}
 	}
+	writeClosedVariantFile(t, root, "support/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "support/schema.yaml", "# fixture: support\nstages:\n"+waiting+"  active: {}\n  review: "+reviewMetadata+"\n  done: {final: true}\npins:\n  inputs: ["+pinList+"]\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder:\n")
 	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"

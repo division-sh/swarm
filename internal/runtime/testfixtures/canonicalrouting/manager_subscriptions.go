@@ -23,7 +23,7 @@ func WriteManagerSubscriptionAdmission(t testing.TB) string {
   model: regular
   intent: {inline: Observe review-local work.}
   subscriptions: [task.ready]
-`,
+`, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		writeClosedVariantFile(t, root, relative, source)
 	}

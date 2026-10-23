@@ -1,11 +1,3 @@
-name: telegram-chat
-imports:
-  connector_packs:
-    - provider: telegram
-      tool: telegram.send_message
-  provider_trigger_events:
-    - provider: telegram
-      event: inbound.telegram.text_message
 instance: conversation_reference
 stages: []
 pins:

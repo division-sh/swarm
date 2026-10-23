@@ -638,8 +638,13 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	processEvidence, err := process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	var activated runfork.RunForkActivation
-	operation := startupownership.PreparedForkActivateOperation(pg.runForkPostgresOwner, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, OriginalRootAdmission: rooted.Admission(), AllowSourceFreeze: true}, &activated)
+	operation := startupownership.PreparedForkActivateOperation(pg.runForkPostgresOwner, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, OriginalRootAdmission: rooted.Admission(), Process: processEvidence.LeaseStamp(), AllowSourceFreeze: true}, &activated)
 	if err := process.RunPreparedOperation(ctx, operation); err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}

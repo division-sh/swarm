@@ -16,8 +16,7 @@ func TestWorkflowGateSemanticNumericOutcomeExecutionParity(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := semanticNumericIngressFixture(t)
-			schema := `name: numeric-gate
-stages:
+			schema := `stages:
   waiting: {}
   review:
     gate:
@@ -41,6 +40,10 @@ pins:
   inputs:
     - numeric.requested
 `
+
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(schema), 0600); err != nil {
 				t.Fatal(err)
 			}
