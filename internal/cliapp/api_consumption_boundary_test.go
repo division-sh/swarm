@@ -83,7 +83,8 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 	for name := range wantAPIConsumers {
 		source := sources[name]
 		for _, needle := range localBypassNeedles {
-			if name == "test_command.go" && needle == "BundleHash(" {
+			// run start compiles only the positional source; serve still admits its hash (#2786/6369921544).
+			if (name == "test_command.go" || name == "run_command.go") && needle == "BundleHash(" {
 				continue
 			}
 			if strings.Contains(source, needle) {
