@@ -48,6 +48,20 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runti
 		bus.SetProviderOutputAuthorizationVerifier(testProviderTriggerCatalog(t))
 	}
 	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed, executionposture.Live, stores...)
+	if bus != nil {
+		occurrence := runtimeTestEventBusWorkOwner(t, bus)
+		gateway.SetAdmissionGuard(func(ctx context.Context) (context.Context, func(), bool) {
+			lease, err := occurrence.Begin(ctx)
+			if err != nil {
+				return ctx, nil, false
+			}
+			return lease.Context(), func() {
+				if err := lease.Done(); err != nil {
+					t.Errorf("settle inbound test admission: %v", err)
+				}
+			}, true
+		})
+	}
 	owner, err := runtimecredentials.NewSnapshotOwner(boundedProviderCredentialStore{})
 	if err != nil {
 		t.Fatal(err)

@@ -105,7 +105,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			liveAuthority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
 			liveCtx := fixture.normal.contextFor(liveAuthority)
 			// Budget accounting compares separate work, not a mode change within one turn.
-			liveOrigin := claimCompletionOriginForTest(t, testAuthorActivityContext(), fixture.normal.store, liveAuthority, time.Now().UTC())
+			liveOrigin := claimCompletionOriginForTest(t, fixture.normal.context, fixture.normal.store, liveAuthority, time.Now().UTC())
 			if liveOrigin.Same(fixture.normal.origin) {
 				t.Fatal("mock and live budget probes reused one logical delivery")
 			}
@@ -237,22 +237,22 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 	case runtimeeffects.AuthoritySelectedContractFork:
 		// Ordinary and selected execution share this process, not competing
 		// selected-store startup capabilities.
-		process, err := agentfixture.ProcessCapability(fixture.normal.agentOwner, testAuthorActivityContext(), fixture.normal.store)
+		process, err := agentfixture.ProcessCapability(fixture.normal.agentOwner, fixture.normal.context, fixture.normal.store)
 		if err != nil {
 			t.Fatal(err)
 		}
 		selected := newSelectedProviderCompletionFixtureWithProcess(t, fixture.primary, fixture.db, fixture.sqlite, process)
-		issued, err := fixture.primary.IssueRunForkSelectedContractRuntimeExecution(testAuthorActivityContext(), selected.request)
+		issued, err := fixture.primary.IssueRunForkSelectedContractRuntimeExecution(selected.ctx, selected.request)
 		if err != nil {
 			t.Fatalf("issue budget-race selected authority: %v", err)
 		}
-		authority, err := fixture.primary.ClaimRunForkSelectedContractRuntimeExecution(testAuthorActivityContext(), issued, "budget-selected", time.Minute)
+		authority, err := fixture.primary.ClaimRunForkSelectedContractRuntimeExecution(selected.ctx, issued, "budget-selected", time.Minute)
 		if err != nil {
 			t.Fatalf("claim budget-race selected authority: %v", err)
 		}
-		admitSelectedProviderFixture(t, testAuthorActivityContext(), selected, issued, authority)
+		admitSelectedProviderFixture(t, selected.ctx, selected, issued, authority)
 		authority.Target = selectedProviderTarget(selected)
-		return authority, selectedProviderClaimContext(t, testAuthorActivityContext(), selected, authority)
+		return authority, selectedProviderClaimContext(t, selected.ctx, selected, authority)
 	case runtimeeffects.AuthorityConversationForkChat:
 		now := time.Now().UTC()
 		var source conversationForkSourceFixture
@@ -261,13 +261,13 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		} else {
 			source = seedConversationForkSource(t, fixture.db, now)
 		}
-		fork, err := fixture.primary.CreateOperatorConversationFork(testAuthorActivityContext(), runfork.ConversationForkCreateRequest{
+		fork, err := fixture.primary.CreateOperatorConversationFork(fixture.normal.context, runfork.ConversationForkCreateRequest{
 			SourceSessionID: source.sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID}, CreatedBy: "budget-actor", Now: now,
 		})
 		if err != nil {
 			t.Fatalf("create budget-race forkchat fork: %v", err)
 		}
-		prepared, err := fixture.primary.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
+		prepared, err := fixture.primary.PrepareOperatorConversationForkChat(fixture.normal.context, runfork.ConversationForkChatPrepareRequest{
 			ExecutionPosture: executionposture.Live,
 			ForkID:           fork.ForkID, Message: "budget race", Method: "conversation.fork_chat", ActorTokenID: "budget-actor",
 			RequestHash: runtimeeffects.Fingerprint([]byte("budget race")), Now: now.Add(time.Second),

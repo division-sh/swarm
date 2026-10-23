@@ -218,6 +218,7 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 				candidate.Source = mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 				seedStoreTestPersistedArtifact(t, f.db, bundle.SourceArtifact)
 				ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
+				ctx = storeTestOriginalProcessContext(t, ctx, store)
 				registrar := store.(testAuthorActivityCatalogRegistrar)
 				registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
 				standing, err := f.workflow.ReconcileStandingService(ctx, candidate)
@@ -281,6 +282,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 		testAuthorActivityContextForBundle(candidate.Source.BundleHash()),
 		candidate.Source,
 	)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	seedStoreTestPersistedArtifact(t, db, artifact)
 	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
 	if !ok {

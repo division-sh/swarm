@@ -10,6 +10,7 @@ func TestInboundAgentSettlementWitnessRejectsRetiredReceiptCounterBothStores(t *
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 			claimed := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			eventID := claimed.Snapshot.EventID
 			if n, err := ReadAgentSettledAttemptCountForTest(ctx, fixture.store, eventID, "agent-a"); err != nil || n != 0 {
