@@ -210,7 +210,7 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 
 func runForkSourceStatusActive(raw string) bool {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "running", "paused":
+	case "running", "paused", "live":
 		return true
 	default:
 		return false
@@ -295,7 +295,7 @@ func validateRunForkResult(result runForkResult) error {
 	}
 	sourceStatus := strings.ToLower(strings.TrimSpace(result.SourceRunStatus))
 	switch sourceStatus {
-	case "running", "paused", "completed", "failed", "cancelled", "forked":
+	case "running", "paused", "live", "completed", "failed", "cancelled", "forked":
 	default:
 		return fmt.Errorf("malformed run.fork result: source_run_status %q is invalid", result.SourceRunStatus)
 	}

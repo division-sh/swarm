@@ -20,6 +20,7 @@ import (
 type State string
 
 const (
+	StateLive      State = "live"
 	StateRunning   State = "running"
 	StatePaused    State = "paused"
 	StateCompleted State = "completed"
@@ -266,7 +267,7 @@ func (o *RunOrigin) UnmarshalJSON(raw []byte) error {
 func ParseState(raw string) (State, error) {
 	state := State(strings.ToLower(strings.TrimSpace(raw)))
 	switch state {
-	case StateRunning, StatePaused, StateCompleted, StateFailed, StateCancelled, StateForked:
+	case StateLive, StateRunning, StatePaused, StateCompleted, StateFailed, StateCancelled, StateForked:
 		return state, nil
 	default:
 		return "", fmt.Errorf("invalid run lifecycle state %q", raw)
@@ -283,11 +284,11 @@ func (s State) Terminal() bool {
 }
 
 func (s State) Active() bool {
-	return s == StateRunning || s == StatePaused
+	return s == StateLive || s == StateRunning || s == StatePaused
 }
 
-func ActiveStates() [2]State {
-	return [2]State{StateRunning, StatePaused}
+func ActiveStates() [3]State {
+	return [3]State{StateRunning, StatePaused, StateLive}
 }
 
 func ValidateStateFailure(state State, failure *runtimefailures.Envelope) error {
@@ -455,8 +456,8 @@ func (r ActiveTransitionRequest) Validate() error {
 	if strings.TrimSpace(r.RunID) == "" {
 		return errors.New("active run lifecycle transition requires run_id")
 	}
-	if r.State != StateRunning && r.State != StatePaused {
-		return fmt.Errorf("active run lifecycle transition requires running or paused state, got %s", r.State)
+	if r.State != StateLive && r.State != StateRunning && r.State != StatePaused {
+		return fmt.Errorf("active run lifecycle transition requires live, running or paused state, got %s", r.State)
 	}
 	return nil
 }
@@ -466,6 +467,7 @@ type CreateRequest struct {
 	Origin    RunOrigin
 	Source    runtimecorrelation.SourceArtifactFact
 	StartedAt time.Time
+	LiveScope LiveRunScope
 }
 
 func (r CreateRequest) Validate() error {
@@ -480,6 +482,12 @@ func (r CreateRequest) Validate() error {
 	}
 	if r.StartedAt.IsZero() {
 		return errors.New("run creation requires started_at")
+	}
+	if !r.LiveScope.Empty() {
+		if r.Origin.Kind() == OriginScenarioSetup || r.Origin.Kind() == OriginForkMaterialization {
+			return errors.New("isolated setup and fork materialization do not claim live execution")
+		}
+		return r.LiveScope.Validate()
 	}
 	return nil
 }

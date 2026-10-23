@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -160,6 +161,12 @@ func runControlRunIDParam(params map[string]any) (string, error) {
 }
 
 func runControlError(runID string, err error) error {
+	var live *runtimerunlifecycle.LiveRunConflictError
+	if errors.As(err, &live) {
+		return NewApplicationError(RunFlowAlreadyLiveCode, false, map[string]any{
+			"run_id": runID, "live_run_id": live.LiveRunID, "deployment": live.Scope.Deployment, "flow_path": live.Scope.FlowPath,
+		})
+	}
 	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{

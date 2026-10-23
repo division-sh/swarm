@@ -223,7 +223,7 @@ func (p ListPage) Validate(q ListQuery) error {
 		return errors.New("invalid fan-out page identity, time, order or rows")
 	}
 	switch p.RunStatus {
-	case "running", "paused", "completed", "failed", "cancelled", "forked":
+	case "live", "running", "paused", "completed", "failed", "cancelled", "forked":
 	default:
 		return errors.New("invalid fan-out page run status")
 	}

@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
-	"github.com/google/uuid"
 )
 
 func (s *RunLifecycleSQLiteOwner) StopRunControlOutcome(ctx context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error) {
@@ -109,15 +108,7 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 				if action == "continue" {
 					transition = "resumed"
 				}
-				transitionID := uuid.NewString()
-				if err := attempt.Record(txctx, runtimeauthoractivity.Draft{
-					Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
-					SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
-					OccurredAt: req.Now.UTC(), RunID: runID, Scope: occurrenceScope,
-					Projection: runtimeauthoractivity.Projection{
-						SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
-					},
-				}); err != nil {
+				if err := recordRunControlTransition(txctx, attempt, runID, occurrenceScope, req, transition); err != nil {
 					return err
 				}
 			}
@@ -128,6 +119,9 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 	state, committed := result.Value()
 	outcome := runtimeruncontrol.StoreTransition{State: state, Acknowledged: committed}
 	mutationErr := errors.Join(result.Err(), s.publishChannelChanges(committed, changes))
+	if action == "continue" && !committed && result.Phase() < mutationprotocol.CommitAdmission {
+		mutationErr = classifyLiveClaimFailure(ctx, s.backend, req.RunID, mutationErr)
+	}
 	if action == "stop" {
 		return outcome, classifyStopTransactionOutcome(result.Phase(), committed, mutationErr)
 	}
@@ -169,7 +163,7 @@ func (s *RunLifecycleSQLiteOwner) pauseRunControlTx(ctx context.Context, tx *sql
 		return runtimeruncontrol.State{}, err
 	}
 	switch lifecycleState {
-	case runtimerunlifecycle.StateRunning:
+	case runtimerunlifecycle.StateRunning, runtimerunlifecycle.StateLive:
 	case runtimerunlifecycle.StatePaused:
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	default:
@@ -204,10 +198,11 @@ func (s *RunLifecycleSQLiteOwner) continueRunControlTx(ctx context.Context, tx *
 	if lifecycleState != runtimerunlifecycle.StatePaused || state.ControlStatus != "paused" {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if err := requireGenericContinueAuthority(ctx, tx, false, state); err != nil {
+	target, err := continueTargetState(ctx, tx, false, state)
+	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{RunID: state.RunID, State: runtimerunlifecycle.StateRunning}); err != nil {
+	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{RunID: state.RunID, State: target}); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("continue sqlite run lifecycle: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -217,7 +212,7 @@ func (s *RunLifecycleSQLiteOwner) continueRunControlTx(ctx context.Context, tx *
 	`, sqliteNullableString(req.Reason), req.ControlledBy, req.Now.UTC(), state.RunID); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("persist sqlite run continue control state: %w", err)
 	}
-	state.Status = string(runtimerunlifecycle.StateRunning)
+	state.Status = string(target)
 	state.ControlStatus = "running"
 	state.Reason = req.Reason
 	state.ControlledBy = req.ControlledBy
@@ -281,6 +276,9 @@ func (s *RunLifecycleSQLiteOwner) quiesceStoppedRunWorkTx(ctx context.Context, t
 }
 
 func rejectSQLiteStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	if scoped, err := rejectLiveRunStop(ctx, tx, runID); scoped || err != nil {
+		return err
+	}
 	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, false, runID)
 	if err != nil {
 		return fmt.Errorf("inspect sqlite standing run control ownership: %w", err)

@@ -23,6 +23,9 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')`, sourceRunID, bundleHash); err != nil {
 				t.Fatalf("create source run: %v", err)
 			}
+			t.Run("one_live_run_per_deployment_flow", func(t *testing.T) {
+				verifyLiveRunSelectionConstraint(t, db, bundleHash)
+			})
 			t.Run("activity_execution_binding", func(t *testing.T) {
 				verifyActivityExecutionBindingColumn(t, db, sourceRunID)
 			})
@@ -251,6 +254,48 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func verifyLiveRunSelectionConstraint(t *testing.T, db *sql.DB, bundleHash string) {
+	t.Helper()
+	ctx := context.Background()
+	first, sibling := uuid.NewString(), uuid.NewString()
+	insert := `INSERT INTO runs (run_id,bundle_hash,origin_kind,deployment,flow_path,status)
+		VALUES ($1,$2,'deployment',$3,$4,$5)`
+	for _, row := range []struct{ id, deployment, flow, status string }{
+		{first, "deployment-a", "orders", "live"},
+		{sibling, "deployment-a", "orders", "paused"},
+		{uuid.NewString(), "deployment-a", "support", "live"},
+		{uuid.NewString(), "deployment-b", "orders", "live"},
+	} {
+		if _, err := db.ExecContext(ctx, insert, row.id, bundleHash, row.deployment, row.flow, row.status); err != nil {
+			t.Fatalf("create %s run for %s/%s: %v", row.status, row.deployment, row.flow, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, insert, uuid.NewString(), bundleHash, "deployment-a", "orders", "live"); err == nil {
+		t.Fatal("two live runs claimed the same deployment/flow")
+	}
+	if _, err := db.ExecContext(ctx, insert, uuid.NewString(), bundleHash, "", "orders", "live"); err == nil {
+		t.Fatal("live run without a deployment was admitted")
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='paused' WHERE run_id=$1`, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='live' WHERE run_id=$1`, sibling); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	var selected string
+	if err := db.QueryRowContext(ctx, `SELECT run_id FROM runs WHERE deployment=$1 AND flow_path=$2 AND status='live'`, "deployment-a", "orders").Scan(&selected); err != nil || selected != first {
+		t.Fatalf("rollback changed live selection: selected=%s error=%v", selected, err)
 	}
 }
 
