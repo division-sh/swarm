@@ -87,7 +87,7 @@ func TestIssue642SettledFanOutSelectedRemovalAndReforkBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatalf("settled source required an executable selected declaration: %v", err)
 					}
-					if reused, err := forks.MaterializeRunFork(ctx, request); err != nil || reused.ForkRunID != child.ForkRunID {
+					if reused, err := forks.RequireMaterializedRunFork(ctx, child.ForkRunID, request); err != nil || reused.ForkRunID != child.ForkRunID {
 						t.Fatalf("exact settled-history readback: %+v %v", reused, err)
 					}
 					requireSettledFanOutHistoryForTest(t, ctx, opened.store, child.ForkRunID, fixture.bundleHash)
