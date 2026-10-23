@@ -335,6 +335,7 @@ func TestSelectedContractReceiverReadinessRejectsUnsupportedConfigDependencyAuth
 	}
 	for _, field := range []string{"config: {foo: required}", "prompt_inputs: [config.foo]"} {
 		root := t.TempDir()
+		writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: config-authority\n")
 		writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: Exercise receiver configuration.}\n  "+field+"\n")
 		repo := runForkExecutionRepoRoot(t)

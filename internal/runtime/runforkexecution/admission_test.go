@@ -397,6 +397,7 @@ func rootedDirectAdmissionFixture(t *testing.T, forkRunID string) (runfork.RunFo
 	t.Helper()
 	binding := testSelectedContractBinding(forkRunID)
 	repo, root := runForkExecutionRepoRoot(t), t.TempDir()
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	loaded, err := (admittedFixtureSelectedContractSourceLoader{
 		RepoRoot: repo, SourceRoot: root,
@@ -937,6 +938,7 @@ func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *tes
 		t.Run(tc.name, func(t *testing.T) {
 			cleaned := false
 			repo, root := runForkExecutionRepoRoot(t), t.TempDir()
+			writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 			loaded, loadErr := (admittedFixtureSelectedContractSourceLoader{
 				RepoRoot: repo, SourceRoot: root,

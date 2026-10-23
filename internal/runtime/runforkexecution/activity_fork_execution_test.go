@@ -432,20 +432,10 @@ func selectedContractActivityDeclaredSource(t *testing.T, serverURL, method stri
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
-		"entities.yaml": "root: {}\n",
-		"flow_a/schema.yaml": `name: flow_a
-stages:
-  pending: {}
-  review: {}
-  closed: {final: true}
-  exhausted: {final: true}
-loops:
-  revision:
-    revision_field: revision_id
-    max_attempts: 3
-    escape: {advances_to: exhausted}
-`,
+		"schema.yaml":        "stages:\n  pending: {}\n",
+		"entities.yaml":      "root: {}\n",
+		"flow_a/schema.yaml": "stages:\n  pending: {}\n  review: {}\n  closed: {final: true}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n",
+
 		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
 		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/nodes.yaml": `test-node:
@@ -469,7 +459,7 @@ loops:
 		"tools.yaml": fmt.Sprintf(`provider.connector:
   handler_type: http
   http: {method: %s, url: %q}
-`, method, serverURL),
+`, method, serverURL), "flow_a/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		writeSelectedContractFixtureFile(t, filepath.Join(root, path), contents)
 	}

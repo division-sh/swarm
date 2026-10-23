@@ -519,14 +519,8 @@ func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, db *sql.DB, 
 func closedReceiverAuthorityFixtureFiles() map[string]string {
 	return map[string]string{
 
-		"schema.yaml": `name: closed-receiver-authority
-stages:
-  pending: {}
-  done: {final: true}
-pins:
-  inputs:
-    - task.assigned
-`,
+		"schema.yaml": "stages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n",
+
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml": `task.assigned:
 task.completed:
@@ -550,6 +544,6 @@ downstream-agent:
     task.completed:
       advances_to: done
       emit: task.finalized
-`,
+`, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 }

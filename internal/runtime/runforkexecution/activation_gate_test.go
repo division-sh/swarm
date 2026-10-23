@@ -351,6 +351,7 @@ func rootedActivationGateFixture(t *testing.T, forkRunID string) (runfork.RunFor
 	t.Helper()
 	binding := testSelectedContractBinding(forkRunID)
 	repo, targetRoot := canonicalrouting.RepoRoot(t), t.TempDir()
+	writeSelectedContractFixtureFile(t, filepath.Join(targetRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(targetRoot, "schema.yaml"), "stages: []\n")
 	var sources [2]LoadedSelectedContractSource
 	for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {

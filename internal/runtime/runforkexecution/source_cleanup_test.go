@@ -389,6 +389,7 @@ func TestSelectedSourceStagedCleanupOwnership(t *testing.T) {
 func rootedSourceCleanupFixture(t *testing.T) (LoadedSelectedContractSource, LoadedSelectedContractSource) {
 	t.Helper()
 	repo, targetRoot := runForkExecutionRepoRoot(t), t.TempDir()
+	writeSelectedContractFixtureFile(t, filepath.Join(targetRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(targetRoot, "schema.yaml"), "stages: []\n")
 	var sources [2]LoadedSelectedContractSource
 	for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {

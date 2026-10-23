@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/config"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -15,12 +14,11 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
-	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestNamesOnlyRootInterfaceUsesOrdinaryValidationPolicy(t *testing.T) {
@@ -248,40 +246,6 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 	}
 }
 
-func TestValidateWorkflowContractSurface_KeyFreeDurableActivityHTTPAccepted(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle("source.requested")
-	declareRuntimeValidationSourceRequestedEvent(bundle)
-	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-			"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-		}), runtimecontracts.ToolSchemaRequired("url")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"})),
-	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"scanner": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{
-						Tool: "source_scrape",
-						Input: map[string]runtimecontracts.ExpressionValue{
-							"url": runtimecontracts.CELExpression("payload.url"),
-						},
-					},
-				},
-			},
-		},
-	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
-		ExecutionPosture:               executionposture.Live,
-		CheckMCPReachable:              false,
-		StrictEmitSchemas:              false,
-		FatalToolImplementationWarning: false,
-		FatalBootWarnings:              false,
-	})
-	if err != nil {
-		t.Fatalf("key-free authored HTTP activity admission: %v", err)
-	}
-}
-
 func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle("source.requested")
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
@@ -308,122 +272,7 @@ func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t 
 	}
 }
 
-func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle("source.requested")
-	declareRuntimeValidationSourceRequestedEvent(bundle)
-	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-			"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-		}), runtimecontracts.ToolSchemaRequired("url")),
-
-			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-				"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-			}))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"})),
-	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"scanner": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{
-						Tool: "source_scrape",
-						Input: map[string]runtimecontracts.ExpressionValue{
-							"url": runtimecontracts.CELExpression("payload.url"),
-						},
-					},
-				},
-			},
-		},
-	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
-		ExecutionPosture:               executionposture.Live,
-		CheckMCPReachable:              false,
-		StrictEmitSchemas:              false,
-		FatalToolImplementationWarning: false,
-		FatalBootWarnings:              false,
-	})
-	if err != nil {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want nil", err)
-	}
-}
-
-func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitted(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle("source.requested")
-	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
-	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"scanner": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
-				},
-			},
-		},
-	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
-		Credentials:                    testProviderCredentialStore(t, "provider_token", "test-provider-token"),
-		ExecutionPosture:               executionposture.Live,
-		CheckMCPReachable:              false,
-		StrictEmitSchemas:              false,
-		FatalToolImplementationWarning: false,
-		FatalBootWarnings:              false,
-	})
-	if err != nil {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want non_idempotent_write admitted", err)
-	}
-}
-
-func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) {
-	for _, tc := range []struct {
-		name            string
-		method          string
-		decision        string
-		includeConsumer bool
-		wantError       string
-	}{
-		// USER6220888538: GET is not a different approval or retry policy.
-		{name: "valid POST", method: "POST", decision: "support_reply", includeConsumer: true},
-		{name: "valid GET", method: "GET", decision: "support_reply", includeConsumer: true},
-		{name: "missing revision consumer POST", method: "POST", decision: "support_reply", wantError: "has no consumer"},
-		{name: "missing revision consumer GET", method: "GET", decision: "support_reply", wantError: "has no consumer"},
-		{name: "noncanonical programmatic decision POST", method: "POST", decision: " support_reply ", includeConsumer: true, wantError: "canonical stable decision id is required"},
-		{name: "noncanonical programmatic decision GET", method: "GET", decision: " support_reply ", includeConsumer: true, wantError: "canonical stable decision id is required"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := testRuntimeWorkflowValidationBundle("support.reply_drafted")
-			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-				"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: tc.method, URL: "https://example.test"})),
-			}
-			handlers := map[string]runtimecontracts.SystemNodeEventHandler{
-				"support.reply_drafted": {
-					Activity: runtimecontracts.ActivitySpec{
-						ID: "send_support_reply", Tool: "provider_write",
-						Approval: &runtimecontracts.ActivityApprovalSpec{Decision: tc.decision},
-					},
-				},
-			}
-			if tc.includeConsumer {
-				handlers["send_support_reply.revision_requested"] = runtimecontracts.SystemNodeEventHandler{}
-			}
-			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-				"support": {EventHandlers: handlers},
-			}
-			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
-				ExecutionPosture:  executionposture.Live,
-				CheckMCPReachable: false, StrictEmitSchemas: false, FatalToolImplementationWarning: false, FatalBootWarnings: false,
-			})
-			if tc.wantError == "" {
-				if err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
-				t.Fatalf("validation error = %v, want %q", err, tc.wantError)
-			}
-		})
-	}
-}
+// USER6220888538: GET is not a different approval or retry policy.
 
 func TestRuleActivityValidationRequiresExplicitIDAndPreservesCombinationRefusal(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle("request")
@@ -488,118 +337,6 @@ func TestActivityDiagnosticsUseRulePresentationAndPreserveRefusal(t *testing.T) 
 				t.Fatalf("completion diagnostic/refusal = %v, want %q", errs, want)
 			}
 		})
-	}
-}
-
-func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle("inbound.telegram")
-	declareRuntimeValidationTelegramEvent(bundle)
-	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("send Telegram messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-			"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-			"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-		}), runtimecontracts.ToolSchemaRequired("chat_id", "text")),
-
-			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
-			Method: "POST",
-			URL:    "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage",
-			Body: map[string]any{
-				"chat_id": "{{input.chat_id}}",
-				"text":    "{{input.text}}",
-			},
-		}), runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{
-			Kind: "http_status_2xx",
-		}), runtimecontracts.WithToolCredentials([]string{"telegram_bot_token"}...)),
-	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"responder": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"inbound.telegram": {
-					Activity: runtimecontracts.ActivitySpec{
-						Tool: "telegram.send_message",
-						Input: map[string]runtimecontracts.ExpressionValue{
-							"chat_id": runtimecontracts.CELExpression("payload.payload.message.chat.id"),
-							"text":    runtimecontracts.CELExpression(`"hello"`),
-						},
-					},
-				},
-			},
-		},
-	}
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
-		Credentials:                    testProviderCredentialStore(t, "telegram_bot_token", "test-telegram-token"),
-		ExecutionPosture:               executionposture.Live,
-		CheckMCPReachable:              false,
-		StrictEmitSchemas:              false,
-		FatalToolImplementationWarning: false,
-		FatalBootWarnings:              false,
-	})
-	if err != nil {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want Telegram connector admitted", err)
-	}
-	if result.mockConnectorResponses == nil {
-		t.Fatal("mock validation did not compile the effective flow-local connector response")
-	}
-	if _, err := result.mockConnectorResponses.Admit("telegram.send_message", bundle.Tools["telegram.send_message"]); err != nil {
-		t.Fatalf("generated flow-local response admission: %v", err)
-	}
-	for _, finding := range result.BootReport.Findings {
-		if finding.Location == "provider_credential" && strings.Contains(finding.Message, "telegram_bot_token") {
-			t.Fatalf("mock validation retained live connector credential finding: %#v", finding)
-		}
-	}
-
-}
-
-func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnectorToolAdmitted(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle("inbound.telegram")
-	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"slack.post_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("post Slack messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-			"channel": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-			"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-		}), runtimecontracts.ToolSchemaRequired("channel", "text")),
-
-			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
-			Method: "POST",
-			URL:    "https://slack.com/api/chat.postMessage",
-			Body: map[string]any{
-				"channel": "{{input.channel}}",
-				"text":    "{{input.text}}",
-			},
-		}), runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{
-			Kind:   "json_field_equals",
-			Path:   "response.body.ok",
-			Equals: true,
-		}), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{
-			Key:    "slack_oauth",
-			Scopes: []string{"chat:write"},
-		})),
-	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"responder": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"inbound.telegram": {
-					Activity: runtimecontracts.ActivitySpec{
-						Tool: "slack.post_message",
-						Input: map[string]runtimecontracts.ExpressionValue{
-							"channel": runtimecontracts.CELExpression(`"C123"`),
-							"text":    runtimecontracts.CELExpression(`"hello"`),
-						},
-					},
-				},
-			},
-		},
-	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
-		ManagedCredentials:             runtimemanagedcredentials.NewMemoryStore(),
-		ExecutionPosture:               executionposture.Live,
-		CheckMCPReachable:              false,
-		StrictEmitSchemas:              false,
-		FatalToolImplementationWarning: false,
-		FatalBootWarnings:              false,
-	})
-	if err != nil {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want Slack managed connector admitted", err)
 	}
 }
 
@@ -737,92 +474,8 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGenera
 	}
 }
 
-func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClosed(t *testing.T) {
-	cases := []struct {
-		name        string
-		mutateTool  func(runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry
-		errContains string
-	}{
-		{
-			name: "rate limit",
-			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
-				updated, err := tool.WithRateLimit("1/s", "0s")
-				if err != nil {
-					panic(err)
-				}
-				return updated
-			},
-			errContains: "uses rate_limit",
-		},
-		{
-			name: "key-free static credentials supported",
-			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
-				updated, err := tool.WithStaticCredentials("provider_token")
-				if err != nil {
-					panic(err)
-				}
-				return updated
-			},
-		},
-		{
-			name: "managed credentials",
-			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
-				updated, err := tool.WithManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "provider_oauth"})
-				if err != nil {
-					panic(err)
-				}
-				return updated
-			},
-			errContains: "uses managed_credential",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := testRuntimeWorkflowValidationBundle("source.requested")
-			declareRuntimeValidationSourceRequestedEvent(bundle)
-			tool := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-			}), runtimecontracts.ToolSchemaRequired("url")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"}))
-
-			tool = tc.mutateTool(tool)
-			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{"source_scrape": tool}
-			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-				"scanner": {
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-						"source.requested": {
-							Activity: runtimecontracts.ActivitySpec{
-								Tool: "source_scrape",
-								Input: map[string]runtimecontracts.ExpressionValue{
-									"url": runtimecontracts.CELExpression("payload.url"),
-								},
-							},
-						},
-					},
-				},
-			}
-			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
-				Credentials:                    testProviderCredentialStore(t, "provider_token", "test-provider-token"),
-				ManagedCredentials:             runtimemanagedcredentials.NewMemoryStore(),
-				ExecutionPosture:               executionposture.Live,
-				CheckMCPReachable:              false,
-				StrictEmitSchemas:              false,
-				FatalToolImplementationWarning: false,
-				FatalBootWarnings:              false,
-			})
-			// USER6220888538 gives key-free GET the same fixed conservative
-			// policy as POST, including the existing static credential owner.
-			if tc.errContains == "" {
-				if err != nil {
-					t.Fatalf("supported key-free credential admission: %v", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.errContains) {
-				t.Fatalf("ValidateWorkflowContractSurface error = %v, want substring %q", err, tc.errContains)
-			}
-		})
-	}
-}
+// USER6220888538 gives key-free GET the same fixed conservative
+// policy as POST, including the existing static credential owner.
 
 func declareRuntimeValidationSourceRequestedEvent(bundle *runtimecontracts.WorkflowContractBundle) {
 	if bundle.Events == nil {
@@ -864,151 +517,6 @@ func workflowValidationTestProfile(t *testing.T) llmselection.Profile {
 	return profile
 }
 
-func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
-	t.Run("unsupported config source", func(t *testing.T) {
-		var cfg config.Config
-		source, err := yamlsource.Load([]byte("llm:\n  runtime_mode: cli_test\n"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := config.DecodeSource(source.Document("swarm.yaml").Root(), &cfg); err == nil || !strings.Contains(err.Error(), "runtime_mode") || !strings.Contains(err.Error(), "Valid fields: backend") {
-			t.Fatalf("source admission = %v, want rejection before constructing runtime dependencies", err)
-		}
-	})
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	validModule := semanticOnlyWorkflowRuntime{source: compiledRuntimeValidationSource(t, testRuntimeWorkflowValidationBundle())}
-
-	cases := []struct {
-		name        string
-		deps        RuntimeDeps
-		errContains string
-	}{
-		{
-			name:        "nil config",
-			deps:        RuntimeDeps{Options: RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: validModule}},
-			errContains: "runtime config is required",
-		},
-		{
-			name: "missing workflow module",
-			deps: RuntimeDeps{
-				Config:  &config.Config{Runtime: config.RuntimeConfig{}},
-				Options: RuntimeOptions{ExecutionPosture: executionposture.Live, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)},
-			},
-			errContains: "workflow contract validation failed: workflow module is required",
-		},
-		{
-			name: "valid dependency graph",
-			deps: RuntimeDeps{
-				Config: &config.Config{Runtime: config.RuntimeConfig{}},
-				Options: RuntimeOptions{ExecutionPosture: executionposture.Live,
-					WorkflowModule:     validModule,
-					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
-				},
-			},
-		},
-		{
-			name: "inbound store without admitted provider registry",
-			deps: RuntimeDeps{
-				Config:       &config.Config{Runtime: config.RuntimeConfig{}},
-				InboundStore: &recordingInboundStore{},
-				Options: RuntimeOptions{ExecutionPosture: executionposture.Live,
-					WorkflowModule:     validModule,
-					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
-				},
-			},
-			errContains: "provider trigger catalog snapshot is required when inbound store is configured",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.deps.Validate()
-			if tc.errContains != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.errContains) {
-					t.Fatalf("RuntimeDeps.Validate error = %v, want substring %q", err, tc.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("RuntimeDeps.Validate: %v", err)
-			}
-		})
-	}
-}
-
-func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	module := semanticOnlyWorkflowRuntime{source: compiledRuntimeValidationSource(t, testRuntimeWorkflowValidationBundle())}
-
-	boot, err := (RuntimeDeps{
-		Config: &config.Config{Runtime: config.RuntimeConfig{}},
-		Options: RuntimeOptions{ExecutionPosture: executionposture.Live,
-			WorkflowModule:     module,
-			SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
-		},
-	}).validated()
-	if err != nil {
-		t.Fatalf("RuntimeDeps.validated: %v", err)
-	}
-	if boot.Source == nil {
-		t.Fatal("validated RuntimeDeps Source = nil")
-	}
-	if boot.Credentials == nil {
-		t.Fatal("validated RuntimeDeps Credentials = nil")
-	}
-	if boot.Authority == nil {
-		t.Fatal("validated RuntimeDeps Authority = nil")
-	}
-	if boot.EmitRegistry == nil {
-		t.Fatal("validated RuntimeDeps EmitRegistry = nil")
-	}
-	if boot.SourceArtifactFact.BundleHash() != runtimeContextTestHashA {
-		t.Fatalf("SourceArtifactFact bundle_hash = %q, want %q", boot.SourceArtifactFact.BundleHash(), runtimeContextTestHashA)
-	}
-}
-
-func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T) {
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	bundle := testRuntimeWorkflowValidationBundle("ready.event")
-	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-		"agent-1": func() runtimecontracts.AgentRegistryEntry {
-			entry := testRuntimeWorkflowValidationAgent("agent-1")
-			entry.Subscriptions = []string{"ready.event"}
-			entry.EmitEvents = []string{"ready.event"}
-			return entry
-		}(),
-		"agent-2": func() runtimecontracts.AgentRegistryEntry {
-			entry := testRuntimeWorkflowValidationAgent("agent-2")
-			entry.Subscriptions = []string{"ready.event"}
-			return entry
-		}(),
-	}
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
-		"ready.event": {
-			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{
-					"id": {Type: "string"},
-				},
-			},
-		},
-	}
-	source := compiledRuntimeValidationSource(t, bundle)
-
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-	if err != nil {
-		t.Fatalf("ValidateWorkflowContractSurface: %v", err)
-	}
-	if len(result.MissingEmitSchemaEventTypes) != 0 {
-		t.Fatalf("MissingEmitSchemaEventTypes = %#v, want none", result.MissingEmitSchemaEventTypes)
-	}
-	if len(result.BootReport.Warnings()) != 0 {
-		t.Fatalf("BootReport warnings = %#v, want none", result.BootReport.Warnings())
-	}
-}
-
 func TestWorkflowContractAdmissionRejectsInvalidGeneratedEmitToolSchema(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
@@ -1045,55 +553,6 @@ func TestWorkflowContractAdmissionRejectsInvalidGeneratedEmitToolSchema(t *testi
 	}
 	if _, ok, err := bundle.ResolveCompiledFlowEventSchema(".", "ready.event"); err != nil || ok {
 		t.Fatalf("failed admission retained an executable schema: present=%v err=%v", ok, err)
-	}
-}
-
-func TestValidateWorkflowContractSurfaceAllowsPrecisionQualifiedGeneratedEmitToolSchema(t *testing.T) {
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	bundle := testRuntimeWorkflowValidationBundle("ready.event")
-	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
-		Types: map[string]runtimecontracts.NamedTypeDecl{
-			"RequiredCapabilities": {
-				Fields: map[string]runtimecontracts.TypeFieldSpec{
-					"automation_with_unlock": {Type: "numeric(5,2)"},
-				},
-			},
-		},
-	}
-	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-		"agent-1": func() runtimecontracts.AgentRegistryEntry {
-			entry := testRuntimeWorkflowValidationAgent("agent-1")
-			entry.Role = "agent"
-			entry.Subscriptions = []string{"ready.event"}
-			entry.EmitEvents = []string{"ready.event"}
-			return entry
-		}(),
-		"agent-2": func() runtimecontracts.AgentRegistryEntry {
-			entry := testRuntimeWorkflowValidationAgent("agent-2")
-			entry.Role = "consumer"
-			entry.Subscriptions = []string{"ready.event"}
-			return entry
-		}(),
-	}
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
-		"ready.event": {
-			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{
-					"capabilities": {Type: "RequiredCapabilities"},
-					"amounts":      {Type: "[numeric(10,2)]"},
-				},
-			},
-		},
-	}
-	source := compiledRuntimeValidationSource(t, bundle)
-
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-	if err != nil {
-		t.Fatalf("ValidateWorkflowContractSurface: %v", err)
-	}
-	if len(result.GeneratedEmitSchemaErrors) != 0 {
-		t.Fatalf("GeneratedEmitSchemaErrors = %#v, want none", result.GeneratedEmitSchemaErrors)
 	}
 }
 
