@@ -588,6 +588,7 @@ func conversationForkToolCallMap(t *testing.T, raw json.RawMessage) map[string]a
 }
 
 type conversationForkSourceFixture struct {
+	ctx        context.Context
 	runID      string
 	bundleHash string
 	agentID    string
@@ -624,6 +625,8 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, histor
 	}
 	ctx := testAuthorActivityContextForBundle(source.bundleHash)
 	store := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
+	source.ctx = ctx
 	requireRunFixtureForTest(t, ctx, store, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()

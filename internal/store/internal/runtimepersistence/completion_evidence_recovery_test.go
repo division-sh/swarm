@@ -32,12 +32,12 @@ func TestCompletion2270ForkChatUncertainRecoveryBothStores(t *testing.T) {
 				if cut == "authorized" {
 					want, children = runtimeeffects.RecoverySummary{PrelaunchTerminal: 1}, 0
 				}
-				if summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now)); err != nil || summary != want {
+				if summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.source.ctx, liveExternalEffectRecoveryRequest(now)); err != nil || summary != want {
 					t.Fatalf("recover %s: %+v, %v", cut, summary, err)
 				}
 				requireForkChatGroupRows(t, fixture, prepared.ForkTurnID, children, 0)
 				before := requireCompletion2270ForkRecoveryEvidence(t, fixture, request, children)
-				if summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second))); err != nil || summary != (runtimeeffects.RecoverySummary{}) {
+				if summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.source.ctx, liveExternalEffectRecoveryRequest(now.Add(time.Second))); err != nil || summary != (runtimeeffects.RecoverySummary{}) {
 					t.Fatalf("repeat recovery created another completion: %+v, %v", summary, err)
 				}
 				after := requireCompletion2270ForkRecoveryEvidence(t, fixture, request, children)
