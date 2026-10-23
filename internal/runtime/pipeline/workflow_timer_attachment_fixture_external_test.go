@@ -32,7 +32,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 	closeOwner := func() {
 		t.Helper()
 		once.Do(func() {
-			cleanup := context.Background()
+			cleanup := context.WithoutCancel(ctx)
 			if request != nil && attempt.ID() == "" {
 				resolved, err := workflows.ResolveDynamicFlowRuntimeActivation(cleanup, *request)
 				if err != nil || request.ValidateResolution(resolved) != nil || resolved.Disposition == pipeline.FlowActivationUnresolved {

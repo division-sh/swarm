@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -132,7 +133,11 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 				if err := closeStore(); err != nil {
 					t.Fatal(err)
 				}
+				replacePipelineExternalWorkOccurrenceForSource(t, fact, pipelineExternalTestWorkOwnerForSource(t, fact))
 				selected = reopen()
+				ctx = withLiveGateExecution(testAuthorActivityContextForSource(t, context.Background(), fact))
+				ctx = runtimecorrelation.WithRunID(ctx, runID)
+				ctx = nativeProcessContextFixture(t, ctx, selected)
 				pc, admitAttachment, _ = build()
 				attempt = admitAttachment(construction.Plan.Readiness)
 				reader = selected
