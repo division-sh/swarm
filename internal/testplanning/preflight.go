@@ -14,7 +14,6 @@ import (
 // Membership changes require reviewed catch/cost evidence. This is local-only;
 // it must not enter Profiles, TierRank, CI-Units or hosted coverage deferrals.
 var preflightCandidates = []TestRoot{
-	preflightRoot("internal/cliapp", "TestVerifyBootStartupPredicateCensus"),
 	preflightRoot("internal/runtime/conformance", "TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified"),
 	preflightRoot("internal/runtime/manager", "TestDynamicFlowRuntimeReadinessProductionConsumersStatic"),
 	preflightRoot("internal/testplanning", "TestCurrentProofPlansBindActiveRequiredRoots"),
