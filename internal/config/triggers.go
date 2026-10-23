@@ -3,26 +3,15 @@ package config
 import (
 	"fmt"
 	"io/fs"
-	"reflect"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 // TriggerConfig is deployment consent for one captured trigger BODY member.
 // Its token and transport compatibility are validated by trigger admission.
 type TriggerConfig struct {
 	Acknowledge string `yaml:"acknowledge"`
-}
-
-func (c *TriggerConfig) UnmarshalYAML(node *yaml.Node) error {
-	source := yamlsource.ValueFromNode(node)
-	if err := validateConfigSource(source, reflect.TypeFor[TriggerConfig](), "config.triggers entry"); err != nil {
-		return err
-	}
-	type plain TriggerConfig
-	return node.Decode((*plain)(c))
 }
 
 func validateTriggerConfigSource(source yamlsource.Value) error {
