@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 // Leave candidates unclaimed: this tests the selected-store selector across
@@ -28,7 +29,8 @@ func TestFanOutClosingSourceFailedRetirementPreservesHealthyProgressBothStores(t
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			idle := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 0, time.Now().UTC())
-			healthy := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), storeTestSourceArtifact("closing-source-retirement-healthy-source"))
+			healthyRooted, _ := sourceartifactfixture.Rooted(t, "healthy", storeTestSourceArtifact("closing-source-retirement-healthy-source"))
+			healthy := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), healthyRooted.Artifact())
 			process, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{idle, healthy})
 			workers := 1
 			a, err := startupownership.StartFanOutServing(ctx, grants[0], occurrences[0], &workers, sourceLocalSelectorExecutor{})
@@ -176,7 +178,8 @@ func TestFanOutIdleSourceClosePreservesOtherSourceSelectionBothStores(t *testing
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			idle := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 0, time.Now().UTC())
-			healthy := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), storeTestSourceArtifact("idle-source-close-healthy-source"))
+			healthyRooted, _ := sourceartifactfixture.Rooted(t, "healthy", storeTestSourceArtifact("idle-source-close-healthy-source"))
+			healthy := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), healthyRooted.Artifact())
 			_, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{idle, healthy})
 			workers := 1
 			registrations := make([]*startupownership.FanOutServingRegistration, 2)

@@ -31,7 +31,8 @@ func TestPolicyCaseRepeatedSelectorWithinTupleIsRefused2287(t *testing.T) {
 					err = decodeNodeTestYAML([]byte("rules:\n  - case: {"+row+"}\n    emit: task.done\n  - emit: task.other\n"), &handler)
 				case "bundle":
 					root := t.TempDir()
-					writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: case_tuple\nstages: {done: {final: true}}\n")
+					writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+					writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: {done: {final: true}}\n")
 					writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\n  mode: text\n  target: text\ntask.done:\ntask.other:\n")
 					writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - case: {"+row+"}\n          emit: task.done\n        - emit: task.other\n")
 					repo := repoRootForContractsTest(t)
@@ -145,7 +146,8 @@ func TestPolicyCaseBundleShapeAdmission2287(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: case_shape\nstages: {done: {final: true}}\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: {done: {final: true}}\n")
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\n  mode: text\n  target: text\n  ready: boolean\n  count: integer\ntask.done:\ntask.other:\n")
 			writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - case: {"+tc.row+"}\n          emit: task.done\n        - emit: task.other\n")
 			repo := repoRootForContractsTest(t)

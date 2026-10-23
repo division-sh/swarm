@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/packruntime"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -21,7 +21,6 @@ type Projection struct {
 	ProviderTriggers    *providertriggers.CatalogSnapshot
 	LoadedProviderPacks []providertriggers.LoadedPack
 	ProviderConnectors  *providerconnectors.PackRegistry
-	LoadedChannelPacks  []packs.LoadedChannelPack
 	ChannelPlans        []packs.SatisfactionPlan
 }
 
@@ -34,8 +33,12 @@ func (p Projection) EffectivePackInventoryDigest() string {
 
 func (p Projection) PackSourceValues() map[string]yamlsource.Value {
 	out := p.ProviderConnectors.SourceValues()
-	for _, pack := range p.LoadedChannelPacks {
-		out[pack.Envelope.ID+".channel"] = pack.Manifest.SourceValue()
+	if p.Inventory != nil {
+		for _, entry := range p.Inventory.Entries() {
+			if body, present := entry.Provider().Body(packmodel.BodyChannel); present {
+				out[entry.ID()+".channel"] = body.SourceValue()
+			}
+		}
 	}
 	return out
 }
@@ -56,21 +59,19 @@ func Admit(inventory *packartifact.EffectivePackInventory, platform runtimecontr
 	if err != nil {
 		return Projection{}, fmt.Errorf("admit provider connector packs: %w", err)
 	}
-	channels, err := packruntime.LoadChannelPacks(inventory, runningVersion)
-	if err != nil {
-		return Projection{}, fmt.Errorf("admit channel packs: %w", err)
-	}
-	interfaces, err := packs.NewInterfaceRegistry(platform)
-	if err != nil {
-		return Projection{}, fmt.Errorf("admit channel interfaces: %w", err)
-	}
-	plans, err := packs.CompileChannelInventory(interfaces, channels, triggers.PackDescriptors(), connectors.PackDescriptors())
-	if err != nil {
-		return Projection{}, fmt.Errorf("admit channel inventory: %w", err)
+	var plans []packs.SatisfactionPlan
+	for _, entry := range inventory.Entries() {
+		definition, err := AdmitProviderDirectory(entry.Provider(), platform)
+		if err != nil {
+			return Projection{}, fmt.Errorf("admit provider directory %q: %w", entry.ID(), err)
+		}
+		if plan, present := definition.ChannelPlan(); present {
+			plans = append(plans, plan)
+		}
 	}
 	return Projection{
 		Inventory: inventory, ProviderTriggers: triggers, LoadedProviderPacks: loadedTriggers,
-		ProviderConnectors: connectors, LoadedChannelPacks: channels, ChannelPlans: plans,
+		ProviderConnectors: connectors, ChannelPlans: plans,
 	}, nil
 }
 

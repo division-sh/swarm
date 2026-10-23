@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -27,16 +28,11 @@ func TestHTTPOperatorConstructorRequiresAuthenticatedDeliveryIdentity(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := packs.NewInterfaceRegistry(spec)
+	projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plans, err := packs.CompileChannelInventory(registry, packfixture.ChannelPacks(t),
-		packfixture.TriggerCatalog(t).PackDescriptors(), packfixture.ConnectorRegistry(t).PackDescriptors())
-	if err != nil {
-		t.Fatal(err)
-	}
-	channel := packfixture.ChannelPlanByID(t, plans, "provider.telegram.hitl_channel")
+	channel := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "telegram")
 	trigger, err := packfixture.TriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: "telegram", Provider: "telegram", SigningSecret: "fixture_signing"})
 	if err != nil {

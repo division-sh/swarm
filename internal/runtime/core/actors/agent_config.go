@@ -210,12 +210,12 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	if cfg == nil {
 		return
 	}
+	// FlowID stays raw for exact source-scope admission, including after refusal.
 	cfg.TurnTimeout = timeridentity.CloneTurnTimeout(cfg.TurnTimeout)
 	cfg.ID = strings.TrimSpace(cfg.ID)
 	cfg.Identity = cfg.Identity.Normalize()
 	cfg.Type = strings.TrimSpace(cfg.Type)
 	cfg.Role = strings.TrimSpace(cfg.Role)
-	cfg.FlowID = strings.TrimSpace(cfg.FlowID)
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	cfg.LLMBackend = strings.TrimSpace(cfg.LLMBackend)
 	cfg.ResolvedLLMBackend = strings.TrimSpace(cfg.ResolvedLLMBackend)

@@ -220,7 +220,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	} else if armedJoinCut {
 		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
 	} else {
-		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+		seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID)
 	}
 	checkpointWithSchedule := func(forkRun, scheduleID string) {
 		pipe := os.NewFile(3, "selected-checkpoint")
@@ -258,12 +258,13 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		}}
 	}
 	request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
-		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source), AgentRuntime: options}
+		SourceArtifactFact: loaded.SourceArtifactFact,
+		ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source), AgentRuntime: options}
 	if strings.HasPrefix(cut, "retained_") {
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut",
 			TransportHash: "retained-crash-transport", SourceRunID: sourceRun, ForkEventID: eventID,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
 		}
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)

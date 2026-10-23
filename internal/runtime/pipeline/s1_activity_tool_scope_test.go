@@ -1,0 +1,150 @@
+package pipeline
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"sync/atomic"
+	"testing"
+
+	"github.com/division-sh/swarm/internal/events"
+	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
+)
+
+func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source) {
+	t.Helper()
+	if compose == nil {
+		t.Fatal("local activity journey requires the real effective-source compiler")
+	}
+	verifyS1ScopedActivityDispatch(t, open, compose, false)
+}
+
+func VerifyS1DirectoryConnectorDispatchUsesExactDeclarationForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source) {
+	t.Helper()
+	if compose == nil {
+		t.Fatal("directory journey requires the real effective-source compiler")
+	}
+	verifyS1ScopedActivityDispatch(t, open, compose, true)
+}
+
+func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source, directory bool) {
+	t.Helper()
+	toolID := "provider_write"
+	if directory {
+		toolID = "team-bot.send"
+	}
+	var firstCalls, secondCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if directory && request.Header.Get("Authorization") != "Bearer directory-fixture-secret" {
+			t.Errorf("directory connector did not consume its exact qualified credential")
+		}
+		origin := "research"
+		switch request.URL.Path {
+		case "/research":
+			firstCalls.Add(1)
+		case "/research2":
+			origin = "research2"
+			secondCalls.Add(1)
+		default:
+			t.Errorf("unexpected scoped endpoint %q", request.URL.Path)
+			http.Error(w, "wrong endpoint", http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"origin": origin})
+	}))
+	defer server.Close()
+	files := map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": "stages: []\n"}
+	for _, flow := range []string{"research", "research2"} {
+		files[flow+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
+		files[flow+"/schema.yaml"] = "stages: []\n"
+		files[flow+"/events.yaml"] = "request:\n"
+		files[flow+"/nodes.yaml"] = fmt.Sprintf("scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: send, tool: %s, input: {}}\n", toolID)
+		tool := fmt.Sprintf("provider_write:\n  handler_type: http\n  input_schema: {type: object, additionalProperties: false}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
+		if !directory {
+			files[flow+"/tools.yaml"] = tool
+		} else {
+			files[flow+"/team-bot/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send]}, cannot: [bypass journal]}\n"
+			files[flow+"/team-bot/connector.yaml"] = fmt.Sprintf("tools:\n  send:\n    category: provider_connector\n    handler_type: http\n    credentials: [token]\n    input_schema: {type: object, additionalProperties: false}\n    output_schema:\n      type: object\n      required: [origin]\n      properties: {origin: {type: string, enum: [%s]}}\n    http:\n      method: POST\n      url: %q\n      headers: {Authorization: 'Bearer {{credentials.token}}'}\n    response_success: {kind: http_status_2xx}\n", flow, server.URL+"/"+flow)
+		}
+	}
+	source := semanticview.Wrap(loadWorkflowTempBundle(t, files))
+	source = compose(t, source)
+	if _, present := source.ToolEntries()[toolID]; present {
+		t.Fatal("fixture did not remove the ambiguous global tool alias")
+	}
+	fixture := open(t, source)
+	ctx := fixture.Context
+	runID := uuid.NewString()
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	bus := &recordingPipelineBus{}
+	options := PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}}
+	if directory {
+		options.Credentials = testActivityCredentialStore(t, "team-bot.token", "directory-fixture-secret")
+	}
+	pc := fixture.NewCoordinator(bus, options)
+	var expectedStatuses []string
+	for _, flow := range []string{"research", "research2"} {
+		intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
+		intent.Input = mustActivityInput(map[string]any{})
+		intent.ActivityID = "send"
+		intent.Tool = toolID
+		intent.Owner = runtimeactivityidentity.MustNodeOwner(mustPipelineNode(flow, "scanner"))
+		intent.ExecutionFlowID = identity.NormalizeFlowID(flow)
+		intent.FlowInstance = flow + "/entity-1"
+		intent.HandlerEventKey = "request"
+		intent.SuccessEvent = flow + "/send.succeeded"
+		intent.FailureEvent = flow + "/send.failed"
+		routing, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+			FlowID: flow, FlowInstance: intent.FlowInstance, EntityID: intent.EntityID.String(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		intent.RoutingSource = routing
+		request, err := activityRequestEmitIntent(intent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedStatuses = append(expectedStatuses, request.Event.ID()+":succeeded")
+		for replay := 0; replay < 2; replay++ {
+			handled, _, err := pc.handleEventResult(ctx, request.Event)
+			if err != nil || !handled {
+				t.Fatalf("scoped dispatch/replay %s/%d: handled=%t err=%v", flow, replay, handled, err)
+			}
+			if len(bus.publishes) == 0 {
+				t.Fatal("scoped activity produced no result")
+			}
+			last := bus.publishes[len(bus.publishes)-1]
+			if last.Type() != events.EventType(flow+"/entity-1/send.succeeded") {
+				t.Fatalf("scoped call did not produce its success: %s %s", last.Type(), last.Payload())
+			}
+			var payload struct{ Result struct{ Origin string } }
+			if err := json.Unmarshal(last.Payload(), &payload); err != nil || payload.Result.Origin != flow {
+				t.Fatalf("scoped call used another endpoint/schema: %+v %v", payload, err)
+			}
+		}
+		if bus.publishes[len(bus.publishes)-1].ID() != bus.publishes[len(bus.publishes)-2].ID() {
+			t.Fatal("duplicate activity changed the canonical journaled result identity")
+		}
+	}
+	if firstCalls.Load() != 1 || secondCalls.Load() != 1 || len(bus.publishes) != 4 {
+		t.Fatalf("scoped replay redispatched or lost a result: calls=%d/%d results=%d", firstCalls.Load(), secondCalls.Load(), len(bus.publishes))
+	}
+	journal, err := fixture.ReadJournal(ctx, runID)
+	if err != nil || journal.Attempts != 2 {
+		t.Fatalf("scoped journal ownership differs: %+v %v", journal, err)
+	}
+	statuses, err := fixture.ReadAttemptStatuses(ctx)
+	slices.Sort(expectedStatuses)
+	if err != nil || !slices.Equal(statuses, expectedStatuses) {
+		t.Fatalf("scoped journal did not settle both exact effects: %+v %v", statuses, err)
+	}
+}

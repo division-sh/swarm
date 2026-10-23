@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type fanOutSelectionExecutor struct {
@@ -67,7 +68,8 @@ func TestFanOutGrantedCompleteSetAndGlobalFairnessBothStores(t *testing.T) {
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			old := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 33, time.Now().UTC())
-			newer := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), storeTestSourceArtifact("fan-out-second-granted-source"))
+			newerRooted, _ := sourceartifactfixture.Rooted(t, "newer", storeTestSourceArtifact("fan-out-second-granted-source"))
+			newer := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), newerRooted.Artifact())
 			process, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{old, newer})
 			started := make(chan capturedFanOutTurn, 8)
 			completed := make(chan fanoutobligation.Intent, 8)

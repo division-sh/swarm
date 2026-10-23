@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
@@ -91,7 +92,7 @@ func ValidateSource(source semanticview.Source) []error {
 	tools := source.ToolEntries()
 	names := make([]string, 0, len(tools))
 	for name := range tools {
-		names = append(names, strings.TrimSpace(name))
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	var errs []error
@@ -133,7 +134,7 @@ func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts Ca
 	tools := source.ToolEntries()
 	names := make([]string, 0, len(tools))
 	for name := range tools {
-		names = append(names, strings.TrimSpace(name))
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	out := make([]packs.Subject, 0)
@@ -291,7 +292,6 @@ func validateProviderConnectorAgentExposure(source semanticview.Source) []error 
 		}
 		entry := declaration.Entry
 		for _, toolID := range entry.ConfiguredTools() {
-			toolID = strings.TrimSpace(toolID)
 			if toolID == "" {
 				continue
 			}
@@ -306,7 +306,10 @@ func validateProviderConnectorAgentExposure(source semanticview.Source) []error 
 }
 
 func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry, opts CapabilityOptions) (packs.Subject, error) {
-	provider, action, _ := splitToolID(toolID)
+	provider, action, valid := splitToolID(toolID)
+	if !valid {
+		return packs.Subject{}, fmt.Errorf("provider connector tool %q must use <provider>.<action> id form", toolID)
+	}
 	host := ""
 	if httpExecution, ok := tool.HTTPExecution(); ok {
 		host = httpExecution.StaticHost()
@@ -386,22 +389,22 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 	actionLabel := connectorActionLabel(provider, action, tool)
 	var generation *GenerationSurface
 	capabilities := source.SemanticCapabilities()
-	if evidence, exists := capabilities.ConnectorGeneration(toolID); exists {
+	if evidence, exists := capabilities.ConnectorGeneration(flowID, toolID); exists {
 		copy := evidence
 		generation = &copy
 	}
 	sourceKind := "flow_local"
 	provenance := ""
 	sourcePath := ""
-	if importSource, exists := capabilities.ConnectorImportSource(toolID); exists {
+	if importSource, exists := capabilities.ConnectorImportSource(flowID, toolID); exists {
 		sourceKind = "connector_pack_import"
 		sourcePath = importSource.URI()
 		if loaded, found := opts.Registry.Lookup(provider, toolID); found {
-			provenance = strings.TrimSpace(loaded.Envelope.Provenance.Source)
+			provenance = strings.TrimSpace(loaded.Identity.Source().Provenance())
 		}
 	}
 	subject := packs.Subject{
-		ID:            strings.TrimSpace(toolID),
+		ID:            toolID,
 		Kind:          packs.SubjectProviderConnector,
 		Provider:      provider,
 		Action:        action,
@@ -437,18 +440,21 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 }
 
 func availableCapabilitySubject(installed InstalledTool) (packs.Subject, error) {
-	provider, action, _ := splitToolID(installed.ToolID)
+	provider, action, valid := splitToolID(installed.ToolID)
+	if !valid {
+		return packs.Subject{}, fmt.Errorf("installed provider connector tool %q must use <provider>.<action> id form", installed.ToolID)
+	}
 	host := ""
 	if httpExecution, ok := installed.Tool.HTTPExecution(); ok {
 		host = httpExecution.StaticHost()
 	}
 	subject := packs.Subject{
-		ID:            strings.TrimSpace(installed.ToolID),
+		ID:            installed.ToolID,
 		Kind:          packs.SubjectProviderConnector,
 		Provider:      provider,
 		Action:        action,
 		Source:        "connector_pack",
-		Provenance:    strings.TrimSpace(installed.Pack.Envelope.Provenance.Source),
+		Provenance:    strings.TrimSpace(installed.Pack.Identity.Source().Provenance()),
 		SourcePath:    strings.TrimSpace(installed.Pack.Directory),
 		Applicability: "installed",
 		Capabilities: []packs.Capability{
@@ -529,7 +535,6 @@ func connectorToolFlowID(source semanticview.Source, toolID string, tool runtime
 	if source == nil {
 		return "", nil
 	}
-	toolID = strings.TrimSpace(toolID)
 	flowIDs := map[string]struct{}{}
 	for _, scope := range source.FlowScopes() {
 		if scopedToolMatches(scope.Tools, toolID, tool) {
@@ -556,25 +561,17 @@ func connectorToolFlowID(source semanticview.Source, toolID string, tool runtime
 }
 
 func scopedToolMatches(tools map[string]runtimecontracts.ToolSchemaEntry, toolID string, tool runtimecontracts.ToolSchemaEntry) bool {
-	scoped, ok := tools[strings.TrimSpace(toolID)]
+	scoped, ok := tools[toolID]
 	return ok && reflect.DeepEqual(scoped, tool)
 }
 
 func splitToolID(toolID string) (string, string, bool) {
-	parts := strings.Split(strings.TrimSpace(toolID), ".")
+	parts := strings.Split(toolID, ".")
 	if len(parts) != 2 {
 		return "", "", false
 	}
-	provider := normalizeToken(parts[0])
-	action := normalizeToken(parts[1])
-	return provider, action, provider != "" && action != ""
-}
-
-func normalizeToken(raw string) string {
-	raw = strings.TrimSpace(strings.ToLower(raw))
-	raw = strings.ReplaceAll(raw, "-", "_")
-	raw = strings.ReplaceAll(raw, " ", "_")
-	return strings.Trim(raw, "_")
+	provider, action := parts[0], parts[1]
+	return provider, action, runtimepaths.ValidateFlowSegment(provider) == nil && action != "" && action == strings.TrimSpace(action)
 }
 
 func connectorActionLabel(provider, action string, tool runtimecontracts.ToolSchemaEntry) string {

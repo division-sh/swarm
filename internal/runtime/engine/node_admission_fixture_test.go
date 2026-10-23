@@ -17,9 +17,10 @@ func loadNodeHandlerFixture(raw string) (runtimecontracts.SystemNodeEventHandler
 	}
 	defer os.RemoveAll(root)
 	for file, body := range map[string]string{
-		"schema.yaml": "name: node-admission-fixture\nstages: []\n",
-		"events.yaml": "proof.requested:\n  items: [text]\n",
-		"nodes.yaml":  "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      " + strings.ReplaceAll(strings.TrimSpace(raw), "\n", "\n      ") + "\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "proof.requested:\n  items: [text]\n",
+		"nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      " + strings.ReplaceAll(strings.TrimSpace(raw), "\n", "\n      ") + "\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, file), []byte(body), 0600); err != nil {
 			return runtimecontracts.SystemNodeEventHandler{}, err

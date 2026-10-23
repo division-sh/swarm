@@ -265,7 +265,9 @@ func effectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowI
 }
 
 func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool, bool) {
-	flowID = strings.TrimSpace(flowID)
+	if _, ok := bundle.exactFlowEventDeclarationView(flowID); !ok {
+		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false, false
+	}
 	_, connected, ambiguous := connectedEventSchemaOwnershipRow(bundle, flowID, eventType)
 	if ambiguous {
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, true, false
@@ -285,10 +287,6 @@ func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle
 }
 
 func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, eventType string) (CompiledFlowInputPin, bool) {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		flowID = "."
-	}
 	requested := eventidentity.Normalize(eventType)
 	if local, owned := b.connectionInputs.ReceiverEvent(flowID, requested); owned {
 		return b.FlowInputEventPin(flowID, local)
@@ -306,10 +304,6 @@ func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, event
 func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, eventType string) (eventSchemaOwnershipRow, bool, bool) {
 	if bundle == nil {
 		return eventSchemaOwnershipRow{}, false, false
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		flowID = "."
 	}
 	var selected eventSchemaOwnershipRow
 	found := false

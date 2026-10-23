@@ -1,4 +1,4 @@
-name: worker-flow
+# fixture: worker-flow
 instance: worker_id
 stages:
   idle: {}

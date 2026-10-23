@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -41,15 +42,15 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
 	scope, _ := authoractivity.ScopeFromContext(f.ctx)
 	lease, err := selected.RegisterAuthorActivityEventCatalog(scope, []authoractivity.EventDescriptor{
-		{EventType: "inbound.whatsapp", Disposition: authoractivity.StoryAuthored},
+		{EventType: "inbound.whatsapp.raw", Disposition: authoractivity.StoryAuthored},
 		{EventType: "inbound.whatsapp.message", Disposition: authoractivity.StoryAuthored},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(lease.Release)
-	payload := func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
-		return eventtest.PayloadAdmission(event, flow, string(event.Type()))
+	payload := func(_ context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, producer.FlowID(), string(event.Type()))
 	}
 	selected.SetEventPayloadAdmitter(payload)
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(source, f.source.Coordinate.RuntimeInstanceID, 1)
@@ -57,7 +58,7 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 		t.Fatal(err)
 	}
 	eventBus, err := bus.NewEventBusWithOptions(selected, bus.EventBusOptions{
-		ContractBundle:   sessionBusinessSemanticFixture(t),
+		ContractBundle:   sessionBusinessSemanticFixture(t, f.rooted),
 		ExecutionPosture: executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID,
 		WorkOwner: f.workOwner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
@@ -76,19 +77,20 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 
 // Provider declarations are isolated component inputs. The compiled source and
 // selected source fact must still consume the identical admitted artifact.
-func sessionBusinessSemanticFixture(t *testing.T) semanticview.Source {
+func sessionBusinessSemanticFixture(t *testing.T, rooted sourceartifact.RootedSource) semanticview.Source {
 	t.Helper()
 	repo := pipeline.WorkflowRepoRoot()
-	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(),
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted,
 		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp", "inbound.whatsapp.message", "inbound.whatsapp.edit", "inbound.whatsapp.revoke"}})
+	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp.raw", "inbound.whatsapp.message", "inbound.whatsapp.edit", "inbound.whatsapp.revoke"}})
 }
 
 func TestSessionPublicationFixtureUsesItsAdmittedArtifact(t *testing.T) {
-	source := sessionBusinessSemanticFixture(t)
+	rooted, _ := sourceartifactfixture.Rooted(t, "session-business", sourceartifactfixture.Artifact())
+	source := sessionBusinessSemanticFixture(t, rooted)
 	runID := uuid.NewString()
 	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", runID, runID))
 	if err != nil {
@@ -97,7 +99,14 @@ func TestSessionPublicationFixtureUsesItsAdmittedArtifact(t *testing.T) {
 	if _, err := pipeline.NewExactFlowInstanceLookup(source, sourceartifactfixture.Fact(), owner); err != nil {
 		t.Fatalf("compiled publication fixture lost its admitted source: %v", err)
 	}
-	foreign := sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("name: foreign\n")))
+	foreignArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 2.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := sourceartifactfixture.FactFor(foreignArtifact)
 	if _, err := pipeline.NewExactFlowInstanceLookup(source, foreign, owner); err == nil {
 		t.Fatal("publication fixture accepted a different admitted artifact")
 	}

@@ -11,8 +11,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +24,9 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 			fixture, reopen := openPayloadBindingHistoryFixture(t, backend.name)
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			payload := []byte("{\n  \"integer\":9007199254740993, \"double\":1.0\n}")
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "history.binding", "operator", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond))
 			if err := commitSemanticEventFixture(ctx, store, event); err != nil {

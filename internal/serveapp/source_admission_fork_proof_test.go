@@ -89,7 +89,7 @@ func Test2376VerifyServeArtifactParityBothStores(t *testing.T) {
 
 func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, condition := range []string{"incompatible", "malformed range", "unknown path", "oversized name", "oversized version", "oversized platform_version"} {
+		for _, condition := range []string{"incompatible", "malformed range", "unknown path", "retired name", "oversized version", "oversized platform_version"} {
 			t.Run(backend+"/"+condition, func(t *testing.T) {
 				root := canonicalrouting.CopyLifecycleForkSource(t, true)
 				opts, start := lifecycleRestartHarness(t, backend, root)
@@ -105,9 +105,12 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 				want := "platform_version"
 				if strings.HasPrefix(condition, "oversized ") {
 					want = strings.TrimPrefix(condition, "oversized ")
-					fields := map[string]string{"name": "Root", "version": "1.0.0", "platform_version": "*"}
+					fields := map[string]string{"version": "1.0.0", "platform_version": "*"}
 					fields[want] = strings.Repeat("x", 257)
-					write2376SourceFile(t, root, "manifest.yaml", fmt.Sprintf("name: %q\nversion: %q\nplatform_version: %q\n", fields["name"], fields["version"], fields["platform_version"]))
+					write2376SourceFile(t, root, "manifest.yaml", fmt.Sprintf("version: %q\nplatform_version: %q\n", fields["version"], fields["platform_version"]))
+				} else if condition == "retired name" {
+					write2376SourceFile(t, root, "manifest.yaml", "name: Root\nversion: 1.0.0\nplatform_version: '*'\n")
+					want = "the directory is the name"
 				} else if condition == "unknown path" {
 					write2376SourceFile(t, root, "notes.txt", "relocate into docs\n")
 					want = "notes.txt"
@@ -116,7 +119,7 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 					if condition == "malformed range" {
 						rangeText = "not-a-range"
 					}
-					write2376SourceFile(t, root, "manifest.yaml", "name: Root\nversion: 1.0.0\nplatform_version: '"+rangeText+"'\n")
+					write2376SourceFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '"+rangeText+"'\n")
 				}
 				admissionEvidence := func(message string) bool {
 					return strings.Contains(message, want) && (!strings.HasPrefix(condition, "oversized ") || strings.Contains(message, "256 UTF-8 bytes"))

@@ -25,6 +25,7 @@ func (s *bindingCommitProbeStore) BindAgentSession(context.Context, runtimedeliv
 }
 
 func TestEventBusBindingConsumesTypedClaimCommit(t *testing.T) {
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery-binding", sourceartifactfixture.Artifact())
 	routeIdentity, err := events.ParseDeliveryRouteIdentity("delivery-route-v2:sha256:" + strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +61,7 @@ func TestEventBusBindingConsumesTypedClaimCommit(t *testing.T) {
 			bus := &EventBus{
 				store:              InMemoryEventStore{},
 				sourceArtifactFact: sourceartifactfixture.Fact(),
+				rootAdmission:      rooted.Admission(),
 				durable:            DurableDependencies{DeliveryLifecycle: owner},
 			}
 			bound, err := bus.MarkDeliveryInProgress(runtimedelivery.WithClaim(context.Background(), claim), "agent-a", sessionID)

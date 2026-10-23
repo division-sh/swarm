@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -71,7 +72,7 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 				logger := &exactJoinRuntimeLogger{}
 				newBus := func() *runtimebus.EventBus {
 					t.Helper()
-					bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TestLifecycleProbe: probe, Logger: logger},
+					bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: swarmruntime.NewRuntimePayloadAdmitter(nil, source, fact), TestLifecycleProbe: probe, Logger: logger},
 						"platform.join_complete", "platform.join_timeout")
 					if err != nil {
 						t.Fatal(err)
@@ -219,7 +220,8 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 
 func a2JoinResultTypeFiles(resultType string) map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: a2-result-types\nstages:\n  awaiting: {}\n  ready: {final: true}\npins:\n  inputs:\n    - item.completed\n    - halt.requested\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  awaiting: {}\n  ready: {final: true}\npins:\n  inputs:\n    - item.completed\n    - halt.requested\n",
 		"entities.yaml": fmt.Sprintf("result_state:\n  final_expected: integer\n  final_completed: integer\n  final_results: [%s]\n  final_reason: text\n", resultType),
 		"types.yaml": `scalars:
   Score: integer

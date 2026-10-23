@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packadmission"
 	channelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -100,7 +101,11 @@ func (pc *PipelineCoordinator) compileAuthoredSessionActivity(ctx context.Contex
 	if err != nil || !publication.Generation().Equal(lease.Generation()) {
 		return absent, errors.Join(err, fmt.Errorf("session activity lost its held publication identity"))
 	}
-	return channelonboarding.CompileSessionActivityTarget(pc.SemanticSource(), intent.BundleHash, site, publication)
+	trigger, err := packadmission.SessionActivityTrigger(pc.SemanticSource(), site)
+	if err != nil {
+		return absent, err
+	}
+	return channelonboarding.CompileSessionActivityTarget(pc.SemanticSource(), intent.BundleHash, site, publication, trigger)
 }
 
 func (pc *PipelineCoordinator) validateAuthoredSessionActivity(ctx context.Context, intent engine.ActivityIntent,

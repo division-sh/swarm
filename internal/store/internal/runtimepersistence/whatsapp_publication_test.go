@@ -14,6 +14,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -24,7 +26,6 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -32,16 +33,36 @@ import (
 // This proves the selected-store publication component, not SDK authentication,
 // pack normalization or a connected capture-to-publication runtime journey.
 func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *testing.T) {
+	const manifestText = `secret: {required: true}
+signature: {type: hmac_sha256, header: X-Signature, prefix: "sha256=", signed_payload: raw_body}
+delivery_id: {literal: WHATSAPP_CAPTURED_EVENT}
+event_type: {literal: fixture}
+event_name: {literal: message}
+ack: {mode: durable_before_dispatch}
+`
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := openStandingDispositionParityFixture(t, backend)
 			store := f.selected.(inboundPublicationProofStore)
 			candidate := f.candidate("whatsapp-publication")
-			artifact := sourceartifactfixture.New("schema.yaml", []byte("name: whatsapp-publication-component\n"))
+			artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.whatsapp.message]}\n"),
+				"whatsapp/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n"),
+				"whatsapp/trigger.yaml":  []byte(manifestText),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rooted, _ := sourceartifactfixture.Rooted(t, "whatsapp-publication", artifact)
 			candidate.Source = sourceartifactfixture.RequireArtifact(t, context.Background(), store, artifact)
 			candidate.FlowPath = "."
 			candidate.ServiceID = runtimeflowidentity.StandingServiceID(candidate.FlowPath)
 			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+			if _, err := f.selected.(rootedSourceStore).EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 			if !ok {
 				t.Fatal("publication component fixture requires its exact source scope")
@@ -70,23 +91,16 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 			body := []byte(`{ "conversation" : "original", "text" : "exact captured bytes" }`)
 			// This store-only fixture uses authenticated webhook admission. It
 			// cannot manufacture a native session or stand in for the SDK journey.
-			const manifestText = `provider: whatsapp
-secret: {required: true}
-signature: {type: hmac_sha256, header: X-Signature, prefix: "sha256=", signed_payload: raw_body}
-delivery_id: {literal: WHATSAPP_CAPTURED_EVENT}
-event_type: {literal: fixture}
-event_name: {literal: inbound.whatsapp.message}
-ack: {mode: durable_before_dispatch}
-`
-			manifest, err := providertriggers.ParseManifest([]byte(manifestText))
+			provider, err := packartifact.ProviderFromRootedSource(rooted, "whatsapp")
 			if err != nil {
 				t.Fatal(err)
 			}
-			digest := sha256.Sum256([]byte(manifestText))
-			catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-				Manifest: manifest, Source: "authenticated store component fixture",
-				Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.fixture", Version: "1.0.0", ManifestHash: "sha256:" + hex.EncodeToString(digest[:]), Provenance: "test"},
-			})
+			triggerBody, _ := provider.Body(packmodel.BodyTrigger)
+			manifest, err := providertriggers.AdmitBody(triggerBody)
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -144,7 +158,7 @@ ack: {mode: durable_before_dispatch}
 			}
 			eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
 				SourceArtifactFact: candidate.Source,
-				ContractBundle:     whatsappPublicationComponentSource(t, artifact),
+				ContractBundle:     whatsappPublicationComponentSource(t, rooted),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -226,13 +240,13 @@ ack: {mode: durable_before_dispatch}
 	}
 }
 
-func whatsappPublicationComponentSource(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) semanticview.Source {
+func whatsappPublicationComponentSource(t *testing.T, rooted sourceartifact.RootedSource) semanticview.Source {
 	t.Helper()
 	repo := runtimepipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact,
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted,
 		runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp.message"}})
+	return semanticview.Wrap(bundle)
 }

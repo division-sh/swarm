@@ -83,7 +83,11 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 			flow = "global"
 		}
 		fixture := newCompletionSettlementFixtureForFlow(t, selected.selected.(completionSettlementTestStore), selected.db, !selected.postgres, agentmemory.Plan{}, flow)
-		bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", sourceartifactfixture.Artifact(), platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
+		rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(fixture.context, fixture.origin.RunID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

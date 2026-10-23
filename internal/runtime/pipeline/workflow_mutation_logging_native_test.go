@@ -4,9 +4,10 @@ import "testing"
 
 func VerifyQ10NativeFieldlessNoStagePrivateHistoryForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "name: q10-fieldless-no-stage\n",
-		"events.yaml": "observe:\n",
-		"nodes.yaml":  "observer:\n  execution_type: system_node\n  event_handlers:\n    observe: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "observe:\n",
+		"nodes.yaml":    "observer:\n  execution_type: system_node\n  event_handlers:\n    observe: {}\n",
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

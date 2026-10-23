@@ -99,7 +99,6 @@ func TestIssue2564H2SubprocessHelperRegistryIsNonCredit(t *testing.T) {
 			}
 			for _, name := range []string{
 				"TestIssue2564ReconstructedEquivalentH2BothStores",
-				"TestIssue2564H2EquivalentCorpus",
 				"TestIssue2564H2WorkloadObservationPortsBothStores",
 				"TestIssue2564H2WorkloadObservationsRejectOtherOwner",
 				"TestIssue2564H2ServeProcessHelperExtra",

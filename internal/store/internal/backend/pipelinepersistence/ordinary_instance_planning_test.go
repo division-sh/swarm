@@ -92,18 +92,24 @@ func TestOrdinaryPlanningMemoKeepsLaterReadFailuresAndCancellation(t *testing.T)
 
 func TestOrdinaryPlanningScopeKeepsSourceAndLineageRefusals(t *testing.T) {
 	artifact := sourceartifactfixture.Artifact()
-	source := semanticview.Wrap(&contracts.WorkflowContractBundle{SourceArtifact: artifact, Semantics: contracts.WorkflowSemanticView{Version: "original"}})
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", artifact)
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(pipeline.WorkflowRepoRoot(), rooted, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
 	scope, err := pipeline.NewFlowInstanceLookupScope(source, sourceartifactfixture.FactFor(artifact), "11111111-1111-1111-1111-111111111111", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := runlifecycle.Snapshot{RunID: scope.RunID(), State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()}
+	run := runlifecycle.Snapshot{RunID: scope.RunID(), State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: artifact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: time.Now().UTC()}
 	for _, fault := range []string{"exact", "changed_source", "missing_lineage", "missing_owner", "invalid_state", "malformed_hash"} {
 		t.Run(fault, func(t *testing.T) {
 			snapshot := &flowInstanceIndexSnapshot{source: source, run: run, historical: &snapshotHistoricalReader{}}
 			switch fault {
 			case "changed_source":
 				snapshot.run.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
+				snapshot.run.RootReference.BundleHash = snapshot.run.BundleHash
 			case "missing_lineage":
 				snapshot.run.Origin = runlifecycle.RunOrigin{}
 			case "missing_owner":

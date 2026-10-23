@@ -9,9 +9,36 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
+
+func TestS1ActiveRunAdmissionRejectsSameContentForeignRoot(t *testing.T) {
+	runAdmissionDialects(t, func(t *testing.T, dialect privateactivity.Dialect) {
+		sourceA, _ := sourceartifactfixture.Rooted(t, "shop-a", sourceartifactfixture.Artifact())
+		sourceB, _ := sourceartifactfixture.Rooted(t, "shop-b", sourceA.Artifact())
+		fact := sourceartifactfixture.FactFor(sourceA.Artifact())
+		caller := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), sourceA.Admission())
+		runID := uuid.NewString()
+		withRunAdmissionAttempt(t, dialect, caller, func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
+			if err := CacheActiveRunSource(ctx, tx, runID, fact, sourceA.Admission().Reference()); err != nil {
+				t.Fatal(err)
+			}
+			foreign := runtimecorrelation.WithRootAdmission(ctx, sourceB.Admission())
+			if _, _, cached, err := CachedActiveRunSource(foreign, tx, runID); err == nil || cached {
+				t.Errorf("same content under another root reused run admission: cached=%t err=%v", cached, err)
+			}
+			if err := attempt.RequireActiveRunSourceAdmission(foreign, runID, fact); err == nil {
+				t.Error("same-content foreign root acquired record authority")
+			}
+			if _, _, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || !cached {
+				t.Errorf("refused foreign caller destroyed the original frozen admission: cached=%t err=%v", cached, err)
+			}
+		})
+	})
+}
 
 func runAdmissionMockDB(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
 	t.Helper()
@@ -42,6 +69,10 @@ func runAdmissionFact(t *testing.T, digit string) runtimecorrelation.SourceArtif
 		t.Fatal(err)
 	}
 	return fact
+}
+
+func runAdmissionRootReference(fact runtimecorrelation.SourceArtifactFact) sourceartifact.RootAdmissionReference {
+	return sourceartifact.RootAdmissionReference{BundleHash: fact.BundleHash(), RootDirectory: "fixture"}
 }
 
 func withRunAdmissionAttempt(t *testing.T, dialect privateactivity.Dialect, caller context.Context, check func(context.Context, *Attempt, *sql.Tx)) {
@@ -76,12 +107,12 @@ func withRunAdmissionAttempt(t *testing.T, dialect privateactivity.Dialect, call
 
 func requireRunAdmissionRefusal(t *testing.T, ctx context.Context, attempt *Attempt, tx *sql.Tx, runID string, fact runtimecorrelation.SourceArtifactFact, want error) {
 	t.Helper()
-	got, cached, err := CachedActiveRunSource(ctx, tx, runID)
+	got, _, cached, err := CachedActiveRunSource(ctx, tx, runID)
 	if cached || got != (runtimecorrelation.SourceArtifactFact{}) || err == nil || (want != nil && !errors.Is(err, want)) {
 		t.Fatalf("refused cache read: fact=%v cached=%v err=%v, want %v", got, cached, err, want)
 	}
 	for name, operation := range map[string]func() error{
-		"setter":       func() error { return CacheActiveRunSource(ctx, tx, runID, fact) },
+		"setter":       func() error { return CacheActiveRunSource(ctx, tx, runID, fact, runAdmissionRootReference(fact)) },
 		"invalidation": func() error { return InvalidateActiveRunSource(ctx, tx, runID) },
 		"record check": func() error { return attempt.RequireActiveRunSourceAdmission(ctx, runID, fact) },
 	} {
@@ -99,20 +130,20 @@ func TestRunAdmissionExactNativeAttemptAndTransaction(t *testing.T) {
 			if ctx.Value(sqlAttemptKey{}) != attempt || attempt.tx != tx || attempt.callerCtx != caller || attempt.runAdmissions == nil {
 				t.Fatal("native constructor did not bind the exact attempt, transaction, caller and fresh map")
 			}
-			if got, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || cached || got != (runtimecorrelation.SourceArtifactFact{}) {
+			if got, _, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || cached || got != (runtimecorrelation.SourceArtifactFact{}) {
 				t.Fatalf("new attempt had admission: fact=%v cached=%v err=%v", got, cached, err)
 			}
 			if err := attempt.RequireActiveRunSourceAdmission(ctx, runID, fact); err == nil {
 				t.Fatal("unadmitted source minted record permission")
 			}
-			if err := CacheActiveRunSource(ctx, tx, " "+runID+" ", fact); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, " "+runID+" ", fact, runAdmissionRootReference(fact)); err != nil {
 				t.Fatal(err)
 			}
 			if err := attempt.WithSQL(context.Background(), func(lent context.Context, lentTx *sql.Tx) error {
 				if lent.Value(sqlAttemptKey{}) != attempt || lentTx != tx {
 					t.Fatal("WithSQL did not bind the same native attempt and transaction")
 				}
-				got, cached, err := CachedActiveRunSource(lent, lentTx, runID)
+				got, _, cached, err := CachedActiveRunSource(lent, lentTx, runID)
 				if err != nil || !cached || !got.Matches(fact) {
 					t.Fatalf("exact admission reuse: fact=%v cached=%v err=%v", got, cached, err)
 				}
@@ -130,10 +161,10 @@ func TestRunAdmissionSourceOnlyContextCannotMint(t *testing.T) {
 		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
 			sourceOnly := runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(context.Background(), runID), fact)
 			for name, unbound := range map[string]context.Context{"no key": context.Background(), "source only": sourceOnly} {
-				if err := CacheActiveRunSource(unbound, tx, runID, fact); err != nil {
+				if err := CacheActiveRunSource(unbound, tx, runID, fact, runAdmissionRootReference(fact)); err != nil {
 					t.Fatalf("%s uncached setter: %v", name, err)
 				}
-				if got, cached, err := CachedActiveRunSource(unbound, tx, runID); err != nil || cached || got != (runtimecorrelation.SourceArtifactFact{}) {
+				if got, _, cached, err := CachedActiveRunSource(unbound, tx, runID); err != nil || cached || got != (runtimecorrelation.SourceArtifactFact{}) {
 					t.Fatalf("%s borrowed native admission: fact=%v cached=%v err=%v", name, got, cached, err)
 				}
 				if err := InvalidateActiveRunSource(unbound, tx, runID); err != nil {
@@ -144,13 +175,13 @@ func TestRunAdmissionSourceOnlyContextCannotMint(t *testing.T) {
 				}
 			}
 			boundSource := runtimecorrelation.WithSourceArtifactFact(ctx, fact)
-			if _, cached, err := CachedActiveRunSource(boundSource, tx, runID); err != nil || cached || len(attempt.runAdmissions) != 0 {
+			if _, _, cached, err := CachedActiveRunSource(boundSource, tx, runID); err != nil || cached || len(attempt.runAdmissions) != 0 {
 				t.Fatalf("context fact populated the native map: cached=%v err=%v map=%v", cached, err, attempt.runAdmissions)
 			}
 			if err := attempt.RequireActiveRunSourceAdmission(boundSource, runID, fact); err == nil {
 				t.Fatal("bound context fact alone minted record permission")
 			}
-			if err := CacheActiveRunSource(ctx, tx, runID, fact); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, runID, fact, runAdmissionRootReference(fact)); err != nil {
 				t.Fatal(err)
 			}
 			if err := InvalidateActiveRunSource(sourceOnly, tx, runID); err != nil {
@@ -171,7 +202,7 @@ func TestRunAdmissionForeignAndEndedScope(t *testing.T) {
 		var endedTx *sql.Tx
 		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
 			endedCtx, ended, endedTx = ctx, attempt, tx
-			if err := CacheActiveRunSource(ctx, tx, runID, fact); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, runID, fact, runAdmissionRootReference(fact)); err != nil {
 				t.Fatal(err)
 			}
 			for name, invalidCtx := range map[string]context.Context{
@@ -194,7 +225,7 @@ func TestRunAdmissionForeignAndEndedScope(t *testing.T) {
 					t.Fatal("independent native scopes share identity")
 				}
 				// Equal source and run values do not bridge attempt or Tx ownership.
-				if err := CacheActiveRunSource(foreignCtx, foreignTx, runID, fact); err != nil {
+				if err := CacheActiveRunSource(foreignCtx, foreignTx, runID, fact, runAdmissionRootReference(fact)); err != nil {
 					t.Fatal(err)
 				}
 				requireRunAdmissionRefusal(t, ctx, foreign, foreignTx, runID, fact, nil)
@@ -237,7 +268,7 @@ func TestRunAdmissionFreshNativeRetry(t *testing.T) {
 			attempts++
 			fact := firstFact
 			err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				if _, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || cached || len(attempt.runAdmissions) != 0 {
+				if _, _, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || cached || len(attempt.runAdmissions) != 0 {
 					t.Fatalf("attempt %d inherited admission: cached=%v err=%v map=%v", attempts, cached, err, attempt.runAdmissions)
 				}
 				if attempts == 1 {
@@ -255,7 +286,7 @@ func TestRunAdmissionFreshNativeRetry(t *testing.T) {
 						t.Fatal("retry retained the prior map entry")
 					}
 				}
-				if err := CacheActiveRunSource(ctx, tx, runID, fact); err != nil {
+				if err := CacheActiveRunSource(ctx, tx, runID, fact, runAdmissionRootReference(fact)); err != nil {
 					return err
 				}
 				if attempts == 2 {
@@ -285,7 +316,7 @@ func TestRunAdmissionCancellation(t *testing.T) {
 				runID := uuid.NewString()
 				fact, replacement := runAdmissionFact(t, "a"), runAdmissionFact(t, "b")
 				withRunAdmissionAttempt(t, dialect, caller, func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
-					if err := CacheActiveRunSource(ctx, tx, runID, fact); err != nil {
+					if err := CacheActiveRunSource(ctx, tx, runID, fact, runAdmissionRootReference(fact)); err != nil {
 						t.Fatal(err)
 					}
 					checkCtx := ctx
@@ -305,7 +336,7 @@ func TestRunAdmissionCancellation(t *testing.T) {
 						}
 					}
 					requireRunAdmissionRefusal(t, checkCtx, attempt, tx, runID, replacement, context.Canceled)
-					if len(attempt.runAdmissions) != 1 || !attempt.runAdmissions[runID].Matches(fact) {
+					if len(attempt.runAdmissions) != 1 || !attempt.runAdmissions[runID].fact.Matches(fact) {
 						t.Fatal("canceled setter or invalidation changed the cached admission")
 					}
 					if name == "current context" {
@@ -325,29 +356,31 @@ func TestRunAdmissionRunAndSourceIsolation(t *testing.T) {
 		fact, otherFact := runAdmissionFact(t, "a"), runAdmissionFact(t, "b")
 		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, otherFact)
-			if err := CacheActiveRunSource(ctx, tx, runID, fact); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, runID, fact, runAdmissionRootReference(fact)); err != nil {
 				t.Fatal(err)
 			}
-			if got, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || !cached || !got.Matches(fact) {
+			if got, _, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || !cached || !got.Matches(fact) {
 				t.Fatalf("context fact replaced canonical admission: fact=%v cached=%v err=%v", got, cached, err)
 			}
-			if _, cached, err := CachedActiveRunSource(ctx, tx, foreignRun); err != nil || cached {
+			if _, _, cached, err := CachedActiveRunSource(ctx, tx, foreignRun); err != nil || cached {
 				t.Fatalf("foreign run borrowed admission: cached=%v err=%v", cached, err)
 			}
 			for name, check := range map[string]func() error{
 				"foreign run":     func() error { return attempt.RequireActiveRunSourceAdmission(ctx, foreignRun, fact) },
 				"mismatched fact": func() error { return attempt.RequireActiveRunSourceAdmission(ctx, runID, otherFact) },
-				"invalid fact":    func() error { return CacheActiveRunSource(ctx, tx, runID, runtimecorrelation.SourceArtifactFact{}) },
-				"empty run":       func() error { return CacheActiveRunSource(ctx, tx, " ", fact) },
+				"invalid fact": func() error {
+					return CacheActiveRunSource(ctx, tx, runID, runtimecorrelation.SourceArtifactFact{}, runAdmissionRootReference(runtimecorrelation.SourceArtifactFact{}))
+				},
+				"empty run": func() error { return CacheActiveRunSource(ctx, tx, " ", fact, runAdmissionRootReference(fact)) },
 			} {
 				if err := check(); err == nil {
 					t.Fatalf("%s was admitted", name)
 				}
 			}
-			if len(attempt.runAdmissions) != 1 || !attempt.runAdmissions[runID].Matches(fact) {
+			if len(attempt.runAdmissions) != 1 || !attempt.runAdmissions[runID].fact.Matches(fact) {
 				t.Fatal("refused source/run input changed admission")
 			}
-			if err := CacheActiveRunSource(ctx, tx, foreignRun, otherFact); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, foreignRun, otherFact, runAdmissionRootReference(otherFact)); err != nil {
 				t.Fatal(err)
 			}
 			if err := attempt.RequireActiveRunSourceAdmission(ctx, foreignRun, otherFact); err != nil {
@@ -367,7 +400,7 @@ func TestRunAdmissionUUIDAliasInvalidation(t *testing.T) {
 		unrelated, fact := uuid.NewString(), runAdmissionFact(t, "a")
 		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
 			for _, key := range append(aliases, unrelated) {
-				if err := CacheActiveRunSource(ctx, tx, key, fact); err != nil {
+				if err := CacheActiveRunSource(ctx, tx, key, fact, runAdmissionRootReference(fact)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -376,7 +409,7 @@ func TestRunAdmissionUUIDAliasInvalidation(t *testing.T) {
 			}
 			for _, key := range append(aliases, unrelated) {
 				want := key == unrelated || (dialect == privateactivity.DialectSQLite && key != aliases[1])
-				got, cached, err := CachedActiveRunSource(ctx, tx, key)
+				got, _, cached, err := CachedActiveRunSource(ctx, tx, key)
 				if err != nil || cached != want || (want && !got.Matches(fact)) || (!want && got != (runtimecorrelation.SourceArtifactFact{})) {
 					t.Fatalf("alias %s after invalidation: fact=%v cached=%v err=%v, want cached=%v", key, got, cached, err, want)
 				}
@@ -384,27 +417,27 @@ func TestRunAdmissionUUIDAliasInvalidation(t *testing.T) {
 					t.Fatalf("alias %s record admission: err=%v, want admitted=%v", key, err, want)
 				}
 			}
-			if err := CacheActiveRunSource(ctx, tx, runID, fact); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, runID, fact, runAdmissionRootReference(fact)); err != nil {
 				t.Fatal(err)
 			}
 			// PG also accepts forms that uuid.Parse does not recognize.
 			if err := InvalidateActiveRunSource(ctx, tx, aliases[4]); err != nil {
 				t.Fatal(err)
 			}
-			if _, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
+			if _, _, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
 				t.Fatalf("four-digit-group alias invalidation: cached=%v err=%v", cached, err)
 			}
-			if _, cached, err := CachedActiveRunSource(ctx, tx, unrelated); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
+			if _, _, cached, err := CachedActiveRunSource(ctx, tx, unrelated); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
 				t.Fatalf("uuid.Parse fallback invalidation: cached=%v err=%v", cached, err)
 			}
-			if err := CacheActiveRunSource(ctx, tx, unrelated, fact); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, unrelated, fact, runAdmissionRootReference(fact)); err != nil {
 				t.Fatal(err)
 			}
 			// Unrecognized spellings still conservatively clear potentially stale PG authority.
 			if err := InvalidateActiveRunSource(ctx, tx, "not-a-uuid"); err != nil {
 				t.Fatal(err)
 			}
-			if _, cached, err := CachedActiveRunSource(ctx, tx, unrelated); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
+			if _, _, cached, err := CachedActiveRunSource(ctx, tx, unrelated); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
 				t.Fatalf("fallback invalidation: cached=%v err=%v", cached, err)
 			}
 		})
@@ -417,12 +450,12 @@ func TestRunAdmissionUUIDAliasReuseAndReplacement(t *testing.T) {
 		aliases := runIdentityAliases(runID)
 		fact, replacement := runAdmissionFact(t, "a"), runAdmissionFact(t, "b")
 		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
-			if err := CacheActiveRunSource(ctx, tx, " "+aliases[0]+" ", fact); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, " "+aliases[0]+" ", fact, runAdmissionRootReference(fact)); err != nil {
 				t.Fatal(err)
 			}
 			for _, alias := range aliases {
 				want := dialect == privateactivity.DialectPostgres || alias == aliases[0]
-				got, cached, err := CachedActiveRunSource(ctx, tx, " "+alias+" ")
+				got, _, cached, err := CachedActiveRunSource(ctx, tx, " "+alias+" ")
 				if err != nil || cached != want || (want && !got.Matches(fact)) || (!want && got != (runtimecorrelation.SourceArtifactFact{})) {
 					t.Fatalf("alias %s reuse: fact=%v cached=%v err=%v, want cached=%v", alias, got, cached, err, want)
 				}
@@ -431,7 +464,7 @@ func TestRunAdmissionUUIDAliasReuseAndReplacement(t *testing.T) {
 				}
 			}
 			for _, alias := range aliases[1:] {
-				if err := CacheActiveRunSource(ctx, tx, alias, fact); err != nil {
+				if err := CacheActiveRunSource(ctx, tx, alias, fact, runAdmissionRootReference(fact)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -442,7 +475,7 @@ func TestRunAdmissionUUIDAliasReuseAndReplacement(t *testing.T) {
 			if len(attempt.runAdmissions) != wantKeys {
 				t.Fatalf("alias admissions=%d, want %d", len(attempt.runAdmissions), wantKeys)
 			}
-			if err := CacheActiveRunSource(ctx, tx, aliases[4], replacement); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, aliases[4], replacement, runAdmissionRootReference(replacement)); err != nil {
 				t.Fatal(err)
 			}
 			for _, alias := range aliases {
@@ -450,7 +483,7 @@ func TestRunAdmissionUUIDAliasReuseAndReplacement(t *testing.T) {
 				if dialect == privateactivity.DialectPostgres || alias == aliases[4] {
 					want = replacement
 				}
-				got, cached, err := CachedActiveRunSource(ctx, tx, alias)
+				got, _, cached, err := CachedActiveRunSource(ctx, tx, alias)
 				if err != nil || !cached || !got.Matches(want) {
 					t.Fatalf("alias %s replacement: fact=%v cached=%v err=%v, want %v", alias, got, cached, err, want)
 				}
@@ -471,14 +504,14 @@ func TestRunAdmissionInvalidUUIDCannotMintButSQLiteTextCan(t *testing.T) {
 		fact := runAdmissionFact(t, "a")
 		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
 			for _, input := range []string{"", " ", "run", "urn:uuid:" + runID, "[" + runID + "]", "{" + runID, "aa-bbccddeeff00112233445566778899"} {
-				if got, cached, err := CachedActiveRunSource(ctx, tx, input); err != nil || cached || got != (runtimecorrelation.SourceArtifactFact{}) {
+				if got, _, cached, err := CachedActiveRunSource(ctx, tx, input); err != nil || cached || got != (runtimecorrelation.SourceArtifactFact{}) {
 					t.Fatalf("unadmitted input %q: fact=%v cached=%v err=%v", input, got, cached, err)
 				}
 				want := dialect == privateactivity.DialectSQLite && strings.TrimSpace(input) != ""
-				if err := CacheActiveRunSource(ctx, tx, input, fact); (err == nil) != want {
+				if err := CacheActiveRunSource(ctx, tx, input, fact, runAdmissionRootReference(fact)); (err == nil) != want {
 					t.Fatalf("input %q setter: err=%v, want admitted=%v", input, err, want)
 				}
-				got, cached, err := CachedActiveRunSource(ctx, tx, input)
+				got, _, cached, err := CachedActiveRunSource(ctx, tx, input)
 				if err != nil || cached != want || (want && !got.Matches(fact)) || (!want && got != (runtimecorrelation.SourceArtifactFact{})) {
 					t.Fatalf("input %q getter: fact=%v cached=%v err=%v, want admitted=%v", input, got, cached, err, want)
 				}

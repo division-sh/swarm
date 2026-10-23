@@ -14,7 +14,8 @@ func VerifyIssue2564EvaluatedSnapshotMustFenceCommitBothStoresForTest(t *testing
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: stale-evaluated-snapshot\nstages:\n  pending: {}\n",
+				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"schema.yaml":   "stages:\n  pending: {}\n",
 				"entities.yaml": "test_entity:\n  count: integer\n  marker: integer\n",
 			})
 			fixture := open(t, tc.name, source)

@@ -485,6 +485,10 @@ var sqlitePredicateReplacements = func() [][2]string {
 		sqliteBundleHashPredicate("payload_schema_bundle_hash"),
 	)
 	add(
+		"target_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
+		sqliteBundleHashPredicate("target_bundle_hash"),
+	)
+	add(
 		"bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("bundle_hash"),
 	)

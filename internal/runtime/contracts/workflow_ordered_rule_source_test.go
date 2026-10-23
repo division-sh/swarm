@@ -22,9 +22,11 @@ func TestOrderedRuleRetirementReachesDiskCatalogAndRetainedChildren(t *testing.T
 		} {
 			t.Run(scope+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
-				writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: ordered-rule-source\n")
+				writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: ordered-rule-source\n")
 				if scope != "." {
-					writeFixtureFile(t, filepath.Join(root, scope, "schema.yaml"), "name: unused-child\n")
+					writeFixtureFile(t, filepath.Join(root, scope, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+					writeFixtureFile(t, filepath.Join(root, scope, "schema.yaml"), "stages: []\n# fixture: unused-child\n")
 				}
 				writeFixtureFile(t, filepath.Join(root, scope, "events.yaml"), "request:\ndone:\n")
 				writeFixtureFile(t, filepath.Join(root, scope, "nodes.yaml"),
@@ -53,7 +55,7 @@ func TestOrderedRuleRetirementReachesDiskCatalogAndRetainedChildren(t *testing.T
 					if source.BundleHash() != artifact.BundleHash() || string(source.LogicalBlob()) != string(artifact.LogicalBlob()) {
 						t.Fatalf("%s changed the exact refused source bytes/hash", name)
 					}
-					bundle, err := LoadWorkflowContractBundleFromArtifact(repo, source, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+					bundle, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, source), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 					if bundle != nil || err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "nodes.yaml") {
 						t.Fatalf("%s bypassed the exact rule refusal: bundle=%v err=%v", name, bundle, err)
 					}

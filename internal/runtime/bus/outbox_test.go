@@ -18,14 +18,11 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -1229,30 +1226,15 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		t.Fatalf("Begin: %v", err)
 	}
 	store := &directRecipientTransactionalStore{}
-	flow := runtimecontracts.FlowContractView{
-		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"),
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"task.started": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"target-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.started": {}}},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
-	root.Children[0].Parent = &root
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		SourceArtifact: sourceartifactfixture.Artifact(), RootSchema: &root.Schema,
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": flow.Schema},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "review": &root.Children[0]},
-		},
-	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "review"))
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
-	bundle.Semantics.Version = "1.0.0"
+	bundle := loadEventBusTempBundle(t, map[string]string{
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":          "stages: []\n",
+		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"review/schema.yaml":   "stages: []\ninstance: instance_key\n",
+		"review/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		"review/events.yaml":   "task.started:\n",
+		"review/nodes.yaml":    "target-node:\n  execution_type: system_node\n  event_handlers:\n    task.started: {}\n",
+	})
 	source := semanticview.Wrap(bundle)
 	var observations []runtimepipeline.FlowInstanceObservation
 	for _, owner := range []struct{ flow, instance string }{{".", ""}, {"review", "inst-1"}} {

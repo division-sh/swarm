@@ -301,7 +301,7 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 		t.Fatal("stage lifecycle runtime requires a bundle-backed source")
 	}
 	sourceArtifactFact := conformanceSourceArtifactFact(t, module.source)
-	catalogStore, ok := selected.(storetest.DurableDataCatalogStore)
+	catalogStore, ok := selected.(storetest.RootedDataCatalogStore)
 	if !ok {
 		t.Fatalf("stage lifecycle store %T does not persist source artifacts", selected)
 	}

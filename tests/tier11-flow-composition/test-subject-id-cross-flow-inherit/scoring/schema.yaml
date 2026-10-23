@@ -1,4 +1,4 @@
-name: scoring
+# fixture: scoring
 stages:
   pending: {}
   scored: {final: true}

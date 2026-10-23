@@ -1,4 +1,4 @@
-name: test-dead-letter
+# fixture: test-dead-letter
 stages:
   pending: {}
   done: {final: true}

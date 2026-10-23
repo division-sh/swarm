@@ -1,4 +1,4 @@
-name: map-worker
+# fixture: map-worker
 instance: member_id
 stages:
   waiting: {}

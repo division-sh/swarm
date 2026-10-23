@@ -13,7 +13,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -71,6 +70,13 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runti
 func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, target runtimepkg.InboundTarget, w http.ResponseWriter, r *http.Request, provider, signingSecret string) {
 	t.Helper()
 	_ = bus
+	if target.AdmissionPlan.Valid() {
+		if target.Provider != provider || target.SigningSecret != signingSecret {
+			t.Fatal("captured provider target contradicts delivery credentials")
+		}
+		gateway.HandleResolvedWebhook(w, r, target, nil)
+		return
+	}
 	plan, err := testProviderTriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: target.Alias, Provider: provider, SigningSecret: signingSecret,
 	})
@@ -156,14 +162,24 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 	if !ok || !found || bundle.SourceArtifact == nil || bundleHash != bundle.SourceArtifact.BundleHash() {
 		t.Fatal("bounded component binding requires its exact admitted fixture artifact writer")
 	}
-	sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
+	captured, captureErr := bundle.RootedSource()
+	if captureErr != nil {
+		t.Fatal(captureErr)
+	}
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil || (present && !root.Equal(captured.Admission())) {
+		t.Fatalf("bounded provider requires its matching constructor root: present=%v err=%v", present, err)
+	}
+	root = captured.Admission()
+	ctx = runtimecorrelation.WithRootAdmission(ctx, root)
+	sourceartifactfixture.RequireArtifact(t, ctx, writer, captured.Artifact())
 
 	owner, ok := persistence.(runtimepipeline.StandingServicePersistence)
 	if !ok {
 		t.Fatalf("bounded provider persistence %T lacks the standing owner", persistence)
 	}
 	standing, err := owner.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, FlowPath: flowPath, Source: source, BindingEnabled: true,
+		ServiceID: serviceID, FlowPath: flowPath, Source: source, RootAdmission: root, BindingEnabled: true,
 	})
 	if err != nil {
 		t.Fatalf("reconcile bounded standing binding: %v", err)
@@ -196,52 +212,3 @@ func boundedInboundTargetContext(t testing.TB, ctx context.Context, target runti
 }
 
 const boundedProviderFlowID = "bounded_inbound"
-
-// boundedStandingConnectorBundle puts connector consumers in the exact static
-// flow path targeted by the bounded standing-ingress fixture. Process-served
-// tests separately prove real standing singleton materialization.
-func boundedStandingConnectorBundle(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	if bundle == nil {
-		return bundle
-	}
-	inputs := []runtimecontracts.FlowInputEventPin(nil)
-	if bundle.RootSchema != nil {
-		inputs = append(inputs, bundle.RootSchema.Pins.Inputs.EventPins...)
-	}
-	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: boundedProviderFlowID},
-		Schema: runtimecontracts.FlowSchemaDocument{
-
-			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputs}},
-		},
-		Nodes:  bundle.Nodes,
-		Events: bundle.Events,
-		Agents: bundle.Agents,
-		Tools:  bundle.Tools,
-	}
-	admitted := loadRuntimeTempBundle(t, map[string]string{
-		"schema.yaml":                   "name: bounded-standing-connector\n",
-		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nstages:\n  active: {}\n",
-		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
-	})
-	admitted.RootSchema = bundle.RootSchema
-	admitted.FlowTree.Root.Schema = *bundle.RootSchema
-	admittedFlow, ok := admitted.FlowTree.ByPath[boundedProviderFlowID]
-	if !ok {
-		t.Fatalf("admitted bounded connector source omitted flow %q", boundedProviderFlowID)
-	}
-	// Keep the admitted lifecycle used by the shared inbound state fixture.
-	flow.Schema = admittedFlow.Schema
-	flow.Schema.Pins.Inputs.EventPins = inputs
-	admittedFlow.Schema = flow.Schema
-	admittedFlow.Nodes = flow.Nodes
-	admittedFlow.Events = flow.Events
-	admittedFlow.Agents = flow.Agents
-	admittedFlow.Tools = flow.Tools
-	admitted.FlowSchemas[boundedProviderFlowID] = flow.Schema
-	if err := runtimecontracts.CompileWorkflowSemantics(admitted); err != nil {
-		t.Fatalf("compile bounded standing connector semantics: %v", err)
-	}
-	return admitted
-}

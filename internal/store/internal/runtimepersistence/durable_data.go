@@ -66,6 +66,50 @@ func (s *SQLiteRuntimeStore) EnsureSourceArtifactWithData(ctx context.Context, a
 	return result, err
 }
 
+func (s *PostgresStore) EnsureRootedSourceWithData(ctx context.Context, source sourceartifact.RootedSource, catalog runtimedata.Catalog) (sourceartifact.RootedEnsureResult, error) {
+	if s == nil || s.backend == nil || s.sourceArtifactOwner == nil || s.durableDataOwner == nil {
+		return sourceartifact.RootedEnsureResult{}, fmt.Errorf("postgres rooted source and data catalog owners are required")
+	}
+	if err := source.Validate(); err != nil {
+		return sourceartifact.RootedEnsureResult{}, err
+	}
+	if source.Admission().BundleHash() != catalog.BundleHash {
+		return sourceartifact.RootedEnsureResult{}, fmt.Errorf("rooted source and data catalog hashes must match")
+	}
+	var result sourceartifact.RootedEnsureResult
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = storesourceartifact.EnsurePostgresRootedSourceTx(txctx, tx, source, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		return storedurabledata.RegisterCatalogTx(s.durableDataOwner, txctx, tx, catalog, time.Now().UTC())
+	})
+	return result, err
+}
+
+func (s *SQLiteRuntimeStore) EnsureRootedSourceWithData(ctx context.Context, source sourceartifact.RootedSource, catalog runtimedata.Catalog) (sourceartifact.RootedEnsureResult, error) {
+	if s == nil || s.backend == nil || s.sourceArtifactOwner == nil || s.durableDataOwner == nil {
+		return sourceartifact.RootedEnsureResult{}, fmt.Errorf("sqlite rooted source and data catalog owners are required")
+	}
+	if err := source.Validate(); err != nil {
+		return sourceartifact.RootedEnsureResult{}, err
+	}
+	if source.Admission().BundleHash() != catalog.BundleHash {
+		return sourceartifact.RootedEnsureResult{}, fmt.Errorf("rooted source and data catalog hashes must match")
+	}
+	var result sourceartifact.RootedEnsureResult
+	err := s.backend.RunTransaction(ctx, "sqlite rooted source and data catalog ensure", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = storesourceartifact.EnsureSQLiteRootedSourceTx(txctx, tx, source, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		return storedurabledata.RegisterCatalogTx(s.durableDataOwner, txctx, tx, catalog, time.Now().UTC())
+	})
+	return result, err
+}
+
 func (s *PostgresStore) ExecuteDataSourceOperation(ctx context.Context, command runtimedata.SourceCommand) (runtimedata.SourceOperationResult, error) {
 	return s.durableDataOwner.ExecuteSourceOperation(ctx, command)
 }

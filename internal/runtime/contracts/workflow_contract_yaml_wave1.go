@@ -21,37 +21,6 @@ var builtinWave1ScalarTypes = map[string]struct{}{
 	"uuid":      {},
 }
 
-var projectFlowIngressFields = map[string]struct{}{
-	"alias":     {},
-	"providers": {},
-}
-
-var projectFlowIngressProviderFields = map[string]struct{}{
-	"provider":       {},
-	"signing_secret": {},
-	"admission":      {},
-}
-
-var projectFlowIngressAdmissionFields = map[string]struct{}{
-	"kind":           {},
-	"pack":           {},
-	"acknowledge":    {},
-	"authentication": {},
-	"event":          {},
-	"delivery_id":    {},
-	"payload":        {},
-}
-
-var projectFlowIngressAdmissionPackFields = map[string]struct{}{"id": {}}
-
-var projectFlowIngressAuthenticationFields = map[string]struct{}{
-	"kind": {}, "header": {}, "prefix": {}, "encoding": {},
-}
-
-var projectFlowIngressDeliveryIDFields = map[string]struct{}{
-	"source": {}, "header": {}, "json_path": {},
-}
-
 var flowConnectFieldOptions = map[string]struct{}{
 	"replies_to":      {},
 	"correlation_key": {},

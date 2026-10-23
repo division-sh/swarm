@@ -15,16 +15,23 @@ import (
 func activationAncestrySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":                    "name: activation-ancestry\nstages:\n  created: {}\n",
-		"operating/schema.yaml":          "name: operating\ninstance: instance_key\nstages:\n  created: {}\n",
+		"manifest.yaml":                  "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":                    "stages:\n  created: {}\n",
+		"operating/manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"operating/schema.yaml":          "instance: instance_key\nstages:\n  created: {}\n",
 		"operating/entities.yaml":        "item:\n  instance_key: text\n",
-		"operating/review/schema.yaml":   "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"operating/review/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"operating/review/schema.yaml":   "instance: instance_key\nstages:\n  created: {}\n",
 		"operating/review/entities.yaml": "item:\n  instance_key: text\n",
-		"operating/scout/schema.yaml":    "name: scout\nstages:\n  created: {}\n",
-		"scout/schema.yaml":              "name: scout\nstages:\n  created: {}\n",
-		"scout/review/schema.yaml":       "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"operating/scout/manifest.yaml":  "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"operating/scout/schema.yaml":    "stages:\n  created: {}\n",
+		"scout/manifest.yaml":            "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"scout/schema.yaml":              "stages:\n  created: {}\n",
+		"scout/review/manifest.yaml":     "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"scout/review/schema.yaml":       "instance: instance_key\nstages:\n  created: {}\n",
 		"scout/review/entities.yaml":     "item:\n  instance_key: text\n",
-		"scout/detail/schema.yaml":       "name: detail\nstages:\n  created: {}\n",
+		"scout/detail/manifest.yaml":     "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"scout/detail/schema.yaml":       "stages:\n  created: {}\n",
 	}))
 }
 

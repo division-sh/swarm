@@ -14,11 +14,18 @@ import (
 )
 
 func AdmitDirectory(root string) (*AdmittedSourceArtifact, error) {
-	root = strings.TrimSpace(root)
 	if root == "" {
 		return nil, fmt.Errorf("source root is required")
 	}
-	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+	selectedRoot, err := captureSourceRootPath(root)
+	if err != nil {
+		return nil, err
+	}
+	directory := filepath.Base(selectedRoot)
+	if err := validateRootDirectory(directory); err != nil {
+		return nil, err
+	}
+	fd, err := unix.Open(selectedRoot, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open source root %q: %w", root, err)
 	}
@@ -31,12 +38,28 @@ func AdmitDirectory(root string) (*AdmittedSourceArtifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	selectedRoot, err := filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-	artifact.directoryLabel = filepath.Base(selectedRoot)
+	artifact.rootAdmission = RootAdmission{bundleHash: artifact.BundleHash(), rootDirectory: directory}
 	return artifact, nil
+}
+
+func captureSourceRootPath(root string) (string, error) {
+	root = strings.TrimRight(root, string(filepath.Separator))
+	if root == "" {
+		return string(filepath.Separator), nil
+	}
+	if !filepath.IsAbs(root) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		// Keep parent traversals for the kernel, including symlink parents.
+		root = cwd + string(filepath.Separator) + root
+	}
+	leaf := root[strings.LastIndexByte(root, byte(filepath.Separator))+1:]
+	if leaf == "." || leaf == ".." {
+		return filepath.EvalSymlinks(root)
+	}
+	return root, nil
 }
 
 type admissionState struct {

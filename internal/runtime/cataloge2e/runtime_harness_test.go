@@ -38,6 +38,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -291,7 +292,11 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 		t.Fatalf("unsupported catalog runtime backend %q", backend)
 	}
 
-	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), catalogRuntimeRunID))
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatalf("capture catalog runtime root: %v", err)
+	}
+	ctx, cancel := context.WithCancel(runtimecorrelation.WithRootAdmission(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), catalogRuntimeRunID), rooted.Admission()))
 	if chunkObserver != nil {
 		ctx = runtimestartupownership.WithFanOutChunkObserverForTest(ctx, chunkObserver)
 	}
@@ -303,7 +308,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	}
 	fixture := storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID,
-		BundleHash: sourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
+		BundleHash: sourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(),
 	}
 	// Scenario fixtures are setup, not live runtime mutations. Admit every
 	// requested run before constructing a runtime that can start store writers.
@@ -330,13 +335,17 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	bundle, captured := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	if !captured {
+		t.Fatal("catalog runtime requires its admitted compiled source")
+	}
 	var selected runtimestartupownership.Store
 	if pg != nil {
 		selected = pg
 	} else {
 		selected = sqlite
 	}
-	processTopology := installCatalogRuntimeStartupGrant(t, ctx, selected, rt, !start)
+	processTopology := installCatalogRuntimeStartupGrant(t, ctx, selected, rt, rooted.Admission(), !start)
 	if !start {
 		installCatalogHarnessDeliveryAuthority(t, ctx, rt, pg, sqlite)
 	}
@@ -393,6 +402,7 @@ func installCatalogRuntimeStartupGrant(
 	ctx context.Context,
 	selected runtimestartupownership.Store,
 	rt *runtime.Runtime,
+	root sourceartifact.RootAdmission,
 	componentExecution bool,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
@@ -400,7 +410,18 @@ func installCatalogRuntimeStartupGrant(
 		t.Fatal("catalog runtime startup grant requires a selected store and constructed runtime")
 	}
 	bundleHash := rt.Options.SourceArtifactFact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	bundle, captured := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	if !captured {
+		t.Fatal("catalog runtime startup grant requires its module capture")
+	}
+	moduleRoot, err := bundle.RootedSource()
+	if err != nil || !moduleRoot.Admission().Equal(root) || root.BundleHash() != bundleHash {
+		t.Fatalf("catalog startup root differs from its module/fact: %v", err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatalf("admit catalog runtime source coordinate: %v", err)
+	}
 	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(rt.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatalf("compile catalog runtime source set: %v", err)
@@ -688,6 +709,21 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 	}
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), catalogRuntimeRunID))
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		h.t.Fatalf("capture reopened catalog root: %v", err)
+	}
+	var retainedReader interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	} = pg
+	if pg == nil {
+		retainedReader = sqlite
+	}
+	retained, err := retainedReader.LoadRunRootedSource(ctx, catalogRuntimeRunID)
+	if err != nil || !retained.Admission().Equal(rooted.Admission()) {
+		h.t.Fatalf("reopened capture differs from its retained run root: %v", err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, retained.Admission())
 	processOwner := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, processOwner)
 	var workflowPersistence runtimepipeline.WorkflowPersistence
@@ -710,7 +746,7 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 	} else {
 		selected = sqlite
 	}
-	processTopology := installCatalogRuntimeStartupGrant(h.t, ctx, selected, rt, false)
+	processTopology := installCatalogRuntimeStartupGrant(h.t, ctx, selected, rt, retained.Admission(), false)
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		cancel()
 		h.t.Fatalf("prepare reopened author activity catalog: %v", err)

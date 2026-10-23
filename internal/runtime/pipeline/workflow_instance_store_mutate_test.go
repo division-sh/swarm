@@ -243,13 +243,14 @@ func VerifyWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshotsForTest(t
 	}
 }
 
-func VerifyUpdateEntityState_RejectsCompetingStaleCallbackSnapshotForTest(t *testing.T, open func(*testing.T, string) WorkflowMutationNativeFixtureForTest) {
-	fixture := open(t, testPipelineRunID)
+func VerifyUpdateEntityState_RejectsCompetingStaleCallbackSnapshotForTest(t *testing.T, open func(*testing.T, string, semanticview.Source) WorkflowMutationNativeFixtureForTest) {
+	source := semanticview.Wrap(lifecycleStateFixtureForTest(t, "mutation-flow", "queued", "done", "workflow.completed"))
+	fixture := open(t, testPipelineRunID, source)
 	entityID := uuid.NewString()
 	seedWorkflowInstanceForMutationTest(t, fixture, entityID)
 
 	pc := fixture.NewCoordinator(&recordingPipelineBus{}, PipelineCoordinatorOptions{
-		Module: &previewWorkflowModule{bundle: lifecycleStateFixtureForTest(t, "mutation-flow", "queued", "done", "workflow.completed")},
+		Module: staticSemanticWorkflowModule{source: source},
 	})
 
 	ctx := fixture.Context

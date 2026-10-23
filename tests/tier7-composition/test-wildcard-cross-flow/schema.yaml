@@ -1,4 +1,4 @@
-name: test-wildcard-cross-flow
+# fixture: test-wildcard-cross-flow
 stages:
   pending: {}
   done: {final: true}

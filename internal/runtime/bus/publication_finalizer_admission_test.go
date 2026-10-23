@@ -26,7 +26,7 @@ func VerifyCommittedFinalizersScopeIngressAdmissionWithoutLosingRuntimeAuthority
 			defer cancel()
 			ctx = deliverylifecycle.WithClaim(ctx, claim)
 			ctx = correlation.WithRunID(ctx, runID)
-			ctx = correlation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
+			ctx = correlation.WithSourceArtifactFact(ctx, store.fixture.Authority.SourceArtifact())
 			ctx = WithCurrentRuntimeEpoch(ctx)
 			public := publicInputAdmission{endpointID: "input", flowID: "child", pinName: "thing.created", eventType: "thing.created"}
 			api := apiEventPublicationAdmission{kind: apiEventPublicationEndpointOrdinaryFlow, flowID: "child", flowPath: "child", eventType: "thing.created"}
@@ -67,7 +67,7 @@ func VerifyCommittedFinalizersScopeIngressAdmissionWithoutLosingRuntimeAuthority
 			if got, ok := deliverylifecycle.ClaimFromContext(followup); !ok || !got.Same(claim) {
 				t.Fatal("followup lost exact delivery claim")
 			}
-			if got, ok := correlation.SourceArtifactFactFromContext(followup); !ok || !got.Matches(authorActivityTestSourceArtifactFact) {
+			if got, ok := correlation.SourceArtifactFactFromContext(followup); !ok || !got.Matches(store.fixture.Authority.SourceArtifact()) {
 				t.Fatal("followup lost exact source authority")
 			}
 			if correlation.RunIDFromContext(followup) != runID {

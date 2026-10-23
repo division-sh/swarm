@@ -453,10 +453,11 @@ func loadStoreBackendSelectionWorkflowBundle(t *testing.T) *runtimecontracts.Wor
 	t.Helper()
 	root := t.TempDir()
 
-	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: store-backend-selection
-stages:
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   idle: {final: true}
-`)
+`,
+	)
 	RepoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
 		RepoRoot,

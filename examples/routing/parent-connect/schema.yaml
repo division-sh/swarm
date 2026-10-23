@@ -1,4 +1,4 @@
-name: routing-parent-connect
+# fixture: routing-parent-connect
 pins:
   inputs:
     - work.requested

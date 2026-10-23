@@ -7,11 +7,17 @@ import (
 	"strings"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/google/uuid"
 )
 
-type activeRunSources map[string]runtimecorrelation.SourceArtifactFact
+type activeRunSource struct {
+	fact runtimecorrelation.SourceArtifactFact
+	root sourceartifact.RootAdmissionReference
+}
+
+type activeRunSources map[string]activeRunSource
 
 func runAdmissionAttempt(ctx context.Context, tx *sql.Tx) (*Attempt, error) {
 	if ctx == nil {
@@ -45,22 +51,27 @@ func runAdmissionAttempt(ctx context.Context, tx *sql.Tx) (*Attempt, error) {
 
 // CachedActiveRunSource reuses only the matching native attempt's mutable
 // run-row admission. Source-artifact availability must still be queried.
-func CachedActiveRunSource(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, bool, error) {
+func CachedActiveRunSource(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, sourceartifact.RootAdmissionReference, bool, error) {
 	attempt, err := runAdmissionAttempt(ctx, tx)
 	if err != nil || attempt == nil {
-		return runtimecorrelation.SourceArtifactFact{}, false, err
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, false, err
 	}
 	key, valid := physicalRunKey(attempt.dialect, runID)
 	if !valid {
-		return runtimecorrelation.SourceArtifactFact{}, false, nil
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, false, nil
 	}
-	fact, ok := attempt.runAdmissions[key]
-	return fact, ok, nil
+	admitted, ok := attempt.runAdmissions[key]
+	if ok {
+		if err := runtimecorrelation.CheckRootAdmissionContext(ctx, admitted.root); err != nil {
+			return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, false, err
+		}
+	}
+	return admitted.fact, admitted.root, ok, nil
 }
 
 // CacheActiveRunSource is called only after canonical mutable active-run and
 // source-artifact admission. Read-only results and context facts cannot mint it.
-func CacheActiveRunSource(ctx context.Context, tx *sql.Tx, runID string, fact runtimecorrelation.SourceArtifactFact) error {
+func CacheActiveRunSource(ctx context.Context, tx *sql.Tx, runID string, fact runtimecorrelation.SourceArtifactFact, root sourceartifact.RootAdmissionReference) error {
 	attempt, err := runAdmissionAttempt(ctx, tx)
 	if err != nil || attempt == nil {
 		return err
@@ -75,7 +86,13 @@ func CacheActiveRunSource(ctx context.Context, tx *sql.Tx, runID string, fact ru
 	if err := fact.Validate(); err != nil {
 		return err
 	}
-	attempt.runAdmissions[key] = fact
+	if root.BundleHash != fact.BundleHash() {
+		return errors.New("run admission requires the exact source/root pair")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, root); err != nil {
+		return err
+	}
+	attempt.runAdmissions[key] = activeRunSource{fact: fact, root: root}
 	return nil
 }
 
@@ -114,8 +131,8 @@ func (a *Attempt) RequireActiveRunSourceAdmission(ctx context.Context, runID str
 	}
 	key, valid := physicalRunKey(a.dialect, runID)
 	admitted, ok := a.runAdmissions[key]
-	if !valid || !ok || !admitted.Matches(fact) {
+	if !valid || !ok || !admitted.fact.Matches(fact) {
 		return errors.New("active run source was not admitted by this mutation attempt")
 	}
-	return nil
+	return runtimecorrelation.CheckRootAdmissionContext(ctx, admitted.root)
 }

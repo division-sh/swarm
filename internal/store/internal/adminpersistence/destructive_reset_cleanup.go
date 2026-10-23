@@ -606,8 +606,8 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 	if destructiveResetCleanupPreservesTable(table, includeSourceArtifacts) {
 		return destructiveResetCleanupStatements{count: fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdent(table))}, nil
 	}
-	if table == "source_artifacts" && includeSourceArtifacts {
-		return destructiveResetCleanupStatements{count: "SELECT COUNT(*) FROM source_artifacts", delete: "DELETE FROM source_artifacts"}, nil
+	if (table == "source_artifacts" || table == "source_root_admissions") && includeSourceArtifacts {
+		return destructiveResetCleanupStatements{count: fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdent(table)), delete: fmt.Sprintf("DELETE FROM %s", quoteIdent(table))}, nil
 	}
 	switch table {
 	case "connected_channel_activations", "channel_onboarding_operations", "standing_service_journal", "standing_service_generations", "standing_services":

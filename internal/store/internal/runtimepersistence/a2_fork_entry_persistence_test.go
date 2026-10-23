@@ -37,16 +37,16 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					opened := backend.open(t)
 					flowID, path := "owner", "owner/one"
 					files := map[string]string{
-						"schema.yaml":         "name: fork-entry-history\n",
-						"owner/schema.yaml":   "name: owner\ninstance: owner_key\nstages:\n  active: {}\npins:\n  inputs:\n    - construct.requested\n",
+						"schema.yaml":         "stages: []\n",
+						"owner/schema.yaml":   "instance: owner_key\nstages:\n  active: {}\npins:\n  inputs:\n    - construct.requested\n",
 						"owner/entities.yaml": "review_item:\n  owner_key: text\n",
-						"owner/events.yaml":   "construct.requested:\n",
+						"owner/events.yaml":   "construct.requested:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "owner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					}
 					if root {
 						flowID, path = ".", "."
 						files = map[string]string{
-							"schema.yaml":   "name: fork-entry-history\nstages:\n  active: {}\n",
-							"entities.yaml": "review_item:\n  owner_key: {type: text, initial: one}\n",
+							"schema.yaml":   "stages:\n  active: {}\n",
+							"entities.yaml": "review_item:\n  owner_key: {type: text, initial: one}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 						}
 					}
 					construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
@@ -206,7 +206,11 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 						t.Fatalf("missing fixed entity identities: seen=%v expected=%v", seen, expected)
 					}
 					source := readSnapshotOwnershipEntity(t, f, f.runID)
-					request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
+					rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()}
 					result, err := f.store.MaterializeRunFork(f.ctx, request)
 					if err != nil {
 						t.Fatal(err)

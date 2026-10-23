@@ -105,10 +105,10 @@ func TestCatalogRequiredVerifyGateMutationDiscoversAndNamesBrokenBundles(t *test
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			t.Fatalf("create broken bundle %s: %v", mutation.identity, err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: broken-example\nversion: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
 			t.Fatalf("write broken example manifest %s: %v", mutation.identity, err)
 		}
-		body := fmt.Sprintf("name: broken-example\n%s: true\n", mutation.field)
+		body := fmt.Sprintf("%s: true\n", mutation.field)
 		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(body), 0o600); err != nil {
 			t.Fatalf("write broken example schema %s: %v", mutation.identity, err)
 		}
@@ -139,8 +139,8 @@ func TestCatalogRequiredVerifyGateRejectsDiscoveredPresentZeroOptionalFile(t *te
 		t.Fatalf("create mutated bundle: %v", err)
 	}
 	files := map[string]string{
-		"manifest.yaml": "name: present-zero\nversion: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "name: present-zero\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
 		"agents.yaml":   "{}\n",
 	}
 	for name, body := range files {
@@ -200,10 +200,15 @@ func discoverRequiredExampleBundles(corpusRoot, configPath string) ([]requiredCo
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || entry.Name() != "manifest.yaml" {
+		if !entry.IsDir() {
 			return nil
 		}
-		root := filepath.Dir(path)
+		if _, err := os.Lstat(filepath.Join(path, "manifest.yaml")); os.IsNotExist(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		root := path
 		relative, err := filepath.Rel(corpusRoot, root)
 		if err != nil {
 			return err
@@ -213,7 +218,7 @@ func discoverRequiredExampleBundles(corpusRoot, configPath string) ([]requiredCo
 			Root:       root,
 			ConfigPath: configPath,
 		})
-		return nil
+		return filepath.SkipDir
 	})
 	sort.Slice(bundles, func(i, j int) bool { return bundles[i].ID < bundles[j].ID })
 	return bundles, err

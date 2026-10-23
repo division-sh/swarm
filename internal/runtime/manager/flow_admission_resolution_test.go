@@ -55,11 +55,11 @@ func TestManagerRetainsAdmissionBeforeBeginAndResolvesLostResponse(t *testing.T)
 		t.Run(cut, func(t *testing.T) {
 			instances := &flowAdmissionResolutionProbe{flowActivationTestInstanceStore: &flowActivationTestInstanceStore{}, lost: true, rollback: cut == "rolled_back", unresolved: cut == "unresolved"}
 			bus := &flowActivationTestBus{}
-			am := newFlowActivationManager(t, bus, instances)
-			instances.manager = am
-			ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
-			defer cancel()
 			req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
+			am, baseCtx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
+			instances.manager = am
+			ctx, cancel := context.WithTimeout(baseCtx, 5*time.Second)
+			defer cancel()
 			err := activateFlowInstanceForTest(am, ctx, req)
 			wantErr := admissionResponseLost
 			if !errors.Is(err, wantErr) {
@@ -113,12 +113,11 @@ func TestManagerRetainsAdmissionBeforeBeginAndResolvesLostResponse(t *testing.T)
 func TestManagerCancelledAdmissionRetainsResolutionUntilRetirement(t *testing.T) {
 	instances := &flowAdmissionResolutionProbe{flowActivationTestInstanceStore: &flowActivationTestInstanceStore{}, lost: true}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
-	instances.manager = am
-	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
-	defer cancel()
 	req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
-	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+	am, baseCtx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
+	instances.manager = am
+	ctx, cancel := context.WithCancel(baseCtx)
+	defer cancel()
 	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil {
 		t.Fatal(err)

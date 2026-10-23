@@ -25,6 +25,7 @@ type ContractPaths struct {
 	PlatformSpecFile string
 }
 type WorkflowContractBundle struct {
+	rootedSource          sourceartifact.RootedSource
 	SourceArtifact        *sourceartifact.AdmittedSourceArtifact
 	FlowSources           map[string]FlowSource
 	Paths                 ContractPaths
@@ -71,12 +72,27 @@ type WorkflowContractBundle struct {
 	URIRegistry           ContractURIRegistry
 	PackInventory         *packartifact.EffectivePackInventory
 	PackAdmission         PackAdmissionProjection
-	ProjectPacks          packartifact.ProjectPackSet
 	fanOutPlansBySite     map[FanOutSiteRef]FanOutCompiledPlan
 	fanOutPlansByElement  map[FanOutElementRef]FanOutCompiledPlan
 	fanOutPlanFailures    []FanOutPlanFailure
 	fanOutPlansPrepared   bool
 }
+
+// RootedSource returns the original compiler input only while its public content
+// view still names those exact owned bytes. Content replacement cannot retarget it.
+func (b *WorkflowContractBundle) RootedSource() (sourceartifact.RootedSource, error) {
+	if b == nil {
+		return sourceartifact.RootedSource{}, fmt.Errorf("workflow contract bundle is required")
+	}
+	if err := b.rootedSource.Validate(); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	if b.SourceArtifact != b.rootedSource.Artifact() {
+		return sourceartifact.RootedSource{}, fmt.Errorf("compiled rooted source differs from its exposed content")
+	}
+	return b.rootedSource, nil
+}
+
 type WorkflowSemanticView struct {
 	Name                   string
 	Version                string
@@ -1494,8 +1510,9 @@ type SystemNodeEventHandler struct {
 	Clear            *ClearSpec               `yaml:"clear"`
 }
 type EventCatalogEntry struct {
-	BusinessKeyField string           `yaml:"key"`
-	Payload          EventPayloadSpec `yaml:"payload"`
+	BusinessKeyField  string           `yaml:"key"`
+	Payload           EventPayloadSpec `yaml:"payload"`
+	platformAuthority PlatformEventAuthority
 }
 
 type AgentRegistryEntry struct {

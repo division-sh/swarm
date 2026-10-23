@@ -42,7 +42,8 @@ func TestEventOwnerDiagnosticFailingSourceLoads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: owner-diagnostic\nstages: {waiting: {}, done: {final: true}}\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: {waiting: {}, done: {final: true}}\n")
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n")
 			writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), tc.nodes)
 			assertEventOwnerDiagnosticLoads(t, root, "work.requested", tc.owners)
@@ -52,7 +53,8 @@ func TestEventOwnerDiagnosticFailingSourceLoads(t *testing.T) {
 
 func TestEventOwnerDiagnosticJoinUntilUsesContributingDeclaration(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: join-owner-diagnostic\nstages: {waiting: {}, done: {final: true}}\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: {waiting: {}, done: {final: true}}\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "arrived:\n  member: text\n  result: integer\nclosed:\nunrelated:\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `collector:
   event_handlers:
@@ -79,8 +81,11 @@ func TestEventOwnerDiagnosticScopedAndPatternCoordinates(t *testing.T) {
 	for _, pattern := range []string{"work.requested", "work.*"} {
 		t.Run(pattern, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-owner-diagnostic\n")
-			writeFixtureFile(t, filepath.Join(root, "parent", "jobs", "schema.yaml"), "name: jobs\nstages: {waiting: {}, done: {final: true}}\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			writeFixtureFile(t, filepath.Join(root, "parent", "jobs", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "parent", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "parent", "jobs", "schema.yaml"), "stages: {waiting: {}, done: {final: true}}\n")
 			writeFixtureFile(t, filepath.Join(root, "parent", "jobs", "events.yaml"), "work.requested:\n")
 			writeFixtureFile(t, filepath.Join(root, "parent", "jobs", "nodes.yaml"), "alpha:\n  event_handlers:\n    "+pattern+":\n      advances_to: done\nbeta:\n  event_handlers:\n    "+pattern+":\n      advances_to: done\n")
 			assertEventOwnerDiagnosticLoads(t, root, "parent/jobs/"+pattern, []string{
@@ -93,10 +98,12 @@ func TestEventOwnerDiagnosticScopedAndPatternCoordinates(t *testing.T) {
 
 func TestEventOwnerDiagnosticSameSlugDistinctScopes(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: distinct-owner-diagnostic\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n")
 	for _, scope := range []string{"west", "east"} {
-		writeFixtureFile(t, filepath.Join(root, scope, "schema.yaml"), "name: "+scope+"\nstages: {waiting: {}, done: {final: true}}\n")
+		writeFixtureFile(t, filepath.Join(root, scope, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFixtureFile(t, filepath.Join(root, scope, "schema.yaml"), "stages: {waiting: {}, done: {final: true}}\n")
 		writeFixtureFile(t, filepath.Join(root, scope, "nodes.yaml"), "worker:\n  event_handlers:\n    work.requested:\n      advances_to: done\n")
 	}
 	assertEventOwnerDiagnosticLoads(t, root, "work.requested", []string{
@@ -125,10 +132,10 @@ func assertEventOwnerDiagnosticLoads(t *testing.T, root, event string, owners []
 			return LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 		}},
 		{"artifact", func() (*WorkflowContractBundle, error) {
-			return LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+			return LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		}},
 		{"retained", func() (*WorkflowContractBundle, error) {
-			return LoadWorkflowContractBundleFromArtifact(repo, retained, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+			return LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, retained), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		}},
 	} {
 		t.Run(loader.name, func(t *testing.T) {
@@ -166,8 +173,10 @@ func assertEventOwnerDiagnosticLoads(t *testing.T, root, event string, owners []
 
 func TestEventOwnerDiagnosticUsesCompiledCoordinatesOnly(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: retained-owner-diagnostic\n")
-	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "stages: []\n")
 	writeFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "work.requested:\nwork.done:\n")
 	writeFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), "worker:\n  event_handlers:\n    work.requested: {emit: work.done}\n")
 	repo := repoRootForContractsTest(t)
@@ -234,7 +243,8 @@ func TestEventOwnerDiagnosticMissingSourceAndStableOwnerSet(t *testing.T) {
 
 func TestEventOwnerDiagnosticCorrectedRouterLoads(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: owner-router\nstages: {waiting: {}, done: {final: true}}\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: {waiting: {}, done: {final: true}}\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n  priority: integer\nwork.urgent:\nwork.normal:\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `router:
   event_handlers:

@@ -58,7 +58,6 @@ func ResolveExecutableNodeEventProof(source Source, node runtimeidentity.Executa
 }
 
 func ResolveFlowEventProof(source Source, flowID, eventType string) FlowEventProof {
-	flowID = strings.TrimSpace(flowID)
 	authored := runtimeeventidentity.Normalize(eventType)
 	proof := FlowEventProof{
 		FlowID:    flowID,
@@ -67,6 +66,12 @@ func ResolveFlowEventProof(source Source, flowID, eventType string) FlowEventPro
 		Canonical: authored,
 	}
 	if source == nil || authored == "" {
+		return proof
+	}
+	if _, err := runtimeidentity.AdmitFlowIdentity(flowID); err != nil {
+		return proof
+	}
+	if _, found := FlowScopeByID(source, flowID); !found {
 		return proof
 	}
 
@@ -161,6 +166,25 @@ func (p FlowEventProof) IsAuthored(source Source) bool {
 	return false
 }
 
+func (p FlowEventProof) CrossesDeclaredOutputBoundary(source Source) bool {
+	if source == nil {
+		return false
+	}
+	canonical := strings.TrimSpace(p.Canonical)
+	if canonical == "" {
+		return false
+	}
+	flowID := p.FlowID
+	if _, found := FlowScopeByID(source, flowID); !found {
+		return false
+	}
+	for _, output := range source.FlowOutputEvents(flowID) {
+		if source.ResolveFlowEventReference(flowID, output) == canonical {
+			return true
+		}
+	}
+	return false
+}
 func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 	if source == nil {
 		return ""

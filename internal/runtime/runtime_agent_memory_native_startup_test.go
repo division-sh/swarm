@@ -90,7 +90,7 @@ func assertNativeRuntimeStartCarriesMemoryIdentity(t *testing.T, variant canonic
 			}
 			ctx = effects.WithExecutionMode(worklifetime.WithOccurrence(ctx, rt.WorkOccurrence()), effects.ExecutionModeLive)
 			if err := rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
-				ContractBundle: source, Instance: flowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
+				ContractBundle: rt.Options.WorkflowModule.SemanticSource(), Instance: flowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
 			}); err != nil {
 				t.Fatalf("construct and attach memory-identity tree: %v", err)
 			}

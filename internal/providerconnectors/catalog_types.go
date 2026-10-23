@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -18,7 +19,7 @@ const (
 	CatalogGeneratorVersion  = "swarm-openapi-gen/v1"
 	generatedPackIndexFile   = "catalog/generated-packs.yaml"
 	generatedProfileRoot     = "catalog/generator-profiles"
-	connectorPackRoot        = "provider-connectors"
+	connectorPackRoot        = "providers"
 	GeneratedPackKindBuiltin = "builtin"
 	GeneratedPackKindFixture = "fixture"
 	GenerationReviewApproved = "approved"
@@ -61,6 +62,16 @@ type GenerationOperationEvidence struct {
 }
 
 func (g GenerationEvidence) Validate(provider string, tools map[string]runtimecontracts.ToolSchemaEntry) error {
+	if err := g.validateHeader(provider); err != nil {
+		return err
+	}
+	return g.validateOperations(provider, tools)
+}
+
+func (g GenerationEvidence) validateHeader(provider string) error {
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return fmt.Errorf("generation provider requires an exact portable directory key: %w", err)
+	}
 	if strings.TrimSpace(g.SchemaVersion) != CatalogSchemaVersion {
 		return fmt.Errorf("generation schema_version must be %q", CatalogSchemaVersion)
 	}
@@ -79,6 +90,10 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 	if err := validateSHA256("generation profile", g.Profile.SHA256); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (g GenerationEvidence) validateOperations(provider string, tools map[string]runtimecontracts.ToolSchemaEntry) error {
 	if len(g.Operations) == 0 {
 		return fmt.Errorf("generation operations are required")
 	}
@@ -86,7 +101,7 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 	seenTools := map[string]struct{}{}
 	for _, operation := range g.Operations {
 		operationID := strings.TrimSpace(operation.OperationID)
-		toolID := strings.TrimSpace(operation.ToolID)
+		toolID := operation.ToolID
 		if operationID == "" || toolID == "" {
 			return fmt.Errorf("generation operation_id and tool_id are required")
 		}
@@ -103,7 +118,7 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 			return fmt.Errorf("generation operation %q references unknown tool_id %q", operationID, toolID)
 		}
 		toolProvider, _, ok := splitToolID(toolID)
-		if !ok || toolProvider != normalizeToken(provider) {
+		if !ok || toolProvider != provider {
 			return fmt.Errorf("generation tool_id %q does not match provider %q", toolID, provider)
 		}
 		if len(operation.Permissions) == 0 {
@@ -149,9 +164,8 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 }
 
 func (g GenerationEvidence) OperationForTool(toolID string) (GenerationOperationEvidence, bool) {
-	toolID = strings.TrimSpace(toolID)
 	for _, operation := range g.Operations {
-		if strings.TrimSpace(operation.ToolID) == toolID {
+		if operation.ToolID == toolID {
 			return operation, true
 		}
 	}
@@ -199,12 +213,15 @@ func (i GeneratedPackIndex) Validate(fsys fs.FS) error {
 	seenOutputs := map[string]struct{}{}
 	for _, entry := range i.Packs {
 		id := strings.TrimSpace(entry.ID)
-		provider := normalizeToken(entry.Provider)
+		provider := entry.Provider
 		profile := strings.TrimSpace(entry.Profile)
 		kind := strings.TrimSpace(entry.Kind)
 		output := strings.Trim(strings.TrimSpace(entry.Output), "/")
 		if id == "" || provider == "" || profile == "" || output == "" {
 			return fmt.Errorf("generated connector pack index id, provider, profile, and output are required")
+		}
+		if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+			return fmt.Errorf("generated connector pack index provider requires an exact portable directory key: %w", err)
 		}
 		if kind != GeneratedPackKindBuiltin && kind != GeneratedPackKindFixture {
 			return fmt.Errorf("generated connector pack index %q has unsupported kind %q", id, entry.Kind)
@@ -269,32 +286,64 @@ func (i GeneratedPackIndex) BuiltinByID() map[string]GeneratedPackIndexEntry {
 
 func validateGeneratedPackIdentity(fsys fs.FS, pack *LoadedPack, expected GeneratedPackIndexEntry) error {
 	if pack.Manifest.Generation == nil {
-		return fmt.Errorf("generated connector pack %q is indexed as generated but generation evidence is missing", pack.Envelope.ID)
+		return fmt.Errorf("generated connector pack %q is indexed as generated but generation evidence is missing", pack.Identity.ID())
 	}
-	if normalizeToken(pack.Manifest.Provider) != normalizeToken(expected.Provider) {
-		return fmt.Errorf("generated connector pack %q provider %q does not match indexed provider %q", pack.Envelope.ID, pack.Manifest.Provider, expected.Provider)
+	if pack.Manifest.Provider != expected.Provider {
+		return fmt.Errorf("generated connector pack %q provider %q does not match indexed provider %q", pack.Identity.ID(), pack.Manifest.Provider, expected.Provider)
 	}
 	if strings.TrimSpace(pack.Manifest.Generation.Profile.Path) != strings.TrimSpace(expected.Profile) {
-		return fmt.Errorf("generated connector pack %q profile %q does not match indexed profile %q", pack.Envelope.ID, pack.Manifest.Generation.Profile.Path, expected.Profile)
+		return fmt.Errorf("generated connector pack %q profile %q does not match indexed profile %q", pack.Identity.ID(), pack.Manifest.Generation.Profile.Path, expected.Profile)
 	}
-	profileBody, err := fs.ReadFile(fsys, strings.TrimSpace(expected.Profile))
+	source, err := validateIndexedGenerationSource(fsys, *pack.Manifest.Generation, expected.Profile)
 	if err != nil {
-		return fmt.Errorf("generated connector pack %q read indexed profile: %w", pack.Envelope.ID, err)
+		return fmt.Errorf("generated connector pack %q: %w", pack.Identity.ID(), err)
 	}
-	if got, want := sha256String(profileBody), "sha256:"+normalizeSHA(pack.Manifest.Generation.Profile.SHA256); got != want {
-		return fmt.Errorf("generated connector pack %q profile hash mismatch: got %s want %s", pack.Envelope.ID, got, want)
-	}
-	profile, err := parseGeneratorProfileAt(profileBody, expected.Profile)
-	if err != nil {
-		return fmt.Errorf("generated connector pack %q parse indexed profile: %w", pack.Envelope.ID, err)
-	}
-	if strings.TrimSpace(profile.Source.Path) != strings.TrimSpace(pack.Manifest.Generation.Source.Path) ||
-		strings.TrimSpace(profile.Source.OpenAPIVersion) != strings.TrimSpace(pack.Manifest.Generation.Source.OpenAPIVersion) ||
-		normalizeSHA(profile.Source.SHA256) != normalizeSHA(pack.Manifest.Generation.Source.SHA256) {
-		return fmt.Errorf("generated connector pack %q source evidence does not match indexed profile", pack.Envelope.ID)
-	}
-	pack.identitySource = profile.SourceValue()
+	pack.identitySource = source
 	return nil
+}
+
+// ValidateDirectoryConnectorGeneration preserves the reviewed profile/source
+// checks without treating a directory namespace as a transport or registry ID.
+func ValidateDirectoryConnectorGeneration(manifest ConnectorManifest) error {
+	if manifest.Generation == nil {
+		return nil
+	}
+	index, err := loadGeneratedPackIndex(generatedConnectorIdentityFS)
+	if err != nil {
+		return err
+	}
+	profiles := map[string]GeneratedPackIndexEntry{}
+	for _, entry := range index.Packs {
+		if entry.Kind == GeneratedPackKindBuiltin {
+			profiles[entry.Profile] = entry
+		}
+	}
+	expected, present := profiles[manifest.Generation.Profile.Path]
+	if !present {
+		return fmt.Errorf("provider connector generation profile %q is not a reviewed installed profile", manifest.Generation.Profile.Path)
+	}
+	_, err = validateIndexedGenerationSource(generatedConnectorIdentityFS, *manifest.Generation, expected.Profile)
+	return err
+}
+
+func validateIndexedGenerationSource(fsys fs.FS, generation GenerationEvidence, profilePath string) (yamlsource.Value, error) {
+	profileBody, err := fs.ReadFile(fsys, profilePath)
+	if err != nil {
+		return yamlsource.Value{}, fmt.Errorf("read indexed profile: %w", err)
+	}
+	if got, want := sha256String(profileBody), "sha256:"+normalizeSHA(generation.Profile.SHA256); got != want {
+		return yamlsource.Value{}, fmt.Errorf("profile hash mismatch: got %s want %s", got, want)
+	}
+	profile, err := parseGeneratorProfileAt(profileBody, profilePath)
+	if err != nil {
+		return yamlsource.Value{}, fmt.Errorf("parse indexed profile: %w", err)
+	}
+	if strings.TrimSpace(profile.Source.Path) != strings.TrimSpace(generation.Source.Path) ||
+		strings.TrimSpace(profile.Source.OpenAPIVersion) != strings.TrimSpace(generation.Source.OpenAPIVersion) ||
+		normalizeSHA(profile.Source.SHA256) != normalizeSHA(generation.Source.SHA256) {
+		return yamlsource.Value{}, fmt.Errorf("source evidence does not match indexed profile")
+	}
+	return profile.SourceValue(), nil
 }
 
 func validateSHA256(context, value string) error {

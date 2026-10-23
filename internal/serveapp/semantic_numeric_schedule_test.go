@@ -21,7 +21,10 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := semanticNumericIngressFixture(t)
-			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: numeric-schedule\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - numeric.requested\n"), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - numeric.requested\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			unsetStoreSelectorEnv(t)

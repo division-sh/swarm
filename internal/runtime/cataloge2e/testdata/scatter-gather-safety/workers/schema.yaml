@@ -1,4 +1,4 @@
-name: workers
+# fixture: workers
 instance: item_id
 stages:
   registered:

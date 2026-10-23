@@ -72,7 +72,7 @@ func (s *EventPostgresOwner) ensureEventPayloadAdmission(ctx context.Context, ad
 		return events.AdmittedEvent{}, fmt.Errorf("event payload admission evidence is required")
 	}
 	flowID := strings.TrimSpace(event.RoutingSource().Route().FlowID)
-	payload, err := admitter(ctx, event, flowID)
+	payload, err := admitter(ctx, event, events.EventPayloadProducer(event, flowID))
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("admit event payload: %w", err)
 	}
@@ -343,12 +343,19 @@ func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, attem
 	if !ok {
 		return fmt.Errorf("ensure run row: executable bundle source fact is required")
 	}
+	root, ok, rootErr := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if rootErr != nil {
+		return rootErr
+	}
+	if !ok {
+		return fmt.Errorf("ensure run row: exact rooted source admission is required")
+	}
 	origin, err := runtimerunlifecycle.EventRunOrigin(triggerEventID, triggerEventType)
 	if err != nil {
 		return fmt.Errorf("ensure run row origin: %w", err)
 	}
 	_, err = s.RunLifecyclePostgresOwner.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: origin, Source: fact, StartedAt: time.Now().UTC(),
+		RunID: runID, Origin: origin, Source: fact, RootAdmission: root, StartedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return err

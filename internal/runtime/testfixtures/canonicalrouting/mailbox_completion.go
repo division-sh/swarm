@@ -50,7 +50,8 @@ effect-revision:
   event_handlers:
     telegram_send_message.revision_requested: {}
 `)
-	writeClosedVariantFile(t, root, "observers/schema.yaml", `name: observers
+	writeClosedVariantFile(t, root, "observers/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "observers/schema.yaml", `# fixture: observers
 stages: []
 pins:
   inputs:
@@ -130,12 +131,13 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
 	case "template":
 		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")
-		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "name: observers\n", "name: observers\ninstance: case_id\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "# fixture: observers\n", "# fixture: observers\ninstance: case_id\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers, resolution: create}\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - observer.seed\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  case_id: text\n  seed: boolean\n")
 		for name, suffix := range map[string]string{
-			"events.yaml": "observer.seed:\n  case_id: text\n",
+			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"events.yaml":   "observer.seed:\n  case_id: text\n",
 			"nodes.yaml": `human-template-launcher:
   execution_type: system_node
   subscribes_to: [observer.seed]

@@ -1,9 +1,12 @@
 package eventidentity
 
 import (
+	"fmt"
 	"path"
 	"regexp"
 	"strings"
+
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
 var eventTypeTokenPattern = regexp.MustCompile("^[a-z0-9_]+$")
@@ -36,9 +39,9 @@ func IsValidName(raw string) bool {
 			return false
 		}
 		if strings.Contains(segment, ".") {
-			for _, part := range strings.Split(segment, ".") {
-				part = strings.TrimSpace(part)
-				if part == "" || !eventTypeTokenPattern.MatchString(part) {
+			parts := strings.Split(segment, ".")
+			for index := range parts {
+				if !validDottedEventToken(parts, index, false) {
 					return false
 				}
 			}
@@ -76,13 +79,49 @@ func IsCanonicalPattern(raw string) bool {
 			}
 			continue
 		}
-		for _, part := range strings.Split(segment, ".") {
-			if part != "*" && !eventTypeTokenPattern.MatchString(part) {
+		parts := strings.Split(segment, ".")
+		for index := range parts {
+			if !validDottedEventToken(parts, index, true) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+func validDottedEventToken(parts []string, index int, allowWildcard bool) bool {
+	token := parts[index]
+	if allowWildcard && token == "*" {
+		return true
+	}
+	if isProviderDirectoryEventPosition(parts, index) {
+		return runtimepaths.ValidateFlowSegment(token) == nil
+	}
+	if !allowWildcard {
+		token = strings.TrimSpace(token)
+	}
+	return eventTypeTokenPattern.MatchString(token)
+}
+
+// Recognize the position before validation so no ordinary-token acceptance or
+// whitespace repair can bypass the directory owner.
+func isProviderDirectoryEventPosition(parts []string, index int) bool {
+	return len(parts) >= 3 && parts[0] == "inbound" && index == 1
+}
+
+// ProviderKeyError supplies the directory owner's teaching error. It diagnoses
+// only concrete provider keys, not general event validity or wildcard admission.
+func ProviderKeyError(raw string) error {
+	for _, segment := range strings.Split(raw, "/") {
+		parts := strings.Split(segment, ".")
+		if !isProviderDirectoryEventPosition(parts, 1) || parts[1] == "*" {
+			continue
+		}
+		if err := runtimepaths.ValidateFlowSegment(parts[1]); err != nil {
+			return fmt.Errorf("provider event %q must use inbound.<provider-directory>.<local-event> with an exact portable directory key: %w", raw, err)
+		}
+	}
+	return nil
 }
 
 func IsCanonicalDeclaration(raw string) bool {

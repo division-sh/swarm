@@ -13,7 +13,8 @@ func TestScalar2556GateContextSourceDiagnostic(t *testing.T) {
 	for _, value := range []string{"ready", "${entity.name}", "'ready'", `"${7}"`} {
 		t.Run(value, func(t *testing.T) {
 			root := t.TempDir()
-			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: diagnostic\nstages:\n  waiting:\n    gate:\n      decision: review\n      context:\n        note: "+value+"\n      outcomes:\n        accept: {advances_to: done}\n  done: {final: true}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: diagnostic\nstages:\n  waiting:\n    gate:\n      decision: review\n      context:\n        note: "+value+"\n      outcomes:\n        accept: {advances_to: done}\n  done: {final: true}\n")
 			repo := repoRootForBootverifyTest(t)
 			bundle := loadFixtureBundleAt(t, repo, root, contracts.DefaultPlatformSpecFile(repo))
 			findings := checkStageGateValidation(&checkerContext{source: semanticview.Wrap(bundle)})
