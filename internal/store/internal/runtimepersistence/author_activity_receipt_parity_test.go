@@ -36,7 +36,7 @@ type authorActivityReceiptFixture struct {
 }
 
 func (f authorActivityReceiptFixture) originalContext(ctx context.Context) context.Context {
-	owner := f.activityOwner.(*testing.T)
+	owner := f.activityOwner
 	owner.Helper()
 	return storeTestOriginalProcessContext(owner, storeTestWorkContext(owner, ctx), f.store)
 }

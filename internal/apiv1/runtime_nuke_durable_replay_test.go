@@ -55,6 +55,7 @@ func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testi
 		t.Fatalf("domain completion was lost: %s", admitted.Phase)
 	}
 	laterRun := uuid.NewString()
+	ctx = apiTestOriginalProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: laterRun, Origin: storetest.ScenarioSetupOrigin()})
 	first, err := executeRuntimeNuke(ctx, req, opts, now.Add(time.Minute))
 	if err != nil {

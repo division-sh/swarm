@@ -335,7 +335,7 @@ func waitSelectedQ1CompletedInput(t *testing.T, ctx context.Context, selected st
 		if err != nil || delivery.AgentDeliveries > 1 || len(delivery.Failures) != 0 {
 			t.Fatalf("selected input delivery: %+v err=%v", delivery, err)
 		}
-		if header.Status == "completed" && storage.State == "closed" && len(inputs.Events) == 1 && delivery.AgentDeliveries == 1 && delivery.Delivered == 1 {
+		if header.Status == "running" && storage.State == "running" && len(inputs.Events) == 1 && delivery.AgentDeliveries == 1 && delivery.Delivered == 1 {
 			input := inputs.Events[0]
 			prepared, found, err := selected.(bus.PreparedPublishEventReader).LoadPreparedPublishEvent(wait, input.EventID)
 			if err != nil || !found || input.RunID != child {

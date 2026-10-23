@@ -805,8 +805,7 @@ func originalSourceForRun(t testing.TB, selected any, runID string) runforkexecu
 		t.Fatal("fixture requires the actual source artifact reader")
 	}
 	repo := canonicalrouting.RepoRoot(t)
-	originalTest := t.(*testing.T)
-	ctx := storeTestOriginalProcessContext(originalTest, storeTestWorkContext(originalTest, t.Context()), selected)
+	ctx := storeTestOriginalProcessContext(t, storeTestWorkContext(t, t.Context()), selected)
 	loaded, err := (runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
 		Store: store}).LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 		SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},

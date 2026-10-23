@@ -73,6 +73,7 @@ func TestCompletion2270PublicReadbackBothStores(t *testing.T) {
 			}
 			runID, sessionID := uuid.NewString(), uuid.NewString()
 			identity := sqliteAgentUsageIdentityForRun(t, runID, "completion-2270")
+			ctx = apiTestOriginalProcessContext(t, ctx, selected)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 			seedCompletion2270Agent(t, ctx, selected, identity)
 			want := map[string]effects.CompletionEvidence{}

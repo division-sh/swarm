@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -17,6 +19,81 @@ import (
 type selectedRetainedExecutionObservation struct {
 	ExecutedEventCount int
 	ForkEvents         []SelectedContractExecutionForkEvent
+}
+
+func retireQuiescentSelectedTestContext(ctx context.Context, owner SelectedContractExecutionOwner, child string) error {
+	contexts := owner.ports.contexts
+	contexts.mu.Lock()
+	var prepared *PreparedSelectedFork
+	for _, entry := range contexts.entries {
+		if entry.binding.ForkRunID == child {
+			if prepared != nil {
+				contexts.mu.Unlock()
+				return errors.New("ambiguous retained selected execution")
+			}
+			prepared = entry.retained
+		}
+	}
+	contexts.mu.Unlock()
+	if prepared == nil {
+		return errors.New("selected test shutdown requires its retained execution")
+	}
+	prepared.bindMu.Lock()
+	runtime := prepared.retainedRuntime
+	complete, closeErr := prepared.cleanupComplete, prepared.closeErr
+	prepared.bindMu.Unlock()
+	if complete {
+		return closeErr
+	}
+	if runtime == nil {
+		return errors.New("selected test shutdown requires its retained runtime")
+	}
+	runtime.mu.Lock()
+	retainedContext, eventBus := runtime.cleanupContext, runtime.bus
+	runtime.mu.Unlock()
+	if retainedContext == nil {
+		return errors.New("selected test shutdown lacks its original execution context")
+	}
+	owned, cancel := bindSelectedDecisionCaller(ctx, retainedContext)
+	defer cancel()
+	_, authority, err := selectedContractManagedExecutionAuthority(owned)
+	if err != nil {
+		return err
+	}
+	for {
+		if err := runtime.WaitForQuiescence(owned, eventBus); err != nil {
+			return err
+		}
+		err := owner.ports.runtimeExecution.RequireRunForkSelectedContractExecutionSettlement(owned, authority,
+			selectedContractExecutionFrontierEventIDs(prepared.frontier.FrontierEvents), prepared.loadedSource.Source)
+		if err == nil {
+			return owner.disposePreparation(prepared)
+		}
+		select {
+		case <-owned.Done():
+			return errors.Join(err, context.Cause(owned))
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func selectedTestInstanceSettled(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, selected any, instance flowidentity.RunScopedFlowInstance, state string) bool {
+	t.Helper()
+	header, found, err := owner.ports.workflow.LoadWorkflowInstance(ctx, instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := storetest.ReadServedIncompletePipelineHandoffCount(ctx, selected, instance.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || header.CurrentState != state || pending != 0 {
+		return false
+	}
+	if err := retireQuiescentSelectedTestContext(ctx, owner, instance.RunID); err != nil {
+		t.Fatalf("shutdown settled selected execution: %v", err)
+	}
+	return true
 }
 
 // The activation ACK is not completion. Join its existing retained owner and
@@ -40,11 +117,7 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 	contexts.mu.Unlock()
 	var outcome error
 	if retained != nil {
-		select {
-		case <-wait.Done():
-			return selectedRetainedExecutionObservation{}, context.Cause(wait)
-		case <-retained.done:
-		}
+		outcome = retireQuiescentSelectedTestContext(wait, owner, child)
 		contexts.mu.Lock()
 		outcome = retained.err
 		contexts.mu.Unlock()

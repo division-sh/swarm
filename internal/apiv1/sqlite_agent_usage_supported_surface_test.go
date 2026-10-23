@@ -89,6 +89,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
+	ctx = apiTestOriginalProcessContext(t, ctx, sqliteStore)
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, runID, "agent-1")
 	evt := eventtest.ExistingRunRootIngress(
@@ -147,6 +148,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 func newSQLiteAgentUsageStoreFixture(t *testing.T, ctx context.Context) *storepkg.SQLiteRuntimeStore {
 	t.Helper()
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	ctx = apiTestOriginalProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 	})

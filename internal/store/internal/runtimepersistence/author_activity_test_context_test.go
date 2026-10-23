@@ -48,7 +48,7 @@ type storeTestWorkFixture struct {
 
 var storeTestWorkFixtures sync.Map
 
-func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
+func storeTestWorkOwner(t testing.TB) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	if existing, ok := storeTestWorkFixtures.Load(t); ok {
 		return existing.(*storeTestWorkFixture).runtime
@@ -83,14 +83,14 @@ func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 	return owner
 }
 
-func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
+func storeTestWorkContext(t testing.TB, ctx context.Context) context.Context {
 	t.Helper()
 	owner := storeTestWorkOwner(t)
 	value, _ := storeTestWorkFixtures.Load(t)
 	return worklifetime.WithProcess(worklifetime.WithOccurrence(ctx, owner), value.(*storeTestWorkFixture).process)
 }
 
-func storeTestOriginalProcessContext(t *testing.T, ctx context.Context, selected any) context.Context {
+func storeTestOriginalProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
 	if process, found := worklifetime.ProcessFromContext(ctx); found {
 		if _, bound := process.OriginalProcess(); bound {
