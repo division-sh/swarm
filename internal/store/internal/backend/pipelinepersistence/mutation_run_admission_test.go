@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -22,7 +23,15 @@ import (
 // Observe before rollback so an accidental write cannot be hidden by cleanup.
 func missingMutationRunProof(t *testing.T, initial bool) {
 	t.Helper()
-	db := fanOutReadbackTestDB(t, "sqlite")
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "missing-run.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	backend, err := sqlitebackend.New(db)
 	if err != nil {
 		t.Fatal(err)

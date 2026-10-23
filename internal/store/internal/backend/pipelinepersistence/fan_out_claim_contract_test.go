@@ -18,8 +18,8 @@ func TestFanOutUnacknowledgedCommitCannotBorrowSuccessorOnBothStores(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, disposition := range []string{"none", "claimed", "advanced", "canceled"} {
 			t.Run(backend+"/"+disposition, func(t *testing.T) {
-				ctx := context.Background()
 				db := fanOutReadbackTestDB(t, backend)
+				ctx := acquireStatementProcessForDB(t, db, backend == "postgres")
 				if backend == "sqlite" {
 					db.SetMaxOpenConns(1)
 					if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {

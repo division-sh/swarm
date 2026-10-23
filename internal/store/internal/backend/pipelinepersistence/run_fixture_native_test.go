@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -99,6 +100,59 @@ func statementOriginalContext(t testing.TB, sqlite bool, acquire func(context.Co
 		t.Fatal(err)
 	}
 	return authoractivity.WithScope(ctx, authoractivity.BundleScope(identity.RuntimeInstanceID, sourceartifactfixture.BundleHash))
+}
+
+func acquireStatementProcessForDB(t testing.TB, db *sql.DB, postgres bool) context.Context {
+	t.Helper()
+	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := schemastore.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.TableName != "runtime_process_generation" {
+			continue
+		}
+		statements := plan.Statements
+		if !postgres {
+			statements, err = schemastore.SQLiteStatementsForPlan(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, statement := range statements {
+			if _, err := db.ExecContext(context.Background(), statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := platformschema.SeedFreshProcessGeneration(context.Background(), db, []schemastore.SchemaTableDDL{plan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !postgres {
+		backend, err := sqlitebackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return statementOriginalContext(t, true, backend.RunProcessAcquisitionOutcome)
+	}
+	backend, err := postgresbackend.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(context.Background(), backend, "swarm:runtime:shared-store-owner")
+	if err != nil || !acquired {
+		t.Fatalf("acquire retained statement session: acquired=%v err=%v", acquired, err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	return statementOriginalContext(t, false, lease.RunProcessAcquisitionOutcome)
 }
 
 func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) (runlifecycle.OperationOwner, context.Context) {
