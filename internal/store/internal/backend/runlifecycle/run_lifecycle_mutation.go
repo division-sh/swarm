@@ -711,14 +711,6 @@ func (m postgresRunLifecycleMutation) TransitionActive(
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
-	if request.State == runtimerunlifecycle.StateRunning {
-		if m.store == nil {
-			return "", errors.New("PostgreSQL run lifecycle resume requires selected-store candidate owner")
-		}
-		if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
-			return "", err
-		}
-	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
 
@@ -766,14 +758,6 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
-	}
-	if request.State == runtimerunlifecycle.StateRunning {
-		if m.store == nil {
-			return "", errors.New("SQLite run lifecycle resume requires selected-store candidate owner")
-		}
-		if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
-			return "", err
-		}
 	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
@@ -937,9 +921,6 @@ func (m postgresRunLifecycleMutation) ReviseSource(
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
-	if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
-		return "", err
-	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
 
@@ -974,9 +955,6 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 		return "", errors.Join(fmt.Errorf("revise SQLite run lifecycle source affected %d rows", rows), rowsErr)
 	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
-		return "", err
-	}
-	if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
