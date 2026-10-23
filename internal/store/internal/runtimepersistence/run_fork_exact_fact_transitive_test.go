@@ -20,7 +20,7 @@ func TestRunForkExactFactsTransitiveBothStores(t *testing.T) {
 		f := newExactFactFixture(t, s)
 		exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 			seedRunForkRevisionMatrixFacts(t, ctx, tx, f, true, s.postgres)
-			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactMatrixRefs(t, f)...), 1, true)
+			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactMatrixRefs(t, f)...), f.initialRevision+1, true)
 		})
 		t.Run("selection_and_dead_letter_outcome_join", func(t *testing.T) {
 			failure := failures.Normalize(failures.New(failures.ClassComputeFailure, "joined_failure", "exact-fact-proof", "settle", nil), "exact-fact-proof", "settle")
@@ -46,7 +46,7 @@ func TestRunForkExactFactsTransitiveBothStores(t *testing.T) {
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `RELEASE SAVEPOINT omitted_contributor`)
 				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID,
 					exactFactRef(t, runforkrevision.FamilyEventDeliveries, f.deliveryID),
-					exactFactRef(t, runforkrevision.FamilyDeadLetters, f.deadLetterID)), 2, true)
+					exactFactRef(t, runforkrevision.FamilyDeadLetters, f.deadLetterID)), f.initialRevision+2, true)
 			})
 		})
 		t.Run("structured_intent_outcome_barrier_with_pipe_path", func(t *testing.T) {
@@ -70,13 +70,13 @@ func TestRunForkExactFactsTransitiveBothStores(t *testing.T) {
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) SELECT run_id,triggering_delivery_id,flow_path,declaration_family,$1,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,1,'closed',next_chunk_size,capsule,created_at,updated_at FROM fan_out_intents WHERE run_id=$2 AND triggering_delivery_id=$3`, key.ElementRef.SemanticPath, f.runID, f.deliveryID)
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id,created_at) VALUES ($1,$2,'root','handler_rule',$3,0,'committed',$4,$5)`, f.runID, f.deliveryID, key.ElementRef.SemanticPath, f.eventID, f.at)
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_obligation_barriers (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,target_flow_path,target_node_id,handler_event,join_id,route_scope_key,route_instance_id,route_instance_path,entity_id,routing_source,execution_mode,timer_handle,status,created_at,updated_at) VALUES ($1,$2,'root','handler_rule',$3,$4,$5,'root','matrix-node','matrix.complete','matrix-join','root','','root',$6,$7,'live',$8,'armed',$9,$9)`, f.runID, f.deliveryID, key.ElementRef.SemanticPath, "bundle-v2:sha256:"+strings.Repeat("1", 64), "sha256:"+strings.Repeat("1", 64), f.entityID, `{"kind":"root"}`, `{}`, f.at)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, intent, outcome, barrier), 3, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, intent, outcome, barrier), f.initialRevision+3, true)
 			})
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				for _, table := range []string{"fan_out_obligation_barriers", "fan_out_outcomes", "fan_out_intents"} {
 					mustExecRunForkRevisionMatrix(t, ctx, tx, `DELETE FROM `+table+` WHERE run_id=$1 AND triggering_delivery_id=$2 AND semantic_path=$3`, f.runID, f.deliveryID, key.ElementRef.SemanticPath)
 				}
-				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, intent, outcome, barrier), 4, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, intent, outcome, barrier), f.initialRevision+4, true)
 			})
 		})
 	})

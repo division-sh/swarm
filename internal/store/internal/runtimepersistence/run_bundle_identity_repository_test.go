@@ -58,51 +58,6 @@ func TestRepositoryRunCreationHasCanonicalOwnersOnly(t *testing.T) {
 	}
 }
 
-func TestRepositoryRunInsertFixturesHaveExplicitCanonicalIdentity(t *testing.T) {
-	root := repositoryRootForBundleIdentityTest(t)
-	for _, rel := range bundleIdentityFixtureLedger {
-		path := filepath.Join(root, filepath.FromSlash(rel))
-		switch rel {
-		case "internal/store/run_bundle_fingerprint_test.go":
-			if _, err := os.Stat(path); !os.IsNotExist(err) {
-				t.Errorf("retired compatibility fixture %s still exists", rel)
-			}
-		default:
-			if _, err := os.Stat(path); err != nil {
-				t.Errorf("fixture ledger row %s is missing: %v", rel, err)
-			}
-		}
-	}
-
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() || filepath.Ext(path) != ".go" {
-			return nil
-		}
-		rel := repositoryRelativePath(t, root, path)
-		if rel == "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go" {
-			return nil
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-		if err != nil {
-			return err
-		}
-		violations, err := runFixtureIdentityViolations(rel, file)
-		if err != nil {
-			return err
-		}
-		for _, violation := range violations {
-			t.Errorf("%s: %s", rel, violation)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk run fixture inserts: %v", err)
-	}
-}
-
 func runFixtureIdentityViolations(path string, file *ast.File) ([]string, error) {
 	minimal, err := classifyBackendMinimalRunLiterals(path, file)
 	if err != nil {

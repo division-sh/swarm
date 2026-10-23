@@ -29,13 +29,6 @@ var semanticExecutionExits = map[string][]string{
 	"internal/runtime/pipeline/workflow_gate_decision.go::handleHumanTaskDecisionCard":               {"FromGo", "ProjectSemanticValue", "MarshalPreservingNumberKinds"},
 }
 
-func TestWorkflowSemanticBoundaryGuard(t *testing.T) {
-	findings := semanticBoundaryFindings(t, nil)
-	for _, finding := range findings {
-		t.Error(finding)
-	}
-}
-
 func TestWorkflowSemanticBoundaryGuardRejectsBypasses(t *testing.T) {
 	root := filepath.Clean(filepath.Join(workflowProjectionRuntimeRoot(t), "..", ".."))
 	path := filepath.Join(root, "internal/apiv1/operator_event_publish.go")

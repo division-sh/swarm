@@ -85,6 +85,19 @@ func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime
 	t.Fatalf("source pipeline completion did not finish: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
 }
 
+func waitServedSelectedForkFrontier(t *testing.T, rt servedControlProofRuntime, child, frontier string) string {
+	t.Helper()
+	eventID := activityidentity.ForkLineageEventID(child, frontier)
+	if rt.Postgres != nil {
+		waitWorkspaceProofPipelineReceipt(t, rt.Postgres, child, eventID, "success")
+	} else {
+		waitWorkspaceProofPipelineReceipt(t, rt.SQLite, child, eventID, "success")
+	}
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, child)
+	waitForkReceiverSourceCompletion(t, rt, child)
+	return eventID
+}
+
 // Refusal snapshots cover all application base tables, not merely the child
 // tables that a successful fork would populate. Internal DB objects are excluded.
 func snapshotForkReceiverApplication(t *testing.T, rt servedControlProofRuntime) map[string][]string {
@@ -681,12 +694,12 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	var fork, replay apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-	if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
+	if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
 		t.Fatalf("fork identity: %+v", fork)
 	}
-	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+	childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier)
+	requireLifecycleEventCount(t, rt, fork.ForkRunID, producerEvidence.Name, 1)
 	childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
-	childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 	// This persisted child event has passed backend source-event loading and
 	// container preparation/publication. Compare their composition, not helpers.
 	childProducer := readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent)
@@ -1131,11 +1144,11 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "business-fork"}
 				var fork, replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
+				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
 					t.Fatalf("business fork identity: %+v", fork)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-				childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
+				childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier)
+				requireLifecycleEventCount(t, rt, fork.ForkRunID, sourceEvidence.Name, 1)
 				childRoute := requireForkReceiverBusinessMutation(t, rt, fork.ForkRunID, childEvent, consumer.ID)
 				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("business fork changed compiled consumer or immutable producer evidence")

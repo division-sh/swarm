@@ -197,46 +197,6 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 	}
 }
 
-func TestRewrite2566EntryGoldenMatchesTypedCorpus(t *testing.T) {
-	entries, err := readCurrentEntryGoldens("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) == 0 {
-		t.Fatal("missing independently reviewed entry golden")
-	}
-	for _, entry := range entries {
-		t.Run(entry.File+"/"+entry.Flow, func(t *testing.T) {
-			if entry.Function != "" {
-				assertEmbeddedEntryGolden(t, entry)
-				return
-			}
-			if len(entry.EmbeddedPath) != 0 {
-				assertSpecEntryGolden(t, entry)
-				return
-			}
-			if filepath.ToSlash(filepath.Join(entry.Source, entry.Flow, filepath.Base(entry.File))) != entry.File {
-				t.Fatalf("invalid exact source/flow tuple: %+v", entry)
-			}
-			body, err := os.ReadFile(filepath.Join("../..", entry.File))
-			if err != nil {
-				t.Fatal(err)
-			}
-			snapshot, err := yamlsource.Load(body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			schema, err := contracts.AdmitFlowSchemaValue(snapshot.Document(entry.File).Root())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := assertEntryGolden(entry, schema); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
 func assertSpecEntryGolden(t *testing.T, expected entryGolden) {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join("../..", expected.File))

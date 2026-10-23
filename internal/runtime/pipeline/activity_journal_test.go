@@ -20,11 +20,11 @@ func VerifyActivityAttemptJournalSQLiteAndPostgresForTest(t *testing.T, open fun
 		t.Run(backend, func(t *testing.T) {
 			fixture := open(t, backend)
 			journal, ctx := fixture.Persistence.store, fixture.Context
-			journal.activityJournal = fixture.CaptureActivityJournal()
 			runID := uuid.NewString()
 			if err := fixture.RequireRun(ctx, runID); err != nil {
 				t.Fatal(err)
 			}
+			journal.activityJournal = fixture.CaptureActivityJournal()
 			initial, err := fixture.ReadJournal(ctx, runID)
 			if err != nil {
 				t.Fatal(err)
@@ -98,11 +98,11 @@ func VerifyActivityAttemptJournalPreservesReplyContextAcrossRestartForTest(t *te
 		t.Run(backend, func(t *testing.T) {
 			fixture := open(t, backend)
 			journal, ctx := fixture.Persistence.store, fixture.Context
-			journal.activityJournal = fixture.CaptureActivityJournal()
 			runID := uuid.NewString()
 			if err := fixture.RequireRun(ctx, runID); err != nil {
 				t.Fatal(err)
 			}
+			journal.activityJournal = fixture.CaptureActivityJournal()
 			requestEventID := uuid.NewString()
 			replyContextID := "reply-v1:activity-" + uuid.NewString()
 			if err := fixture.CreateReply(ctx, runID, requestEventID, replyContextID); err != nil {
@@ -128,7 +128,6 @@ func VerifyLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStoresForTest(t *te
 		t.Run(backend, func(t *testing.T) {
 			fixture := open(t, backend)
 			store := fixture.Persistence.store
-			store.activityJournal = fixture.CaptureActivityJournal()
 			// Each independent cell constructs one keyless validation instance.
 			newRunContext := func(t *testing.T) context.Context {
 				t.Helper()
@@ -136,6 +135,7 @@ func VerifyLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStoresForTest(t *te
 				if err := fixture.RequireRun(fixture.Context, runID); err != nil {
 					t.Fatal(err)
 				}
+				store.activityJournal = fixture.CaptureActivityJournal()
 				return runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(fixture.Context, runID), executionmode.Live)
 			}
 

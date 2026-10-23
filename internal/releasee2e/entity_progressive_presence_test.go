@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 )
 
 func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T) {
@@ -126,11 +128,21 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				err = process.rpc.call(ctx, "run.fork", params, &fork)
 				cancel()
 				forkRunID, _ := fork["fork_run_id"].(string)
-				executed, _ := fork["executed_event_count"].(float64)
-				if err != nil || forkRunID == "" || forkRunID == runID || executed < 1 {
+				executed, hasCount := fork["executed_event_count"].(float64)
+				if err != nil || forkRunID == "" || forkRunID == runID || !hasCount || executed != 0 {
 					t.Fatalf("reconstruct and execute fork: result=%+v err=%v", fork, err)
 				}
 				waitForPresenceEntity(t, process, forkRunID, "done", completed)
+				waitForGoldenTerminalRun(t, process, store, forkRunID, 30*time.Second)
+				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+				childEvents, err := listGoldenEvents(ctx, process.rpc, forkRunID)
+				cancel()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if child := goldenSingleNamedEvent(t, childEvents, "work.completed"); child.EventID != activityidentity.ForkLineageEventID(forkRunID, done.EventID) {
+					t.Fatalf("fork did not execute its exact retained frontier: %+v", child)
+				}
 				var retried map[string]any
 				ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 				err = process.rpc.call(ctx, "run.fork", params, &retried)
