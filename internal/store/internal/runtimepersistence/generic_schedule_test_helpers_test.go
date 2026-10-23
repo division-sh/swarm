@@ -33,6 +33,7 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 			runID := uuid.NewString()
 			ctx := selectedScheduleTestContext(t, runID)
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			seedSQLiteScheduleRun(t, store, ctx, runID)
 			return store, store.backend.ConstructionHandle(), ctx
 		}},
@@ -42,8 +43,13 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			runID := uuid.NewString()
 			ctx := selectedScheduleTestContext(t, runID)
 			store := admitTestPostgresStore(t, db)
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			requireRunningRunForTest(t, ctx, store, runID, time.Now().UTC())
-			t.Cleanup(func() { _ = store.ReleaseGenericScheduleClaims(context.Background()) })
+			t.Cleanup(func() {
+				if err := store.ReleaseGenericScheduleClaims(context.WithoutCancel(ctx)); err != nil {
+					t.Error(err)
+				}
+			})
 			return store, db, ctx
 		}},
 	}

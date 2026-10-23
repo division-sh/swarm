@@ -1071,11 +1071,14 @@ func advanceAdmittedFanOutBarriers(ctx context.Context, attempt *mutationprotoco
 }
 
 func retainedFanOutBarrierActivations(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, schedules GenericScheduleTxOwner, runID string) (activations []runtimerunlifecycle.CommittedGenericScheduleActivation, err error) {
-	pending, err := loadFanOutBarriersByStatus(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending)
+	pending, err := loadFanOutBarriers(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending, nil, true)
 	if err != nil {
 		return activations, err
 	}
 	for _, barrier := range pending {
+		if barrier.TransferredOccurrence != nil {
+			continue
+		}
 		activation, found, err := schedules.LoadActivationTx(ctx, attempt, barrier.ScheduleActivationID)
 		if err != nil {
 			return activations, err

@@ -31,7 +31,7 @@ func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *te
 			selected := fixture.store.(deliveryReadProjectionStore)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			identity := mustTestAgentIdentityForRun(runID, "retry-agent", "delivery-projection/retry")
 			event := eventtest.PersistedProjection(
@@ -99,7 +99,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			siblingEvent := eventtest.PersistedProjection(
 				uuid.NewString(), "projection.siblings", "gateway", "", json.RawMessage(`{"kind":"siblings"}`), 0,

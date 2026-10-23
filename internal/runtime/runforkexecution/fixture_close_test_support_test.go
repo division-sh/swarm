@@ -77,7 +77,7 @@ func TestSelectedFixtureCloseRequiresCurrentRetainedOccurrence(t *testing.T) {
 			if err := grant.evidence.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			runtime := &selectedContractAgentRuntime{controlContext: owned, bus: &bus.EventBus{}, generationGrant: grant, timerLifecycle: &pipeline.PipelineCoordinator{}}
+			runtime := &selectedContractAgentRuntime{controlContext: owned, cleanupContext: owned, bus: &bus.EventBus{}, generationGrant: grant, timerLifecycle: &pipeline.PipelineCoordinator{}}
 			entry := &selectedForkContext{binding: binding, done: make(chan struct{}), retained: &PreparedSelectedFork{retainedRuntime: runtime}}
 			contexts := &selectedForkContexts{recovered: true, entries: map[*selectedContractOperation]*selectedForkContext{{}: entry}}
 			store := &selectedControlBindingFixture{binding: binding, exists: true}

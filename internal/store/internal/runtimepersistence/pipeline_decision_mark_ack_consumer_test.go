@@ -25,7 +25,7 @@ func TestDecisionMarkRetainsAcknowledgementAfterHandoffFailure(t *testing.T) {
 			}
 			ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			at := time.Now().UTC().Add(-time.Minute)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)

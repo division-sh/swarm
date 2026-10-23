@@ -171,7 +171,7 @@ func completeSelectedHistoryJournal(t *testing.T, ctx context.Context, original 
 // failure under each of two retired generations, not just successful results.
 func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionSettlementFixture, selected selectedCompletionFixture, firstGrant runtimeownership.GrantEvidence, firstJournals []pipeline.ActivityAttemptRecord, control *activityGrantHistoryConnector) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := selected.ctx
 	issued, err := selected.store.IssueRunForkSelectedContractRuntimeExecution(ctx, selected.request)
 	if err != nil {
 		t.Fatal(err)

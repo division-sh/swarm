@@ -9,6 +9,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -22,6 +24,8 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
 			ctx := fixture.ctx
+			finishHistory := beginForkDeliveryHistoryFixture(t, ctx, store, fixture.forkRun)
+			defer finishHistory()
 			fixture.request.ContainerPlanFingerprint = "sha256:" + strings.Repeat("1", 64)
 			fixture.request.ActorCensusFingerprint = "sha256:" + strings.Repeat("2", 64)
 			fixture.request.EffectiveConfigFingerprint = "sha256:" + strings.Repeat("3", 64)
@@ -69,15 +73,18 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			servingCtx := startupownership.WithGenerationGrantEvidence(runtimeeffects.WithAuthority(ctx, authority), evidence)
+			servingCtx = correlation.WithRunID(servingCtx, fixture.forkRun)
 			serving := store.(interface {
 				BindSelectedFanOutGrant(startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error)
 				ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
 			})
-			owner, err := serving.BindSelectedFanOutGrant(evidence)
-			if err != nil || owner == nil {
-				t.Fatalf("exact selected bind: owner=%T err=%v", owner, err)
+			bound, err := serving.BindSelectedFanOutGrant(evidence)
+			owner, ok := bound.(pipeline.SelectedFanOutObligationOwner)
+			if err != nil || !ok {
+				t.Fatalf("exact selected bind: owner=%T err=%v", bound, err)
 			}
-			if activations, err := owner.ReconcileFanOutBarriers(ctx); err != nil || len(activations) != 0 {
+			if activations, err := owner.ReconcileFanOutBarriers(servingCtx); err != nil || len(activations) != 0 {
 				t.Fatalf("empty exact child barrier recovery: activations=%v err=%v", activations, err)
 			}
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
@@ -89,11 +96,15 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			}
 			var activationID string
 			for restart := range 2 {
-				owner, err = serving.BindSelectedDeploymentFanOutGrant(evidence)
+				bound, err = serving.BindSelectedFanOutGrant(evidence)
 				if err != nil {
 					t.Fatal(err)
 				}
-				activations, err := owner.ReconcileFanOutBarriers(ctx)
+				owner, ok = bound.(pipeline.SelectedFanOutObligationOwner)
+				if !ok {
+					t.Fatalf("selected barrier recovery owner=%T", bound)
+				}
+				activations, err := owner.ReconcileFanOutBarriers(servingCtx)
 				if err != nil || len(activations) != 1 {
 					t.Fatalf("selected barrier recovery %d: activations=%v err=%v", restart, activations, err)
 				}
@@ -208,7 +219,7 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			if _, _, _, err := owner.ClaimFanOutIntent(ctx, claim); err == nil {
 				t.Fatal("bound selected owner retained stale execution fence")
 			}
-			if _, err := owner.ReconcileFanOutBarriers(ctx); err == nil {
+			if _, err := owner.ReconcileFanOutBarriers(servingCtx); err == nil {
 				t.Fatal("selected barrier recovery retained stale execution fence")
 			}
 		})

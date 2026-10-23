@@ -21,6 +21,15 @@ import (
 
 func acquireLogoutProcessFixture(t *testing.T, f *activeInputFixture, runtimeID string, exact ...startupownership.AcquireRequest) startupownership.ProcessCapability {
 	t.Helper()
+	if len(exact) == 0 && f.processCapability != nil {
+		original, err := f.processCapability.Evidence()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if original.RuntimeInstanceID == runtimeID {
+			return f.processCapability
+		}
+	}
 	request := startupownership.AcquireRequest{OwnerID: "logout-process-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID}
 	if len(exact) == 1 {
 		request = exact[0]
@@ -28,6 +37,9 @@ func acquireLogoutProcessFixture(t *testing.T, f *activeInputFixture, runtimeID 
 	owner, err := f.selected.(startupownership.Store).AcquireProcessCapability(f.ctx, request)
 	if err != nil {
 		t.Fatal("acquire real selected process responsibility", err)
+	}
+	if f.processCapability == nil {
+		f.processCapability = owner
 	}
 	t.Cleanup(func() {
 		if err := owner.Release(context.Background()); err != nil {

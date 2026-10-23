@@ -25,7 +25,7 @@ func TestDeliverySingletonSnapshotIndependentParityBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			adapter := m29DeliveryAdapter(t, backend.name == "postgres")
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			now, err := adapter.CaptureSnapshotTime(ctx, fixture.db)
 			if err != nil {
 				t.Fatal(err)
@@ -161,8 +161,8 @@ func TestDeliverySingletonSnapshotMembershipRefusalBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			adapter := m29DeliveryAdapter(t, backend.name == "postgres")
 			runID, foreignRun := uuid.NewString(), uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, foreignRun)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, foreignRun)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "singleton.hostile", "gateway", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("first"), testEntitylessNodeDeliveryRoute("second")}); err != nil {
 				t.Fatal(err)

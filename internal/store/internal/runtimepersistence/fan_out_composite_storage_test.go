@@ -22,7 +22,7 @@ import (
 func seedFanOutCompositeStorageNodeClaim(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture) runtimedelivery.ClaimedObligation {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "recovery.requested", "gateway", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	route := testEntitylessNodeDeliveryRoute("composite-storage-source")
 	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{route}); err != nil {

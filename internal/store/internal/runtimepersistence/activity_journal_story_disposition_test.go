@@ -39,7 +39,7 @@ func TestActivityJournalTerminalTimestampAfterAdmissionBothStores(t *testing.T) 
 					// A submitted candidate cannot choose the durable completion clock.
 					forged := time.Date(2000, 1, 2, 3, 4, 5, 123456789, time.FixedZone("candidate", 3600))
 					candidate.CompletedAt, candidate.UpdatedAt = &forged, forged
-					ctx, cancel := context.WithCancel(testAuthorActivityContext())
+					ctx, cancel := context.WithCancel(fixture.originalContext(testAuthorActivityContext()))
 					defer cancel()
 					tx, err := fixture.db.BeginTx(ctx, nil)
 					if err != nil {
@@ -107,7 +107,7 @@ func TestActivityJournalTerminalTimestampAfterAdmissionBothStores(t *testing.T) 
 					if err := tx.Rollback(); err != nil {
 						t.Fatal(err)
 					}
-					loaded, found, err := fixture.store.(activityStoryJournal).LoadActivityAttempt(testAuthorActivityContext(), started.RequestEventID)
+					loaded, found, err := fixture.store.(activityStoryJournal).LoadActivityAttempt(fixture.originalContext(testAuthorActivityContext()), started.RequestEventID)
 					if err != nil || !found || !reflect.DeepEqual(started, loaded) {
 						t.Fatal("rolled-back terminal clock escaped into the started receipt")
 					}
@@ -262,7 +262,7 @@ func TestActivityJournalStoryDispositionBothStores(t *testing.T) {
 							if err := fixture.db.QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&head); err != nil || head != last.Sequence {
 								t.Fatalf("story head = %d, err=%v, want %d", head, err, last.Sequence)
 							}
-							loaded, found, err := fixture.store.(activityStoryJournal).LoadActivityAttempt(testAuthorActivityContext(), record.RequestEventID)
+							loaded, found, err := fixture.store.(activityStoryJournal).LoadActivityAttempt(fixture.originalContext(testAuthorActivityContext()), record.RequestEventID)
 							if err != nil || !found || !reflect.DeepEqual(loaded, got) {
 								t.Fatal("committed source readback differs")
 							}
@@ -361,9 +361,9 @@ func TestActivityJournalStoryFailureAtomicityBothStores(t *testing.T) {
 
 func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture, mode executionmode.Mode, status string, generated bool) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := fixture.originalContext(testAuthorActivityContext())
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	activityNativeJournalForFixture(t, fixture)
 	record := runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: mode, EntityID: uuid.NewString(), FlowInstance: "flow/" + uuid.NewString(),
@@ -449,7 +449,7 @@ func activityStoryRequest(t *testing.T, record runtimepipeline.ActivityAttemptRe
 }
 
 func activityStoryOuter(fixture authorActivityReceiptFixture, op string, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
-	j, ctx := fixture.store.(activityStoryJournal), testAuthorActivityContext()
+	j, ctx := fixture.store.(activityStoryJournal), fixture.originalContext(testAuthorActivityContext())
 	if fixture.activityJournal != nil && fixture.activityJournal.owner != nil {
 		j = fixture.activityJournal.owner
 	}
@@ -471,7 +471,7 @@ func activityStoryOuter(fixture authorActivityReceiptFixture, op string, record 
 
 func activityStoryKernel(t *testing.T, fixture authorActivityReceiptFixture, postgres bool, op string, record runtimepipeline.ActivityAttemptRecord, spy *activityStorySpy) (runtimepipeline.ActivityAttemptRecord, bool, error) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := fixture.originalContext(testAuthorActivityContext())
 	tx, err := fixture.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -518,7 +518,7 @@ func activityStoryOccurrences(t *testing.T, fixture authorActivityReceiptFixture
 	if postgres {
 		dialect = authoractivityadapter.DialectPostgres
 	}
-	page, err := authoractivityadapter.List(testAuthorActivityContext(), fixture.db, dialect, authoractivity.ListOptions{RunID: runID, Limit: 100})
+	page, err := authoractivityadapter.List(fixture.originalContext(testAuthorActivityContext()), fixture.db, dialect, authoractivity.ListOptions{RunID: runID, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
