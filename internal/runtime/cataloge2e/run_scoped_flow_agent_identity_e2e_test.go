@@ -279,10 +279,13 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			if err != nil {
 				t.Fatalf("resume materialized selected-contract flow fork: %v; pending=%#v", err, sourcePlan.PendingWork)
 			}
-			if result.Owner != runfork.RunForkSelectedContractExecutionActivationGateOwner || !result.Activated || result.ExecutedEventCount == 0 {
+			if result.Owner != runfork.RunForkSelectedContractExecutionActivationGateOwner || !result.Activated || result.ExecutedEventCount != 0 {
 				t.Fatalf("selected-contract flow fork result = %#v", result)
 			}
 			forkRunID := materialization.ForkRunID
+			if observed, err := observeCatalogSelectedExecution(t, h, forkRunID); err != nil || observed.ExecutedEventCount == 0 {
+				t.Fatalf("retained flow fork=%+v error=%v", observed, err)
+			}
 			assertCatalogRunScopedFlowOwner(t, h, selected, forkRunID, flowPath, "complete")
 			forkAgent := catalogRunScopedAgentDeliveryIdentity(t, h, forkRunID, flowPath, string(sourceEvent.Type()), "delivered")
 			if sourceAgent.RunID == forkAgent.RunID || sourceAgent.Name != forkAgent.Name || sourceAgent.Route != forkAgent.Route {

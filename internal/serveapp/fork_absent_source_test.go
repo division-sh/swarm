@@ -56,10 +56,10 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "allow_source_freeze": true, "idempotency_key": "root-source-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.ExecutedEventCount != 1 || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
+			if fork.ExecutedEventCount != 0 || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
 				t.Fatalf("fork result: %+v", fork)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+			waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, published.EventID)
 			requireServedRunStatus(t, rt.Endpoint, fork.ForkRunID, "completed")
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
