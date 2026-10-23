@@ -727,7 +727,8 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGenera
 	}
 	repo := canonicalrouting.RepoRoot(t)
 	_, err = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err == nil || !strings.Contains(err.Error(), "compiled event .:send.failed has multiple declaration owners") {
+	if err == nil || !strings.Contains(err.Error(), `duplicate activity id "send"`) ||
+		!strings.Contains(err.Error(), `handlers "producer/activity.requested" and "other/activity.requested"`) {
 		t.Fatalf("admission error = %v, want two generated owners rejected before runtime boot", err)
 	}
 }

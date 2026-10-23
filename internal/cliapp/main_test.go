@@ -3122,6 +3122,16 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:6:", `handlers "sender/z.request" and "sender/a.request"`, "give each activity in this flow a unique id"},
 			notWants: []string{"provider connector pack import failed", "multiple declaration owners"},
 		},
+		{
+			name:   "duplicate activity on one YAML line",
+			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
+			files: map[string]string{
+				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
+				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers: {z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}, a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}}\n",
+			},
+			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:4:172", `handlers "sender/z.request" and "sender/a.request"`},
+			notWants: []string{"provider connector pack import failed", "multiple declaration owners"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
