@@ -20,10 +20,10 @@ The five-minute warm-vemew target is soft: an overrun requires reviewed
 re-ranking, never shorter test deadlines or automatic selector changes.
 An overrun alone does not make a complete passing command fail.
 
-Execution order is formatting, OpenRPC, nine ranked existing package phases,
+Execution order is formatting, OpenRPC, eight ranked existing package phases,
 complexity, all remaining selected packages in canonical order, then full
 `go vet ./...`. The ranked group is worklifetime, effects, deliverycontinuation,
-manager, testutil, rewrite-stages-2566, backend/authoractivity, swarm-test-timing,
+manager, testutil, backend/authoractivity, swarm-test-timing,
 and testtiming. Rank changes only order, not membership: missing ranked packages
 are never fabricated and future structural packages are never omitted. Cheap
 census failures can surface before expensive checks, but complexity-only or

@@ -151,7 +151,7 @@ func TestAccountingSampleIsHeadBoundAndNotAuthorChosen(t *testing.T) {
 }
 
 func TestAccountingGuardEvidenceRefusesPartialMissingSkippedAndForeign(t *testing.T) {
-	const pkg = "github.com/division-sh/swarm/scripts/rewrite-stages-2566"
+	const pkg = "github.com/division-sh/swarm/scripts/rewrite-stages-2566/formatproof"
 	line := func(action, pkg, test string) string {
 		raw, _ := json.Marshal(map[string]string{"Action": action, "Package": pkg, "Test": test})
 		return string(raw) + "\n"

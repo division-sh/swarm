@@ -191,7 +191,7 @@ func accountingGuardMap(ctx context.Context, root string) ([]accountingGuardRece
 		return nil, err
 	}
 	var required []accountingGuardReceipt
-	for _, pkg := range []string{"github.com/division-sh/swarm/scripts/rewrite-stages-2566", "github.com/division-sh/swarm/scripts/rewrite-stages-2566/formatproof"} {
+	for _, pkg := range []string{"github.com/division-sh/swarm/scripts/rewrite-stages-2566/formatproof"} {
 		roots := append([]string{}, inventory.Packages[pkg].Roots...)
 		sort.Strings(roots)
 		if len(roots) == 0 {

@@ -334,7 +334,7 @@ func accountingClosure(ctx context.Context, root string) ([]accountingInput, err
 			paths[name] = true
 		}
 	}
-	for _, path := range []string{".github/test-proof-plan.yaml", ".github/test-proof-history-inputs.json", ".github/scripts/prepare-proof-history.sh", testplanning.GeneratedWeightModelPath, ".github/flake-ledger.json", "internal/apiv1/testdata/public_surface_backend_matrix.yaml", formatproof.Ledger, "scripts/rewrite-stages-2566/intent.json", "scripts/rewrite-stages-2566/entries.json"} {
+	for _, path := range []string{".github/test-proof-plan.yaml", ".github/test-proof-history-inputs.json", ".github/scripts/prepare-proof-history.sh", testplanning.GeneratedWeightModelPath, ".github/flake-ledger.json", "internal/apiv1/testdata/public_surface_backend_matrix.yaml", formatproof.Ledger} {
 		paths[path] = true
 	}
 	paths["scripts/rewrite-stages-2566/formatproof/testdata/original.go.txt"] = true

@@ -18,7 +18,7 @@ type proofHistoryCase struct {
 }
 
 func TestProofBatchProvidesHistoricalCorpusInputsBeforeExecution(t *testing.T) {
-	const corpus = "github.com/division-sh/swarm/scripts/rewrite-stages-2566"
+	const corpus = "github.com/division-sh/swarm/internal/store"
 	for _, tc := range []proofHistoryCase{
 		{name: "selected renamed unit", pkg: corpus, selected: true},
 		{name: "store transition", pkg: "github.com/division-sh/swarm/internal/store", selected: true},
@@ -148,8 +148,7 @@ func proofHistoryInputs(t *testing.T) map[string][]string {
 
 func TestProofHistoryInputsMatchPinnedSourceConsumers(t *testing.T) {
 	files := map[string][]string{
-		"github.com/division-sh/swarm/internal/store":              {"internal/store/persistence_authority_debt_run_fixture_transition_test.go"},
-		"github.com/division-sh/swarm/scripts/rewrite-stages-2566": {"scripts/rewrite-stages-2566/current_entries_test.go", "scripts/rewrite-stages-2566/embedded_entries.go", "scripts/rewrite-stages-2566/intent.json", "scripts/rewrite-stages-2566/finite-fixtures.json", "scripts/rewrite-stages-2566/finite_feed_inputs_test.go", "scripts/rewrite-stages-2566/finite_fixtures_test.go"},
+		"github.com/division-sh/swarm/internal/store": {"internal/store/persistence_authority_debt_run_fixture_transition_test.go"},
 	}
 	inputs := proofHistoryInputs(t)
 	if len(inputs) != len(files) {
