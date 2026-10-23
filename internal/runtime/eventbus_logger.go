@@ -144,7 +144,7 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			decoded = normalized
 		}
 		if err := runtimetools.ValidatePayloadAgainstSchema(schema, payloadForCanonicalEventValidation(decoded, schema)); err != nil {
-			if logger != nil {
+			if logger != nil && !runtimebus.IsSubmittedInboundEvent(ctx, event) {
 				handleRuntimeLogPersistenceError("event-bus", "payload_validation_rejected", logger.Warn(ctx, "event-bus", "payload_validation_rejected", map[string]any{
 					"event_type": eventType,
 				}, err))

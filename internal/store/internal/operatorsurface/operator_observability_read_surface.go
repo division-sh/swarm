@@ -691,6 +691,12 @@ func listOperatorRuntimeIncidents(ctx context.Context, db interface {
 
 func operatorRuntimeLogFailureMessage(logEntry operatorread.OperatorRuntimeLogEntry) string {
 	if logEntry.Failure != nil {
+		if logEntry.Failure.Class == runtimefailures.ClassSchemaInvalid && logEntry.Failure.Detail.Code == "schema_validation_failed" &&
+			logEntry.Component == "inbound-gateway" && logEntry.Action == "payload_validation_rejected" {
+			if message := strings.TrimSpace(logEntry.Message); message != "" {
+				return message
+			}
+		}
 		return strings.TrimSpace(logEntry.Failure.Message)
 	}
 	return strings.TrimSpace(logEntry.Message)

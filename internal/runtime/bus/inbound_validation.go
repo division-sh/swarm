@@ -1,10 +1,19 @@
 package bus
 
 import (
+	"context"
 	"errors"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 )
+
+// IsSubmittedInboundEvent identifies only the exact authenticated batch event,
+// so its rejecting gateway can own the payload diagnostic without duplication.
+func IsSubmittedInboundEvent(ctx context.Context, event events.Event) bool {
+	_, submitted := authenticatedProviderPublicationForEvent(ctx, event)
+	return submitted
+}
 
 // Only the submitted event's admission step may mint this boundary. Generated
 // publications and later planning failures do not become caller input errors.

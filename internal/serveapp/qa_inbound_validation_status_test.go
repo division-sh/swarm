@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -38,7 +40,8 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 			if err := file.Set(t.Context(), "webhook_signing.partner", secret); err != nil {
 				t.Fatal(err)
 			}
-			_, start := clockDeploymentHarness(t, backend, root)
+			opts, start := clockDeploymentHarness(t, backend, root)
+			opts.SwarmDir, opts.SwarmDirSet = t.TempDir(), true
 			var inbound inboundpublication.Runner
 			captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) { inbound = persistence.deps.InboundStore })
 			process, served := start()
@@ -58,7 +61,7 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 				t.Fatal(err)
 			}
 			endpoint := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + "/webhooks/keyed-shop/partner"
-			for _, invalid := range []struct{ id, body, path string }{
+			for index, invalid := range []struct{ id, body, path string }{
 				{"missing-user", `{"delivery_id":"missing-user"}`, "$.data.user_id"},
 				{"wrong-user-type", `{"delivery_id":"wrong-user-type","user_id":7}`, "$.data.user_id"},
 				{"null-user", `{"delivery_id":"null-user","user_id":null}`, "$.data.user_id"},
@@ -78,6 +81,43 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 				if strings.Contains(string(response), "bus:") || strings.Contains(string(response), "publish inbound failed:") {
 					t.Errorf("typed validation response leaks internal error: %s", response)
 				}
+				var logs operatorread.OperatorRuntimeLogListResult
+				requireServedJSONRPCResult(t, served.Endpoint, "runtime.logs", map[string]any{
+					"bundle_hash": served.BundleHash, "component": "inbound-gateway", "limit": 100,
+				}, &logs)
+				matched := 0
+				for _, row := range logs.Logs {
+					if row.CanonicalDetail["provider_event_id"] != invalid.id {
+						continue
+					}
+					matched++
+					if row.Level != "warn" || row.Failure == nil || row.Failure.Class != runtimefailures.ClassSchemaInvalid || !strings.Contains(row.Message, invalid.path) {
+						t.Errorf("sender rejection misclassified: %+v", row)
+					}
+				}
+				if matched != 1 {
+					t.Errorf("gateway rejection logs=%d, want 1", matched)
+				}
+				for _, component := range []string{"inbound-gateway", "event-bus"} {
+					var incidents operatorread.OperatorRuntimeIncidentListResult
+					requireServedJSONRPCResult(t, served.Endpoint, "runtime.incidents", map[string]any{
+						"bundle_hash": served.BundleHash, "component": component, "limit": 100,
+					}, &incidents)
+					count := 0
+					for _, incident := range incidents.Incidents {
+						count += incident.Count
+						if incident.Level != "warn" || incident.ErrorCode != "schema_validation_failed" || !strings.Contains(incident.SampleMessage, invalid.path) {
+							t.Errorf("sender incident lost schema/path classification: %+v", incident)
+						}
+					}
+					want := 0
+					if component == "inbound-gateway" {
+						want = index + 1
+					}
+					if count != want {
+						t.Errorf("%s incidents=%+v, want %d sender rejections", component, incidents, want)
+					}
+				}
 				if _, found, err := inbound.LoadInboundPublicationByIdentity(t.Context(), inboundpublication.Identity{
 					ServiceID: standing.ServiceID, RunID: standing.RunID, Generation: standing.Generation,
 					Provider: "partner", ProviderEventID: invalid.id,
@@ -89,6 +129,11 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 					t.Fatalf("invalid input changed construction: before=%+v after=%+v err=%v", before, after, err)
 				}
 			}
+			incidentOutput := issue2394SurfaceCLI(t, servedControlProofRuntime{Endpoint: served.Endpoint}, "incidents", "--component", "inbound-gateway", "--level", "warn", "--limit", "100")
+			if !strings.Contains(incidentOutput, "schema_validation_failed") || !strings.Contains(incidentOutput, "$.data.nested.user_id") || strings.Contains(incidentOutput, "internal failure") {
+				t.Fatalf("CLI lost sender rejection classification/path: %s", incidentOutput)
+			}
+			t.Logf("sender incidents CLI: %s", incidentOutput)
 			body := `{"delivery_id":"valid-user","user_id":"user-7"}`
 			if fixture.optionalNull {
 				body = `{"delivery_id":"valid-user","user_id":"user-7","labels":null,"attributes":null,"nested":null}`

@@ -213,9 +213,14 @@ func TestRuntimePayloadAdmitter_RejectsNonObjectJSON(t *testing.T) {
 func TestRuntimePayloadAdmitter_RejectsSchemaMismatch(t *testing.T) {
 	t.Parallel()
 
-	admitter := testRuntimePayloadAdmitter(t, booleanPayloadBundle(t))
+	bundle := booleanPayloadBundle(t)
+	logs := &runtimeLogPersistenceCapture{}
+	admitter := NewRuntimePayloadAdmitter(newTestRuntimeLogger(logs), semanticview.Wrap(bundle), testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash()))
 	if _, err := admitRuntimePayload(admitter, "task.completed", []byte(`{"ok":"yes"}`)); err == nil {
 		t.Fatal("expected schema-invalid payload to be rejected")
+	}
+	if len(logs.records) != 1 {
+		t.Fatalf("non-inbound validation diagnostics=%d, want 1", len(logs.records))
 	}
 }
 

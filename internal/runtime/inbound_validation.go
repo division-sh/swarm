@@ -8,7 +8,27 @@ import (
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
+
+func logInboundPayloadRejection(logger *RuntimeLogger, ctx context.Context, provider, serviceID, providerEventID, path string) {
+	path = inboundValidationDisplayPath(path)
+	message := "invalid webhook payload"
+	if path != "" {
+		message += " at " + path
+	}
+	detail := map[string]any{"provider": provider, "service_id": serviceID, "provider_event_id": providerEventID, "path": path}
+	diaglog.ProcessLog(diaglog.LevelWarn, "inbound-gateway", message,
+		"provider", provider, "service_id", serviceID, "provider_event_id", providerEventID, "path", path)
+	if logger != nil {
+		failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "schema_validation_failed",
+			"inbound-gateway", "payload_validation_rejected", map[string]any{"path": path}), "inbound-gateway", "payload_validation_rejected")
+		handleRuntimeLogPersistenceError("inbound-gateway", "payload_validation_rejected", logger.Log(ctx, RuntimeLogEntry{
+			Level: diaglog.LevelWarn, Message: message, Component: "inbound-gateway", Action: "payload_validation_rejected", Detail: detail, Failure: &failure,
+		}))
+	}
+}
 
 func writeInboundPublicationError(w http.ResponseWriter, logger *RuntimeLogger, ctx context.Context, provider, serviceID, providerEventID string, err error) {
 	logInboundPublicationFailure(logger, ctx, provider, serviceID, providerEventID, err)

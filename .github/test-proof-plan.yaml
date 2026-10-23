@@ -223,7 +223,7 @@ profiles:
 units:
   source-contract-guards:
     preflight_fast: true
-    input_paths: [internal, scripts, tools, cmd, platform-spec.yaml, .github]
+    input_paths: [internal, scripts, tools, cmd, data, examples, packs, tests, .changes, .github, .golangci.yml, openrpc.json, platform-spec.yaml, platform_artifacts.go, swarm.example.yaml]
     packages:
     - github.com/division-sh/swarm/internal/apispec
     count_mode: count-1
