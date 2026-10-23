@@ -32,7 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -3033,15 +3033,6 @@ func countAllEventRows(t *testing.T, selected any) int {
 		t.Fatalf("count all event rows: %v", err)
 	}
 	return count
-}
-
-func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, selected any, eventID string) (string, *runtimefailures.Envelope) {
-	t.Helper()
-	outcome, failure, err := storetest.ReadPipelineReceiptOutcomeStorage(ctx, selected, eventID)
-	if err != nil {
-		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
-	}
-	return outcome, failure
 }
 
 func stringValue(t *testing.T, value any, field string) string {
