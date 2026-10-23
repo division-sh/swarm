@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
@@ -1246,24 +1247,12 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface(t 
 }
 
 func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
-	root := &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Events: map[string]runtimecontracts.EventCatalogEntry{
-		"company.registered": {
-			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{
-					"gem_score":   {Type: "number"},
-					"external_id": {Type: "uuid"},
-				},
-				Required: []string{"gem_score", "external_id"},
-			},
-		},
-	}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}},
+	files := map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "company.registered:\n  gem_score: double\n  external_id: uuid\n",
 	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
-	source := semanticview.Wrap(bundle)
+	source := loadWorkflowTempSource(t, files)
 
 	tests := []struct {
 		name       string
@@ -1279,14 +1268,14 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 			name: "schema mismatch", event: "company.registered", kind: runtimeengine.EmitPayloadSchemaMismatch,
 			path: "$.gem_score", constraint: "type", expected: "number", actual: "string",
 			run: func() error {
-				return validatePipelineEmitPayload(source, "", "company.registered", map[string]any{"gem_score": "7.2", "external_id": uuid.NewString()}, nil, runtimeengine.EmitSurfaceDeclarative)
+				return validatePipelineEmitPayload(source, ".", "company.registered", map[string]any{"gem_score": "7.2", "external_id": uuid.NewString()}, nil, runtimeengine.EmitSurfaceDeclarative)
 			},
 		},
 		{
 			name: "schema mismatch empty value", event: "company.registered", kind: runtimeengine.EmitPayloadSchemaMismatch,
 			path: "$.external_id", constraint: "format", expected: "uuid", actual: "",
 			run: func() error {
-				return validatePipelineEmitPayload(source, "", "company.registered", map[string]any{"gem_score": 7.2, "external_id": ""}, nil, runtimeengine.EmitSurfaceDeclarative)
+				return validatePipelineEmitPayload(source, ".", "company.registered", map[string]any{"gem_score": 7.2, "external_id": ""}, nil, runtimeengine.EmitSurfaceDeclarative)
 			},
 		},
 		{
@@ -1311,13 +1300,15 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 		})
 	}
 	t.Run("unresolved schema rejected before execution", func(t *testing.T) {
-		root.Events["company.unresolved"] = runtimecontracts.EventCatalogEntry{
-			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{"evidence": {Type: "NotDeclared"}},
-				Required:   []string{"evidence"},
-			},
+		files["events.yaml"] += "company.unresolved:\n  evidence: NotDeclared\n"
+		root := t.TempDir()
+		for name, body := range files {
+			if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
+		repo := WorkflowRepoRoot()
+		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
 			t.Fatalf("unresolved schema escaped compiler admission: %v", err)
 		}
 	})

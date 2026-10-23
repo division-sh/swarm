@@ -42,6 +42,14 @@ func derivedStaticTargetObservation(t *testing.T, source semanticview.Source, fa
 	if err != nil {
 		t.Fatal(err)
 	}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("derived-target fixture requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	parent, err := flowidentity.KeyedChild(source, root, "parent", "stored-coordinate")
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +67,7 @@ func derivedStaticTargetObservation(t *testing.T, source semanticview.Source, fa
 		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
 		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
 		CurrentState: "active", Revision: 1, CreatedAt: at, UpdatedAt: at}
-	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	var observation FlowInstanceObservation
 	if historical {
 		sourceRun := eventtest.UUID("fixed-static-target-source")

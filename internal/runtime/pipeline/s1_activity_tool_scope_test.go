@@ -61,6 +61,7 @@ func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semantic
 	files := map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml": "stages: []\n"}
 	for _, flow := range []string{"research", "research2"} {
+		files[flow+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 		files[flow+"/schema.yaml"] = "stages: []\n"
 		files[flow+"/events.yaml"] = "request:\n"
 		files[flow+"/nodes.yaml"] = fmt.Sprintf("scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: send, tool: %s, input: {}}\n", toolID)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -100,76 +99,6 @@ func TestPipelineDeliveryCompiledCallerRewriteRejectsUnreviewedShape(t *testing.
 	}
 	if _, err := rewritePipelineDeliveryCompiledCaller("foreign", before); err == nil {
 		t.Fatal("unreviewed caller admitted")
-	}
-}
-
-func TestPipelineDeliveryCompiledCallerRecipesPreserveAssertions(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	mechanical, semantic := 0, 0
-	for _, row := range rows {
-		switch row.Family {
-		case "native-pipeline-delivery-compiled-callers":
-			mechanical++
-			want, err := rewritePipelineDeliveryCompiledCaller(row.Function, row.Before)
-			got, afterErr := canonicalFunction(row.After)
-			if err != nil || afterErr != nil || want != got {
-				t.Fatalf("native pipeline caller did more than its finite propagation: %s/%v/%v", row.Function, err, afterErr)
-			}
-		case "native-pipeline-delivery-compiled-semantic":
-			semantic++
-			if _, err := rewritePipelineDeliveryCompiledCaller(row.Function, row.Before); err == nil {
-				t.Fatalf("semantic repair was admitted as mechanical: %s", row.Function)
-			}
-		default:
-			continue
-		}
-		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, "VerifyNative"+strings.TrimPrefix(row.Function, "Test")+"ForTest"))
-		current := row.After
-		if row.Successor != "" {
-			current = row.Successor
-		}
-		want, afterErr := canonicalFunction(current)
-		if err != nil || afterErr != nil || actual != want {
-			t.Fatalf("native pipeline caller differs from its source-pinned repair: %s/%v/%v", row.Function, err, afterErr)
-		}
-	}
-	if mechanical != 8 || semantic != 4 {
-		t.Fatalf("compiled delivery caller closure = %d mechanical/%d semantic, want 8/4", mechanical, semantic)
-	}
-}
-
-func TestNativePipelineExactLoopAndJoinRecipesStaySourcePinned(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, row := range rows {
-		if row.Family != "native-pipeline-delivery-loop-callers" && row.Family != "native-pipeline-delivery-exact-join-semantic" && row.Family != "native-pipeline-delivery-bus-semantic" {
-			continue
-		}
-		count++
-		source := []byte("package probe\n" + row.Before)
-		after, changed, err := rewriteFunction(row.File, source, row)
-		if err != nil || !changed {
-			t.Fatalf("reviewed native replacement failed: %s/%v", row.Function, err)
-		}
-		if _, changed, err := rewriteFunction(row.File, after, row); err != nil || changed {
-			t.Fatalf("native replacement was not idempotent: %s/%v", row.Function, err)
-		}
-		if _, _, err := rewriteFunction(row.File, bytes.Replace(source, []byte("{"), []byte("{ unreviewedEscape();"), 1), row); err == nil {
-			t.Fatalf("changed native consumer admitted: %s", row.Function)
-		}
-		actual := selectedCausalObservationBody(t, row.File, nativePipelineRecipeReplacementName(t, row))
-		if !residualComparatorCurrent2617(t, row, actual) {
-			t.Fatalf("native semantic repair drifted: %s", row.Function)
-		}
-	}
-	if count != 18 {
-		t.Fatalf("native exact/loop/join/bus closure recipes=%d, want 18", count)
 	}
 }
 

@@ -429,6 +429,18 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 	if !found || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != fact.BundleHash() {
 		t.Fatal("partial attachment manager source disagrees with its context")
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := correlation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 		OwnerID: "partial-attachment", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -444,7 +456,7 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 		})
 	}
 	t.Cleanup(releaseProcess)
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

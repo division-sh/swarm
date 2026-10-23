@@ -417,6 +417,22 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 	if !found {
 		t.Fatal("activation fixture requires its admitted source")
 	}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("activation fixture requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil || rooted.Admission().BundleHash() != fact.BundleHash() {
+		t.Fatalf("activation fixture root disagrees with its source: %v", err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := correlation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 		OwnerID: "a2-activation-join", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -424,7 +440,7 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = process.Release(context.Background()) })
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,7 @@ func TestFlowConstructorInitialStateUsesCompiledOwner(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-				"schema.yaml": "stages: []\n" + test.stages, "child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"schema.yaml": test.stages, "child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"child/schema.yaml": "stages: []\n"})
 			constructor, err := CompileFlowConstructor(source, test.flowID, "")
 			if err != nil {

@@ -432,7 +432,7 @@ func VerifyNativeSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothSt
 				}
 				for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 					for _, flowID := range []string{"a", "b"} {
-						files[flowID+"/"+name] = strings.Replace(files["orders/"+name], "name: orders", "name: "+flowID, 1)
+						files[flowID+"/"+name] = files["orders/"+name]
 					}
 					delete(files, "orders/"+name)
 				}

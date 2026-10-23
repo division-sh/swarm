@@ -2428,9 +2428,9 @@ func workflowTimerSourceRevisionBundle(t *testing.T, revised bool) *runtimecontr
 
 func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	schema := "name: workflow-timer-first-revision\nstages:\n  waiting: {}\n"
+	schema := "stages:\n  waiting: {}\n"
 	if revised {
-		schema = "name: workflow-timer-first-revision\nstages:\n  waiting:\n    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
+		schema = "stages:\n  waiting:\n    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",

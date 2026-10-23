@@ -11,7 +11,14 @@ import (
 
 func TestS1StandingCandidateRequiresExactRootAdmission(t *testing.T) {
 	source, _ := sourceartifactfixture.Rooted(t, "shop-a", sourceartifactfixture.Artifact())
-	other, _ := sourceartifactfixture.Rooted(t, "other-content", sourceartifactfixture.New("schema.yaml", []byte("description: another source\n")))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("description: another source\nstages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := sourceartifactfixture.Rooted(t, "other-content", artifact)
 	candidate := StandingServiceCandidate{
 		BindingEnabled: true, ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".",
 		Source: sourceartifactfixture.FactFor(source.Artifact()),
