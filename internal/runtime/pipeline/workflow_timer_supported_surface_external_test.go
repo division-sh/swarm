@@ -901,6 +901,7 @@ func workflowLifecycleSourceContext(t *testing.T, selected gateRecoveryStoreCase
 	t.Helper()
 	fact := mustAuthorActivityTestSourceArtifactFactForHash(bundle.SourceArtifact.BundleHash())
 	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
+	ctx = nativeProcessContextFixture(t, ctx, selected.events)
 	storetest.RequireRun(t, ctx, selected.events, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	return ctx, fact
 }
