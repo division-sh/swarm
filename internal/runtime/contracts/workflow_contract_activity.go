@@ -280,6 +280,7 @@ func (b *WorkflowContractBundle) GeneratedActivityEventEntries() map[string]Even
 // A global event-name map cannot establish ownership for a scoped lookup.
 func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() ([]currentEventDeclarationRecord, error) {
 	var out []currentEventDeclarationRecord
+	owners := map[[2]string]ActivitySite{}
 	for _, site := range b.ActivitySites() {
 		events, err := ActivityResultEventsForSite(site)
 		if err != nil {
@@ -293,6 +294,11 @@ func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() ([]curren
 		if !ok {
 			continue
 		}
+		key := [2]string{site.Node.FlowPath(), events.SuccessEvent}
+		if previous, exists := owners[key]; exists {
+			return nil, b.duplicateActivityIDError(events.ActivityID, previous, site)
+		}
+		owners[key] = site
 		entries := map[string]EventCatalogEntry{
 			events.SuccessEvent: ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusSucceeded),
 			events.FailureEvent: ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusFailed),
@@ -330,6 +336,33 @@ func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() ([]curren
 		}
 	}
 	return out, nil
+}
+
+func (b *WorkflowContractBundle) duplicateActivityIDError(id string, first, second ActivitySite) *LoaderDiagnostic {
+	location := func(site ActivitySite) LoaderDiagnosticLocation {
+		record, _ := b.ExecutableNode(site.Node)
+		slot := NodeProvenanceMapPath(NodeProvenanceMapPath("", site.Node.NodeID())+".event_handlers", site.HandlerEventKey) + "." + strings.TrimPrefix(site.Source, "handler.")
+		introduction, found := b.IntroductionLocation(record.Source.File, slot+".id", false)
+		if !found {
+			introduction, _ = b.IntroductionLocation(record.Source.File, slot, false)
+		}
+		return LoaderDiagnosticLocation{File: record.Source.File, YAMLPath: slot, Line: introduction.Line, Column: introduction.Column}
+	}
+	firstLocation, secondLocation := location(first), location(second)
+	if firstLocation.File == secondLocation.File && firstLocation.Line > secondLocation.Line {
+		first, second = second, first
+		secondLocation = firstLocation
+	}
+	position := secondLocation.String()
+	if secondLocation.Line > 0 {
+		position = fmt.Sprintf("%s:%d:%d", secondLocation.File, secondLocation.Line, secondLocation.Column)
+	}
+	return &LoaderDiagnostic{
+		Code:     "contract_loader.duplicate_activity_id",
+		Location: secondLocation,
+		Problem: fmt.Sprintf("duplicate activity id %q in %s (handlers %q and %q); give each activity in this flow a unique id",
+			id, position, first.Node.NodeID()+"/"+first.HandlerEventKey, second.Node.NodeID()+"/"+second.HandlerEventKey),
+	}
 }
 
 func (b *WorkflowContractBundle) GeneratedActivityEventSchemas() map[string]EventSchema {
