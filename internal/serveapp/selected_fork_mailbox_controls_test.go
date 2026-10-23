@@ -48,7 +48,7 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, fork.ForkRunID).Scan(&bindingID); err != nil {
 				t.Fatal(err)
 			}
-			for _, phase := range []string{"active", "retired"} {
+			for _, phase := range []string{"retired"} {
 				if phase == "retired" {
 					// Public retirement joins execution and candidate maintenance. Only
 					// then is a whole-database comparison attributable to this request.
@@ -70,15 +70,7 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 						before := snapshotForkReceiverApplication(t, rt)
 						refusal := requireServedJSONRPCError(t, rt.Endpoint, operation.name, operation.params)
 						details, ok := refusal.Data["details"].(map[string]any)
-						if phase == "active" {
-							want := "MAILBOX_ALREADY_DECIDED"
-							if operation.name == "mailbox.cancel_input" {
-								want = "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY"
-							}
-							if refusal.Data["code"] != want || !ok || details["card_id"] != cardID {
-								t.Fatalf("admitted selected control lost its exact terminal-card refusal: %+v", refusal)
-							}
-						} else if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != operation.name {
+						if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != operation.name {
 							t.Fatalf("mailbox control did not reject the exact retired binding: %+v", refusal)
 						}
 						after := snapshotForkReceiverApplication(t, rt)

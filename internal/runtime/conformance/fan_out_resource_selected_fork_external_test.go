@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -466,6 +467,9 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				restartedServer := selectedExternalForkServer(t, f, restarted, provider.URL)
 				result, retryErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
 				t.Logf("R5 %s retry result=%+v error=%s", stage.name, result, retryErr)
+				if len(retryErr) != 0 || !reflect.DeepEqual(result, ack) {
+					t.Fatalf("R5 recovery changed its immutable child acknowledgment: first=%+v retry=%+v error=%s", ack, result, retryErr)
+				}
 				if got := calls.Load(); got != stage.providerCalls {
 					t.Fatalf("R5 %s redispatched provider: calls=%d want %d", stage.name, got, stage.providerCalls)
 				}
@@ -475,11 +479,11 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				}
 				switch stage.name {
 				case "authorized":
-					if post[0].State != effects.StateTerminalFailure || len(retryErr) == 0 {
+					if post[0].State != effects.StateTerminalFailure {
 						t.Fatalf("R5 authorized prelaunch must fail without dispatch: state=%s retry=%+v error=%s", post[0].State, result, retryErr)
 					}
 				case "response_observed":
-					if post[0].State != effects.StateOutcomeUncertain || len(retryErr) == 0 {
+					if post[0].State != effects.StateOutcomeUncertain {
 						t.Fatalf("R5 observed response must report uncertainty without redispatch: state=%s retry=%+v error=%s", post[0].State, result, retryErr)
 					}
 				case "settled":

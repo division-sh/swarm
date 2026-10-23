@@ -44,11 +44,6 @@ func startLifecycleTemplateRuntime(t *testing.T, backend servedparity.Backend, r
 	return rt
 }
 
-func readLifecycleTemplateGate(t *testing.T, rt servedControlProofRuntime, runID, entityID, flow string) gateruntime.Activation {
-	t.Helper()
-	return readLifecycleTemplateGateFromReader(t, rt.ReceiverStateReader, runID, entityID, flow)
-}
-
 func readLifecycleTemplateGateFromReader(t *testing.T, reader receiverProofStateReader, runID, entityID, flow string) gateruntime.Activation {
 	t.Helper()
 	record, instance := requireSingleReceiverTargetState(t, reader, runID, flow)
