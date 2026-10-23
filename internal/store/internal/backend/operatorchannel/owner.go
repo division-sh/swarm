@@ -939,6 +939,7 @@ func settleInboundClaimTx(ctx context.Context, tx *sql.Tx, d dialect, claim doma
 	op.State, op.Revision, op.ClaimedAt = domain.StateAwaitingConfirmation, op.Revision+1, now
 	op.ExternalAccountRef, op.ConversationRef, op.ConversationScope = claim.ExternalAccountRef, claim.ConversationRef, claim.ConversationScope
 	op.AccountPresentation, op.ClaimDisposition = claim.AccountPresentation, domain.DispositionConsumedBinding
+	op.ClaimProviderEventID, op.ClaimAuthorization = claim.ProviderEventID, claim.ProviderAuthorization
 	result, err := tx.ExecContext(ctx, d.bind(`UPDATE operator_channel_operations SET state = 'awaiting_confirmation', operation_revision = ?, external_account_reference = ?, conversation_reference = ?, conversation_scope = ?, account_presentation = ?, claim_provider = ?, claim_provider_event_id = ?, claim_publication_id = ?, claim_authorization = ?, claim_disposition = ?, claimed_at = ?, updated_at = ? WHERE operation_id = ? AND state = 'awaiting_claim' AND operation_revision = ?`),
 		op.Revision, op.ExternalAccountRef, op.ConversationRef, string(op.ConversationScope), nullable(op.AccountPresentation), claim.Provider, claim.ProviderEventID, claim.PublicationID, claim.ProviderAuthorization, domain.DispositionConsumedBinding, now, now, op.OperationID, op.Revision-1)
 	if err != nil {
