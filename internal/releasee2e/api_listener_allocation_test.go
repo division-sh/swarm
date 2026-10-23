@@ -48,7 +48,6 @@ func TestReleaseEndpointHandoffConsumerCensus(t *testing.T) {
 		"TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults":     1, // Foreground --api-port and default MCP contract.
 		"TestClaudeCLIPaidAgenticLifecycleFromReleaseBinaryDefaults": 1, // Optional live foreground --api-port/default MCP contract.
 		"TestRunStartForegroundObserverOverflowFromReleaseBinary":    1, // Foreground --api-port with blocked stdout observer.
-		"TestChannelOnboardingReleaseBinaryJourneys":                 1, // Externally registered fixed public webhook callback.
 		"TestDeclaredClockFiniteAndPublicReadbackBothStores":         2, // Local finite startup and parked-deployment startup require fixed --mcp-port.
 		"TestRootInputFeedLocalAndConnectedCLIExecuteBothStores":     1, // Only local finite startup requires fixed --mcp-port; serve API is child-owned.
 	}

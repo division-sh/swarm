@@ -27,7 +27,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 	}
 	lookup := h.contexts.LookupIngress(alias, provider)
 	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.pendingClaim != nil && h.publicRegistration != nil {
+		if h.pendingClaim != nil && h.publicRegistration != nil && provider == "telegram" {
 			consumed, err := h.publicRegistration.ConsumePendingDeploymentClaim(r, lookup.Target.AdmissionPlan, h.pendingClaim)
 			if err != nil {
 				status := http.StatusServiceUnavailable

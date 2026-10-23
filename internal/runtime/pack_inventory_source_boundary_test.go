@@ -31,6 +31,7 @@ func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testin
 		),
 		"NewEffectivePackInventory": pathSet(
 			"internal/cliapp/doctor.go",
+			"internal/cliapp/channel_deployment.go",
 			"internal/runtime/contracts/workflow_contract_loading.go",
 			"internal/testutil/packfixture/packfixture.go",
 		),

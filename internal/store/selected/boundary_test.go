@@ -167,12 +167,15 @@ func selectedStoreBoundaryViolations(path, body string) []string {
 	allowedSelectedImports := map[string]bool{
 		// The approved reset supervisor retains the exact selected family and
 		// owns successor construction and final retirement, not backend handles.
-		"internal/serveapp/process_lifecycle_supervisor.go": true,
-		"internal/serveapp/main.go":                         true,
-		"internal/serveapp/store_capabilities.go":           true,
-		"internal/serveapp/serve_runtime_execution.go":      true,
-		"internal/serveapp/store_runtime.go":                true,
-		"internal/cliapp/store_authority.go":                true,
+		"internal/serveapp/process_lifecycle_supervisor.go":   true,
+		"internal/serveapp/main.go":                           true,
+		"internal/serveapp/store_capabilities.go":             true,
+		"internal/serveapp/serve_runtime_execution.go":        true,
+		"internal/serveapp/store_runtime.go":                  true,
+		"internal/cliapp/store_authority.go":                  true,
+		"internal/cliapp/channel_deployment.go":               true,
+		"internal/serveapp/channel_deployment_unix.go":        true,
+		"internal/serveapp/channel_deployment_unsupported.go": true,
 		// Verification borrows a revocable, consistent read-only inspection;
 		// construction and concrete backend handles remain forbidden here.
 		"internal/cliapp/verify_deployment_store.go": true,

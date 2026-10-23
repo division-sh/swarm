@@ -193,7 +193,7 @@ func (c *ProviderRegistrationController) OwnsAccountCallback(ctx context.Context
 // authenticates the payload before the deployment claim owner can consume it.
 func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *http.Request, plan providertriggers.InboundAdmissionPlan, consume PendingDeploymentClaim) (bool, error) {
 	target, selected := CurrentRegistrationTarget(request.Context())
-	if consume == nil || !selected || target.Provider != "telegram" {
+	if consume == nil || !selected {
 		return false, nil
 	}
 	snapshot := c.snapshot.capture()
@@ -202,14 +202,11 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			continue
 		}
 		prefix := target.Provider + ":" + state.Pair.Registration.SlotNamespace() + ":"
-		account, err := channelonboarding.CanonicalAccount(target.Provider, strings.TrimPrefix(state.SelectionSlotID, prefix))
-		if err != nil || !strings.HasPrefix(state.SelectionSlotID, prefix) {
+		if !strings.HasPrefix(state.SelectionSlotID, prefix) {
 			return false, channelonboarding.ErrConflict
 		}
-		provider, signing, err := c.admitCredentials(request.Context(), state.Pair)
-		if err != nil {
-			return false, err
-		}
+		account := channelonboarding.AccountReference{Provider: target.Provider, Account: strings.TrimPrefix(state.SelectionSlotID, prefix)}
+		var provider map[string]runtimecredentials.AdmittedSnapshot
 		credential := func(admission channelonboarding.CredentialAdmission) bool {
 			projection := c.opts.CredentialOwner.BeginSecretBindingProjection()
 			value, usable, err := projection.ObserveAdmittedActivationCredential(request.Context(), runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}, admission.Receipt)
@@ -224,6 +221,12 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 		admit := func() (providertriggers.Delivery, error) {
 			if !plan.Valid() || !plan.Generation().Equal(target.AdmissionPlanGeneration) || plan.Provider() != target.Provider {
 				return providertriggers.Delivery{}, channelonboarding.ErrConflict
+			}
+			var signing runtimecredentials.AdmittedSnapshot
+			var err error
+			provider, signing, err = c.admitCredentials(request.Context(), state.Pair)
+			if err != nil {
+				return providertriggers.Delivery{}, err
 			}
 			if request.Method != http.MethodPost {
 				return providertriggers.Delivery{}, providertriggers.Error{Status: http.StatusMethodNotAllowed, Message: "method not allowed"}

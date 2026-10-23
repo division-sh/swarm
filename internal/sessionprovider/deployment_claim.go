@@ -53,7 +53,7 @@ func PollDeploymentClaim(ctx context.Context, client *http.Client, operations ch
 }
 
 func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectionOptions, identities operatorchannel.Store, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
-	if account.Provider != "telegram" || account.Validate() != nil || credential == nil || admit == nil || current == nil || !current() {
+	if account.Provider != "telegram" || account.Validate() != nil || credential == nil || admit == nil || current == nil {
 		return false, channelonboarding.ErrInvalidRequest
 	}
 	selected, err := opts.Plan.InterfaceIdentity()
@@ -75,6 +75,9 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 		if !op.DeploymentRegistration || op.Provider != account.Provider || op.AccountReference != account.Account || !op.AccountConfirmed ||
 			op.PrincipalID != opts.Principal.ID || identity.OperationID != op.IdentityOperationID || op.Interface.Normalized() != selected.Normalized() || len(op.CredentialAdmissions) != 1 {
 			continue
+		}
+		if !current() {
+			return false, channelonboarding.ErrConflict
 		}
 		valid := func() bool { return current() && credential(op.CredentialAdmissions[0]) }
 		delivery, err := admit()
