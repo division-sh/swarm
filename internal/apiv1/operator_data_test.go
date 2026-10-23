@@ -829,6 +829,7 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := context.Background()
 			selected := backend.open(t)
+			ctx = apiTestOriginalProcessContext(t, ctx, selected)
 			db := storetest.Database(selected)
 			catalog, ref := dataHTTPProbeCatalog(t)
 			if _, err := selected.EnsureSourceArtifactWithData(ctx, dataProbeSourceArtifact, catalog); err != nil {

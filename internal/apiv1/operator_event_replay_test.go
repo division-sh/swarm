@@ -1088,6 +1088,7 @@ func TestEventReplayAuditPayloadOmitsAbsentTargetlessEntity(t *testing.T) {
 
 func seedCompleteReplayRun(t testing.TB, ctx context.Context, selected storetest.RunFixtureStore, runID string, startedAt time.Time) {
 	t.Helper()
+	ctx = apiTestOriginalProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, StartedAt: startedAt, BundleHash: runStartTestBundleHash,
 	})
@@ -1243,6 +1244,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		bus := eventReplayTestBus(t, pg)
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
+		ctx = apiTestOriginalProcessContext(t, ctx, pg)
 		storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: runStartTestBundleHash})
 		nodeOnlyEvent := eventtest.PersistedProjection(
 			eventID,
@@ -1621,6 +1623,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := operatorReplayRunID
+	ctx = apiTestOriginalProcessContext(t, ctx, pg)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	semanticEvent := eventtest.PersistedProjection(
 		eventID,

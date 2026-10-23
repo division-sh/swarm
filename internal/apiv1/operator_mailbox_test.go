@@ -276,6 +276,7 @@ func seedActiveAPIV1RuntimeBusAgentNewRun(t *testing.T, ctx context.Context, own
 	if _, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); !ok {
 		ctx = testAuthorActivityContext(ctx)
 	}
+	ctx = apiTestOriginalProcessContext(t, ctx, owner)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	seedActiveAPIV1RuntimeBusAgentForRun(t, ctx, owner, runID, agentID, "")
@@ -284,6 +285,7 @@ func seedActiveAPIV1RuntimeBusAgentNewRun(t *testing.T, ctx context.Context, own
 
 func seedActiveAPIV1RuntimeBusAgentForRun(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, runID, agentID, flowPath string) {
 	t.Helper()
+	ctx = apiTestOriginalProcessContext(t, ctx, owner)
 	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		source = authorActivityTestSourceArtifactFact

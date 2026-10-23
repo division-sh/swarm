@@ -59,6 +59,7 @@ func TestAgentTurnsOwnPublicConversationTranscriptBothStores(t *testing.T) {
 				const agentID = "transcript-agent"
 				identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
 				at := time.Now().UTC().Truncate(time.Second)
+				ctx = apiTestOriginalProcessContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Hour)})
 				storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
 					Config: runtimeactors.AgentConfig{

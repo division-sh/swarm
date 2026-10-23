@@ -136,6 +136,10 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.ForkRunID != child || ack.Result == nil {
 				t.Fatalf("removed-rule fork lacks permanent acknowledgment: %+v found=%v err=%v", ack, found, err)
 			}
+			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
+			if err != nil {
+				t.Fatal(err)
+			}
 			wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			reader := selected.(interface {
@@ -149,7 +153,10 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+				if selectedTestInstanceSettled(t, wait, owner, selected, flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()}, "awaiting") {
+					if header.Status != "running" || header.EndedAt != nil || process.ActiveCount() != baseline {
+						t.Fatalf("retired rule changed live run or leaked shutdown work: %+v leases=%d baseline=%d", header, process.ActiveCount(), baseline)
+					}
 					break
 				}
 				select {
@@ -157,10 +164,6 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 					t.Fatalf("removed rule left dependent work alive: %+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
 				case <-time.After(10 * time.Millisecond):
 				}
-			}
-			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
-			if err != nil {
-				t.Fatal(err)
 			}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()})
 			if err != nil || !found || header.CurrentState != "awaiting" || header.EntityID != projected.EntityID ||

@@ -17,7 +17,7 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.ctx
 			fixture.request.ContainerPlanFingerprint = "sha256:" + strings.Repeat("1", 64)
 			fixture.request.ActorCensusFingerprint = "sha256:" + strings.Repeat("2", 64)
 			fixture.request.EffectiveConfigFingerprint = "sha256:" + strings.Repeat("3", 64)
