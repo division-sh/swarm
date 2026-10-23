@@ -187,17 +187,33 @@ func observeCatalogSelectedExecution(t *testing.T, h *runtimeHarness, child stri
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
 	defer cancel()
+	logs := selected.(interface {
+		ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
+	})
 	for {
 		state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, child)
 		if err != nil {
 			return catalogSelectedExecutionObservation{}, err
 		}
-		if state.State == "closed" && state.Occurrences == 1 {
+		dispatches, err := logs.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{RunID: child,
+			Component: "run_fork", ActionOrEventType: "selected_contract_event_dispatched", Limit: 1000})
+		if err != nil {
+			return catalogSelectedExecutionObservation{}, err
+		}
+		deliveries, err := storetest.ReadServedRunDeliverySummary(ctx, selected, child)
+		if err != nil {
+			return catalogSelectedExecutionObservation{}, err
+		}
+		handoffs, err := storetest.ReadServedIncompletePipelineHandoffCount(ctx, selected, child)
+		if err != nil {
+			return catalogSelectedExecutionObservation{}, err
+		}
+		if state.Occurrences == 1 && (state.State == "closed" || (len(dispatches.Logs) > 0 && deliveries.Settled() && handoffs == 0)) {
 			break
 		}
 		select {
 		case <-ctx.Done():
-			return catalogSelectedExecutionObservation{}, fmt.Errorf("selected execution did not close: %+v: %w", state, ctx.Err())
+			return catalogSelectedExecutionObservation{}, fmt.Errorf("selected dispatch did not settle: state=%+v deliveries=%+v handoffs=%d: %w", state, deliveries, handoffs, ctx.Err())
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
