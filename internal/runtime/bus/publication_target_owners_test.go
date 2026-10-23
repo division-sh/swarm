@@ -29,7 +29,7 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	reader := &publicationDecisionTestReader{constructionIndexTestReader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{observation}}}
 	bounded := withSelectedTargetOwnerLookupScope(correlation.WithInboundEvent(ctx, event), selectedTargetOwnerLookupScope{lookup: scope, observations: []pipeline.FlowInstanceObservation{observation}})
 	origin := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
-	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), Origin: origin,
+	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin,
 		RequesterFlowID: ".", RequestOutputPin: "work.requested", ReplyInputPin: "work.completed",
 		ProviderFlowID: "producer", ProviderInputPin: "work.requested", ProviderOutputPin: "work.completed", RequestCorrelationID: event.ID()}
 	base := publicationTargetOwnerEvidence{
@@ -144,7 +144,7 @@ func TestClosedPublicationReturnScopeExtendsOnlyCompiledOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	origin := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
-	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), Origin: origin}
+	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin}
 	evidence := publicationTargetOwnerEvidence{event: event, projection: projection, present: true, planner: planner,
 		origins: map[string]events.RouteIdentity{record.ID: origin}}
 	plan := RoutePlan{Event: event}
@@ -205,7 +205,7 @@ func TestClosedPublicationOwnersKeepProposedRunAndFinalConstruction(t *testing.T
 		t.Fatal(err)
 	}
 	origin := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
-	reply := replycontext.Record{ID: "proposed-reply", RunID: event.RunID(), RequestEventID: event.ID(), Origin: origin,
+	reply := replycontext.Record{ID: "proposed-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin,
 		RequesterFlowID: ".", RequestOutputPin: "work.requested", ReplyInputPin: "work.completed",
 		ProviderFlowID: "producer", ProviderInputPin: "work.requested", ProviderOutputPin: "work.completed", RequestCorrelationID: event.ID()}
 	plan, err := planner.resolvePreparedRoutePlan(projection, RoutePlan{Event: event, ActivationPlans: activations, ReplyCreations: []replycontext.Record{reply}})
