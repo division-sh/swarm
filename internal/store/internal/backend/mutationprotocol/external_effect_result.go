@@ -70,7 +70,15 @@ func runExternalEffectResult[T any](ctx context.Context, dialect privateactivity
 		return failed[T](err)
 	}
 	original, originalErr := runtimeownership.CaptureMutationAuthority(ctx)
-	return run(resultCtx, dialect, evidence, Ordinary, nil, candidates, func(nativeCtx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	candidateCtx := resultCtx
+	if originalErr == nil {
+		candidateCtx = runtimeownership.CarryMutationAuthority(resultCtx, ctx)
+	}
+	return run(candidateCtx, dialect, evidence, Ordinary, nil, candidates, func(nativeCtx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+		nativeCtx, err := runtimeownership.ExternalEffectResultContext(nativeCtx, result)
+		if err != nil {
+			return false, err
+		}
 		return native(nativeCtx, func(txctx context.Context, tx *sql.Tx) error {
 			sqlite := dialect == privateactivity.DialectSQLite
 			if err := generationauthority.FenceMutation(txctx, tx, sqlite); err != nil {
