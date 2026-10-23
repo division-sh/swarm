@@ -146,7 +146,7 @@ func issue642RequireReusedProviderResult(t *testing.T, rt issue2564ServedFixture
 		t.Fatalf("reused worker lost the final business result: %+v err=%v", entity, err)
 	}
 	root, err := rt.selected.LoadOperatorEntity(t.Context(), runID, runID)
-	if err != nil || root.Entity.CurrentState == nil || *root.Entity.CurrentState != "done" || root.Fields["counter"] != float64(1) {
+	if err != nil || root.Entity.CurrentState == nil || *root.Entity.CurrentState != "done" || root.Fields["counter"] != json.Number("1") {
 		t.Fatalf("reused provider must finish its root exactly once: %+v err=%v", root, err)
 	}
 	agentReader, ok := rt.persistence.deps.EventStore.(operatorread.AgentReader)

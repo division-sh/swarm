@@ -2010,7 +2010,7 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 					if childDigest != targetPlans[0].Ref.SemanticDigest || capsule.SourcePlanRef != fixture.plan.Ref || !reflect.DeepEqual(capsule.SourceProjection, fixture.plan.SemanticEvidence()) {
 						t.Fatal("selected materialization replaced the original source witness or lost the exact selected plan")
 					}
-					reused, err := owner.MaterializeRunFork(ctx, matching)
+					reused, err := owner.RequireMaterializedRunFork(ctx, materialized.ForkRunID, matching)
 					if err != nil || reused.ForkRunID != materialized.ForkRunID {
 						t.Fatalf("exact counterfactual materialization readback failed: %+v %v", reused, err)
 					}

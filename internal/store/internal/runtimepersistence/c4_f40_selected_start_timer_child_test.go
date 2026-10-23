@@ -242,8 +242,10 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			if len(childStart.WorkflowTimers) != 1 || !reflect.DeepEqual(childStart.WorkflowTimers[0], expected.PersistenceRecord()) {
 				t.Fatal("native child creation did not atomically retain its exact inherited timer")
 			}
+			readbackRequest := request
+			readbackRequest.ForkOperation = nil
 			for pass := 0; pass < 2; pass++ {
-				replayed, err := fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
+				replayed, err := fork.RequireMaterializedRunForkForSelectedContractExecution(ctx, staged.ForkRunID, readbackRequest)
 				if err != nil || replayed.ForkRunID != staged.ForkRunID || replayed.ForkPoint != staged.ForkPoint {
 					t.Fatalf("exact selected start materialization retry: %+v err=%v", replayed, err)
 				}

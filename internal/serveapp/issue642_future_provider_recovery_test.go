@@ -671,7 +671,7 @@ func issue642RequireFutureClaimCut(t *testing.T, fixture issue2564ServedFixture,
 		t.Fatalf("claim cut already published a result: %+v", finished)
 	}
 	root, err := fixture.selected.LoadOperatorEntity(t.Context(), claim.RunID, claim.RunID)
-	if err != nil || root.Entity.CurrentState == nil || *root.Entity.CurrentState != "pending" || root.Fields["counter"] != float64(0) {
+	if err != nil || root.Entity.CurrentState == nil || *root.Entity.CurrentState != "pending" || root.Fields["counter"] != json.Number("0") {
 		t.Fatalf("claim cut already changed the root result: %+v err=%v", root, err)
 	}
 	outcomes, err := fixture.persistence.deps.DeliveryStore.Outcomes(t.Context(), claim.DeliveryID)
