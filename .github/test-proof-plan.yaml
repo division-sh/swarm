@@ -1420,7 +1420,6 @@ units:
         - postgres/loop
       TestSelectedRunTargetOwnersUseConstructedHeadersBothStores: [postgres/fielded, postgres/fieldless, sqlite/fielded, sqlite/fieldless]
       TestSelectedWorkflowNodeNoopSettlementBothStores: [sqlite/healthy, sqlite/expired_execution, sqlite/quiesced_execution, sqlite/stale_generation, postgres/healthy, postgres/expired_execution, postgres/quiesced_execution, postgres/stale_generation]
-      TestSelectedRunForkActivationFrontierContentionBothStores: [postgres/activation/cancel_loser, postgres/activation/cancel_winner, postgres/activation/commit, postgres/activation/rollback, postgres/writer/cancel_loser, postgres/writer/cancel_winner, postgres/writer/commit, postgres/writer/rollback, sqlite/activation/cancel_loser, sqlite/activation/cancel_winner, sqlite/activation/commit, sqlite/activation/rollback, sqlite/writer/cancel_loser, sqlite/writer/cancel_winner, sqlite/writer/commit, sqlite/writer/rollback]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
