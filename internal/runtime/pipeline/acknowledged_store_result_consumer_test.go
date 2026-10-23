@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForTest(t *testing.T, open func(*testing.T, string, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		for _, uncertain := range []bool{false, true} {
 			name := "complete"
@@ -22,13 +22,9 @@ func VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForT
 				name = "uncertain"
 			}
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
-				fixture := open(t, tc.name)
-				ctx := fixture.Context
+
 				runID := uuid.NewString()
-				store := fixture.Persistence.store
-				if err := fixture.RequireRun(ctx, runID); err != nil {
-					t.Fatal(err)
-				}
+
 				fault := errors.New("injected activity post-commit cleanup fault")
 
 				calls := 0
@@ -38,7 +34,14 @@ func VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForT
 				}))
 				defer server.Close()
 				tool := testCompiledChannelActivityTool(server.URL)
-				source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"channel.ops.deliver": tool}})
+				fixture := open(t, tc.name, map[string]runtimecontracts.ToolSchemaEntry{"channel.ops.deliver": tool})
+				source := fixture.Source
+				ctx := fixture.Context
+				store := fixture.Persistence.store
+				if err := fixture.RequireRun(ctx, runID); err != nil {
+					t.Fatal(err)
+				}
+
 				bus := &recordingPipelineBus{}
 				pc, faultCount := fixture.CleanupFaultCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}}, fault)
 				dispatcher := pipelineActivityDispatcher{coordinator: pc}

@@ -224,10 +224,11 @@ func TestScenarioExecutionProfilesRemainIsolatedAcrossConcurrentRuns(t *testing.
 	}
 }
 
-func VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
+func VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+	_, tool := scenarioExecutionProfileTestSource(t)
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{"provider.send": tool})
 	ctx := fixture.Context
-	source, tool := scenarioExecutionProfileTestSource(t)
+	source := fixture.Source
 	fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !found {
 		t.Fatal("native profile replay has no admitted source fact")
