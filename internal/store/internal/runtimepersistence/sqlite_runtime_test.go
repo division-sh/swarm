@@ -970,13 +970,16 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
-		"schema.yaml":          "name: flow-activation-proof\n",
-		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+		"schema.yaml":          "stages: []\n",
+		"review/schema.yaml":   "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
 		"review/entities.yaml": "review_item:\n  request_id: text\n",
-		"review/events.yaml":   "task.started:\n  request_id: text\n",
+		"review/events.yaml":   "task.started:\n  request_id: text\n", "manifest.yaml":
+
+		// The actor authority fixture supplies its admitted test intent separately
+		// from the compiled flow declaration.
+		"version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	})
-	// The actor authority fixture supplies its admitted test intent separately
-	// from the compiled flow declaration.
+
 	bundle.FlowTree.ByID["review"].Agents = reviewFlow.Agents
 	bundle.FlowTree.ByID["review"].AgentURIs = reviewFlow.AgentURIs
 	bundle.URIRegistry = base.URIRegistry

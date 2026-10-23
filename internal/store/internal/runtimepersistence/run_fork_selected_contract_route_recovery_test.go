@@ -452,7 +452,11 @@ func prepareSelectedRouteRecoveryStartup(
 	if err := manager.InstallStartupTopology(store, admission, plan); err != nil {
 		t.Fatalf("install route recovery startup topology: %v", err)
 	}
-	if err := manager.ReconcileStaticTopologyForStartup(ctx, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(runtimepipeline.WorkflowRepoRoot(), rooted, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatalf("compile retained route recovery source: %v", err)
+	}
+	if err := manager.ReconcileStaticTopologyForStartup(ctx, semanticview.Wrap(bundle)); err != nil {
 		t.Fatalf("reconcile route recovery startup topology: %v", err)
 	}
 }

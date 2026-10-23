@@ -293,6 +293,51 @@ func TestRuntimePayloadAdmitter_ClassifiesPlatformCatalogSchema(t *testing.T) {
 			t.Errorf("%s restored reference authority", name)
 		}
 	}
+
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", "pipeline", "emit", nil), "pipeline", "emit")
+	deadLetter := map[string]any{
+		"original_event": "task.completed", "original_payload": map[string]any{"ok": true},
+		"failure": failure, "retry_count": 0, "chain_depth": 51, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	deadLetterPayload, err := json.Marshal(deadLetter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadLetterEvent := eventtest.RuntimeDiagnostic("", "platform.dead_letter", "runtime", "", deadLetterPayload, 0, "", "", events.EventEnvelope{}, time.Time{})
+	deadLetterAdmission, err := admit(context.Background(), deadLetterEvent, events.PlatformPayloadProducer(deadLetterEvent))
+	if err != nil {
+		t.Fatalf("admit unparented dead letter through catalog law: %v", err)
+	}
+	deadLetterBinding := deadLetterAdmission.Binding()
+	if deadLetterBinding.Reference() != events.DeadLetterSchemaReference || deadLetterBinding.SchemaDigest() == binding.SchemaDigest() {
+		t.Fatal("dead letter did not retain its own catalog law")
+	}
+	if _, err := events.ApplyPayloadAdmission(deadLetterEvent, deadLetterAdmission); err != nil {
+		t.Fatal(err)
+	}
+	deadLetterInput := events.PayloadSchemaBindingInput{BundleHash: deadLetterBinding.BundleHash(), EventKey: deadLetterBinding.EventKey(), SchemaClass: deadLetterBinding.SchemaClass(), SchemaDigest: deadLetterBinding.SchemaDigest()}
+	if restored, err := events.RestoreEventPayloadSchemaBinding(deadLetterInput, deadLetterEvent.AdmissionClass(), deadLetterEvent.Type(), deadLetterEvent.Producer()); err != nil || !restored.Equal(deadLetterBinding) {
+		t.Fatalf("dead-letter reference restoration: %v", err)
+	}
+	wrongClass := eventtest.RuntimeControl("", "platform.dead_letter", "runtime", "", deadLetterPayload, 0, "", "", events.EventEnvelope{}, time.Time{})
+	if _, err := admit(context.Background(), wrongClass, events.PlatformPayloadProducer(wrongClass)); err == nil {
+		t.Fatal("dead-letter reference accepted the wrong admission class")
+	}
+	for field, invalid := range map[string]any{"failure": map[string]any{}, "original_payload": []any{}, "retry_count": "0", "source": map[string]any{"flow_id": 17}} {
+		bad := make(map[string]any, len(deadLetter))
+		for key, value := range deadLetter {
+			bad[key] = value
+		}
+		bad[field] = invalid
+		raw, err := json.Marshal(bad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		badEvent := eventtest.RuntimeDiagnostic("", "platform.dead_letter", "runtime", "", raw, 0, "", "", events.EventEnvelope{}, time.Time{})
+		if _, err := admit(context.Background(), badEvent, events.PlatformPayloadProducer(badEvent)); err == nil {
+			t.Errorf("dead-letter reference accepted invalid %s", field)
+		}
+	}
 }
 
 func TestRuntimePayloadAdmitter_SelectedForkValidatesTargetSchemaWithoutChangingHistoricalBytes(t *testing.T) {

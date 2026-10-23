@@ -128,8 +128,8 @@ func TestReceiverConstructionPublicationObservesStandingTypedAbsenceBothStores(t
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				documents := map[string]string{
-					"schema.yaml":         "name: standing-absence\n",
-					"service/schema.yaml": "name: service\n",
+					"schema.yaml":         "stages: []\n",
+					"service/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "service/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if fielded {
 					documents["entities.yaml"] = "receipt:\n  marker: {type: text, initial: unchanged}\n"

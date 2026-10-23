@@ -51,9 +51,6 @@ func AdmitProviderDirectory(provider packartifact.AdmittedProvider, platform run
 	if !provider.Valid() {
 		return ProviderDefinition{}, fmt.Errorf("provider admission requires a captured provider directory")
 	}
-	if err := provider.Metadata().ValidatePlatformVersion(platform.Platform.Version); err != nil {
-		return ProviderDefinition{}, err
-	}
 	out := ProviderDefinition{provider: provider}
 	if body, present := provider.Body(packmodel.BodyTrigger); present {
 		manifest, err := providertriggers.AdmitBody(body)

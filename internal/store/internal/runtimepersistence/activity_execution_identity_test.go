@@ -20,7 +20,7 @@ func TestActivitySettlementKeepsOriginalNativeIdentityBothStores(t *testing.T) {
 				t.Run(operation, func(t *testing.T) {
 					// The callback must retain the exact originally admitted execution.
 					original := seedActivityStoryAttempt(t, fixture, executionmode.Live, "started", false)
-					journal := activityNativeJournalForFixture(t, fixture)
+					journal := activityNativeJournalForFixture(t, fixture, original.RunID)
 					status := "succeeded"
 					if operation == "uncertain" {
 						status = "uncertain"

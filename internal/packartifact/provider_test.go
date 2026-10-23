@@ -144,6 +144,23 @@ func TestS1ProviderArtifactRefusesPathAliasesAndForeignSelection(t *testing.T) {
 }
 
 func TestS1ProviderArtifactRefusesMalformedCapturedMembers(t *testing.T) {
+	for _, aggregate := range []bool{false, true} {
+		files := fstest.MapFS{}
+		for name, body := range s1ProviderMembers() {
+			files["team-bot/"+name] = &fstest.MapFile{Data: body}
+		}
+		if aggregate {
+			body := make([]byte, sourceartifact.MaxMemberBytes)
+			for _, name := range []string{"a.dat", "b.dat", "c.dat"} {
+				files["team-bot/"+name] = &fstest.MapFile{Data: body}
+			}
+		} else {
+			files["team-bot/large.dat"] = &fstest.MapFile{Data: make([]byte, sourceartifact.MaxMemberBytes+1)}
+		}
+		if provider, err := LoadProviderFS(files, "team-bot", testPlatformVersion); err == nil || provider.Valid() || !strings.Contains(err.Error(), "byte bound") {
+			t.Fatalf("oversized provider (aggregate=%t) produced captured evidence: %v", aggregate, err)
+		}
+	}
 	for _, bad := range []string{"provider: team-bot\n", "[]\n", "null\n"} {
 		t.Run(bad, func(t *testing.T) {
 			members := s1ProviderMembers()

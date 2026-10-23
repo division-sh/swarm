@@ -160,8 +160,8 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":          "name: constructed-target-transition\n",
-		"review/schema.yaml":   "name: review\ninstance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\npins:\n  inputs: [review.created]\n",
+		"schema.yaml":          "stages: []\n",
+		"review/schema.yaml":   "instance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\npins:\n  inputs: [review.created]\n",
 		"review/entities.yaml": "review_item:\n  account_id: text\n  handled: {type: boolean, initial: false}\n",
 		"review/events.yaml":   "review.created:\n  account_id: text\nfinish.requested:\nsettle.requested:\n",
 		"review/nodes.yaml": `progress:
@@ -172,7 +172,7 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
       advances_to: done
     settle.requested:
       advances_to: settled
-`,
+`, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	f.ctx = runtimecorrelation.WithSourceArtifactFact(f.ctx, sourceartifactfixture.FactFor(f.bundle.SourceArtifact))
 	f.constructKeylessRoot(t)

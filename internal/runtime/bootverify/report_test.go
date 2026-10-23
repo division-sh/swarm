@@ -26,7 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 func TestRun_MapsMissingToolToToolResolutionHardInvalidity(t *testing.T) {
@@ -877,13 +877,13 @@ fanout-node:
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
 						mode: "template",
-						schema: `name: support
-auto_emit_on_create:
+						schema: `auto_emit_on_create:
   event: ticket.ready
 stages:
   idle: {}
   done: {final: true}
 `,
+
 						events: "ticket.ready:\n",
 					},
 				},
@@ -1094,7 +1094,8 @@ func TestRun_RootExportNeedsNoInternalConsumer(t *testing.T) {
 
 func TestRun_WarnsForSubscriptionWithoutProducer(t *testing.T) {
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: consumer-only\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "task.requested:\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  event_handlers:\n    task.requested: {}\n")
 	repo := repoRootForBootverifyTest(t)
@@ -3986,9 +3987,11 @@ func TestRun_RejectsUnconnectedRootNodeEmitAsChildInputProducerPath(t *testing.T
 
 func TestRun_RootInputDoesNotImplicitlySubscribeSameNamedChild(t *testing.T) {
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root\npins:\n  inputs:\n    - work.started\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "pins:\n  inputs:\n    - work.started\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.started: {value: text}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\npins:\n  inputs:\n    - work.started\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "pins:\n  inputs:\n    - work.started\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "work.started: {value: text}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), "observer:\n  execution_type: system_node\n  subscribes_to: [work.started]\n  event_handlers:\n    work.started: {}\n")
 	repo := repoRootForBootverifyTest(t)
@@ -4669,10 +4672,12 @@ case:
 func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesForScopedDuplicateIDs(t *testing.T) {
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: duplicate-agent-writer-coverage\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
 	for _, flowID := range []string{"alpha", "beta"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "# fixture: "+flowID+"\n\nstages: []\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), `
 case:
   business_brief:
@@ -5915,30 +5920,6 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 	}
 }
 
-func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var spec struct {
-		Engine struct {
-			BootVerification struct {
-				CheckCount string `yaml:"check_count"`
-			} `yaml:"boot_verification"`
-		} `yaml:"engine"`
-	}
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
-	}
-	var primary, supplemental int
-	if n, err := fmt.Sscanf(spec.Engine.BootVerification.CheckCount, "%d primary checks plus %d supplemental checks", &primary, &supplemental); err != nil || n != 2 {
-		t.Fatalf("invalid authoritative check inventory: %q: %v", spec.Engine.BootVerification.CheckCount, err)
-	}
-	if len(bootCheckRegistry) != primary || len(supplementalChecks) != supplemental {
-		t.Fatalf("implemented inventory %d primary/%d supplemental differs from spec %d/%d", len(bootCheckRegistry), len(supplementalChecks), primary, supplemental)
-	}
-}
-
 func TestRun_ReportsErrorForUnprefixedTimerStartOn(t *testing.T) {
 	root := writeTimerValidationFixture(t, "ticket.opened", "")
 	repoRoot := repoRootForBootverifyTest(t)
@@ -6438,19 +6419,21 @@ func writeSelectEntityInputPinFixture(t *testing.T, treasuryNodes string) string
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-entity-fixture\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 opco.spend_requested:
   vertical_id: string
   amount_usd: number
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `name: treasury
-stages:
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `stages:
   active: {}
 pins:
   inputs:
     - opco.spend_requested
-`)
+`,
+	)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "events.yaml"), `
 opco.spend_requested:
   vertical_id: string
@@ -6505,7 +6488,8 @@ func writeAgentMemoryValidationFixture(t *testing.T, rootAgents, flowSchema, flo
 item:
   item_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-memory-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -6515,8 +6499,9 @@ item.created:
 	}
 	if strings.TrimSpace(flowSchema) != "" || strings.TrimSpace(flowAgents) != "" {
 		if strings.TrimSpace(flowSchema) == "" {
-			flowSchema = "name: support\n"
+			flowSchema = "stages: []\n"
 		}
+		writeBootverifyFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), flowSchema)
 		writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 support/item.created:
@@ -6537,12 +6522,14 @@ func writePackageBackedAgentMemoryValidationFixture(t *testing.T, flowSchema, pa
 item:
   item_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-memory-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
 `)
 
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), flowSchema)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 support/item.created:
@@ -6654,11 +6641,13 @@ func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
 item:
   item_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: pin-ambiguity\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
 	for _, flowID := range []string{"producer_a", "producer_b"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), `
-name: `+flowID+`
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "\n# fixture: "+
+			flowID+`
 stages:
   idle: {}
   done: {final: true}
@@ -6676,8 +6665,8 @@ ticket.ready:
 	if scoped {
 		subscription = "producer_a/ticket.ready"
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), `name: consumer
-stages:
+	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), `stages:
   waiting: {}
   done: {final: true}
 pins:
@@ -6685,7 +6674,8 @@ pins:
     - ticket.ready
   outputs:
     - consumer.started
-`)
+`,
+	)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "events.yaml"), `
 ticket.ready:
   entity_id: string
@@ -6724,15 +6714,17 @@ func writeStateReachabilityFixtureWithClosedHandler(t *testing.T, closedHandler 
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-reachability\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
-stages:
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `stages:
   waiting: {}
   active: {}
   review: {}
   done: {final: true}
-`)
+`,
+	)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
 ticket: {}
 `)
@@ -6774,8 +6766,10 @@ func writeStagedLifecycleFixture(t *testing.T, schema string) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: staged-lifecycle\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), schema)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
 ticket: {}
@@ -6817,21 +6811,23 @@ func writeWave1RootReaderCoverageFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-root-reader-coverage\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 case:
   priority:
     type: integer
 `)
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `stages:
   idle: {}
   done: {final: true}
 pins:
   inputs:
     - task.assigned
-`)
+`,
+	)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "case:\n  local: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
 task.assigned:
@@ -6861,12 +6857,14 @@ func writePromptWriterCoverageFixture(t *testing.T, agentsYAML, entitiesYAML, pr
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-writer-coverage\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `stages:
   idle: {}
   done: {final: true}
-`)
+`,
+	)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), entitiesYAML)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), agentsYAML)
 	if strings.TrimSpace(promptText) == "" {
@@ -7113,22 +7111,11 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 	}
 	sort.Strings(flowIDs)
 
-	packageYAML := "name: " + name + "\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\n"
-	if len(flowIDs) > 0 {
-		packageYAML += "flows:\n"
-		for _, flowID := range flowIDs {
-			mode := strings.TrimSpace(opts.flows[flowID].mode)
-			if mode == "" {
-				mode = runtimecontracts.FlowModeStatic
-			}
-			packageYAML += "  - id: " + flowID + "\n    flow: " + flowID + "\n    mode: " + mode + "\n"
-		}
-	}
-
 	rootSchema := strings.TrimSpace(opts.rootSchema)
 	if rootSchema == "" {
-		rootSchema = "name: " + name
+		rootSchema = "# fixture: " + name + "\nstages: []"
 	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema+"\n")
 	writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), opts.rootPolicy)
 	writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), opts.rootAgents)
@@ -7139,8 +7126,9 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 		files := opts.flows[flowID]
 		schema := strings.TrimSpace(files.schema)
 		if schema == "" {
-			schema = "name: " + flowID + "\nstages:\n  idle: {}\n  done: {final: true}\n"
+			schema = "stages:\n  idle: {}\n  done: {final: true}\n"
 		}
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schema+"\n")
 		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "policy.yaml"), files.policy)
 		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), files.agents)

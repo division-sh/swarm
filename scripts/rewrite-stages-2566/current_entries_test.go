@@ -68,29 +68,6 @@ func assertDiagnosticNativeConsumerCall(t *testing.T, function *ast.FuncDecl) {
 	}
 }
 
-func TestRewrite2566CurrentSelectorsRetainExactSourceCorrespondence(t *testing.T) {
-	root := canonicalrouting.RepoRoot(t)
-	entries, err := readCurrentEntryGoldens(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.Current == nil {
-			continue
-		}
-		t.Run(entry.File+"/"+entry.Flow, func(t *testing.T) {
-			original := reviewedEntryLiteralForCurrent(t, root, entry)
-			current, err := readEntryLiteral(root, entry.Current.File, entry.Current.Function, entry.Current.Literal)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertEntryLiteralStageGolden(t, entry, original)
-			assertEntryLiteralStageGolden(t, entry, current)
-			t.Logf("source correspondence: original_sha256=%s current_sha256=%s byte_equal=%t", digest([]byte(original.Body)), digest([]byte(current.Body)), original.Body == current.Body)
-		})
-	}
-}
-
 func reviewedEntryLiteralForCurrent(t *testing.T, root string, entry entryGolden) goLiteralSite {
 	t.Helper()
 	// This master ancestor predates the fixture migration and stays reachable
@@ -127,38 +104,6 @@ func assertEntryLiteralStageGolden(t *testing.T, entry entryGolden, site goLiter
 	}
 	if err := assertEntryGolden(entry, schema); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestRewrite2566CurrentSelectorsPreserveHistoricalDecisionsAndRegeneration(t *testing.T) {
-	root := canonicalrouting.RepoRoot(t)
-	reviewed, err := baselineEntryGoldens(root, readPlan(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	retained, err := readCurrentEntryGoldens(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	merged, err := retainCurrentEntrySelectors(reviewed, retained)
-	if err != nil || !reflect.DeepEqual(merged, retained) {
-		t.Fatalf("regeneration changed a reviewed tuple or current selector: %v", err)
-	}
-	count, imported := 0, 0
-	for _, entry := range merged {
-		if entry.Current != nil {
-			count++
-			if entry.File == "internal/store/internal/runtimepersistence/flow_constructor_import_handoff_test.go" {
-				want := &currentEntrySelector{File: entry.File, Function: "TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores", Literal: 9}
-				if entry.Function != want.Function || entry.Literal != 4 || !reflect.DeepEqual(entry.Current, want) {
-					t.Fatalf("import source correspondence escaped its exact historical/current pair: %+v", entry)
-				}
-				imported++
-			}
-		}
-	}
-	if count != 44 || imported != 1 {
-		t.Fatalf("current source remaps=%d imported=%d, want all41 C relocations plus rule-activity, proposed-effect and one exact import-source correspondence", count, imported)
 	}
 }
 

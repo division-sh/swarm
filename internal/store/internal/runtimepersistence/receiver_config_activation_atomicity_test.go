@@ -69,17 +69,17 @@ func newReceiverConfigActivationFixtureWithTimer(t *testing.T, backend string, w
 func newReceiverConfigActivationFixtureWithTimerAndCommitter(t *testing.T, backend string, withAgents, autoEmit, withTimer, recurring bool, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter) receiverConfigActivationFixture {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml": "name: receiver-config-atomicity\n",
-		"review/schema.yaml": `name: review
-instance: request_id
+		"schema.yaml": "stages: []\n",
+		"review/schema.yaml": `instance: request_id
 stages:
   pending: {}
 pins:
   inputs:
     - task.create
 `,
+
 		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
-		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n",
+		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if autoEmit {
 		files["events.yaml"] = "request.started:\n  request_id: string\n  label: string\n  nested: json\n"

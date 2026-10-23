@@ -21,11 +21,11 @@ import (
 func newR7SelectionProof(t *testing.T, backend string) (receiverConfigActivationFixture, pipeline.FlowInstanceSelectionRequest) {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":          "name: selection-proof\n",
-		"worker/schema.yaml":   "name: worker\ninstance: item_id\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - item.created\n",
+		"schema.yaml":          "stages: []\n",
+		"worker/schema.yaml":   "instance: item_id\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - item.created\n",
 		"worker/entities.yaml": "item:\n  item_id: text\n",
 		"worker/events.yaml":   "item.created:\n  item_id: text\nitem.finished:\n",
-		"worker/nodes.yaml":    "progress:\n  execution_type: system_node\n  subscribes_to: [item.finished]\n  event_handlers:\n    item.finished:\n      advances_to: done\n",
+		"worker/nodes.yaml":    "progress:\n  execution_type: system_node\n  subscribes_to: [item.finished]\n  event_handlers:\n    item.finished:\n      advances_to: done\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
@@ -298,7 +298,7 @@ func TestR7PreparedSelectionRechecksDurableAdmissionBothStores(t *testing.T) {
 						RunID: request.Lookup.RunID(), State: runlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 					})
 				case "source_replaced":
-					replacement := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# replacement selection source\n"})
+					replacement := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# replacement selection source\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"})
 					rooted, rootErr := replacement.RootedSource()
 					if rootErr != nil {
 						t.Fatal(rootErr)

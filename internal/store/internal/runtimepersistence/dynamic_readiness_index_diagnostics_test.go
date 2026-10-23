@@ -17,7 +17,7 @@ import (
 func TestR7ReadinessDiagnosticsPreserveOlderPlanClassesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			currentFiles := map[string]string{"schema.yaml": "name: current-readiness-source\n"}
+			currentFiles := map[string]string{"schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 			currentBundle := loadLifecyclePersistenceFixtureForTest(t, currentFiles)
 			current := mustStoreTestSourceArtifactFact(currentBundle.SourceArtifact.BundleHash())
 			currentRoot, err := currentBundle.RootedSource()
@@ -31,7 +31,7 @@ func TestR7ReadinessDiagnosticsPreserveOlderPlanClassesBothStores(t *testing.T) 
 				t.Run(row.name, func(t *testing.T) {
 					files := currentFiles
 					if row.old {
-						files = map[string]string{"schema.yaml": "name: predecessor-readiness-source\n"}
+						files = map[string]string{"schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 					runID := correlation.RunIDFromContext(f.ctx)

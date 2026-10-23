@@ -47,6 +47,7 @@ import (
 
 type sessionPublicationStore interface {
 	sourceartifactfixture.Writer
+	sourceartifactfixture.RootedWriter
 	runtimeinbound.Runner
 	runtimepipeline.StandingServicePersistence
 	runtimebus.EventStore
@@ -94,6 +95,10 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
 	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
+	rooted, _ := sourceartifactfixture.Rooted(t, "session-business", sourceartifactfixture.Artifact())
+	if _, err := f.selected.EnsureRootedSource(context.Background(), rooted); err != nil {
+		t.Fatal(err)
+	}
 	runtimeID := uuid.NewString()
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: source.BundleHash()})
@@ -111,7 +116,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 			t.Error(err)
 		}
 	})
-	f.ctx = runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
+	f.ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(context.Background(), source), rooted.Admission())
 	f.ctx = runtimeauthoractivity.WithScope(f.ctx, runtimeauthoractivity.BundleScope(runtimeID, source.BundleHash()))
 	f.ctx = worklifetime.WithOccurrence(f.ctx, owner)
 	f.catalog, err = providertriggers.NewCatalogSnapshotFromAdmittedBodies(f.manifest)
@@ -139,7 +144,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		t.Fatal(err)
 	}
 	f.bus, err = runtimebus.NewEventBusWithOptions(f.selected, runtimebus.EventBusOptions{
-		ContractBundle:   sessionBusinessSemanticFixture(t),
+		ContractBundle:   sessionBusinessSemanticFixture(t, rooted),
 		ExecutionPosture: executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: runtimeID,
 		WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: f.selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
@@ -155,7 +160,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	}
 	flow := "."
 	f.candidate = runtimepipeline.StandingServiceCandidate{BindingEnabled: true, FlowPath: flow,
-		ServiceID: runtimeflowidentity.StandingServiceID(flow), Source: source}
+		ServiceID: runtimeflowidentity.StandingServiceID(flow), Source: source, RootAdmission: rooted.Admission()}
 	f.standing, err = f.selected.ReconcileStandingService(f.ctx, f.candidate)
 	if err != nil {
 		t.Fatal(err)

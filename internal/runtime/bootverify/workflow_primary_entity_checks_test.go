@@ -73,8 +73,10 @@ func TestRun_RequiresPrimaryEntityForActualOperation(t *testing.T) {
 	for _, handler := range []string{"advances_to: done", "data_accumulation: {writes: [{target_field: entity.count, value: payload.count}]}"} {
 		t.Run(handler, func(t *testing.T) {
 			root := t.TempDir()
-			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: operation-demand\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), "name: scoring\nstages:\n  pending: {}\n  done: {final: true}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), "stages:\n  pending: {}\n  done: {final: true}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), "work.ready:\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      "+handler+"\n")
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -90,7 +92,8 @@ func TestRun_RejectsInvalidRootPrimaryEntityForConstructedBundle(t *testing.T) {
 	t.Run("root schema entity selector rejected at source", func(t *testing.T) {
 		repo := repoRootForBootverifyTest(t)
 		root := t.TempDir()
-		writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\nentity: vertical\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "entity: vertical\n")
 		_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 		if err == nil || !strings.Contains(err.Error(), "schema field \"entity\" is not supported") {
 			t.Fatalf("root entity selector error = %v", err)
@@ -140,7 +143,9 @@ func admitPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities stri
 	repoRoot := repoRootForBootverifyTest(t)
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: primary-entity-fixture\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	if strings.TrimSpace(flowEntities) != "" {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")

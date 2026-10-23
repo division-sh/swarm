@@ -44,13 +44,18 @@ func retainActivityFixtureProcessForMaterialization(t *testing.T, ctx context.Co
 	work.capabilities[selected] = process
 }
 
-func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceiptFixture) pipeline.ActivityAttemptJournal {
+func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceiptFixture, runID string) pipeline.ActivityAttemptJournal {
 	t.Helper()
 	if fixture.activityJournal == nil || fixture.activityOwner == nil {
 		t.Fatal("native activity fixture has no retained original role slot")
 	}
 	fixture.activityJournal.once.Do(func() {
-		fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
+		rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(testAuthorActivityContext(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContext(), mustStoreTestSourceArtifactFact(rooted.Artifact().BundleHash())), rooted.Admission())
+		fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, ctx, fixture.store)
 	})
 	return fixture.activityJournal.owner
 }

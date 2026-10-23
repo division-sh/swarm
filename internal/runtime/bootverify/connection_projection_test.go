@@ -172,6 +172,7 @@ func TestConnectionRenamedConcreteEventAndNodeProof(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 					writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), strings.ReplaceAll(string(raw), "to: worker,", "to: worker, rename: "+local+","))
 				}
 				writeBootverifyFixtureFile(t, filepath.Join(root, "worker/child/schema.yaml"), "name: child\n")

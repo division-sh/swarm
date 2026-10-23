@@ -639,7 +639,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 		t.Fatal(err)
 	}
 	var activated runfork.RunForkActivation
-	operation := startupownership.PreparedForkActivateOperation(pg, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, OriginalRootAdmission: rooted.Admission(), AllowSourceFreeze: true}, &activated)
+	operation := startupownership.PreparedForkActivateOperation(pg.runForkPostgresOwner, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, OriginalRootAdmission: rooted.Admission(), AllowSourceFreeze: true}, &activated)
 	if err := process.RunPreparedOperation(ctx, operation); err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}

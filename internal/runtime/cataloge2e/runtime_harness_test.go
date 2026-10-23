@@ -332,6 +332,10 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	bundle, captured := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	if !captured {
+		t.Fatal("catalog runtime requires its admitted compiled source")
+	}
 	var selected runtimestartupownership.Store
 	if pg != nil {
 		selected = pg

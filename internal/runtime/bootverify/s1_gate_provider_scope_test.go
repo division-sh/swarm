@@ -33,7 +33,9 @@ func TestS1HumanGateRequiresScopedChannelDirectory(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
+			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, tc.gateFlow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, tc.gateFlow, "schema.yaml"), "stages:\n  review:\n    gate:\n      decision: approve\n      outcomes:\n        accept: {advances_to: done}\n  done: {final: true}\n")
 			for _, directory := range tc.channels {
 				writeS1ScopeProvider(t, root, directory, true)

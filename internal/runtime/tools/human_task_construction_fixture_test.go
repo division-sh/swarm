@@ -98,9 +98,9 @@ func humanTaskConstructedRequester(t *testing.T, ctx context.Context, selected h
 func humanTaskImportedSource(t *testing.T, actor actors.AgentConfig) semanticview.Source {
 	t.Helper()
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
-		"gateway": {SchemaYAML: "name: gateway\n"},
+		"gateway": {SchemaYAML: "stages: []\n"},
 		"gateway/provider": {
-			SchemaYAML:   "name: provider\nstages:\n  queued: {}\n",
+			SchemaYAML:   "stages:\n  queued: {}\n",
 			EntitiesYAML: "provider_record:\n  status: text\n", AgentsYAML: entityToolAgentYAML(actor),
 		},
 	})

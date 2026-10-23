@@ -24,7 +24,7 @@ func TestFanOutBarrierConsumesConstructedHeaderBothStores(t *testing.T) {
 					continue
 				}
 				t.Run(backend+"/"+shape+"/"+cell, func(t *testing.T) {
-					files := map[string]string{"schema.yaml": "name: barrier-header\nstages:\n  work: {}\n"}
+					files := map[string]string{"schema.yaml": "stages:\n  work: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 					if shape == "fields" {
 						files["entities.yaml"] = "item:\n  label: text?\n  accumulator:\n    type: text?\n    initial: 'business-only'\n"
 					}

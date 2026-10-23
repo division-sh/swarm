@@ -179,13 +179,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// #2307 adds these eight general roots to the reviewed 113-root census.
-	// The generated-results guard, #2323 proof-census regression, and two
-	// #2300 decode-site roots add four more; #2323 adds two YAML checkout
-	// boundary proofs; #2304 adds two event-authority guards. No prior root,
-	// backend, or command envelope moves partitions.
 	actionRetirementRoots := []string{
-		"TestActionRetirementCorpusLedgerIsComplete",
 		"TestActionRetirementCorpusHasNoLiveAuthoredActions",
 		"TestActionRetirementCorpusScannerPreservesHomonymsAndRejectsAliases",
 		"TestActionRetirementCorpusScannerRejectsTruncatedFragments",

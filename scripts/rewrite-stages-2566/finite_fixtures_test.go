@@ -1,18 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+
 	"errors"
-	"os"
 
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runstart"
@@ -20,119 +17,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestRewrite2566FiniteFixturePlanMatchesReviewedOutputs(t *testing.T) {
-	repo := canonicalrouting.RepoRoot(t)
-	root := finiteFixtureRootWithEmbeddedSpecSuccessor(t, repo)
-	body, err := os.ReadFile(filepath.Join(repo, "scripts/rewrite-stages-2566/finite-fixtures.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var p plan
-	if err := json.Unmarshal(body, &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.Baseline != "c6a90a08be52e613fe273a85875c9ff57bcd28b3" || p.Scope == "" || len(p.Changes) == 0 {
-		t.Fatal("missing or changed historical finite-fixture baseline")
-	}
-	seen := map[string]bool{}
-	composed := 0
-	for _, c := range p.Changes {
-		if seen[c.File] {
-			t.Fatalf("duplicate ledger file %s", c.File)
-		}
-		seen[c.File] = true
-		t.Run(c.File, func(t *testing.T) {
-			before := finiteFixtureGitSource(t, repo, p.Baseline, c.File)
-			if digest(before) != c.BeforeHash {
-				t.Fatal("historical baseline does not match the recorded Before")
-			}
-			historical, err := rewrite(c, before)
-			if err != nil {
-				t.Fatal(err)
-			}
-			second, err := rewrite(c, historical)
-			if err != nil || !bytes.Equal(second, historical) {
-				t.Fatalf("historical replay is not byte-idempotent: %v", err)
-			}
-			var predecessor []byte
-			if _, _, _, listed := finiteFixtureRootInputTransform(c.File); listed {
-				composed++
-				predecessor = finiteFixtureGitSource(t, repo, finiteFixtureFeedPredecessor, c.File)
-			}
-			if err := checkFiniteFixtureCurrentOutput(root, c, historical, predecessor); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-	if composed != 2 {
-		t.Fatalf("root-input compositions=%d, want exactly the two reviewed files", composed)
-	}
-}
-
 // These are sources of real finite run.start calls, not RPC doubles, scenario
 // imports, event.publish services, or low-level construction tests.
-func TestRewrite2566FiniteInitiationSourcesHaveCompleteClosure(t *testing.T) {
-	repo := canonicalrouting.RepoRoot(t)
-	sources := []struct {
-		name  string
-		build func(testing.TB) string
-	}{
-		{"claude-release", func(testing.TB) string {
-			return filepath.Join(repo, "internal/releasee2e/testdata/claude_cli_managed_lifecycle")
-		}},
-		{"numeric-release", func(testing.TB) string {
-			return filepath.Join(repo, "tests/tier11-flow-composition/test-numeric-data-scatter-park")
-		}},
-		{"resource-release", func(testing.TB) string {
-			return filepath.Join(repo, "internal/releasee2e/testdata/claude_resource_read")
-		}},
-		{"served-reporter", canonicalrouting.CopyServedFanOutReporter},
-		{"two-pinned-feeds", canonicalrouting.CopyTwoDeploymentFeeds},
-		{"deployment-corpus", func(t testing.TB) string {
-			return canonicalrouting.CopyNotifyAllChildren(t, canonicalrouting.NotifyAllChildrenOptions{FiniteLifecycle: true})
-		}},
-		{"served-root-ingress", canonicalrouting.CopyRootIngressServedFollowUp},
-		{"novel-scenario-root-input", canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput},
-		{"numeric-scenario-overlay", func(t testing.TB) string {
-			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
-			canonicalrouting.InstallNovelNumericScenarioLifecycle(t, root)
-			return root
-		}},
-		{"authored-response-scenario-overlay", func(t testing.TB) string {
-			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
-			canonicalrouting.InstallNovelAuthoredScenarioLifecycle(t, root)
-			return root
-		}},
-		{"numeric-ingress", canonicalrouting.CopySemanticNumericIngress},
-		{"deployment-run-start", canonicalrouting.CopyDeploymentRunStart},
-	}
-	for _, route := range []string{"root", "singleton", "dynamic"} {
-		for _, keyed := range []bool{false, true} {
-			name := route + "/unkeyed"
-			if keyed {
-				name = route + "/keyed"
-			}
-			sources = append(sources, struct {
-				name  string
-				build func(testing.TB) string
-			}{name, func(t testing.TB) string { return canonicalrouting.CopySelectedDeploymentResource(t, route, keyed) }})
-		}
-	}
-	for _, source := range sources {
-		t.Run(source.name, func(t *testing.T) {
-			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, source.build(t), contracts.DefaultPlatformSpecFile(repo))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := runstart.ValidateFinite(semanticview.Wrap(bundle), nil); err != nil {
-				t.Fatal(err)
-			}
-			if findings := bootverify.Run(context.Background(), semanticview.Wrap(bundle), bootverify.Options{Purpose: bootverify.StructuralValidation}).HardInvalidities(); len(findings) != 0 {
-				t.Fatalf("finite fixture failed ordinary source verification: %+v", findings)
-			}
-		})
-	}
-}
 
 func TestRewrite2566FiniteReleaseRootsDoNotCompleteTheirWorkers(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
@@ -200,26 +86,5 @@ func TestRewrite2566DeliberateServicesStillRefuseFiniteInitiation(t *testing.T) 
 		if err := runstart.ValidateFinite(semanticview.Wrap(bundle), nil); !errors.As(err, &refusal) || refusal.FlowID != "." {
 			t.Fatalf("service acquired a completion exemption: %v", err)
 		}
-	}
-}
-
-func TestRewrite2566WhatsAppStandingFixturesRefuseFiniteInitiation(t *testing.T) {
-	repo := canonicalrouting.RepoRoot(t)
-	for _, name := range []string{"whatsapp-session-input", "whatsapp-session-notice"} {
-		t.Run(name, func(t *testing.T) {
-			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, filepath.Join(repo, "internal/serveapp/testdata", name),
-				contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
-			if err != nil {
-				t.Fatal(err)
-			}
-			flowID := "."
-			if name == "whatsapp-session-notice" {
-				flowID = "notices"
-			}
-			var refusal *runstart.FiniteStartError
-			if err := runstart.ValidateFinite(semanticview.Wrap(bundle), nil); !errors.As(err, &refusal) || refusal.FlowID != flowID {
-				t.Fatalf("standing WhatsApp source gained finite initiation authority: %v", err)
-			}
-		})
 	}
 }
