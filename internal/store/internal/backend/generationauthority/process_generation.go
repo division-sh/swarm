@@ -68,6 +68,10 @@ func readProcessGeneration(ctx context.Context, q processGenerationReader, sqlit
 	if err != nil {
 		return processbinding.LeaseStamp{}, fmt.Errorf("read process generation: %w", err)
 	}
+	return decodeProcessGeneration(ctx, generation, lease, owner, boot, runtime, backend, sqlite)
+}
+
+func decodeProcessGeneration(ctx context.Context, generation int64, lease, owner, boot, runtime, backend sql.NullString, sqlite bool) (processbinding.LeaseStamp, error) {
 	if err := ctx.Err(); err != nil {
 		return processbinding.LeaseStamp{}, err
 	}

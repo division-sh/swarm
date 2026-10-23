@@ -18,15 +18,59 @@ func RequireCurrentRuntimeMutationTx(ctx context.Context, tx *sql.Tx, original r
 		return err
 	}
 	if original.HasRuntimeGrant() {
-		if err := RequireCurrentGrantTx(ctx, tx, original.GrantEvidence(), sqlite); err != nil {
-			return err
-		}
+		return requireCurrentRuntimeGrantTx(ctx, tx, original, sqlite)
 	}
 	current, err := ProcessGenerationCurrent(ctx, tx, original.ProcessAuthority().LeaseStamp(), sqlite)
 	if err != nil {
 		return err
 	}
 	if !current {
+		return errors.New("runtime mutation process generation is no longer current")
+	}
+	return nil
+}
+
+func requireCurrentRuntimeGrantTx(ctx context.Context, tx *sql.Tx, original runtimeownership.MutationAuthority, sqlite bool) error {
+	expected, process := original.GrantEvidence(), original.ProcessAuthority().LeaseStamp()
+	if tx == nil {
+		return errors.New("current generation grant requires its native transaction")
+	}
+	if grantAdmittedInNativeTransaction(ctx, tx, expected, sqlite) && processAdmittedInNativeTransaction(ctx, tx, process, sqlite) {
+		return nil
+	}
+	if err := FenceMutation(ctx, tx, sqlite); err != nil {
+		return err
+	}
+	// The grant observation shares the locked process row's snapshot, after the
+	// order fence; it never supplies authority for another native transaction.
+	query := `SELECT generation, CAST(lease_id AS TEXT), owner_id, CAST(boot_id AS TEXT),
+		CAST(runtime_instance_id AS TEXT), backend,
+		(SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1)
+		FROM runtime_process_generation WHERE singleton_id=1`
+	if !sqlite {
+		query += " FOR UPDATE"
+	}
+	var generation int64
+	var lease, owner, boot, runtime, backend sql.NullString
+	var raw []byte
+	err := tx.QueryRowContext(ctx, query, expected.GrantID).Scan(&generation, &lease, &owner, &boot, &runtime, &backend, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrProcessGenerationMissing
+	}
+	if err != nil {
+		return fmt.Errorf("read runtime mutation generation: %w", err)
+	}
+	if raw == nil {
+		return fmt.Errorf("load run execution generation grant: %w", sql.ErrNoRows)
+	}
+	if err := validateCurrentGrantSnapshot(raw, expected); err != nil {
+		return err
+	}
+	current, err := decodeProcessGeneration(ctx, generation, lease, owner, boot, runtime, backend, sqlite)
+	if err != nil {
+		return err
+	}
+	if current != process {
 		return errors.New("runtime mutation process generation is no longer current")
 	}
 	return nil
@@ -63,6 +107,10 @@ func ObserveCurrentGrantTx(ctx context.Context, tx *sql.Tx, expected runtimeowne
 	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, expected.GrantID).Scan(&raw); err != nil {
 		return fmt.Errorf("load run execution generation grant: %w", err)
 	}
+	return validateCurrentGrantSnapshot(raw, expected)
+}
+
+func validateCurrentGrantSnapshot(raw []byte, expected runtimeownership.GrantEvidence) error {
 	var current runtimeownership.GrantEvidence
 	if err := canonicaljson.DecodeInto(raw, &current); err != nil {
 		return err
