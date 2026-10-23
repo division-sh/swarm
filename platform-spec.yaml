@@ -1578,7 +1578,7 @@ contract_formats:
           owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Durable event writers accept only opaque admitted values; raw Event, SQL, row, transaction, and generic mutation capabilities are unavailable to runtime and API consumers.
           executable_proofs:
-            - {path: internal/store/internal/runtimepersistence/event_boundary_guard_test.go, test: TestEventAdmittedPersistenceBoundaryGuard}
+            - {path: internal/store/internal/backend/eventpersistence/mutation_protocol_test.go, test: TestComposedEventWritersRequireMutationAttempt}
         runtime.event.admitted_run_disposition:
           owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Fresh admission carries exact create-authorized, require-active, require-present, or runless authority through persistence; readback never restores create authority and writers never infer it from labels, payload, context, or run presence.
