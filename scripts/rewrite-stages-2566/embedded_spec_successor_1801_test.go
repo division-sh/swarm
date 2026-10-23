@@ -52,6 +52,17 @@ func originalFiniteEmbeddedSpecOutput(ledger, successor, current []byte) ([]byte
 		return nil, fmt.Errorf("embedded-spec successor is not the exact reviewed file, key and edit")
 	}
 	c := p.Changes[0]
+	// #2786 wires existing run readback into the partial operator fixture. Reverse
+	// only those additions before the immutable stage/spec successor comparison.
+	for _, addition := range []string{
+		"\truns, ok := f.selected.(apiv1.RunReadStore)\n\tif !ok {\n\t\tt.Fatalf(\"selected store %T lacks canonical run readback\", f.selected)\n\t}\n",
+		"\t\tapiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: runs}),\n",
+	} {
+		if bytes.Count(current, []byte(addition)) != 1 {
+			return nil, fmt.Errorf("run-readback successor is missing or ambiguous")
+		}
+		current = bytes.Replace(current, []byte(addition), nil, 1)
+	}
 	if digest(current) != c.AfterHash {
 		return nil, fmt.Errorf("embedded-spec successor current source changed")
 	}
