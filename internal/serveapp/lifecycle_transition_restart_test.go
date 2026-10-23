@@ -31,6 +31,7 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+	opts.SwarmDir, opts.SwarmDirSet = t.TempDir(), true
 	var db *sql.DB
 	var receiverReader receiverProofStateReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
