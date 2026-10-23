@@ -58,6 +58,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
@@ -174,6 +175,14 @@ func (o *notifyAllChildrenLifecycleOwner) current() (runtimestartupownership.Gen
 	return o.grant, nil
 }
 
+func (o *notifyAllChildrenLifecycleOwner) BindRuntimeMutationContext(ctx context.Context) (context.Context, error) {
+	grant, err := o.current()
+	if err != nil {
+		return ctx, err
+	}
+	return runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+}
+
 func (o *notifyAllChildrenLifecycleOwner) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
 	grant, err := o.current()
 	if err != nil {
@@ -196,9 +205,7 @@ func (o *notifyAllChildrenLifecycleOwner) CommitAgentLifecycleTransition(
 func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, selected notifyAllChildrenStore, sources ...semanticview.Source) *notifyAllChildrenProcessTopology {
 	t.Helper()
 	runtimeInstanceID := authorActivityTestRuntimeInstanceID
-	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "notify-all-children-conformance", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-	})
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatalf("acquire notify-all-children process topology capability: %v", err)
 	}
@@ -287,6 +294,10 @@ func (p *notifyAllChildrenProcessTopology) install(
 	}
 	if err := lifecycle.bind(grant); err != nil {
 		t.Fatalf("bind notify-all-children lifecycle generation grant: %v", err)
+	}
+	ctx, err = runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
 	}
 	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, bundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
@@ -2159,6 +2170,7 @@ func newNotifyAllChildrenRuntime(
 	}
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
+	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
 	workOwner := conformanceTestRuntimeOccurrence(t, sourceArtifactFact.BundleHash())
 	var runtimeControlEvents []string
 	if opts.enableGenericSchedules {
@@ -2169,11 +2181,13 @@ func newNotifyAllChildrenRuntime(
 		deliveryLifecycle = opts.deliveryLifecycle
 	}
 	busOptions := durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
-		ExecutionPosture:   posture,
-		ContractBundle:     source,
-		SourceArtifactFact: sourceArtifactFact,
-		WorkOwner:          workOwner,
-		TestLifecycleProbe: opts.testLifecycleProbe,
+		MutationContext:      generationLifecycle.BindRuntimeMutationContext,
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		ExecutionPosture:     posture,
+		ContractBundle:       source,
+		SourceArtifactFact:   sourceArtifactFact,
+		WorkOwner:            workOwner,
+		TestLifecycleProbe:   opts.testLifecycleProbe,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -2372,7 +2386,6 @@ func newNotifyAllChildrenRuntime(
 	}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(coordinatorBus, coordinatorOptions)
 
-	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
 	var lifecycleStore runtimemanager.AgentLifecyclePersistence = generationLifecycle
 	roles := conformanceManagerPersistenceRoles(backend, eventBus, coordinator)
 	if opts.diagnosticOverlap {
@@ -2380,7 +2393,7 @@ func newNotifyAllChildrenRuntime(
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   posture,
-		BaseContext:        runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()),
+		BaseContext:        originalConformanceFixtureContext(t, runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), backend),
 		SourceArtifactFact: sourceArtifactFact,
 		WorkflowInstances:  coordinator,
 		WorkOwner:          workOwner,
@@ -2405,6 +2418,10 @@ func newNotifyAllChildrenRuntime(
 		t.Fatalf("bind notify-all-children delivery authority: %v", err)
 	}
 	continuationCtx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	continuationCtx, err = runtimestartupownership.WithRuntimeMutationAuthority(continuationCtx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := backend.ActivateDeliveryAuthority(continuationCtx, authority); err != nil {
 		t.Fatalf("activate notify-all-children delivery authority: %v", err)
 	}
@@ -2434,7 +2451,7 @@ func newNotifyAllChildrenRuntime(
 		fanOutExecutor = opts.fanOutExecutor(coordinator)
 	}
 	fanOutRegistration, err := runtimestartupownership.StartFanOutServing(
-		runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), grant, workOwner, opts.fanOutWorkers, fanOutExecutor,
+		runtimeeffects.WithExecutionMode(continuationCtx, posture.RootMode()), grant, workOwner, opts.fanOutWorkers, fanOutExecutor,
 	)
 	if err != nil {
 		t.Fatalf("start notify-all-children shared fan-out serving: %v", err)
@@ -2456,7 +2473,7 @@ func newNotifyAllChildrenRuntime(
 		if err != nil {
 			t.Fatalf("construct notify-all-children completion executor: %v", err)
 		}
-		runtimeCtx := worklifetime.WithRuntimeOccurrence(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), workOwner)
+		runtimeCtx := worklifetime.WithRuntimeOccurrence(continuationCtx, workOwner)
 		registration, err := candidateOwner.RegisterCompletionCandidateSink(
 			runtimeCtx,
 			runtimerunlifecycle.CandidateScope{BundleHash: sourceArtifactFact.BundleHash()},

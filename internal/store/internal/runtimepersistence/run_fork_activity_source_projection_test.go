@@ -766,7 +766,7 @@ func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFi
 		t.Fatal("activity source run requires its actual admitted declarations")
 	}
 	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
-	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+	ctx = originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store)
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact,
 		StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),

@@ -141,7 +141,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			}
 			sourceEvent := fixture.seedSource(t, ctx, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource, requestPayload)
 			seedSelectedContractActivityLoop(t, ctx, fixture, loaded, sourceEvent, entityID, activation, at)
-			fixture.capture(t, sourceRunID)
+			fixture.capture(t, ctx, sourceRunID)
 			if tt.sourceAttemptStatus != "" {
 				seedSelectedContractActivityAttempt(t, selected, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
 			}
@@ -384,9 +384,13 @@ func (f activityForkFixture) seedSource(t *testing.T, ctx context.Context, loade
 	return event
 }
 
-func (f activityForkFixture) capture(t *testing.T, runID string) {
+func (f activityForkFixture) capture(t *testing.T, ctx context.Context, runID string) {
 	t.Helper()
-	captureSelectedExecutionSourceRevision(t, f.owner.ports.fork, runID)
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, f.owner.ports.contexts.capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureSelectedExecutionSourceRevision(t, ctx, f.owner.ports.fork, runID)
 }
 
 func selectedContractActivityDescriptorExists(descriptors []runtimeauthoractivity.EventDescriptor, eventType string) bool {

@@ -372,6 +372,11 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 						if grant.GrantID == parentGrantID || grant.SelectedFork == nil || grant.SelectedFork.ForkRunID != event.RunID() {
 							return fmt.Errorf("selected handler did not consume its own exact child grant")
 						}
+						for _, issued := range childContextProof.issued {
+							if err := issued.requireGatewayCustody(ctx, cfg); err != nil {
+								return err
+							}
+						}
 					}
 					err := observeSelectedConstructedInput(ctx, selected, event)
 					if err != nil {

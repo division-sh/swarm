@@ -21,6 +21,7 @@ func TestActivitySettlementKeepsOriginalNativeIdentityBothStores(t *testing.T) {
 					// The callback must retain the exact originally admitted execution.
 					original := seedActivityStoryAttempt(t, fixture, executionmode.Live, "started", false)
 					journal := activityNativeJournalForFixture(t, fixture)
+					ctx := fixture.activityJournal.original
 					status := "succeeded"
 					if operation == "uncertain" {
 						status = "uncertain"
@@ -49,9 +50,9 @@ func TestActivitySettlementKeepsOriginalNativeIdentityBothStores(t *testing.T) {
 							var committed bool
 							var err error
 							if operation == "complete" {
-								got, committed, err = journal.CompleteActivityAttempt(testAuthorActivityContext(), candidate)
+								got, committed, err = journal.CompleteActivityAttempt(ctx, candidate)
 							} else {
-								got, committed, err = journal.MarkActivityAttemptUncertain(testAuthorActivityContext(), candidate)
+								got, committed, err = journal.MarkActivityAttemptUncertain(ctx, candidate)
 							}
 							if err == nil || committed || got.RequestEventID != "" {
 								t.Fatalf("changed callback committed: record=%+v committed=%t err=%v", got, committed, err)
