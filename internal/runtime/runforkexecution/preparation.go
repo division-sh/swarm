@@ -356,10 +356,11 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 		return runforkreadiness.MaterializeRequest{}, err
 	}
 	return runforkreadiness.MaterializeRequest{
-		RootAdmission:        p.loadedSource.RootedSource.Admission(),
-		ForkOperation:        forkOperation,
-		OriginalLoopCarriage: p.originalLoopCarriage,
-		Preparation:          p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.Input,
+		RootAdmission:         p.loadedSource.RootedSource.Admission(),
+		ForkOperation:         forkOperation,
+		OriginalLoopCarriage:  p.originalLoopCarriage,
+		OriginalRootAdmission: p.originalSource.RootedSource.Admission(),
+		Preparation:           p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.Input,
 		ContractSelection: p.loadedSource.Selection, SourceArtifactFact: p.loadedSource.SourceArtifactFact,
 		EffectiveSourceIdentity: p.loadedSource.EffectiveSourceIdentity, FrontierAdmission: detached.Frontier,
 		RouteTopology: detached.Routes, RecipientPlanning: detached.Recipients, Readiness: p.readiness,

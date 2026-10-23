@@ -1959,9 +1959,10 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource, RootAdmission: targetRooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)}
 	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, targetSource), targetRooted.Admission())
-	if _, err := pg.MaterializeRunFork(ctx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
+	base := selectedSourceMaterializationRequest(t, ctx, pg, fixture.runID, forkPointEventID, semanticview.Wrap(targetBundle))
+	base.FanOutPlanRefs = nil
+	if _, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
 		t.Fatalf("missing selected fan-out proof error = %v", err)
 	}
 	changed := base
@@ -1970,7 +1971,7 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 		ElementRef:     runtimecontracts.FanOutElementRef{FlowPath: fixture.flowPath, Family: "fan_out", SemanticPath: fixture.semanticPath},
 		SemanticDigest: "sha256:" + strings.Repeat("f", 64),
 	}}
-	if _, err := pg.MaterializeRunFork(ctx, changed); err == nil || !strings.Contains(err.Error(), "changed pending fan_out") {
+	if _, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, changed); err == nil || !strings.Contains(err.Error(), "changed pending fan_out") {
 		t.Fatalf("changed selected fan-out proof error = %v", err)
 	}
 	var prematureForks int
@@ -1979,7 +1980,7 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 	}
 	matching := changed
 	matching.FanOutPlanRefs = []runtimecontracts.FanOutPlanRef{targetPlans[0].Ref}
-	materialized, err := pg.MaterializeRunFork(ctx, matching)
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, matching)
 	if err != nil {
 		t.Fatalf("materialize semantically unchanged selected fan-out: %v", err)
 	}

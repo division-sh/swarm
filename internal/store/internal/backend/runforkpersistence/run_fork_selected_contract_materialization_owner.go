@@ -167,7 +167,18 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err := requireForkOperationMaterializationRequest(forkOperation, plan.SourceRunID, plan.ForkPoint, identity.RootAdmission, selection, req.DataPinOverrides); err != nil {
 			return err
 		}
-		if err := requireOriginalFanOutCarriage(txctx, source, plan, req.OriginalLoopCarriage); err != nil {
+		originalSource := runForkSourceOwnerFunc(func(readctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+			if err := req.OriginalRootAdmission.Validate(); err != nil {
+				return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("original fan-out root admission: %w", err)
+			}
+			fact, err := runtimecorrelation.NewSourceArtifactFact(req.OriginalRootAdmission.BundleHash())
+			if err != nil {
+				return runtimecorrelation.SourceArtifactFact{}, err
+			}
+			readctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(readctx, fact), req.OriginalRootAdmission)
+			return source.LoadRunSource(readctx, runID)
+		})
+		if err := requireOriginalFanOutCarriage(txctx, originalSource, plan, req.OriginalLoopCarriage); err != nil {
 			return err
 		}
 		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.SourceArtifactFact.BundleHash(), req.FanOutPlanRefs)
