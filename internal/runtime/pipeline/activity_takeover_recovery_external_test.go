@@ -134,7 +134,7 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 			t.Cleanup(func() { _ = successor.Release(context.Background()) })
 			// Serve has process/runtime scope at this pre-dispatch boundary. The
 			// native owner, not a caller-selected primary bundle, knows each row.
-			recoveryCtx := authoractivity.WithScope(ctx, authoractivity.RuntimeScope(successorRequest.RuntimeInstanceID))
+			recoveryCtx := authoractivity.WithScope(context.Background(), authoractivity.RuntimeScope(successorRequest.RuntimeInstanceID))
 			recoveryCtx = nativeOriginalProcessContextFixture(t, worklifetime.WithProcess(recoveryCtx, worklifetime.NewProcess()), successor)
 			summary, err := startupownership.ReconcileDisplacedHTTPActivities(recoveryCtx, successor)
 			if err != nil || len(summary.Results) != 1 {
@@ -157,6 +157,11 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 					t.Fatalf("recovery replay changed the original result: %v", err)
 				}
 			}
+			replacePipelineExternalWorkOccurrenceForSource(t, fact, pipelineExternalTestWorkOwnerForSource(t, fact))
+			ctx = nativeOriginalProcessContextFixture(t, testAuthorActivityContextForSource(t, context.Background(), fact), successor)
+			ctx = correlation.WithRunID(ctx, runID)
+			bus = newActivityJournalProofBus(t, selected, source)
+			pc = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 			if err := pc.PublishRecoveredHTTPActivity(ctx, terminal); err != nil {
 				t.Fatalf("acknowledged native result publication: %v", err)
 			}

@@ -92,9 +92,8 @@ type gateRecoveryStoreCase struct {
 	trace       gateRecoveryTraceStore
 }
 
-func markGateRecoveryTopologyReadyFixture(t *testing.T, selected gateRecoveryStoreCase, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, at time.Time) {
+func markGateRecoveryTopologyReadyFixture(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, at time.Time) {
 	t.Helper()
-	ctx := testAuthorActivityContext(t, context.Background())
 	current, found, err := selected.persistence.LoadDynamicFlowRuntimeReadiness(ctx, plan.RunID, plan.Identity.Route())
 	if err != nil || !found || !current.Eligible() {
 		t.Fatalf("load exact readiness fixture: found=%v err=%v", found, err)

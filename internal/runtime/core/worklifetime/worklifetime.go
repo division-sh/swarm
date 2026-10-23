@@ -79,6 +79,11 @@ func CarryAcceptedLease(dst, admitted context.Context) context.Context {
 	if lease == nil {
 		return dst
 	}
+	// Receiver contexts intentionally discard caller values. Original process
+	// attribution belongs to the admitted lease, not to that caller value tree.
+	if process, found := ProcessFromContext(lease.Context()); found {
+		dst = WithProcess(dst, process)
+	}
 	return context.WithValue(dst, acceptedLeaseContextKey{}, lease)
 }
 

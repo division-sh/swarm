@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -103,18 +104,17 @@ func replacePipelineExternalWorkOccurrenceForSource(t *testing.T, fact runtimeco
 	identity := worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: fact.BundleHash()}
 	join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := predecessor.RetireAndWait(join); err != nil {
+	fixture.mu.Lock()
+	if fixture.runtimes[identity] != predecessor {
+		fixture.mu.Unlock()
+		t.Fatal("native reopen cannot replace another runtime occurrence")
+	}
+	fixture.mu.Unlock()
+	if err := fixture.retireAndWait(join); err != nil {
 		t.Fatal(err)
 	}
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
-	if fixture.runtimes[identity] != predecessor {
-		t.Fatal("native reopen cannot replace another runtime occurrence")
-	}
-	fixture.process.Retire()
-	if _, err := fixture.process.Join(join); err != nil {
-		t.Fatal(err)
-	}
 	fixture.process = worklifetime.NewProcess()
 	next, err := fixture.process.NewRuntime(context.Background(), identity)
 	if err != nil {
@@ -227,6 +227,22 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = pipelineExternalTestWorkOwnerForSource(t, opts.SourceArtifactFact)
+	}
+	admitted, err := opts.WorkOwner.Begin(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	process, found := worklifetime.ProcessFromContext(admitted.Context())
+	if !found {
+		return nil, errors.Join(errors.New("native bus fixture requires its process work owner"), admitted.Done())
+	}
+	if _, bound := process.OriginalProcess(); !bound {
+		ctx := runtimecorrelation.WithRuntimeInstanceID(admitted.Context(), opts.RuntimeInstanceID)
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()))
+		nativeProcessContextFixture(t, ctx, eventStore)
+	}
+	if err := admitted.Done(); err != nil {
+		return nil, err
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
