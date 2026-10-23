@@ -52,6 +52,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	// Keep the first artifact write inside RequireRun's accounting boundary.
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
+	ctx = nativeProcessContextFixture(t, ctx, selected)
 	original := &nativeActivityJournalFixtureOwner{WorkflowPersistenceOwner: selected}
 	persistence := pipeline.NewWorkflowPersistence(original)
 	var buses []*runtimebus.EventBus
@@ -234,6 +235,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			if err := selected.Close(); err != nil {
 				t.Fatal(err)
 			}
+			replacePipelineExternalWorkOccurrenceForSource(t, fact, pipelineExternalTestWorkOwnerForSource(t, fact))
 			return workflowActivityNativeFixtureFromSelectedSource(t, reopen(), reopen, artifact)
 		},
 		ReadJournal: func(ctx context.Context, runID string) (pipeline.WorkflowJournalStorageForTest, error) {
