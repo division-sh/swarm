@@ -17,6 +17,23 @@ type processGenerationReader interface {
 }
 
 func ReadProcessGeneration(ctx context.Context, q processGenerationReader, sqlite bool) (processbinding.LeaseStamp, error) {
+	if ctx != nil {
+		if tx, ok := q.(*sql.Tx); ok {
+			if scope, bound := ctx.Value(transactionKey{}).(*transaction); bound && scope != nil {
+				scope.Lock()
+				defer scope.Unlock()
+				if !scope.active {
+					return processbinding.LeaseStamp{}, sql.ErrTxDone
+				}
+				if scope.tx != tx || scope.sqlite != sqlite {
+					return processbinding.LeaseStamp{}, errors.New("process reader differs from its native transaction")
+				}
+				if scope.loaded {
+					return scope.stamp, errors.Join(ctx.Err(), scope.caller.Err())
+				}
+			}
+		}
+	}
 	return readProcessGeneration(ctx, q, sqlite, unlocked)
 }
 
