@@ -167,25 +167,6 @@ func (g *selectedChildContextProofGrant) BindSelectedForkMutationContext(ctx con
 	return g.ctx, err
 }
 
-func (p *selectedChildContextProofCapability) requireRetiredChildren(t *testing.T) {
-	t.Helper()
-	if len(p.issued) == 0 {
-		t.Fatal("parent-bound proof never issued a real selected child")
-	}
-	for _, grant := range p.issued {
-		if grant.gatewayChecks.Load() == 0 {
-			t.Fatal("selected child never reached its actual-actor gateway custody controls")
-		}
-		owner := grant.GenerationGrant.(startupownership.SelectedForkMutationContextOwner)
-		if _, err := owner.BindSelectedForkMutationContext(context.WithoutCancel(grant.ctx)); err == nil {
-			t.Fatal("retired selected child regained an operation context")
-		}
-		if _, err := startupownership.CaptureMutationAuthority(context.WithoutCancel(grant.ctx)); err == nil {
-			t.Fatal("retired child retained usable mutation authority")
-		}
-	}
-}
-
 func (p *selectedChildContextProofCapability) requireReleasedChildren(t *testing.T) {
 	t.Helper()
 	select {

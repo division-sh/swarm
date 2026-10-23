@@ -47,42 +47,6 @@ func nativeAPIExactRunCountWorkload(t *testing.T, source string) string {
 	return nativeAPIPhysicalCardinalityWorkload(t, nativeAPISQLiteCounterWorkload(t, source))
 }
 
-func q10PrivateTargetCurrentRecipe(t *testing.T, row recipe) recipe {
-	t.Helper()
-	if row.File != "internal/apiv1/operator_event_publish_test.go" || row.Function != "TestOperatorEventPublishPrivateTargetCannotAuthorizePublication" {
-		return row
-	}
-	if row.Family != "native-api-physical-cardinality-consumer" || row.Successor == "" {
-		t.Fatal("private-target historical recipe identity changed")
-	}
-	const original = "if _, err := db.ExecContext(ctx, `\n\t\tUPDATE entity_state\n\t\tSET fields = '{\"entity_id\":\"authored-lookalike\",\"flow_instance\":\"authored/lookalike\"}'::jsonb,\n\t\t    bookkeeping = '{\"entity_id\":\"bookkeeping-lookalike\",\"flow_instance\":\"bookkeeping/lookalike\"}'::jsonb\n\t\tWHERE run_id = $1::uuid AND entity_id = $2::uuid\n\t`, runID, targetEntityID); err != nil {\n\t\tt.Fatalf(\"seed hostile entity value-map identity lookalikes: %v\", err)\n\t}"
-	const owned = "if changed, err := storetest.SetWorkflowProjectionIdentityLookalikes(ctx, pg, runID, targetEntityID, targetFlowInstance); err != nil || changed != 1 {\n\t\tt.Fatalf(\"seed hostile entity value-map identity lookalikes: rows=%d err=%v\", changed, err)\n\t}"
-	if strings.Count(row.Successor, original) != 1 {
-		t.Fatal("private-target original hostile fields/bookkeeping setup is missing or ambiguous")
-	}
-	current := strings.Replace(row.Successor, original, owned, 1)
-	guard := recipe{File: row.File, Function: row.Function, Before: current, After: current}
-	if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+row.Successor), guard); err == nil || changed {
-		t.Fatal("retired hostile bookkeeping SQL admitted as the current fixture owner")
-	}
-	for _, mutation := range [][2]string{
-		{"ctx, pg,", "ctx, foreignStore,"}, {"pg, runID,", "pg, foreignRun,"},
-		{"targetEntityID, targetFlowInstance", "foreignEntity, targetFlowInstance"},
-		{"targetEntityID, targetFlowInstance", "targetEntityID, foreignPath"},
-		{"err != nil || ", ""}, {"changed != 1", "changed < 1"},
-	} {
-		mutant := strings.Replace(current, owned, strings.Replace(owned, mutation[0], mutation[1], 1), 1)
-		if mutant == current {
-			t.Fatal("private-target hostile owner/refusal control did not change source")
-		}
-		if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+mutant), guard); err == nil || changed {
-			t.Fatalf("private-target setup lost selected owner, identity, error or exact row count: %s", mutation[0])
-		}
-	}
-	row.Successor = current
-	return row
-}
-
 func TestNativeAPIExactRunCountsRejectWrongKeyOwnerOrAssertion(t *testing.T) {
 	probes := 0
 	for _, row := range nativeAPIExactRunCountRecipes(t) {
