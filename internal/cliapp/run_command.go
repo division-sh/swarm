@@ -817,15 +817,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	}
 	settleObservation := func() {
 		// Keep transport overflow observable until the current output write joins.
-		rowsDone := renderer.stopRows()
-		for waiting := true; waiting; {
-			select {
-			case <-rowsDone:
-				waiting = false
-			case det := <-detached:
-				reportDetach(det)
-			}
-		}
+		renderer.stopRows(detached, reportDetach)
 		observer.stop()
 		select {
 		case det := <-detached:
@@ -1009,9 +1001,17 @@ func (r *foregroundRunTraceRenderer) enqueueDetached(fact runTraceObserverDetach
 	}
 }
 
-func (r *foregroundRunTraceRenderer) stopRows() <-chan struct{} {
+func (r *foregroundRunTraceRenderer) stopRows(detached <-chan runTraceDetach, reportDetach func(runTraceDetach)) {
 	r.rowsStopOnce.Do(func() { close(r.rowsStop) })
-	return r.rowsDone
+	for {
+		select {
+		case <-r.rowsDone:
+			return
+		case det := <-detached:
+			reportDetach(det)
+			detached = nil
+		}
+	}
 }
 
 func (r *foregroundRunTraceRenderer) stop() {
@@ -1019,7 +1019,7 @@ func (r *foregroundRunTraceRenderer) stop() {
 		return
 	}
 	r.stopOnce.Do(func() {
-		<-r.stopRows()
+		r.stopRows(nil, nil)
 		close(r.detached)
 		r.workers.Wait()
 	})
