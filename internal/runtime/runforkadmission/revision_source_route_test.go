@@ -16,7 +16,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -30,6 +32,14 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), revisionSourceRouteBundleHash))
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	process, err := agentfixture.ProcessCapability(t, ctx, pg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID := uuid.NewString()
 	pendingEventID := uuid.NewString()
 	completedEventID := uuid.NewString()
@@ -110,6 +120,14 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), revisionSourceRouteBundleHash))
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	process, err := agentfixture.ProcessCapability(t, ctx, pg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	type testCase struct {
 		name              string
 		eventName         string
