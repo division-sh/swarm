@@ -285,7 +285,7 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 func settleRecoveredCanceledTurnForTest(t *testing.T, fixture completionSettlementFixture, original runtimeeffects.Attempt, clock runtimeeffects.LogicalTurnClock) {
 	t.Helper()
 	// No previous runtime/controller/handle is carried into this recovery read.
-	ctx := testAuthorActivityContext()
+	ctx := fixture.context
 	recovery := fixture.store.(runtimeeffects.CanceledTurnRecoveryStore)
 	request := liveExternalEffectRecoveryRequest(time.Now().UTC())
 	turns, err := recovery.ListCanceledTurnRecoveries(ctx, request)
