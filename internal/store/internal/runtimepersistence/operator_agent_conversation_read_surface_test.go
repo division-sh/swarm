@@ -454,6 +454,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, agentID string, status string) {
 	t.Helper()
 	identity := testOperatorAgentIdentity(agentID)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{
 		Origin:     semanticScenarioSetupRunOriginForTest(),
 		RunID:      identity.RunID,
@@ -508,7 +509,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	runID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	entityID := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: base})
 	for _, agent := range []struct {
 		runID string
@@ -666,7 +669,9 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	runID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	entityID := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: base})
 	for _, agent := range []struct {
 		runID string

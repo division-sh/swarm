@@ -494,10 +494,12 @@ func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkSta
 	}
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	ctx := testAuthorActivitySourceArtifactContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: lineage.SourceRunID, State: sourceState,
 		BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour), EndedAt: now,
 	})
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: lineage.ForkRunID, State: forkState,
 		BundleHash: authorActivityTestBundleHash, StartedAt: now, EndedAt: now,

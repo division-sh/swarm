@@ -175,6 +175,7 @@ func seedA2NativeJoinFixture(t *testing.T, ctx context.Context, backend string, 
 	runID, entityID := uuid.NewString(), uuid.NewString()
 	flowID, path := "native-join", "native-join/one"
 	ctx = correlation.WithRunID(ctx, runID)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	// The claim requires complete native construction, not a header/field-only

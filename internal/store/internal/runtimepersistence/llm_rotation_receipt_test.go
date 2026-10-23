@@ -553,10 +553,11 @@ func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 		fixture := newExactFactFixture(t, selected)
+		ctx = storeTestOriginalProcessContext(t, ctx, selected.selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		reset := selected.selected.(interface {
-			ResetAll(sessions.ResetMetadata) (sessions.ResetSummary, error)
+			ResetAll(context.Context, sessions.ResetMetadata) (sessions.ResetSummary, error)
 		})
 		predecessor, _, err := owner.AcquireLiveSession(ctx, identity, "reset-worker")
 		if err != nil {
@@ -567,7 +568,7 @@ func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := reset.ResetAll(sessions.ResetMetadata{Source: "rotation-receipt-test"}); err != nil {
+		if _, err := reset.ResetAll(ctx, sessions.ResetMetadata{Source: "rotation-receipt-test"}); err != nil {
 			t.Fatal(err)
 		}
 		var status, retainedKey string
@@ -594,7 +595,7 @@ func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := reset.ResetAll(sessions.ResetMetadata{Source: "prepare-discard"}); err != nil {
+		if _, err := reset.ResetAll(ctx, sessions.ResetMetadata{Source: "prepare-discard"}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := transitionRunForTest(ctx, selected.selected, runlifecycle.ActiveTransitionRequest{RunID: fixture.runID, State: runlifecycle.StatePaused}); err != nil {

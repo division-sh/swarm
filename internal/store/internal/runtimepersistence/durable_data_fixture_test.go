@@ -98,6 +98,7 @@ func TestDurableDataFixturesCommitReplayAndRefuseBothStores(t *testing.T) {
 			}
 			source, target := uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{source, target} {
+				ctx = storeTestOriginalProcessContext(t, ctx, store)
 				requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: runID, Origin: semanticScenarioSetupRunOriginForTest()})
 			}
 			overrides := []runtimedata.ExplicitPin{{Declaration: catalog.Declarations[0].Ref, VersionID: imported.Candidate.VersionID}}
@@ -140,6 +141,7 @@ func TestDurableDataFixturesCommitReplayAndRefuseBothStores(t *testing.T) {
 				t.Fatalf("refusal changed pins: %#v, %v", after, err)
 			}
 			failedTarget := uuid.NewString()
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: failedTarget, Origin: semanticScenarioSetupRunOriginForTest()})
 			if backend == "sqlite" {
 				if _, err := db.ExecContext(ctx, `CREATE TRIGGER reject_fixture_pin BEFORE INSERT ON resource_version_pins

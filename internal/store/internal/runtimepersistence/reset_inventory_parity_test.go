@@ -28,6 +28,7 @@ func TestResetInventoryAndOperationLeaseBothStores(t *testing.T) {
 				selected = newTestPostgresStore(t, database)
 			}
 			ctx := testAuthorActivityContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: runID, Origin: semanticScenarioSetupRunOriginForTest()})
 			inventory, err := selected.ReadResetInventory(ctx)
 			if err != nil {
