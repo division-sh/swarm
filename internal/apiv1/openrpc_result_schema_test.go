@@ -112,8 +112,11 @@ func TestChannelOnboardingCapabilitiesMatchStrictOpenRPC(t *testing.T) {
 						candidate["capabilities"].(map[string]any)[test.field] = test.value
 					}
 					err := validator.validateValue("$."+methodName+".result", validator.methods[methodName].Result.Schema, result)
-					if err == nil || err.Error() != test.want {
-						t.Fatalf("invalid capabilities error = %v, want %q", err, test.want)
+					candidatePath := "$." + methodName + ".result.candidate"
+					runtimeFailure := strings.Replace(test.want, candidatePath+".", candidatePath+".oneOf[0].", 1)
+					want := fmt.Sprintf("%s matched 0 oneOf schemas, want exactly 1; failures=%s | %s.oneOf[1].deployment_registration is required", candidatePath, runtimeFailure, candidatePath)
+					if err == nil || err.Error() != want {
+						t.Fatalf("invalid capabilities error = %v, want %q", err, want)
 					}
 				})
 			}
