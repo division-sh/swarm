@@ -1401,8 +1401,6 @@ units:
          postgres/retained_success/healthy, postgres/retained_success/lost_ack, postgres/retained_success/auxiliary_error,
          postgres/retained_uncertain/healthy, postgres/retained_uncertain/lost_ack, postgres/retained_uncertain/auxiliary_error,
          postgres/two_open_rounds/healthy, postgres/two_open_rounds/lost_ack, postgres/two_open_rounds/auxiliary_error]
-      TestSelectedBranchPointActivationAtomicityBothStores: [sqlite/event/running, sqlite/event/cancelled, sqlite/deployment_revision/running, sqlite/deployment_revision/cancelled, postgres/event/running, postgres/event/cancelled, postgres/deployment_revision/running, postgres/deployment_revision/cancelled]
-      TestSelectedBranchPointCleanupIsolationBothStores: [sqlite/event/discard, sqlite/event/reset, sqlite/deployment_revision/discard, sqlite/deployment_revision/reset, postgres/event/discard, postgres/event/reset, postgres/deployment_revision/discard, postgres/deployment_revision/reset]
       TestSelectedContractOrdinarySourceStatePresenceBothStores:
         - sqlite/absent
         - sqlite/zero
