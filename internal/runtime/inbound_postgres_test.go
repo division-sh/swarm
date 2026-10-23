@@ -160,7 +160,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	eventType := events.EventType(providerEventName)
 	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, eventType)
 
-	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -202,7 +202,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("agent settled attempts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})
@@ -263,7 +263,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	eventType := events.EventType(providerEventName)
 	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, eventType)
 
-	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -305,7 +305,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 		t.Fatalf("agent settled attempts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})
@@ -366,7 +366,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	eventType := events.EventType(providerEventName)
 	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, eventType)
 
-	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -410,7 +410,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("agent settled attempts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})

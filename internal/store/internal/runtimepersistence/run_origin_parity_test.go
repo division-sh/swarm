@@ -244,7 +244,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 				workflow = newPostgresWorkflowTestCoordinator(t, db, store)
 			}
 			candidateStore := selected.(runLifecycleCandidateParityStore)
-			ctx := testAuthorActivityRuntimeContext()
+			ctx := storeTestOriginalProcessContext(t, testAuthorActivityRuntimeContext(), selected)
 			flowPath := "repair-candidate/standing"
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			firstArtifact := storeTestSourceArtifact("standing-repair-first-" + backend)

@@ -26,7 +26,7 @@ func TestPipelineSettlementRetirementCleanupStillHandsOffCandidateBothStores(t *
 			if !ok {
 				t.Fatalf("%T does not expose pipeline obligations", fixture.store)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
