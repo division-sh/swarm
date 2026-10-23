@@ -353,7 +353,7 @@ func (s *postgresSession) CommitSourceSet(ctx context.Context, req runtimeagentt
 func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	var result runtimedestructivereset.CleanupResult
 	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, s.lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
-		if err := generationauthority.FenceMutation(txctx, tx, false); err != nil {
+		if err := generationauthority.FenceGenerationChange(txctx, tx, false); err != nil {
 			return err
 		}
 		if !req.Result.DryRun {
@@ -562,6 +562,9 @@ func (s *sqliteSession) CommitSourceSet(ctx context.Context, req runtimeagenttop
 
 func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (result runtimedestructivereset.CleanupResult, err error) {
 	committed, err := s.owner.backend.RunTransactionOutcome(ctx, "commit destructive reset cleanup", func(txctx context.Context, tx *sql.Tx) error {
+		if err := generationauthority.FenceGenerationChange(txctx, tx, true); err != nil {
+			return err
+		}
 		if !req.Result.DryRun {
 			previous, err := storeadmin.ReadResetCleanupTx(txctx, tx, req)
 			if err != nil {
@@ -725,6 +728,9 @@ func loadProcessAuthorityTx(ctx context.Context, tx *sql.Tx, backend string, sql
 }
 
 func acquireProcessGenerationTx(ctx context.Context, tx *sql.Tx, req runtimestartupownership.AcquireRequest, leaseID, backend string, sqlite bool) (runtimestartupownership.Authority, error) {
+	if err := generationauthority.FenceGenerationChange(ctx, tx, sqlite); err != nil {
+		return runtimestartupownership.Authority{}, err
+	}
 	prior, err := generationauthority.ReadProcessGenerationTx(ctx, tx, sqlite)
 	if err != nil {
 		return runtimestartupownership.Authority{}, err
@@ -745,7 +751,7 @@ func acquireProcessGenerationTx(ctx context.Context, tx *sql.Tx, req runtimestar
 }
 
 func retireAuthorityGenerationGrantsTx(ctx context.Context, tx *sql.Tx, authorityID string, sqlite bool) error {
-	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+	if err := generationauthority.FenceGenerationChange(ctx, tx, sqlite); err != nil {
 		return err
 	}
 	query := `SELECT g.snapshot FROM runtime_generation_grants g WHERE g.process_authority_id = ? AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id`
@@ -804,7 +810,7 @@ func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimes
 	if err := next.Validate(); err != nil {
 		return err
 	}
-	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+	if err := generationauthority.FenceGenerationChange(ctx, tx, sqlite); err != nil {
 		return err
 	}
 	if next.State != runtimestartupownership.GrantRetired {
@@ -884,6 +890,9 @@ func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimes
 
 func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology.SourceSetCommitRequest, sqlite bool) (runtimeagenttopology.SourceSetCommitResult, error) {
 	if err := req.Validate(); err != nil {
+		return runtimeagenttopology.SourceSetCommitResult{}, err
+	}
+	if err := generationauthority.FenceGenerationChange(ctx, tx, sqlite); err != nil {
 		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
 	requestHash, err := canonicaljson.Hash(req)
