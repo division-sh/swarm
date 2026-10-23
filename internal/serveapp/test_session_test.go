@@ -43,6 +43,32 @@ func admittedPrivateTestRequest(t *testing.T) cliapp.TestSessionRequest {
 	return admitted
 }
 
+func unchangedPrivateTestDeployment(t *testing.T, source string) func() {
+	t.Helper()
+	read := func() map[string]string {
+		entries, err := os.ReadDir(filepath.Join(source, ".swarm"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files := map[string]string{}
+		for _, entry := range entries {
+			body, err := os.ReadFile(filepath.Join(source, ".swarm", entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			files[entry.Name()] = string(body)
+		}
+		return files
+	}
+	before := read()
+	return func() {
+		t.Helper()
+		if !reflect.DeepEqual(before, read()) {
+			t.Error("private test changed the scaffold's deployment files or created project state")
+		}
+	}
+}
+
 func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
 	var previousToken string
 	for _, outcome := range []string{"success", "callback_failure", "cancelled", "deadline"} {
@@ -190,6 +216,7 @@ func TestPrivateTestStartupFailureUnwindsAcquiredResources(t *testing.T) {
 	for _, stage := range []string{"store_acquisition", "schema_after_store", "workspace_prepare", "workspace_release_failure", "runtime_construction"} {
 		t.Run(stage, func(t *testing.T) {
 			req := admittedPrivateTestRequest(t)
+			defer unchangedPrivateTestDeployment(t, req.SourceRoot)()
 			original := buildStoresForServe
 			t.Cleanup(func() { buildStoresForServe = original })
 			var privateRoot string
@@ -263,9 +290,6 @@ func TestPrivateTestStartupFailureUnwindsAcquiredResources(t *testing.T) {
 			if _, err := os.Stat(privateRoot); !os.IsNotExist(err) {
 				t.Fatalf("failed startup leaked its private root: %v", err)
 			}
-			if _, err := os.Stat(filepath.Join(req.SourceRoot, ".swarm")); !os.IsNotExist(err) {
-				t.Fatalf("failed private startup mutated project state: %v", err)
-			}
 		})
 	}
 }
@@ -276,6 +300,7 @@ func TestPrivateTestAdmissionPrecedesResourceAcquisition(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			unsetStoreSelectorEnv(t)
 			source := scaffoldConformanceArchetype(t, "zero-agent-automation")
+			defer unchangedPrivateTestDeployment(t, source)()
 			args := []string{"test", source}
 			switch input {
 			case "invalid_variables":
@@ -298,9 +323,6 @@ func TestPrivateTestAdmissionPrecedesResourceAcquisition(t *testing.T) {
 				})
 			if code != 2 || called {
 				t.Fatalf("code=%d acquired=%t stderr=%s", code, called, errOut.String())
-			}
-			if _, err := os.Stat(filepath.Join(source, ".swarm")); !os.IsNotExist(err) {
-				t.Fatalf("project state created: %v", err)
 			}
 		})
 	}

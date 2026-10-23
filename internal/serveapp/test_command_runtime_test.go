@@ -981,6 +981,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", credentialPath)
 	sourceRoot := scaffoldConformanceArchetype(t, archetype)
+	defer unchangedPrivateTestDeployment(t, sourceRoot)()
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot, "--portable"}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
@@ -1042,7 +1043,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	if err := db.Ping(); err == nil {
 		t.Fatal("test returned before store close")
 	}
-	for _, path := range []string{filepath.Dir(privateStorePath), filepath.Join(sourceRoot, ".swarm"), filepath.Join(sourceRoot, "swarm.yaml"), filepath.Join(sourceRoot, "swarm.live.yaml")} {
+	for _, path := range []string{filepath.Dir(privateStorePath), filepath.Join(sourceRoot, "swarm.yaml"), filepath.Join(sourceRoot, "swarm.live.yaml")} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("unexpected retained resource %s: %v", path, err)
 		}

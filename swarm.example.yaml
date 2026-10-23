@@ -18,6 +18,9 @@
 #     hitl:
 #       destination: "-1001234567890" # Deployment-owned opaque destination for the HITL outbound binding.
 #       pack: provider.telegram.hitl_channel # Channel pack selected for the HITL outbound binding.
+#   hitl:
+#     account: "+15550100" # Canonical deployment account reference; not a credential or flow binding.
+#     provider: whatsapp # Provider of the deployment account used for operator verification at connect.
 # connection:
 #   api_server: http://127.0.0.1:8081 # CLI API target for this deployment.
 # database:

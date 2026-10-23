@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	onboarding "github.com/division-sh/swarm/internal/channelonboarding"
 	domain "github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 )
@@ -49,11 +50,11 @@ func settleSessionClaim(ctx context.Context, runner transactionRunner, fact auth
 			settlement = domain.ClaimSettlement{Consumed: true, Disposition: receipt.Disposition}
 			return nil
 		}
-		if err := requireSessionClaimParent(txctx, tx, runner.dialect(), claim, parentID, parentRevision); err != nil {
+		if err := requireSessionClaimParent(txctx, tx, runner.dialect(), claim, parentID, parentRevision, fact.Scope()); err != nil {
 			return err
 		}
 		var err error
-		settlement, err = settleInboundClaimTx(txctx, tx, runner.dialect(), claim, fact.ReceivedAt())
+		settlement, err = settleInboundClaimTx(txctx, tx, runner.dialect(), claim, fact.ReceivedAt(), fact.Scope())
 		if err != nil {
 			return err
 		}
@@ -64,12 +65,16 @@ func settleSessionClaim(ctx context.Context, runner transactionRunner, fact auth
 	return settlement, err
 }
 
-func requireSessionClaimParent(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, parentID string, parentRevision int64) error {
+func requireSessionClaimParent(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, parentID string, parentRevision int64, scope authority.ParentScope) error {
+	table, err := onboardingParentTable(scope)
+	if err != nil {
+		return err
+	}
 	op, found, err := loadOperationByChallenge(ctx, tx, d, claim.Challenge, true)
 	if err != nil {
 		return err
 	}
-	query := `SELECT operation_revision,phase FROM channel_onboarding_operations WHERE operation_id=?`
+	query := `SELECT operation_revision,phase FROM ` + table + ` WHERE operation_id=?`
 	if d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
@@ -84,7 +89,7 @@ func requireSessionClaimParent(ctx context.Context, tx *sql.Tx, d dialect, claim
 	if !found {
 		return nil
 	}
-	if op.OnboardingOperationID != parentID {
+	if op.OnboardingOperationID != parentID || op.ProviderAuthority.Scope != scope {
 		return domain.ErrConflict
 	}
 	return requireActiveOnboardingParent(ctx, tx, d, op)
@@ -130,25 +135,56 @@ func loadClaimReceipt(ctx context.Context, db queryer, d dialect, id string) (do
 	return receipt, true, nil
 }
 
-func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID string, admitted domain.ProviderAuthority) error {
+func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID, principal string, admitted domain.ProviderAuthority) error {
 	if err := admitted.RequireExecutable(); err != nil {
 		return err
 	}
 	originalID, originalRevision := admitted.SessionParent()
-	if originalID != parentID || parentID == "" {
+	if parentID == "" || admitted.Kind == domain.ProviderAuthoritySession && originalID != parentID {
 		return domain.ErrRevisionConflict
 	}
-	query := `SELECT operation_revision,phase FROM channel_onboarding_operations WHERE operation_id=?`
+	table, err := onboardingParentTable(admitted.Scope)
+	if err != nil {
+		return err
+	}
+	approval := `TRUE,'[]'`
+	if admitted.Scope == authority.DeploymentParent {
+		approval = `account_confirmed,credential_admissions`
+	}
+	query := `SELECT operation_revision,phase,principal_id,` + approval + ` FROM ` + table + ` WHERE operation_id=?`
 	if d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
 	var revision int64
 	var phase string
-	if err := tx.QueryRowContext(ctx, d.bind(query), parentID).Scan(&revision, &phase); err != nil {
+	var owner, credentials string
+	var confirmed bool
+	if err := tx.QueryRowContext(ctx, d.bind(query), parentID).Scan(&revision, &phase, &owner, &confirmed, &credentials); err != nil {
 		return err
 	}
-	if revision != originalRevision || phase == "succeeded" || phase == "failed" || phase == "retired" {
+	if owner != principal || !confirmed || admitted.Kind == domain.ProviderAuthoritySession && revision != originalRevision ||
+		phase == "succeeded" || phase == "failed" || phase == "retired" {
 		return domain.ErrRevisionConflict
 	}
+	if admitted.Scope == authority.DeploymentParent && admitted.Kind == domain.ProviderAuthorityCredential {
+		admissions, err := onboarding.DecodeCredentialAdmissions(credentials)
+		if err != nil {
+			return err
+		}
+		if len(admissions) != 1 || admitted.Credential.Key != admissions[0].StoreKey || admitted.Credential.Seal != admissions[0].ValueSeal {
+			return domain.ErrRevisionConflict
+		}
+	}
 	return admitted.RequireExecutable()
+}
+
+func onboardingParentTable(scope authority.ParentScope) (string, error) {
+	switch scope {
+	case authority.RuntimeParent:
+		return "channel_onboarding_operations", nil
+	case authority.DeploymentParent:
+		return "deployment_channel_operations", nil
+	default:
+		return "", domain.ErrInvalidRequest
+	}
 }

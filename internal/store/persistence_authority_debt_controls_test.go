@@ -68,6 +68,55 @@ func TestPersistenceAuthorityDebtFixtureRoleDoesNotAuthorizeProductionConsumptio
 }
 
 func TestPersistenceAuthorityDebtRatchetRejectsPaymentDuplicationReseedAndResurrection(t *testing.T) {
+	t.Run("reviewed deployment stub metadata is exact and one way", func(t *testing.T) {
+		trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtDeploymentRegistrationCollectorFrom, Sites: debtControlSet(debtControlSite("call:QueryRow", 1))}
+		head := trusted
+		head.Collector, head.Sites = debtDeploymentRegistrationCollectorTo, debtWithDeploymentRegistrationStubs(trusted.Sites)
+		if err := debtValidateCollectorIdentity(trusted.Collector, head.Collector, trusted, head, ""); err != nil {
+			t.Fatal(err)
+		}
+		if len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
+			t.Fatal("TSV rows bypassed the trusted-source comparison")
+		}
+		for _, mutation := range []string{"missing", "body", "context", "multiplicity", "unrelated", "foreign-origin", "foreign-destination", "reverse"} {
+			t.Run(mutation, func(t *testing.T) {
+				old, changed := trusted, head
+				changed.Sites = debtWithDeploymentRegistrationStubs(trusted.Sites)
+				for key, site := range debtWithDeploymentRegistrationStubs(nil) {
+					delete(changed.Sites, key)
+					switch mutation {
+					case "body":
+						site.Operation += "other"
+					case "context":
+						site.Resolved += "other"
+					case "multiplicity":
+						site.Multiplicity++
+					}
+					if mutation != "missing" {
+						changed.Sites[site.identity()] = site
+					}
+					break
+				}
+				switch mutation {
+				case "unrelated":
+					site := debtControlSite("call:Exec", 1)
+					changed.Sites[site.identity()] = site
+				case "foreign-origin":
+					old.Collector = strings.Repeat("a", 64)
+				case "foreign-destination":
+					changed.Collector = strings.Repeat("a", 64)
+				case "reverse":
+					old, changed = changed, old
+				}
+				if err := debtValidateCollectorIdentity(old.Collector, changed.Collector, old, changed, ""); err == nil {
+					t.Fatal("reviewed +2 admitted another identity, count, or direction")
+				}
+			})
+		}
+		if len(authorityDebtRatchet(head.Sites, head.Sites, head.Sites, trusted.Sites)) == 0 {
+			t.Fatal("landed baseline authorized resurrection from a source without the stubs")
+		}
+	})
 	one, two := debtControlSite("call:QueryRow", 1), debtControlSite("call:Exec", 1)
 	base := debtControlSet(one, two)
 	for _, test := range []struct {

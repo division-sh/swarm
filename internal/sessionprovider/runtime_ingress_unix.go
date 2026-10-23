@@ -55,7 +55,7 @@ func newRuntimeIncoming(c *RuntimeConnection, opts RuntimeIncomingOptions) (*run
 	if err != nil {
 		return nil, err
 	}
-	input, err := newSessionInputOwner(c.store, reader, c.operation.OperationID)
+	input, err := newSessionInputOwner(c.store, c.operations, reader, c.operation.OperationID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +70,9 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		return nil
 	}
 	if c.incoming == nil {
+		if c.operation.DeploymentRegistration {
+			return errIncomingAdmissionPending
+		}
 		return errRuntimeIngressUnavailable
 	}
 	work, err := c.begin(ctx)
@@ -77,6 +80,15 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, work.Done()) }()
+	if c.operation.DeploymentRegistration {
+		op, err := c.currentOperation(work.Context())
+		if err != nil {
+			return err
+		}
+		if !op.AccountConfirmed || op.IdentityOperationID == "" {
+			return errIncomingAdmissionPending
+		}
+	}
 	account, err := c.AdmitSessionAccount(work.Context(), c.sessionAccount())
 	if err != nil {
 		return err
@@ -120,6 +132,18 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 	op, err := i.connection.currentOperation(ctx)
 	if err != nil {
 		return captureScope{}, captureSource{}, err
+	}
+	if op.DeploymentRegistration {
+		claim, err := i.pendingOperatorClaim(ctx, op, message)
+		if err != nil {
+			return captureScope{}, captureSource{}, err
+		}
+		if !op.AccountConfirmed || !claim {
+			return captureScope{}, captureSource{}, errIncomingAdmissionPending
+		}
+		scope := captureScope{DeploymentRegistration: true, Kind: channelonboarding.SessionInputOnboarding,
+			Session: op.SessionAccount, OnboardingOperation: op.OperationID, OperationRevision: op.Revision, PrincipalID: op.PrincipalID}
+		return scope, captureSource{DeploymentRegistration: true, CatalogGeneration: i.handoff.trigger.Generation()}, scope.Validate()
 	}
 	// Native account admission precedes this check. Pending execution is not
 	// a capture failure, and cannot acknowledge or publish the incoming input.
@@ -168,8 +192,13 @@ func (i *runtimeIncoming) pendingOperatorClaim(ctx context.Context, op channelon
 	if err != nil {
 		return false, err
 	}
+	parentScope := authority.RuntimeParent
+	if op.DeploymentRegistration {
+		parentScope = authority.DeploymentParent
+	}
 	for _, identity := range operations {
 		if identity.OperationID == op.IdentityOperationID && identity.OnboardingOperationID == op.OperationID &&
+			identity.ProviderAuthority.Scope == parentScope &&
 			identity.PrincipalID == op.PrincipalID && identity.Interface.Normalized() == op.Interface.Normalized() &&
 			identity.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession && identity.ProviderAuthority.Session == op.SessionAccount &&
 			(identity.State == operatorchannel.StateAwaitingClaim || identity.State == operatorchannel.StateAwaitingConfirmation) &&

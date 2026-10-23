@@ -30,6 +30,7 @@ const debtRefreshEnv = "SWARM_REFRESH_PERSISTENCE_AUTHORITY_DEBT"
 const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5"
 const debtQuiescenceCollectorFrom = "65fe2e66c01eb0e19ce2b44d53f545cc76dd823f5f8b58562e139a362cc9c267"
 const debtRunFixtureCollectorFrom = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e4d80d904832757ae047"
+const debtDeploymentRegistrationCollectorFrom = "4a683b60cf5147aece5eabc4e8f044555f64a15623f9e7106ddb4d9726961f9a"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
@@ -164,6 +165,30 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	failures = append(failures, authorityDebtSubset(head, base, "head -> trusted baseline")...)
 	failures = append(failures, authorityDebtSubset(actual, baseActual, "actual -> trusted source (resurrection)")...)
 	return failures
+}
+
+// #2764/6360810282 permits exactly these two build-excluded platform stubs.
+// They return error/nil and execute no persistence; their full source identities
+// remain debt, not a new benign classification or an extraction exclusion.
+func debtWithDeploymentRegistrationStubs(sites map[string]authorityDebtSite) map[string]authorityDebtSite {
+	out := make(map[string]authorityDebtSite, len(sites)+2)
+	for key, site := range sites {
+		out[key] = site
+	}
+	for _, stub := range [2]struct{ name, digest string }{
+		{"OpenChannelRegistration", "38dad8ee484412399b136f2a768a54d0cbb866e6bdd788083313df3c413dbdd3"},
+		{"deploymentChannelHandlers", "7890217cded1dd01ed764ec3a9fab9d2daad2c882b0920a7d3ead721e5710d50"},
+	} {
+		site := authorityDebtSite{
+			Kind: "unresolved-excluded-source", File: "internal/serveapp/channel_deployment_unsupported.go",
+			Declaration: stub.name, Operation: "declaration:" + stub.digest,
+			Resolved: "unresolved|source-context:14375e4f0f053ea0b9c5c0715496c22cb494c816197b9efdb94415151ce4d24d",
+			Family:   "excluded-source-uncertainty", Replacement: "existing canonical owner or narrow source-evidenced classification; never a file exemption or baseline increase",
+			Multiplicity: 1,
+		}
+		out[site.identity()] = site
+	}
+	return out
 }
 
 // Reviewed at 2b699b9af7c05fb8f319ae190f9c2f802bd7bd10 ->
@@ -826,7 +851,17 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if err := debtValidateProcessLeaseRelocationSource(root, baseRoot, actual, baseActual); err != nil {
 		t.Fatal(err)
 	}
-	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
+	comparisonBaseline, comparisonSource := trusted.Sites, baseActual
+	if trusted.Collector == debtDeploymentRegistrationCollectorFrom && collector == debtDeploymentRegistrationCollectorTo {
+		for key, site := range debtWithDeploymentRegistrationStubs(nil) {
+			if actual[key] != site || baseActual[key].Multiplicity != 0 {
+				t.Fatal("reviewed deployment stub addition does not match exact source identities")
+			}
+		}
+		comparisonBaseline = debtWithDeploymentRegistrationStubs(comparisonBaseline)
+		comparisonSource = debtWithDeploymentRegistrationStubs(comparisonSource)
+	}
+	failures := authorityDebtRatchet(actual, head.Sites, comparisonBaseline, comparisonSource)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
 	}
@@ -908,6 +943,12 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == debtProcessLeaseCollectorTo && trusted.Collector == base &&
 		current == debtNativeFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // #642/6190983544 + 6191476293: exact fixture/custody policy, no baseline edit.
+	}
+	if base == debtDeploymentRegistrationCollectorFrom && trusted.Collector == base &&
+		current == debtDeploymentRegistrationCollectorTo && head.Collector == current &&
+		authorityDebtCount(head.Sites) == authorityDebtCount(trusted.Sites)+2 &&
+		debtSitesEqual(head.Sites, debtWithDeploymentRegistrationStubs(trusted.Sites)) {
+		return nil
 	}
 	if base == debtForkProofCollectorFrom && current == debtForkProofCollectorTo &&
 		trusted.Collector == base && head.Collector == current &&

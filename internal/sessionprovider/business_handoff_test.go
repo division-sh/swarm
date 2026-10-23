@@ -105,7 +105,7 @@ func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.owner, err = newSessionInputOwner(f.selected, reader, f.operation.OperationID)
+	f.owner, err = newSessionInputOwner(f.selected, f.selected, reader, f.operation.OperationID)
 	if err != nil {
 		t.Fatal(err)
 	}

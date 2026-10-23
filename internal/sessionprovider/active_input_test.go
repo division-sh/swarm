@@ -204,11 +204,11 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.owner, err = newSessionInputOwner(f.selected, reader, f.operation.OperationID)
+	f.owner, err = newSessionInputOwner(f.selected, f.selected, reader, f.operation.OperationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.authority, err = newSessionAuthorityOwner(f.state, f.selected, f.operation, nil)
+	f.authority, err = newSessionAuthorityOwner(f.state, f.selected, f.operation, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestWhatsAppSessionAuthorityIsOwnedAndExactBothStores(t *testing.T) {
 			retained := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: f.operation.SessionAccount}
 			foreignOperation := f.operation
 			foreignOperation.Provider, foreignOperation.SessionAccount.Provider = "discord", "discord"
-			if _, err := newSessionAuthorityOwner(f.state, f.selected, foreignOperation, nil); err == nil {
+			if _, err := newSessionAuthorityOwner(f.state, f.selected, foreignOperation, nil, nil); err == nil {
 				t.Fatal("WhatsApp SDK issued another provider's account authority")
 			}
 			admitted, current, err := retained.AdmitExecution(f.ctx, f.authority)

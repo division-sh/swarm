@@ -1973,6 +1973,32 @@
       "description": "Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome and retries pending or failed proof projection without repeating claim or binding mutation; rejection omits binding.",
       "params": [
         {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "const": "deployment",
+            "type": "string"
+          }
+        },
+        {
+          "name": "holder",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DeploymentChannelHolder"
+          }
+        },
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "enum": [
+              "whatsapp",
+              "telegram"
+            ],
+            "type": "string"
+          }
+        },
+        {
           "name": "operation_id",
           "required": true,
           "schema": {
@@ -2323,12 +2349,58 @@
     {
       "name": "channel.list",
       "description": "Return generation-aware readback for the exact union of current interfaces, retained bindings, machine proofs, and nonterminal operations. Raw account references and display values are masked, with absent provider presentation falling back to the safely masked external account reference.",
-      "params": [],
+      "params": [
+        {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "const": "deployment",
+            "type": "string"
+          }
+        },
+        {
+          "name": "holder",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DeploymentChannelHolder"
+          }
+        },
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "enum": [
+              "whatsapp",
+              "telegram"
+            ],
+            "type": "string"
+          }
+        }
+      ],
       "result": {
         "name": "result",
         "required": true,
         "schema": {
-          "$ref": "#/components/schemas/OperatorChannelListResult"
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/OperatorChannelListResult"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "accounts": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChannelOnboardingResult"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "accounts"
+              ],
+              "type": "object"
+            }
+          ]
         }
       },
       "errors": [
@@ -2377,6 +2449,32 @@
       "description": "Explicitly unlink one original paired session connection selected by its retained onboarding operation and exact revision. The authenticated stable principal owns the durable teardown, which fences business use without disconnecting the transport needed for the effect. The existing effect journal owns launch and outcome; launched or uncertain logout is never automatically resent, re-paired or adopted by a successor. Ordinary unbind, reset and source retirement retain pairing. Readback exposes no raw account, session path, pairing secret or SDK handle. The CLI reads channel.onboarding_get then delegates to this method.",
       "params": [
         {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "const": "deployment",
+            "type": "string"
+          }
+        },
+        {
+          "name": "holder",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DeploymentChannelHolder"
+          }
+        },
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "enum": [
+              "whatsapp",
+              "telegram"
+            ],
+            "type": "string"
+          }
+        },
+        {
           "name": "operation_id",
           "required": true,
           "schema": {
@@ -2403,7 +2501,14 @@
         "name": "result",
         "required": true,
         "schema": {
-          "$ref": "#/components/schemas/ChannelLogoutResult"
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/ChannelLogoutResult"
+            },
+            {
+              "$ref": "#/components/schemas/ChannelOnboardingResult"
+            }
+          ]
         }
       },
       "errors": [
@@ -2587,6 +2692,32 @@
       "description": "Read one durable onboarding operation, its nested identity state, and its exact-current connected readiness without advancing or replaying effects.",
       "params": [
         {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "const": "deployment",
+            "type": "string"
+          }
+        },
+        {
+          "name": "holder",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DeploymentChannelHolder"
+          }
+        },
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "enum": [
+              "whatsapp",
+              "telegram"
+            ],
+            "type": "string"
+          }
+        },
+        {
           "name": "operation_id",
           "required": true,
           "schema": {
@@ -2646,6 +2777,39 @@
       "name": "channel.onboarding_retry",
       "description": "Resume the same durable onboarding responsibility from settled component evidence. It never blindly resends uncertain provider work or rotates credentials merely because the client retried.",
       "params": [
+        {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "const": "deployment",
+            "type": "string"
+          }
+        },
+        {
+          "name": "holder",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DeploymentChannelHolder"
+          }
+        },
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "enum": [
+              "whatsapp",
+              "telegram"
+            ],
+            "type": "string"
+          }
+        },
+        {
+          "name": "reverify",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
         {
           "name": "operation_id",
           "required": true,
@@ -2920,6 +3084,21 @@
       "description": "Resolve one exact onboarding declaration and its provider credential requirement without reservation, credential observation or writes, SDK state, or effects. Start must revalidate the transient selection fence before mutation.",
       "params": [
         {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "const": "deployment",
+            "type": "string"
+          }
+        },
+        {
+          "name": "holder",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DeploymentChannelHolder"
+          }
+        },
+        {
           "name": "verb",
           "required": true,
           "schema": {
@@ -3115,6 +3294,29 @@
       "name": "channel.onboarding_start",
       "description": "Reserve and advance one durable exact-context connected-channel connect, reconnect, or rebind journey. Provider secret material is transient write-only input and is absent from request identity, durable rows, logs, errors, and readback.",
       "params": [
+        {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "const": "deployment",
+            "type": "string"
+          }
+        },
+        {
+          "name": "holder",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DeploymentChannelHolder"
+          }
+        },
+        {
+          "name": "account",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
         {
           "name": "verb",
           "required": true,
@@ -15501,64 +15703,14 @@
         "type": "object"
       },
       "ChannelOnboardingCandidate": {
-        "additionalProperties": false,
-        "properties": {
-          "activation_posture": {
-            "enum": [
-              "webhook_registration",
-              "session_connection"
-            ],
-            "type": "string"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RuntimeChannelOnboardingCandidate"
           },
-          "capabilities": {
-            "$ref": "#/components/schemas/ChannelCapabilityVector"
-          },
-          "confirmation_operation": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "connection_health": {
-            "type": "string"
-          },
-          "coordinate": {
-            "$ref": "#/components/schemas/ChannelRuntimeContextCoordinate"
-          },
-          "identity_ceremony": {
-            "enum": [
-              "authenticated_text_challenge",
-              "account_link"
-            ],
-            "type": "string"
-          },
-          "interface": {
-            "$ref": "#/components/schemas/OperatorChannelInterface"
-          },
-          "provider": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "provider_credential_role": {
-            "type": "string"
-          },
-          "signing_credential_role": {
-            "type": "string"
-          },
-          "target": {
-            "$ref": "#/components/schemas/ChannelOnboardingCandidateTarget"
+          {
+            "$ref": "#/components/schemas/DeploymentChannelCandidate"
           }
-        },
-        "required": [
-          "provider",
-          "interface",
-          "coordinate",
-          "target",
-          "activation_posture",
-          "identity_ceremony",
-          "provider_credential_role",
-          "confirmation_operation",
-          "capabilities"
-        ],
-        "type": "object"
+        ]
       },
       "ChannelOnboardingCandidateTarget": {
         "additionalProperties": false,
@@ -15616,144 +15768,14 @@
         "type": "object"
       },
       "ChannelOnboardingOperation": {
-        "additionalProperties": false,
-        "properties": {
-          "activation_posture": {
-            "enum": [
-              "webhook_registration",
-              "session_connection"
-            ],
-            "type": "string"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RuntimeChannelOnboardingOperation"
           },
-          "activation_revision": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "binding_revision": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "client_language": {
-            "type": "string"
-          },
-          "client_locale_revision": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "completed_at": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "confirmation_operation_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "coordinate": {
-            "$ref": "#/components/schemas/ChannelRuntimeContextCoordinate"
-          },
-          "credential_admissions": {
-            "items": {
-              "$ref": "#/components/schemas/ChannelCredentialAdmission"
-            },
-            "type": "array"
-          },
-          "credential_reservations": {
-            "items": {
-              "$ref": "#/components/schemas/ChannelCredentialReservation"
-            },
-            "type": "array"
-          },
-          "failure_code": {
-            "type": "string"
-          },
-          "failure_message": {
-            "type": "string"
-          },
-          "identity_ceremony": {
-            "enum": [
-              "authenticated_text_challenge",
-              "account_link"
-            ],
-            "type": "string"
-          },
-          "identity_operation_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "interface": {
-            "$ref": "#/components/schemas/OperatorChannelInterface"
-          },
-          "operation_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "phase": {
-            "enum": [
-              "preparing",
-              "credentials_admitted",
-              "activating_provider",
-              "awaiting_external_identity",
-              "awaiting_operator_confirmation",
-              "publishing_activation",
-              "publishing_process_activation",
-              "promoting_registration",
-              "retiring_predecessor",
-              "delivering_confirmation",
-              "succeeded",
-              "failed",
-              "retired"
-            ],
-            "type": "string"
-          },
-          "principal_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "provider": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "requested_at": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "revision": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "save_proof": {
-            "type": "boolean"
-          },
-          "target_selector": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "updated_at": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "verb": {
-            "enum": [
-              "connect",
-              "reconnect",
-              "rebind"
-            ],
-            "type": "string"
+          {
+            "$ref": "#/components/schemas/DeploymentChannelOperation"
           }
-        },
-        "required": [
-          "operation_id",
-          "principal_id",
-          "verb",
-          "provider",
-          "interface",
-          "coordinate",
-          "target_selector",
-          "activation_posture",
-          "identity_ceremony",
-          "phase",
-          "revision",
-          "save_proof",
-          "client_language",
-          "client_locale_revision",
-          "credential_reservations",
-          "requested_at",
-          "updated_at"
-        ],
-        "type": "object"
+        ]
       },
       "ChannelOnboardingResult": {
         "additionalProperties": false,
@@ -19285,6 +19307,225 @@
           "dead_letter"
         ],
         "type": "string"
+      },
+      "DeploymentChannelCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "activation_posture": {
+            "enum": [
+              "webhook_registration",
+              "session_connection"
+            ],
+            "type": "string"
+          },
+          "confirmation_operation": {
+            "type": "string"
+          },
+          "connection_health": {
+            "type": "string"
+          },
+          "deployment_registration": {
+            "const": true,
+            "type": "boolean"
+          },
+          "identity_ceremony": {
+            "const": "account_link",
+            "type": "string"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/OperatorChannelInterface"
+          },
+          "provider": {
+            "enum": [
+              "whatsapp",
+              "telegram"
+            ],
+            "type": "string"
+          },
+          "provider_credential_role": {
+            "type": "string"
+          },
+          "signing_credential_role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deployment_registration",
+          "provider",
+          "interface",
+          "activation_posture",
+          "identity_ceremony",
+          "provider_credential_role",
+          "confirmation_operation"
+        ],
+        "type": "object"
+      },
+      "DeploymentChannelHolder": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_generation": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "authority_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "backend": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "boot_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "owner_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "runtime_instance_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "authority_id",
+          "authority_generation",
+          "owner_id",
+          "boot_id",
+          "runtime_instance_id",
+          "backend"
+        ],
+        "type": "object"
+      },
+      "DeploymentChannelOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "account_confirmed": {
+            "type": "boolean"
+          },
+          "account_reference": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "activation_posture": {
+            "enum": [
+              "webhook_registration",
+              "session_connection"
+            ],
+            "type": "string"
+          },
+          "binding_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "client_language": {
+            "type": "string"
+          },
+          "client_locale_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "credential_admissions": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelCredentialAdmission"
+            },
+            "type": "array"
+          },
+          "credential_reservations": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelCredentialReservation"
+            },
+            "type": "array"
+          },
+          "deployment_registration": {
+            "const": true,
+            "type": "boolean"
+          },
+          "expected_account": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "failure_code": {
+            "type": "string"
+          },
+          "failure_message": {
+            "type": "string"
+          },
+          "identity_ceremony": {
+            "const": "account_link",
+            "type": "string"
+          },
+          "identity_operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/OperatorChannelInterface"
+          },
+          "logout_completed": {
+            "type": "boolean"
+          },
+          "operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "phase": {
+            "enum": [
+              "preparing",
+              "credentials_admitted",
+              "activating_provider",
+              "awaiting_external_identity",
+              "awaiting_operator_confirmation",
+              "succeeded",
+              "failed",
+              "retired"
+            ],
+            "type": "string"
+          },
+          "principal_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "provider": {
+            "enum": [
+              "whatsapp",
+              "telegram"
+            ],
+            "type": "string"
+          },
+          "requested_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "save_proof": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "verb": {
+            "const": "connect",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deployment_registration",
+          "operation_id",
+          "principal_id",
+          "verb",
+          "provider",
+          "interface",
+          "activation_posture",
+          "identity_ceremony",
+          "phase",
+          "revision",
+          "save_proof",
+          "credential_reservations",
+          "requested_at",
+          "updated_at"
+        ],
+        "type": "object"
       },
       "DiagnosisEvidence": {
         "additionalProperties": false,
@@ -23021,6 +23262,206 @@
           "event_id",
           "event_name",
           "event_created_at"
+        ],
+        "type": "object"
+      },
+      "RuntimeChannelOnboardingCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "activation_posture": {
+            "enum": [
+              "webhook_registration",
+              "session_connection"
+            ],
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ChannelCapabilityVector"
+          },
+          "confirmation_operation": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "connection_health": {
+            "type": "string"
+          },
+          "coordinate": {
+            "$ref": "#/components/schemas/ChannelRuntimeContextCoordinate"
+          },
+          "identity_ceremony": {
+            "enum": [
+              "authenticated_text_challenge",
+              "account_link"
+            ],
+            "type": "string"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/OperatorChannelInterface"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider_credential_role": {
+            "type": "string"
+          },
+          "signing_credential_role": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ChannelOnboardingCandidateTarget"
+          }
+        },
+        "required": [
+          "provider",
+          "interface",
+          "coordinate",
+          "target",
+          "activation_posture",
+          "identity_ceremony",
+          "provider_credential_role",
+          "confirmation_operation",
+          "capabilities"
+        ],
+        "type": "object"
+      },
+      "RuntimeChannelOnboardingOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "activation_posture": {
+            "enum": [
+              "webhook_registration",
+              "session_connection"
+            ],
+            "type": "string"
+          },
+          "activation_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "binding_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "client_language": {
+            "type": "string"
+          },
+          "client_locale_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "confirmation_operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "coordinate": {
+            "$ref": "#/components/schemas/ChannelRuntimeContextCoordinate"
+          },
+          "credential_admissions": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelCredentialAdmission"
+            },
+            "type": "array"
+          },
+          "credential_reservations": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelCredentialReservation"
+            },
+            "type": "array"
+          },
+          "failure_code": {
+            "type": "string"
+          },
+          "failure_message": {
+            "type": "string"
+          },
+          "identity_ceremony": {
+            "enum": [
+              "authenticated_text_challenge",
+              "account_link"
+            ],
+            "type": "string"
+          },
+          "identity_operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/OperatorChannelInterface"
+          },
+          "operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "phase": {
+            "enum": [
+              "preparing",
+              "credentials_admitted",
+              "activating_provider",
+              "awaiting_external_identity",
+              "awaiting_operator_confirmation",
+              "publishing_activation",
+              "publishing_process_activation",
+              "promoting_registration",
+              "retiring_predecessor",
+              "delivering_confirmation",
+              "succeeded",
+              "failed",
+              "retired"
+            ],
+            "type": "string"
+          },
+          "principal_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "requested_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "save_proof": {
+            "type": "boolean"
+          },
+          "target_selector": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "verb": {
+            "enum": [
+              "connect",
+              "reconnect",
+              "rebind"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "principal_id",
+          "verb",
+          "provider",
+          "interface",
+          "coordinate",
+          "target_selector",
+          "activation_posture",
+          "identity_ceremony",
+          "phase",
+          "revision",
+          "save_proof",
+          "client_language",
+          "client_locale_revision",
+          "credential_reservations",
+          "requested_at",
+          "updated_at"
         ],
         "type": "object"
       },

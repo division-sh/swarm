@@ -16849,6 +16849,7 @@ platform_tables:
         - standing_services
         - runs
       preserve:
+        - deployment_channel_operations
         - runtime_reset_operations
         - runtime_store_metadata
         - resource_declarations
@@ -17970,6 +17971,71 @@ platform_tables:
             UNIQUE INDEX idx_channel_onboarding_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
             INDEX idx_channel_onboarding_principal (principal_id, requested_at),
             INDEX idx_channel_onboarding_phase (phase, updated_at)
+        );
+    deployment_channel_operations:
+      description: >-
+        Deployment-only account pairing and optional operator verification. Uses the onboarding
+        phase and credential owners, with no runtime, bundle, flow, activation or standing target.
+        Native connection responsibility is reserved before opening device state. Only explicit
+        account approval can complete registration; the expected account fences re-verification.
+      ddl: |
+        CREATE TABLE deployment_channel_operations (
+            operation_id UUID PRIMARY KEY,
+            request_key_hash TEXT NOT NULL UNIQUE,
+            request_hash TEXT NOT NULL,
+            slot_key TEXT NOT NULL,
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            verb TEXT NOT NULL CHECK (verb IN ('connect','reconnect','rebind')),
+            provider TEXT NOT NULL CHECK (provider IN ('whatsapp','telegram')),
+            interface_key TEXT NOT NULL,
+            interface_ref TEXT NOT NULL CHECK (interface_ref = 'swarm.hitl-channel/v2'),
+            channel_pack_id TEXT NOT NULL,
+            channel_pack_version TEXT NOT NULL,
+            channel_manifest_hash TEXT NOT NULL,
+            semantic_generation TEXT NOT NULL,
+            bundle_hash TEXT,
+            bundle_identity TEXT NOT NULL CHECK (bundle_identity = ''),
+            pack_inventory_generation TEXT NOT NULL CHECK (pack_inventory_generation = ''),
+            runtime_instance_id UUID,
+            context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation = 0),
+            plan_generation TEXT NOT NULL CHECK (plan_generation = ''),
+            target_selector TEXT NOT NULL CHECK (target_selector = ''),
+            target_generation BIGINT NOT NULL CHECK (target_generation = 0),
+            activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
+            identity_ceremony TEXT NOT NULL CHECK (identity_ceremony IN ('authenticated_text_challenge','account_link')),
+            phase TEXT NOT NULL CHECK (phase IN ('preparing','credentials_admitted','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','succeeded','failed','retired')),
+            operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
+            save_proof BOOLEAN NOT NULL,
+            client_language TEXT NOT NULL,
+            client_locale_revision BIGINT NOT NULL CHECK (client_locale_revision > 0),
+            credential_reservations TEXT NOT NULL,
+            credential_admissions TEXT NOT NULL,
+            session_connection_id UUID,
+            session_account_admission TEXT,
+            identity_operation_id UUID,
+            binding_revision BIGINT,
+            connect_fence_revision BIGINT NOT NULL DEFAULT 0,
+            activation_revision BIGINT,
+            confirmation_operation_id UUID,
+            account_reference TEXT NOT NULL DEFAULT '',
+            account_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+            logout_completed BOOLEAN NOT NULL DEFAULT FALSE,
+            expected_account TEXT NOT NULL DEFAULT '',
+            failure_code TEXT,
+            failure_message TEXT,
+            requested_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            completed_at TIMESTAMPTZ,
+            CHECK (bundle_hash IS NULL AND runtime_instance_id IS NULL AND activation_revision IS NULL AND confirmation_operation_id IS NULL),
+            CHECK ((phase IN ('succeeded','failed','retired')) = (completed_at IS NOT NULL)),
+            CHECK (NOT account_confirmed OR account_reference <> ''),
+            CHECK (NOT logout_completed OR phase = 'retired'),
+            CHECK (phase <> 'succeeded' OR account_confirmed),
+            CHECK ((provider = 'whatsapp') = (activation_posture = 'session_connection')),
+            CHECK ((activation_posture = 'session_connection') = (session_connection_id IS NOT NULL)),
+            UNIQUE INDEX idx_deployment_channel_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
+            UNIQUE INDEX idx_deployment_channel_account (principal_id,provider,account_reference) WHERE account_confirmed AND phase <> 'retired',
+            INDEX idx_deployment_channel_principal (principal_id,requested_at)
         );
     channel_onboarding_teardowns:
       description: >-
@@ -27140,8 +27206,8 @@ test_specification:
       archetype_admission: >-
         Every admitted `swarm new` archetype contains an authored derived smoke scenario, verifies structurally, and runs
         through bare public `swarm test` with zero credentials and zero Docker in under 60 seconds. No separate server,
-        deployment configuration, precreated .swarm directory or mock-to-live graduation file is shipped. `swarm new` writes
-        only the selected embedded canonical archetype and refuses overwrite; future producers persist the same canonical plan
+        deployment resource or mock-to-live graduation is required by `swarm test`. `swarm new` writes
+        the selected embedded canonical archetype plus private `.swarm/swarm.yaml` and API token, and refuses overwrite; future producers persist the same canonical plan
         grammar rather than introducing a scaffold-only format.
     non_goals:
     - No runtime/backend/provider implementation is promoted by this section.
@@ -37637,6 +37703,41 @@ api_specification:
           kind: {type: string, enum: [written, observed]}
           receipt: {type: string, minLength: 1}
       ChannelOnboardingOperation:
+        oneOf:
+          - {$ref: '#/components/schemas/RuntimeChannelOnboardingOperation'}
+          - {$ref: '#/components/schemas/DeploymentChannelOperation'}
+      DeploymentChannelOperation:
+        type: object
+        additionalProperties: false
+        required: [deployment_registration, operation_id, principal_id, verb, provider, interface, activation_posture, identity_ceremony, phase, revision, save_proof, credential_reservations, requested_at, updated_at]
+        properties:
+          deployment_registration: {type: boolean, const: true}
+          operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          principal_id: {$ref: '#/components/schemas/OpaqueId'}
+          verb: {type: string, const: connect}
+          provider: {type: string, enum: [whatsapp, telegram]}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          activation_posture: {type: string, enum: [webhook_registration, session_connection]}
+          identity_ceremony: {type: string, const: account_link}
+          phase: {type: string, enum: [preparing, credentials_admitted, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, succeeded, failed, retired]}
+          revision: {type: integer, minimum: 1}
+          save_proof: {type: boolean}
+          account_reference: {type: string, minLength: 1}
+          expected_account: {type: string, minLength: 1}
+          account_confirmed: {type: boolean}
+          logout_completed: {type: boolean}
+          client_language: {type: string}
+          client_locale_revision: {type: integer, minimum: 1}
+          credential_reservations: {type: array, items: {$ref: '#/components/schemas/ChannelCredentialReservation'}}
+          credential_admissions: {type: array, items: {$ref: '#/components/schemas/ChannelCredentialAdmission'}}
+          identity_operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          binding_revision: {type: integer, minimum: 1}
+          failure_code: {type: string}
+          failure_message: {type: string}
+          requested_at: {$ref: '#/components/schemas/Timestamp'}
+          updated_at: {$ref: '#/components/schemas/Timestamp'}
+          completed_at: {$ref: '#/components/schemas/Timestamp'}
+      RuntimeChannelOnboardingOperation:
         type: object
         additionalProperties: false
         required: [operation_id, principal_id, verb, provider, interface, coordinate, target_selector, activation_posture, identity_ceremony, phase, revision, save_proof, client_language, client_locale_revision, credential_reservations, requested_at, updated_at]
@@ -37697,6 +37798,24 @@ api_specification:
             type: string
             minLength: 1
       ChannelOnboardingCandidate:
+        oneOf:
+          - {$ref: '#/components/schemas/RuntimeChannelOnboardingCandidate'}
+          - {$ref: '#/components/schemas/DeploymentChannelCandidate'}
+      DeploymentChannelCandidate:
+        type: object
+        additionalProperties: false
+        required: [deployment_registration, provider, interface, activation_posture, identity_ceremony, provider_credential_role, confirmation_operation]
+        properties:
+          deployment_registration: {type: boolean, const: true}
+          provider: {type: string, enum: [whatsapp, telegram]}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          activation_posture: {type: string, enum: [webhook_registration, session_connection]}
+          identity_ceremony: {type: string, const: account_link}
+          provider_credential_role: {type: string}
+          signing_credential_role: {type: string}
+          confirmation_operation: {type: string}
+          connection_health: {type: string}
+      RuntimeChannelOnboardingCandidate:
         type: object
         additionalProperties: false
         required: [provider, interface, coordinate, target, activation_posture, identity_ceremony, provider_credential_role, confirmation_operation, capabilities]
@@ -37818,6 +37937,17 @@ api_specification:
         properties:
           candidate: {$ref: '#/components/schemas/ChannelOnboardingCandidate'}
           selection_fence: {type: string, minLength: 1, description: Transient exact-selection comparison only; no persisted or credential-write authority.}
+      DeploymentChannelHolder:
+        type: object
+        additionalProperties: false
+        required: [authority_id, authority_generation, owner_id, boot_id, runtime_instance_id, backend]
+        properties:
+          authority_id: {$ref: '#/components/schemas/OpaqueId'}
+          authority_generation: {type: integer, minimum: 1}
+          owner_id: {type: string, minLength: 1}
+          boot_id: {$ref: '#/components/schemas/OpaqueId'}
+          runtime_instance_id: {$ref: '#/components/schemas/OpaqueId'}
+          backend: {type: string, minLength: 1}
       ChannelOnboardingResult:
         type: object
         additionalProperties: false
@@ -42222,6 +42352,8 @@ api_specification:
       description: Resolve one exact onboarding declaration and its provider credential requirement without reservation, credential observation or writes, SDK state, or effects. Start must revalidate the transient selection fence before mutation.
       scope: {required: [control:channels]}
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
       - {name: verb, required: true, schema: {type: string, enum: [connect, reconnect, rebind]}}
       - {name: provider, required: true, schema: {type: string, minLength: 1}}
       - {name: bundle, required: false, schema: {type: string, pattern: '^bundle-v2:sha256:[0-9a-f]{64}$'}}
@@ -42238,6 +42370,9 @@ api_specification:
       scope: {required: [control:channels]}
       idempotency: stable-principal domain-operation replay; generic completed-response idempotency does not own this long external flow.
       params:
+        - {name: scope, required: false, schema: {type: string, const: deployment}}
+        - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+        - {name: account, required: false, schema: {type: string, minLength: 1}}
         - name: verb
           required: true
           schema:
@@ -42298,6 +42433,9 @@ api_specification:
       description: Read one durable onboarding operation, its nested identity state, and its exact-current connected readiness without advancing or replaying effects.
       scope: {required: [read:channels]}
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND]
@@ -42312,6 +42450,10 @@ api_specification:
       scope: {required: [control:channels]}
       idempotency: exact durable operation phase/revision and external-effect journal state.
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
+      - {name: reverify, required: false, schema: {type: boolean}}
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: provider_credential, required: false, schema: {type: string, minLength: 1, writeOnly: true}}
       - {name: client_language, required: false, schema: {type: string, minLength: 1}}
@@ -42326,6 +42468,9 @@ api_specification:
       scope: {required: [control:channels]}
       idempotency: per the selected-store API idempotency owner, scoped to the bearer-token request occurrence and exact pending operation; operator authority remains the stable principal.
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
       - {name: approve, required: true, schema: {type: boolean}}
@@ -42355,10 +42500,13 @@ api_specification:
       scope: {required: [control:channels]}
       idempotency: bearer-token-scoped API request occurrence plus stable-principal exact durable logout replay.
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
       - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelLogoutResult'}}
+      result: {name: result, required: true, schema: {oneOf: [{$ref: '#/components/schemas/ChannelLogoutResult'}, {$ref: '#/components/schemas/ChannelOnboardingResult'}]}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, IDEMPOTENCY_CONFLICT]
     channel.proof_revoke:
       tier: must_have
@@ -42375,8 +42523,11 @@ api_specification:
       tier: must_have
       description: Return generation-aware readback for the exact union of current interfaces, retained bindings, machine proofs, and nonterminal operations. Raw account references and display values are masked, with absent provider presentation falling back to the safely masked external account reference.
       scope: {required: [read:channels]}
-      params: []
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelListResult'}}
+      params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
+      result: {name: result, required: true, schema: {oneOf: [{$ref: '#/components/schemas/OperatorChannelListResult'}, {type: object, additionalProperties: false, required: [accounts], properties: {accounts: {type: array, items: {$ref: '#/components/schemas/ChannelOnboardingResult'}}}}]}}
       errors: [CHANNEL_PROOF_UNAVAILABLE]
     runtime.pause:
       tier: should_have

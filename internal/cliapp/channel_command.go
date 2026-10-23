@@ -13,11 +13,16 @@ import (
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
 type channelOperationResult = operatorchannel.Operation
 type channelReadbackResult = channelonboarding.ConnectedChannelReadback
+
+type channelControlClient interface {
+	call(context.Context, string, map[string]any, any) error
+}
 
 type channelListResult struct {
 	PrincipalID string                  `json:"principal_id"`
@@ -73,6 +78,7 @@ type channelConnectOptions struct {
 	resumeCredential string
 	clientLanguage   string
 	waitForPairing   bool
+	account          string
 }
 
 type channelStatusOptions struct {
@@ -113,10 +119,17 @@ func newChannelLogoutCommand(opts rootCommandOptions) *cobra.Command {
 	var output cliOutputOptions
 	var idempotencyKey string
 	cmd := &cobra.Command{
-		Use:   "logout <provider>",
+		Use:   "logout <provider> [account]",
 		Short: "Unlink one exact paired connection and delete its local pairing state.",
-		Args:  argcount.ExactArgs(1),
+		Args:  argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if commandOpts.channelRegistration != nil && uuid.Validate(args[0]) != nil {
+				account := ""
+				if len(args) == 2 {
+					account = args[1]
+				}
+				return runDeploymentChannelLogout(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], account, commandOpts, output)
+			}
 			return runChannelLogout(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], idempotencyKey, commandOpts, output)
 		},
 	}
@@ -184,11 +197,14 @@ func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, i
 func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Command {
 	commandOpts := channelConnectOptions{apiOptions: opts, verb: verb}
 	cmd := &cobra.Command{
-		Use:   verb + " <provider>",
+		Use:   verb + " <provider> [account]",
 		Short: channelLifecycleShort(verb),
-		Args:  argcount.ExactArgs(1),
+		Args:  argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commandOpts.sourceSet = cmd.Flags().Changed("source")
+			if len(args) == 2 {
+				commandOpts.account = args[1]
+			}
 			return runChannelConnect(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
 		},
 	}
@@ -331,7 +347,7 @@ func newChannelProofRevokeCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider string, opts channelConnectOptions) error {
+func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider string, opts channelConnectOptions) (resultErr error) {
 	if err := opts.output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -351,9 +367,32 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 		}
 		bundleHash = sourceHash
 	}
-	client, err := newCLIAPIClient(opts.apiOptions)
-	if err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	var client channelControlClient
+	var begun channelOnboardingResult
+	if opts.apiOptions.channelRegistration != nil && opts.verb == "connect" {
+		if err := opts.requireDeploymentSelection(); err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		local, err := openDeploymentChannelClient(ctx, provider, opts.apiOptions)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		defer func() { resultErr = errors.Join(resultErr, local.Close(context.WithoutCancel(ctx))) }()
+		var proceed bool
+		begun, proceed, err = local.connectAccount(ctx, out, errOut, opts)
+		if err != nil {
+			return err
+		}
+		if !proceed {
+			return nil
+		}
+		client = local
+	} else {
+		var err error
+		client, err = newCLIAPIClient(opts.apiOptions)
+		if err != nil {
+			return returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
 	}
 	params := map[string]any{
 		"provider": provider, "verb": opts.verb, "save_proof": !opts.noSave,
@@ -369,10 +408,17 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if strings.TrimSpace(opts.idempotencyKey) != "" {
 		params["idempotency_key"] = strings.TrimSpace(opts.idempotencyKey)
 	}
-	begun, err := startCLIChannelOnboarding(ctx, client, params, opts, errOut)
-	if err != nil {
-		return err
+	if begun.Operation.OperationID == "" {
+		var err error
+		begun, err = startCLIChannelOnboarding(ctx, client, params, opts, errOut)
+		if err != nil {
+			return err
+		}
 	}
+	return finishChannelOnboarding(ctx, client, begun, opts, out, errOut)
+}
+
+func finishChannelOnboarding(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) error {
 	if opts.waitForPairing && opts.apiOptions.input != nil {
 		opts.apiOptions.input = bufio.NewReader(opts.apiOptions.input)
 	}
@@ -386,6 +432,11 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	result, err := completeChannelOnboarding(ctx, client, begun, opts, progressOut, errOut)
 	if err != nil {
 		return err
+	}
+	if opts.account != "" && result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded &&
+		!opts.output.asJSON && !opts.output.asYAML && !opts.output.quiet {
+		fmt.Fprintf(out, "Reverified %s account %s.\n", result.Operation.Provider, result.Operation.AccountReference)
+		return nil
 	}
 	return renderChannelOnboardingResult(out, errOut, opts.output, result)
 }
@@ -463,7 +514,7 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 	}
 }
 
-func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
+func completeChannelOnboarding(ctx context.Context, client channelControlClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
 	sharedAudienceAnnounced := false
 	acceptedAccount := ""
 	advancePending := opts.verb == "resume"
@@ -480,9 +531,8 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		if pending && !opts.waitForPairing && !advancePending && opts.resumeCredential == "" {
 			return result, nil
 		}
-		waitingForConnection := result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
 		if opts.waitForPairing {
-			if pending || waitingForConnection {
+			if channelPairingWaitRequired(result, pending) {
 				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, awaitLogin, progressOut, errOut)
 				if err != nil {
 					return channelOnboardingResult{}, err
@@ -509,6 +559,9 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			observedAt := now()
 			switch {
 			case identity.State == "awaiting_claim" && (identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(observedAt)):
+				if result.Operation.DeploymentRegistration {
+					fmt.Fprintf(progressOut, "%s is this deployment's HITL channel.\n", result.Operation.AccountReference)
+				}
 				fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339))
 				var err error
 				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
@@ -544,7 +597,11 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 	}
 }
 
-func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
+func channelPairingWaitRequired(result channelOnboardingResult, pending bool) bool {
+	return pending || !result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
+}
+
+func waitForChannelOnboardingPairing(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
 	poll := opts.apiOptions.channelConnectPoll
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
@@ -592,16 +649,19 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 	return current, nil
 }
 
-func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
+func confirmCLIChannelAccount(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
 	// A pairing checkpoint preserves only a preview. Account approval is
 	// required before continuing to activation or operator enrollment.
 	pending, err := validateCLIChannelProgress(current)
 	if err != nil {
 		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
 	}
+	if current.Operation.DeploymentRegistration && current.Operation.AccountConfirmed {
+		return current, false, nil
+	}
 	if !pending {
 		switch {
-		case current.Operation.Posture != channelonboarding.ActivationSessionConnection,
+		case !current.Operation.UsesPairingCheckpoint(),
 			current.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity,
 			current.Operation.ActivationRevision != 0, current.IdentityOperation != nil, current.Binding != nil:
 			return current, false, nil
@@ -626,6 +686,11 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 		}
 		current = next
 	}
+	return confirmCLIAccountPreview(ctx, client, current, opts, out, errOut, acceptedAccount)
+}
+
+func confirmCLIAccountPreview(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
+	var err error
 	account, name := "", ""
 	if current.Pairing != nil {
 		account, name = current.Pairing.AccountPresentation, current.Pairing.AccountName
@@ -664,16 +729,28 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 		paired.Connection == nil || !paired.Connection.Linked {
 		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the rejected account has no exact logout target"))
 	}
-	if err := runChannelLogout(ctx, out, errOut, current.Operation.OperationID, "", opts.apiOptions, opts.output); err != nil {
-		return channelOnboardingResult{}, false, err
+	if current.Operation.DeploymentRegistration {
+		var loggedOut channelOnboardingResult
+		if err := client.call(ctx, "channel.logout", map[string]any{"operation_id": paired.Operation.OperationID, "expected_revision": paired.Operation.Revision}, &loggedOut); err != nil {
+			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
+		}
+	} else {
+		if err := runChannelLogout(ctx, out, errOut, current.Operation.OperationID, "", opts.apiOptions, opts.output); err != nil {
+			return channelOnboardingResult{}, false, err
+		}
 	}
 	params := map[string]any{"provider": current.Operation.Provider, "verb": "connect", "save_proof": !opts.noSave,
 		"bundle": current.Operation.Coordinate.BundleHash, "interface": current.Operation.Interface.Selector, "target": current.Operation.TargetSelector}
+	if current.Operation.DeploymentRegistration {
+		delete(params, "bundle")
+		delete(params, "interface")
+		delete(params, "target")
+	}
 	next, err := startCLIChannelOnboarding(ctx, client, params, opts, errOut)
 	return next, true, err
 }
 
-func confirmChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer, sharedAudienceAnnounced *bool) error {
+func confirmChannelOnboardingClaim(ctx context.Context, client channelControlClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer, sharedAudienceAnnounced *bool) error {
 	identity := result.IdentityOperation
 	if result.Operation.Provider == "whatsapp" {
 		fmt.Fprintf(progressOut, "Code received from %s (%s conversation).\n", cliSanitizeOneLineValue(identity.AccountPresentation), identity.ConversationScope)
@@ -717,7 +794,7 @@ func channelClaimantConfirmationRequired(result channelOnboardingResult, now tim
 	return identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(now)
 }
 
-func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {
+func waitForChannelOnboardingClaim(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {
 	continuation := ""
 	if begun.Operation.Provider != "whatsapp" {
 		continuation = fmt.Sprintf("; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
@@ -755,6 +832,9 @@ func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, be
 func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
 	if err := output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
+	}
+	if opts.channelRegistration != nil {
+		return runDeploymentChannelList(ctx, out, errOut, opts, output)
 	}
 	client, err := newCLIAPIClient(opts)
 	if err != nil {
@@ -874,7 +954,7 @@ func confirmChannelAccount(input io.Reader, out io.Writer, prompt string) (bool,
 	return answer == "y" || answer == "yes", nil
 }
 
-func fetchChannelList(ctx context.Context, client *cliAPIClient) (channelListResult, error) {
+func fetchChannelList(ctx context.Context, client channelControlClient) (channelListResult, error) {
 	var result channelListResult
 	err := client.call(ctx, "channel.list", map[string]any{}, &result)
 	return result, err

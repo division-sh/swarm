@@ -29,6 +29,67 @@ func TestChannelOnboardingSelectedStoreContractParity(t *testing.T) {
 				store = admitTestPostgresStore(t, db)
 			}
 			runChannelOnboardingStoreContract(t, store)
+			t.Run("deployment_scope", func(t *testing.T) {
+				ctx := context.Background()
+				now := time.Now().UTC()
+				principal, err := store.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
+				if err != nil {
+					t.Fatal(err)
+				}
+				port := store.(interface {
+					DeploymentChannelOperations() channelonboarding.OperationStore
+				}).DeploymentChannelOperations()
+				request := channelOnboardingStartRequest(principal.ID, now)
+				request.DeploymentRegistration, request.ExpectedAccount = true, "12345"
+				request.Coordinate, request.TargetSelector = channelonboarding.ChannelRuntimeContextCoordinate{}, ""
+				request.Ceremony = channelonboarding.CeremonyAccountLink
+				op, err := port.ReserveChannelOnboarding(ctx, request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.GetChannelOnboarding(ctx, op.OperationID); !errors.Is(err, channelonboarding.ErrNotFound) {
+					t.Fatal("runtime read crossed deployment scope", err)
+				}
+				if _, err := store.ReserveChannelOnboarding(ctx, request); !errors.Is(err, channelonboarding.ErrInvalidRequest) {
+					t.Fatal("runtime writer accepted deployment scope", err)
+				}
+				replayed, err := port.ReserveChannelOnboarding(ctx, request)
+				if err != nil || replayed.OperationID != op.OperationID || replayed.Revision != op.Revision {
+					t.Fatal("deployment reservation lost exact replay", err)
+				}
+				for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhaseSucceeded} {
+					if phase == channelonboarding.PhaseAwaitingOperatorConfirmation {
+						if op.AccountConfirmed {
+							t.Fatal("pairing checkpoint silently approved the account")
+						}
+						op, err = port.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
+							ExpectedRevision: op.Revision, Phase: op.Phase, ConfirmAccount: true, Now: now})
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					advance := channelonboarding.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: now}
+					if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+						advance.AccountReference = "12345"
+						wrong := advance
+						wrong.AccountReference = "54321"
+						if _, err := port.AdvanceChannelOnboarding(ctx, wrong); !errors.Is(err, channelonboarding.ErrConflict) {
+							t.Fatal("reverify accepted a different account", err)
+						}
+					}
+					if _, err := port.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhasePublishingActivation, Now: now}); !errors.Is(err, channelonboarding.ErrConflict) {
+						t.Fatal("deployment operation entered runtime activation", err)
+					}
+					op, err = port.AdvanceChannelOnboarding(ctx, advance)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				retained, err := port.GetChannelOnboarding(ctx, op.OperationID)
+				if err != nil || !retained.DeploymentRegistration || retained.AccountReference != "12345" || !retained.AccountConfirmed || retained.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) || retained.ActivationRevision != 0 {
+					t.Fatal("deployment completion manufactured runtime authority", err)
+				}
+			})
 		})
 	}
 }

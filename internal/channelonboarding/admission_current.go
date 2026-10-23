@@ -20,6 +20,8 @@ type AdmissionResponsibility struct {
 	Provider           string
 	Credentials        []CredentialAdmission
 	SessionAccount     operatorchannel.SessionAccountAdmission
+
+	DeploymentRegistration bool
 }
 
 // Fresh target promotion borrows the original SDK admission. Confirmed durable
@@ -69,7 +71,15 @@ func AdmissionResponsibilityCurrent(ctx context.Context, store Store, expected A
 	if store == nil || expected.OperationID == "" || expected.OperationRevision < 1 {
 		return false, nil
 	}
-	op, err := store.GetChannelOnboarding(ctx, expected.OperationID)
+	var operations OperationStore = store
+	if expected.DeploymentRegistration {
+		scoped, ok := store.(interface{ DeploymentChannelOperations() OperationStore })
+		if !ok {
+			return false, ErrInvalidRequest
+		}
+		operations = scoped.DeploymentChannelOperations()
+	}
+	op, err := operations.GetChannelOnboarding(ctx, expected.OperationID)
 	if err != nil {
 		return false, err
 	}
@@ -90,8 +100,15 @@ func AdmissionResponsibilityCurrent(ctx context.Context, store Store, expected A
 // The root-store reader and transaction-local admission use the same semantic
 // projection; neither can adopt a newer responsibility from a lookup.
 func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
+	if expected.DeploymentRegistration != op.DeploymentRegistration {
+		return false
+	}
 	coordinateCurrent := op.Coordinate.Matches(expected.Coordinate)
-	if op.Posture == ActivationSessionConnection && expected.ActivationRevision == 0 && !op.Phase.RequiresExecutableTarget(op.Posture) {
+	if op.DeploymentRegistration {
+		coordinateCurrent = expected.Coordinate == (ChannelRuntimeContextCoordinate{}) &&
+			op.Coordinate == expected.Coordinate && expected.TargetSelector == "" && expected.ActivationRevision == 0 && op.AccountConfirmed
+	}
+	if !op.DeploymentRegistration && op.Posture == ActivationSessionConnection && expected.ActivationRevision == 0 && !op.Phase.RequiresExecutableTarget(op.Posture) {
 		coordinateCurrent = op.Coordinate.MatchesDeclaration(expected.Coordinate)
 	}
 	return expected.OperationID != "" && expected.OperationRevision > 0 && op.OperationID == expected.OperationID && coordinateCurrent && op.TargetSelector == expected.TargetSelector &&

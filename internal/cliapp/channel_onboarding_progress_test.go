@@ -77,6 +77,67 @@ func sessionProgressCLIResult(provider, role, phase string, ready bool) map[stri
 }
 
 func TestChannelCLIProgressFixturesRetainExactDeclarations(t *testing.T) {
+	t.Run("exact_account_selection_and_pending_reentry", func(t *testing.T) {
+		rows := []channelOnboardingResult{
+			{Operation: channelonboarding.Operation{OperationID: "first", Provider: "telegram", AccountReference: "420079"}},
+			{Operation: channelonboarding.Operation{OperationID: "second", Provider: "telegram", ExpectedAccount: "420080"}},
+		}
+		if _, err := selectDeploymentAccount(rows, "", nil, io.Discard, false); err == nil {
+			t.Fatal("noninteractive ambiguous logout selected an account")
+		}
+		var output bytes.Buffer
+		chosen, err := selectDeploymentAccount(rows, "", strings.NewReader("n\ny\n"), &output, true)
+		if err != nil || chosen.OperationID != "second" || !strings.Contains(output.String(), "420079") || !strings.Contains(output.String(), "420080") {
+			t.Fatal("interactive selection lost the exact choice", chosen.OperationID, output.String(), err)
+		}
+		chosen, err = selectDeploymentAccount(rows, "420080", nil, io.Discard, false)
+		if err != nil || chosen.OperationID != "second" || chosen.AccountConfirmed {
+			t.Fatal("pending replacement was hidden or approved by selection", err)
+		}
+		if _, err := selectDeploymentAccount([]channelOnboardingResult{rows[0], rows[0]}, "", strings.NewReader("y\n"), io.Discard, true); err == nil {
+			t.Fatal("interactive selection accepted duplicate account evidence")
+		}
+		if _, err := selectDeploymentAccount(rows, "420081", nil, io.Discard, false); err == nil {
+			t.Fatal("missing account selected another account")
+		}
+	})
+	for _, provider := range []string{"telegram", "whatsapp"} {
+		t.Run("registration_is_not_runtime_readiness/"+provider, func(t *testing.T) {
+			fixture := channelOnboardingCLIResult("succeeded", "", true)
+			account := "12345"
+			if provider == "whatsapp" {
+				fixture = sessionProgressCLIResult(provider, "", "succeeded", true)
+				account = "+15550100123"
+			}
+			op := fixture["operation"].(map[string]any)
+			candidate := fixture["candidate"].(map[string]any)
+			for _, row := range []map[string]any{op, candidate} {
+				row["deployment_registration"], row["identity_ceremony"] = true, "account_link"
+				delete(row, "coordinate")
+			}
+			op["account_reference"], op["account_confirmed"], op["target_selector"], op["activation_revision"] = account, true, "", 0
+			candidate["confirmation_operation"], candidate["signing_credential_role"] = "", ""
+			delete(candidate, "target")
+			delete(candidate, "connection_health")
+			delete(fixture, "readiness")
+			body, err := json.Marshal(fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result channelOnboardingResult
+			if err := json.Unmarshal(body, &result); err != nil {
+				t.Fatal(err)
+			}
+			var out, errOut bytes.Buffer
+			if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err != nil || out.String() != "Registered "+provider+" account "+account+".\n" {
+				t.Fatal("registration invented runtime readiness", out.String(), errOut.String(), err)
+			}
+			result.Operation.AccountConfirmed = false
+			if err := renderChannelOnboardingResult(io.Discard, io.Discard, cliOutputOptions{}, result); err == nil {
+				t.Fatal("an unapproved account was reported registered")
+			}
+		})
+	}
 	for _, fixture := range []map[string]any{channelOnboardingCLIResult("preparing", "", false), sessionProgressCLIResult("whatsapp", "", "activating_provider", false)} {
 		body, err := json.Marshal(fixture)
 		if err != nil {

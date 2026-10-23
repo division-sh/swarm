@@ -83,9 +83,9 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 						t.Fatal("native revocation did not fence its original occurrence")
 					}
 				case "native_revocation_during_lookup":
-					original := c.store
+					original := c.operations
 					reads := 0
-					c.store = &sessionInputCancelLookupStore{sessionInputSelectedStore: f.store, cancel: func() {
+					c.operations = &sessionInputCancelLookupStore{sessionInputSelectedStore: f.store, cancel: func() {
 						reads++
 						if reads != 2 {
 							return
@@ -101,7 +101,7 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 						}
 					}}
 					view, readErr := c.PairingReadback(f.ctx, f.principal)
-					c.store = original
+					c.operations = original
 					if reads != 2 || readErr != nil || view != (channelonboarding.PairingReadback{Status: "failed"}) {
 						t.Fatal("revocation during authenticated lookup lost its safe failed observation", reads, readErr)
 					}

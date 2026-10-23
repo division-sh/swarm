@@ -343,7 +343,7 @@ func TestWhatsAppChannelConfirmationJournalBothStores(t *testing.T) {
 					t.Fatal("settled or uncertain native effect was blindly replayed")
 				}
 				f.restartBusinessConnection(t)
-				f.authority, err = newSessionAuthorityOwner(f.state, f.selected, f.operation, nil)
+				f.authority, err = newSessionAuthorityOwner(f.state, f.selected, f.operation, nil, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

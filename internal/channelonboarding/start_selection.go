@@ -56,6 +56,12 @@ func (s *Service) resolveStartCandidate(ctx context.Context, input StartInput) (
 	if err != nil {
 		return principal, candidate, err
 	}
+	if candidate.DeploymentRegistration != s.deployment || !s.deployment && input.ExpectedAccount != "" {
+		return principal, candidate, ErrInvalidRequest
+	}
+	if s.deployment && validateRegistrationScope(true, candidate.Provider, input.ExpectedAccount, candidate.Coordinate, candidate.Target.Selector) != nil {
+		return principal, candidate, ErrInvalidRequest
+	}
 	if err := s.qualifyProvider(candidate); err != nil {
 		return principal, candidate, err
 	}
@@ -80,9 +86,16 @@ func selectedStartRequirement(principal operatorchannel.Principal, candidate Can
 	if err != nil {
 		return StartSelection{}, err
 	}
-	return StartSelection{Candidate: candidate, SelectionFence: operatorchannel.Hash(
+	fence := operatorchannel.Hash(
 		"channel-onboarding-start-selection-v1", principal.ID, string(input.Verb), string(declaration),
 		fmt.Sprint(input.SaveProof), input.ClientLanguage,
 		fmt.Sprint(candidate.OperatorRequired),
-	)}, nil
+	)
+	if candidate.DeploymentRegistration {
+		fence = operatorchannel.Hash("deployment-channel-selection-v1", fence, input.ExpectedAccount)
+	}
+	if input.ExpectedSelection != "" && input.ExpectedSelection != fence {
+		return StartSelection{}, fmt.Errorf("%w: channel selection changed before credential admission", ErrConflict)
+	}
+	return StartSelection{Candidate: candidate, SelectionFence: fence}, nil
 }

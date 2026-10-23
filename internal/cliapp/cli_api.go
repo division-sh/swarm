@@ -85,6 +85,7 @@ type rootCommandOptions struct {
 	stdinIsTerminal        func() bool
 	runServe               ServeRunner
 	runTest                TestSessionRunner
+	channelRegistration    ChannelRegistrationFactory
 	runReadyTimeout        time.Duration
 	runReadyPoll           time.Duration
 	runStatusPoll          time.Duration

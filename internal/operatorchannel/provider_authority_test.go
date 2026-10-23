@@ -23,7 +23,9 @@ func TestProviderAuthorityDistinguishesRealCredentialsAndSessionAccounts(t *test
 	session := ProviderAuthority{Kind: ProviderAuthoritySession, Session: account}
 	discord := session
 	discord.Session.Provider, discord.Credential = "discord", evidence
-	for name, authority := range map[string]ProviderAuthority{"credential": credential, "zero-token session": session, "real-token session": discord} {
+	deployment := credential
+	deployment.Scope = authority.DeploymentParent
+	for name, authority := range map[string]ProviderAuthority{"credential": credential, "deployment credential": deployment, "zero-token session": session, "real-token session": discord} {
 		t.Run(name, func(t *testing.T) {
 			if err := authority.Validate(); err != nil {
 				t.Fatal(err)
@@ -54,6 +56,7 @@ func TestProviderAuthorityDistinguishesRealCredentialsAndSessionAccounts(t *test
 	}{
 		{"missing kind", credential, func(a *ProviderAuthority) { a.Kind = "" }},
 		{"unknown kind", session, func(a *ProviderAuthority) { a.Kind = "pairing" }},
+		{"unknown parent scope", credential, func(a *ProviderAuthority) { a.Scope = "lookup" }},
 		{"credential without seal", credential, func(a *ProviderAuthority) { a.Credential.Seal = "" }},
 		{"credential with inactive session", credential, func(a *ProviderAuthority) { a.Session = account }},
 		{"session without admission", session, func(a *ProviderAuthority) { a.Session = SessionAccountAdmission{} }},

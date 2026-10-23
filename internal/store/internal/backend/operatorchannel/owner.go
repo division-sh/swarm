@@ -13,6 +13,7 @@ import (
 
 	domain "github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -241,8 +242,8 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 			out = existing
 			return nil
 		}
-		if req.ProviderAuthority.Kind == domain.ProviderAuthoritySession {
-			if err := requireSessionParent(txctx, tx, runner.dialect(), req.OnboardingOperationID, req.ProviderAuthority); err != nil {
+		if req.ProviderAuthority.Kind == domain.ProviderAuthoritySession || req.ProviderAuthority.Scope != "" {
+			if err := requireSessionParent(txctx, tx, runner.dialect(), req.OnboardingOperationID, req.PrincipalID, req.ProviderAuthority); err != nil {
 				return err
 			}
 		}
@@ -473,11 +474,11 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 			out = op
 			return nil
 		}
-		if op.ProviderAuthority.Kind == domain.ProviderAuthoritySession {
+		if op.ProviderAuthority.Kind == domain.ProviderAuthoritySession || op.ProviderAuthority.Scope != "" {
 			if err := req.ProviderAuthorityAdmission.RequireExecutableFor(op.ProviderAuthority); err != nil {
 				return err
 			}
-			if err := requireSessionParent(txctx, tx, runner.dialect(), op.OnboardingOperationID, req.ProviderAuthorityAdmission); err != nil {
+			if err := requireSessionParent(txctx, tx, runner.dialect(), op.OnboardingOperationID, req.PrincipalID, req.ProviderAuthorityAdmission); err != nil {
 				return err
 			}
 		}
@@ -565,7 +566,11 @@ func requireActiveOnboardingParent(ctx context.Context, tx *sql.Tx, d dialect, o
 	if parentID == "" {
 		return nil
 	}
-	query := `SELECT phase,identity_operation_id FROM channel_onboarding_operations WHERE operation_id=?`
+	table, err := onboardingParentTable(op.ProviderAuthority.Scope)
+	if err != nil {
+		return err
+	}
+	query := `SELECT phase,identity_operation_id FROM ` + table + ` WHERE operation_id=?`
 	if d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
@@ -875,13 +880,13 @@ func dischargeProofResponsibilities(ctx context.Context, tx *sql.Tx, d dialect, 
 // publication transaction. It never owns or exports a transaction beyond this
 // closed operation.
 func (s *PostgresOwner) SettleInboundClaimTx(ctx context.Context, tx *sql.Tx, claim domain.InboundClaim, now time.Time) (domain.ClaimSettlement, error) {
-	return settleInboundClaimTx(ctx, tx, dialectPostgres, claim, now)
+	return settleInboundClaimTx(ctx, tx, dialectPostgres, claim, now, authority.RuntimeParent)
 }
 func (s *SQLiteOwner) SettleInboundClaimTx(ctx context.Context, tx *sql.Tx, claim domain.InboundClaim, now time.Time) (domain.ClaimSettlement, error) {
-	return settleInboundClaimTx(ctx, tx, dialectSQLite, claim, now)
+	return settleInboundClaimTx(ctx, tx, dialectSQLite, claim, now, authority.RuntimeParent)
 }
 
-func settleInboundClaimTx(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, now time.Time) (domain.ClaimSettlement, error) {
+func settleInboundClaimTx(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, now time.Time, scope authority.ParentScope) (domain.ClaimSettlement, error) {
 	if tx == nil {
 		return domain.ClaimSettlement{}, fmt.Errorf("operator channel claim transaction is required")
 	}
@@ -892,6 +897,9 @@ func settleInboundClaimTx(ctx context.Context, tx *sql.Tx, d dialect, claim doma
 	op, found, err := loadOperationByChallenge(ctx, tx, d, claim.Challenge, true)
 	if err != nil {
 		return domain.ClaimSettlement{}, err
+	}
+	if found && op.ProviderAuthority.Scope != scope {
+		return domain.ClaimSettlement{}, domain.ErrConflict
 	}
 	if !found {
 		if err := insertClaimReceipt(ctx, tx, d, claim, domain.Operation{}, domain.DispositionRejectedClaim, "unknown challenge", now); err != nil {
@@ -931,6 +939,7 @@ func settleInboundClaimTx(ctx context.Context, tx *sql.Tx, d dialect, claim doma
 	op.State, op.Revision, op.ClaimedAt = domain.StateAwaitingConfirmation, op.Revision+1, now
 	op.ExternalAccountRef, op.ConversationRef, op.ConversationScope = claim.ExternalAccountRef, claim.ConversationRef, claim.ConversationScope
 	op.AccountPresentation, op.ClaimDisposition = claim.AccountPresentation, domain.DispositionConsumedBinding
+	op.ClaimProviderEventID, op.ClaimAuthorization = claim.ProviderEventID, claim.ProviderAuthorization
 	result, err := tx.ExecContext(ctx, d.bind(`UPDATE operator_channel_operations SET state = 'awaiting_confirmation', operation_revision = ?, external_account_reference = ?, conversation_reference = ?, conversation_scope = ?, account_presentation = ?, claim_provider = ?, claim_provider_event_id = ?, claim_publication_id = ?, claim_authorization = ?, claim_disposition = ?, claimed_at = ?, updated_at = ? WHERE operation_id = ? AND state = 'awaiting_claim' AND operation_revision = ?`),
 		op.Revision, op.ExternalAccountRef, op.ConversationRef, string(op.ConversationScope), nullable(op.AccountPresentation), claim.Provider, claim.ProviderEventID, claim.PublicationID, claim.ProviderAuthorization, domain.DispositionConsumedBinding, now, now, op.OperationID, op.Revision-1)
 	if err != nil {
@@ -973,7 +982,7 @@ func RequirePrincipalTx(ctx context.Context, tx *sql.Tx, principalID string, pos
 	return requirePrincipal(ctx, tx, d, principalID)
 }
 
-const operationSelect = `SELECT operation_id, operation_kind, principal_id, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_authority, onboarding_operation_id, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at FROM operator_channel_operations`
+const operationSelect = `SELECT operation_id, operation_kind, principal_id, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_authority, onboarding_operation_id, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at, claim_provider_event_id, claim_authorization FROM operator_channel_operations`
 
 func loadOperationByRequestKey(ctx context.Context, db queryer, d dialect, key string, forUpdate bool) (domain.Operation, bool, error) {
 	query := operationSelect + ` WHERE request_key_hash = ?`
@@ -1013,9 +1022,10 @@ func scanOperation(row scanner) (domain.Operation, error) {
 	var op domain.Operation
 	var kind, state, proofStatus string
 	var providerAuthority, onboardingOperationID, challenge, account, conversation, scope, presentation, disposition, plannedProofID, proofID sql.NullString
+	var claimEventID, claimAuthorization sql.NullString
 	var bindingRevision, plannedProofRevision, proofRevision sql.NullInt64
 	var requested, expires, claimed, completed any
-	if err := row.Scan(&op.OperationID, &kind, &op.PrincipalID, &op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration, &providerAuthority, &onboardingOperationID, &op.RequestHash, &op.ExpectedBindingRevision, &challenge, &state, &op.Revision, &bindingRevision, &account, &conversation, &scope, &presentation, &disposition, &op.SaveProof, &plannedProofID, &plannedProofRevision, &proofID, &proofRevision, &proofStatus, &requested, &expires, &claimed, &completed); err != nil {
+	if err := row.Scan(&op.OperationID, &kind, &op.PrincipalID, &op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration, &providerAuthority, &onboardingOperationID, &op.RequestHash, &op.ExpectedBindingRevision, &challenge, &state, &op.Revision, &bindingRevision, &account, &conversation, &scope, &presentation, &disposition, &op.SaveProof, &plannedProofID, &plannedProofRevision, &proofID, &proofRevision, &proofStatus, &requested, &expires, &claimed, &completed, &claimEventID, &claimAuthorization); err != nil {
 		return domain.Operation{}, err
 	}
 	op.Kind, op.State, op.ConversationScope, op.ProofStatus = domain.OperationKind(kind), domain.OperationState(state), domain.ConversationScope(scope.String), domain.ProofStatus(proofStatus)
@@ -1023,6 +1033,7 @@ func scanOperation(row scanner) (domain.Operation, error) {
 	op.BindingRevision, op.ProofRevision = bindingRevision.Int64, proofRevision.Int64
 	op.PlannedProofID, op.PlannedProofRevision = plannedProofID.String, plannedProofRevision.Int64
 	op.OnboardingOperationID = onboardingOperationID.String
+	op.ClaimProviderEventID, op.ClaimAuthorization = claimEventID.String, claimAuthorization.String
 	var err error
 	op.ProviderAuthority, err = decodeProviderAuthority(providerAuthority, op.Kind == domain.OperationUnbind)
 	if err != nil {

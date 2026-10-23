@@ -40,11 +40,13 @@ type runtimeBootstrapFixture struct {
 	owner       *worklifetime.RuntimeOccurrence
 	directory   string
 	candidate   channelonboarding.Candidate
+	trigger     providertriggers.InboundAdmissionPlan
 	principal   operatorchannel.Principal
 	service     *channelonboarding.Service
 	channels    *operatorchannel.Service
 	connection  *RuntimeConnection
 	credentials *credentials.SnapshotOwner
+	writer      *channelonboarding.CredentialWriter
 }
 
 func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapFixture {
@@ -66,6 +68,10 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 		t.Fatal(err)
 	}
 	plan := activeInputChannelFixture(t, catalog)
+	f.trigger, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "whatsapp", Provider: "whatsapp"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	identity, err := plan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -127,6 +133,7 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.writer = writer
 	candidates, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{f.candidate})
 	if err != nil {
 		t.Fatal(err)
@@ -204,6 +211,21 @@ func (f *runtimeBootstrapFixture) AwaitSessionBootstrap(ctx context.Context, _ c
 	}
 	return f.connection.CheckBootstrap(ctx)
 }
+func (f *runtimeBootstrapFixture) VerifyRegistration(ctx context.Context, op channelonboarding.Operation) (bool, error) {
+	return f.connection.VerifyDeploymentRegistration(ctx, op)
+}
+
+func (f *runtimeBootstrapFixture) LogoutRegistration(ctx context.Context, op channelonboarding.Operation) error {
+	if err := f.connection.LogoutDeploymentRegistration(ctx, op); err != nil {
+		return err
+	}
+	return f.connection.Close(ctx)
+}
+
+func (f *runtimeBootstrapFixture) CloseRegistration(ctx context.Context, _ channelonboarding.Operation) error {
+	return f.connection.Close(ctx)
+}
+
 func (f *runtimeBootstrapFixture) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	if f.connection == nil {
 		return channelonboarding.PairingReadback{Status: "not_started"}, nil

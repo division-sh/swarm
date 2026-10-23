@@ -256,6 +256,14 @@ func checkProductionWorkLifetimeFile(t *testing.T, path, relative string) {
 	}
 	eventAliases := importAliases(file, "github.com/division-sh/swarm/internal/events")
 	workAliases := importAliases(file, "github.com/division-sh/swarm/internal/runtime/core/worklifetime")
+	var registrationRoot *ast.BlockStmt
+	if relative == "internal/cliapp/channel_deployment.go" {
+		for _, declaration := range file.Decls {
+			if function, ok := declaration.(*ast.FuncDecl); ok && function.Recv == nil && function.Name.Name == "openDeploymentChannelStore" {
+				registrationRoot = function.Body
+			}
+		}
+	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -286,8 +294,8 @@ func checkProductionWorkLifetimeFile(t *testing.T, path, relative string) {
 			if !ok || selector.Sel.Name != "NewProcess" || !isPackageIdent(selector.X, workAliases) {
 				return true
 			}
-			if relative != "internal/serveapp/main.go" {
-				t.Fatalf("%s:%d creates a private process work owner outside the serve root", relative, fset.Position(value.Pos()).Line)
+			if relative != "internal/serveapp/main.go" && !(registrationRoot != nil && registrationRoot.Pos() <= value.Pos() && value.End() <= registrationRoot.End()) {
+				t.Fatalf("%s:%d creates a private process work owner outside the serve or standalone channel invocation root", relative, fset.Position(value.Pos()).Line)
 			}
 		}
 		return true
