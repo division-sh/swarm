@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -266,6 +267,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 		{"pin", "--pin", func(string) string { return "records.loaded@head" }, "pins", false, false},
 		{"row_receipts", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
 		{"row_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, true},
+		{"row_delivery_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
@@ -315,6 +317,17 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 						result := runStartCommandResult(runID, "completed")
 						result["deployment_feed_ids"] = []string{feedID}
 						return result
+					case "event.get":
+						eventID := req.Params["event_id"].(string)
+						result := validEventObservationEvent(eventID)
+						result["run_id"] = runID
+						delivery := result["deliveries"].([]any)[0].(map[string]any)
+						if tc.name != "row_delivery_refusal" || eventID == "00000000-0000-4000-8000-000000000002" {
+							delivery["status"] = "delivered"
+							delete(delivery, "failure")
+							delete(delivery, "reason_code")
+						}
+						return result
 					case "run.fan_out.list":
 						if req.Params["run_id"] != runID || req.Params["filter"].(map[string]any)["deployment_feed_id"] != feedID {
 							t.Fatalf("wrong outcome scope: %#v", req.Params)
@@ -353,7 +366,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 				[]string{"run", "start", "--connect", server.URL, tc.flag, tc.value(input), "--no-follow"},
 				&stdout, &stderr, testRunCommandOptions(server))
 			wantCode := 0
-			if tc.reject {
+			if tc.reject || tc.name == "row_delivery_refusal" {
 				wantCode = 6
 			}
 			if code != wantCode {
@@ -364,12 +377,24 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 				want = []string{"health.check", "data.show", "data.show", "run.start"}
 			}
 			want = append(want, "run.fan_out.list")
+			if tc.rows {
+				want = append(want, "event.get")
+				if !tc.reject {
+					want = append(want, "event.get")
+				}
+			}
 			assertRunCommandMethods(t, calls, want)
-			if tc.rows && (!strings.Contains(stdout.String(), "row 0 committed") || !strings.Contains(stdout.String(), "feed published: deployment_feed_id="+feedID)) {
+			if tc.rows && (!strings.Contains(stdout.String(), "row 0 ACCEPTED") || !strings.Contains(stdout.String(), "feed published: deployment_feed_id="+feedID)) {
 				t.Fatalf("missing row/receipt readout: %s", stdout.String())
 			}
-			if tc.reject && !strings.Contains(stdout.String(), "row 1 semantic_rejected") {
+			if (tc.reject || tc.name == "row_delivery_refusal") && !strings.Contains(stdout.String(), "row 1 REFUSED") {
 				t.Fatalf("missing row refusal: %s", stdout.String())
+			}
+			if tc.name == "row_delivery_refusal" && !strings.Contains(stdout.String(), "review/instance-1") {
+				t.Fatalf("missing refused instance: %s", stdout.String())
+			}
+			if strings.Contains(stdout.String(), "created") || tc.name == "row_receipts" && strings.Contains(stdout.String(), "review/instance-1") {
+				t.Fatalf("readout claimed creation or named an accepted instance: %s", stdout.String())
 			}
 			if len(*wsRequests) != 0 {
 				t.Fatalf("feed-only --no-follow opened websocket: %#v", *wsRequests)
@@ -401,6 +426,13 @@ func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 				result := runStartCommandResult("9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355", "running")
 				result["event_id"] = "00000000-0000-4000-8000-000000000003"
 				return result
+			case "event.get":
+				result := validEventObservationEvent("00000000-0000-4000-8000-000000000003")
+				result["run_id"] = "9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355"
+				delivery := result["deliveries"].([]any)[0].(map[string]any)
+				delivery["status"] = "delivered"
+				delete(delivery, "failure")
+				return result
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -415,7 +447,7 @@ func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
+	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "event.get"})
 	if len(*wsRequests) != 0 {
 		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
 	}
@@ -685,6 +717,10 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 			case "run.get", "run.diagnose":
 				run := validDiagnosticRunHeader("09c3d378-ceed-5289-b4b3-028de530bb72")
 				result := runCommandReadResult(req.Method, run)
+				result["instances"] = []operatorread.RunInstanceOperationalStatus{
+					{FlowInstance: "unrelated/one", Stage: "waiting", Revision: 1, Disposition: "waiting"},
+					{FlowInstance: "unrelated/two", Stage: "waiting", Revision: 1, Disposition: "waiting"},
+				}
 				work := result["test_quiescence"].(map[string]any)
 				select {
 				case <-tracePrinted:
@@ -724,10 +760,13 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 		}
 	}
 	assertRunCommandTraceSubscription(t, wsRequests, "09c3d378-ceed-5289-b4b3-028de530bb72", true)
-	for _, want := range []string{"id=evt-foreground", "delivery=in progress", "run settled: run_id=09c3d378-ceed-5289-b4b3-028de530bb72", "settled,"} {
+	for _, want := range []string{"id=evt-foreground", "delivery=in progress", "run settled: run_id=09c3d378-ceed-5289-b4b3-028de530bb72", "2 waiting (waiting) | 0 live"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
+	}
+	if strings.Contains(stdout.String(), "unrelated/") {
+		t.Fatalf("run-wide readout named unrelated instances: %s", stdout.String())
 	}
 	t.Run("timeout_detaches_without_cancelling_work", func(t *testing.T) {
 		server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
@@ -737,6 +776,12 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 					return runCommandHealthResult()
 				case "run.start":
 					return runStartCommandResult("7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab", "running")
+				case "run.diagnose":
+					result := runCommandReadResult(req.Method, validDiagnosticRunHeader("7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab"))
+					result["instances"] = []operatorread.RunInstanceOperationalStatus{
+						{FlowInstance: "unrelated/active", Stage: "processing", Revision: 1, Disposition: "active", Work: operatorread.RunInstanceWork{Deliveries: 1}},
+					}
+					return result
 				default:
 					t.Errorf("timeout must not mutate work; unexpected method %s", req.Method)
 					return nil
@@ -753,7 +798,10 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 		if code != 8 || !strings.Contains(stderr.String(), "swarm run status 7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab") || !strings.Contains(stderr.String(), "work continues") {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
-		assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
+		if !strings.Contains(stdout.String(), "1 processing (active) | 1 live") || strings.Contains(stdout.String(), "unrelated/active") {
+			t.Fatalf("timeout lost run-wide counts or named another invocation's instance: %s", stdout.String())
+		}
+		assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.diagnose"})
 	})
 }
 

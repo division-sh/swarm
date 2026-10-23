@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -271,7 +272,7 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 	}
 	writeRunCommandStarted(out, start)
 	if opts.noFollow {
-		rejected, err := readRunDeploymentOutcomes(ctx, client, out, start.RunID, start.DeploymentFeedIDs)
+		rejected, err := readRunPublicationOutcomes(ctx, client, out, start)
 		if err != nil {
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
@@ -282,7 +283,7 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 		}
 		return nil
 	}
-	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, start.RunID, &traceReplaySince, true, start.DeploymentFeedIDs)
+	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, start.RunID, &traceReplaySince, true, start)
 }
 
 func (o runCommandOptions) validate() error {
@@ -762,10 +763,10 @@ func runReattachCommand(ctx context.Context, out, errOut io.Writer, opts runComm
 		return runCommandTerminalExit(run.Status)
 	}
 	writeRunCommandReattached(out, run)
-	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, runID, nil, false, nil)
+	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, runID, nil, false, runStartResult{})
 }
 
-func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool, feeds []string) error {
+func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool, publication runStartResult) error {
 	if opts.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.timeout)
@@ -775,8 +776,8 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	if poll <= 0 {
 		poll = time.Second
 	}
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
+	pollTimer := time.NewTimer(0)
+	defer pollTimer.Stop()
 	observer := startForegroundRunTraceObserver(
 		ctx,
 		wsEndpoint,
@@ -816,7 +817,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	timeout := func() error {
 		settleObservation()
 		if lastDiagnosis != nil {
-			writeDiagnosticRunDiagnosis(out, *lastDiagnosis)
+			writeRunCommandStageCounts(out, *lastDiagnosis)
 		}
 		return writeRunCommandTimeout(errOut, runID, opts.connectURL)
 	}
@@ -832,25 +833,11 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return timeout()
 			}
-			var stopErr error
-			if stopOnInterrupt {
-				stopErr = runCommandStop(context.Background(), client, runID)
-			}
-			settleObservation()
-			if stopErr != nil {
-				fmt.Fprintln(errOut, "interrupted; run.stop failed")
-				writeCLIAPIError(errOut, stopErr)
-				return commandExitError{code: 130}
-			}
-			if stopOnInterrupt {
-				fmt.Fprintln(errOut, "interrupted; requested run.stop")
-			} else {
-				fmt.Fprintln(errOut, "detached from run trace")
-			}
-			return commandExitError{code: 130}
+			return interruptRunCommand(errOut, client, runID, stopOnInterrupt, settleObservation)
 		case det := <-detached:
 			reportDetach(det)
-		case <-ticker.C:
+		case <-pollTimer.C:
+			pollTimer.Reset(poll)
 			run, diagnosis, ready, err := readRunCommandFollowState(ctx, client, opts, runID)
 			if err != nil {
 				settleObservation()
@@ -865,13 +852,32 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				continue
 			}
 			settleObservation()
-			err = writeRunCommandFollowResult(ctx, out, errOut, client, run, diagnosis, feeds)
+			err = writeRunCommandFollowResult(ctx, out, errOut, client, run, diagnosis, publication)
 			if errors.Is(err, context.DeadlineExceeded) {
 				return timeout()
 			}
 			return err
 		}
 	}
+}
+
+func interruptRunCommand(errOut io.Writer, client *cliAPIClient, runID string, stopOnInterrupt bool, settleObservation func()) error {
+	var stopErr error
+	if stopOnInterrupt {
+		stopErr = runCommandStop(context.Background(), client, runID)
+	}
+	settleObservation()
+	if stopErr != nil {
+		fmt.Fprintln(errOut, "interrupted; run.stop failed")
+		writeCLIAPIError(errOut, stopErr)
+		return commandExitError{code: 130}
+	}
+	if stopOnInterrupt {
+		fmt.Fprintln(errOut, "interrupted; requested run.stop")
+	} else {
+		fmt.Fprintln(errOut, "detached from run trace")
+	}
+	return commandExitError{code: 130}
 }
 
 func readRunCommandFollowState(ctx context.Context, client *cliAPIClient, opts runCommandOptions, runID string) (diagnosticRunHeader, *DiagnosticRunDiagnosisResult, bool, error) {
@@ -883,12 +889,12 @@ func readRunCommandFollowState(ctx context.Context, client *cliAPIClient, opts r
 	return diagnosis.Run, &diagnosis, BoolPointerValue(diagnosis.TestQuiescence.Ready), err
 }
 
-func writeRunCommandFollowResult(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, run diagnosticRunHeader, diagnosis *DiagnosticRunDiagnosisResult, feeds []string) error {
+func writeRunCommandFollowResult(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, run diagnosticRunHeader, diagnosis *DiagnosticRunDiagnosisResult, publication runStartResult) error {
 	if diagnosis == nil {
 		writeRunCommandTerminalSummary(out, run)
 		return runCommandTerminalExit(run.Status)
 	}
-	rejected, err := readRunDeploymentOutcomes(ctx, client, out, run.RunID, feeds)
+	rejected, err := readRunPublicationOutcomes(ctx, client, out, publication)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return context.DeadlineExceeded
@@ -901,11 +907,34 @@ func writeRunCommandFollowResult(ctx context.Context, out, errOut io.Writer, cli
 	} else {
 		fmt.Fprintf(out, "run settled: run_id=%s\n", run.RunID)
 	}
-	writeDiagnosticRunDiagnosis(out, *diagnosis)
+	writeRunCommandStageCounts(out, *diagnosis)
 	if rejected {
 		return commandExitError{code: cliExitConflict}
 	}
 	return runCommandTerminalExit(run.Status)
+}
+
+func writeRunCommandStageCounts(out io.Writer, diagnosis DiagnosticRunDiagnosisResult) {
+	counts := make(map[string]int)
+	live := 0
+	for _, instance := range diagnosis.Instances {
+		label := instance.Stage + " (" + formatCLIHumanCode(cliHumanCodeOperationalState, instance.Disposition) + ")"
+		counts[label]++
+		if instance.Disposition == "active" {
+			live++
+		}
+	}
+	labels := make([]string, 0, len(counts))
+	for label := range counts {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	parts := make([]string, 0, len(labels)+1)
+	for _, label := range labels {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[label], label))
+	}
+	parts = append(parts, fmt.Sprintf("%d live", live))
+	fmt.Fprintf(out, "Run %s: %s\n", diagnosis.Run.RunID, strings.Join(parts, " | "))
 }
 
 func startForegroundRunTraceRenderer(out, errOut io.Writer, rows <-chan diagnosticRunTraceRow) *foregroundRunTraceRenderer {
@@ -1344,7 +1373,7 @@ func readRunDeploymentOutcomes(ctx context.Context, client *cliAPIClient, out io
 			if err := page.Validate(query); err != nil {
 				return rejected, err
 			}
-			pageRejected, err := writeRunDeploymentOutcomes(out, feedID, page.Outcomes)
+			pageRejected, err := writeRunDeploymentOutcomes(ctx, client, out, runID, feedID, page.Outcomes)
 			rejected = rejected || pageRejected
 			if err != nil {
 				return rejected, err
@@ -1358,26 +1387,84 @@ func readRunDeploymentOutcomes(ctx context.Context, client *cliAPIClient, out io
 	return rejected, nil
 }
 
-func writeRunDeploymentOutcomes(out io.Writer, feedID string, rows []fanoutobligation.Outcome) (bool, error) {
+func readRunPublicationOutcomes(ctx context.Context, client *cliAPIClient, out io.Writer, publication runStartResult) (bool, error) {
+	rejected, err := readRunDeploymentOutcomes(ctx, client, out, publication.RunID, publication.DeploymentFeedIDs)
+	if err != nil || publication.EventID == "" {
+		return rejected, err
+	}
+	eventRejected, err := writeRunEventOutcome(ctx, client, out, publication.RunID, publication.EventID, "input")
+	return rejected || eventRejected, err
+}
+
+func writeRunDeploymentOutcomes(ctx context.Context, client *cliAPIClient, out io.Writer, runID, feedID string, rows []fanoutobligation.Outcome) (bool, error) {
 	rejected := false
 	for _, row := range rows {
+		prefix := fmt.Sprintf("feed %s row %d", feedID, row.Ordinal)
 		switch row.Kind {
 		case fanoutobligation.OutcomeCommitted:
-			if row.EventID != "" {
-				fmt.Fprintf(out, "feed %s row %d committed: event_id=%s\n", feedID, row.Ordinal, row.EventID)
-			} else {
-				fmt.Fprintf(out, "feed %s row %d committed: source_event_id=%s\n", feedID, row.Ordinal, row.SourceEventID)
+			if row.EventID == "" {
+				if row.InheritedDisposition == fanoutobligation.InheritedSucceeded {
+					fmt.Fprintf(out, "%s ACCEPTED: source_event_id=%s\n", prefix, row.SourceEventID)
+				} else {
+					fmt.Fprintf(out, "%s REFUSED: %s source_event_id=%s\n", prefix, row.InheritedDisposition, row.SourceEventID)
+					rejected = true
+				}
+				continue
+			}
+			rowRejected, err := writeRunEventOutcome(ctx, client, out, runID, row.EventID, prefix)
+			rejected = rejected || rowRejected
+			if err != nil {
+				return rejected, err
 			}
 		case fanoutobligation.OutcomeSemanticRejected:
 			failure, err := failures.UnmarshalEnvelope(row.Failure)
 			if err != nil {
 				return rejected, err
 			}
-			fmt.Fprintf(out, "feed %s row %d semantic_rejected: %s %s\n", feedID, row.Ordinal, failure.Message, failure.Remediation)
+			fmt.Fprintf(out, "%s REFUSED: %s %s\n", prefix, failure.Message, failure.Remediation)
 			rejected = true
 		}
 	}
 	return rejected, nil
+}
+
+func writeRunEventOutcome(ctx context.Context, client *cliAPIClient, out io.Writer, runID, eventID, prefix string) (bool, error) {
+	var event eventFull
+	if err := client.call(ctx, eventObservationMethodGet, map[string]any{"event_id": eventID}, &event); err != nil {
+		return false, err
+	}
+	if err := validateEventFull("event.get result", event); err != nil {
+		return false, err
+	}
+	if event.EventID != eventID || event.RunID != runID {
+		return false, fmt.Errorf("event.get result contradicts publication identity")
+	}
+	if event.NoDelivery != nil {
+		fmt.Fprintf(out, "%s REFUSED: %s (event_id=%s)\n", prefix, event.NoDelivery.Reason, eventID)
+		return true, nil
+	}
+	refused, pending := false, false
+	for _, delivery := range event.Deliveries {
+		switch delivery.Status {
+		case "failed", "dead_letter":
+			if !*delivery.Terminal {
+				pending = true
+				continue
+			}
+			reason := formatCLIHumanCode(cliHumanCodeDeliveryStatus, delivery.Status)
+			if delivery.Failure != nil {
+				reason = delivery.Failure.Message + " " + delivery.Failure.Remediation
+			}
+			fmt.Fprintf(out, "%s REFUSED: %s instance=%s (event_id=%s)\n", prefix, reason, delivery.Target.FlowInstance, eventID)
+			refused = true
+		case "pending", "in_progress":
+			pending = true
+		}
+	}
+	if !refused && !pending {
+		fmt.Fprintf(out, "%s ACCEPTED: event_id=%s\n", prefix, eventID)
+	}
+	return refused, nil
 }
 
 func writeRunCommandNoFollowGuidance(out io.Writer, runID, connectURL string) {
