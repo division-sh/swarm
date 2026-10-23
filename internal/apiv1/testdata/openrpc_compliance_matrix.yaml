@@ -581,7 +581,6 @@ methods:
     required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
-    declared_error_tests: {status: covered, proof_refs: []}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency}]}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency}]}
     notification_schema: {status: not_applicable}
@@ -667,12 +666,9 @@ methods:
     transport: http
     required_params: [mailbox_id]
     declared_errors: [MAILBOX_NOT_FOUND, IDEMPOTENCY_CONFLICT]
-    happy_path: {status: covered, proof_refs: []}
     required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
-    declared_error_tests: {status: covered, proof_refs: []}
-    idempotency: {status: covered, proof_refs: []}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
@@ -682,12 +678,9 @@ methods:
     transport: http
     required_params: [card_id, verdict, observed_content_hash]
     declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, MAILBOX_CARD_SUPERSEDED, IDEMPOTENCY_CONFLICT]
-    happy_path: {status: covered, proof_refs: []}
     required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
-    declared_error_tests: {status: covered, proof_refs: []}
-    idempotency: {status: covered, proof_refs: []}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
@@ -697,12 +690,9 @@ methods:
     transport: http
     required_params: [card_id, input_draft_id]
     declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, IDEMPOTENCY_CONFLICT]
-    happy_path: {status: covered, proof_refs: []}
     required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
-    declared_error_tests: {status: covered, proof_refs: []}
-    idempotency: {status: covered, proof_refs: []}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
@@ -712,12 +702,9 @@ methods:
     transport: http
     required_params: [card_id, verdict, observed_content_hash]
     declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, MAILBOX_CARD_SUPERSEDED, IDEMPOTENCY_CONFLICT]
-    happy_path: {status: covered, proof_refs: []}
     required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
-    declared_error_tests: {status: covered, proof_refs: []}
-    idempotency: {status: covered, proof_refs: []}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
@@ -727,12 +714,9 @@ methods:
     transport: http
     required_params: [card_id, until]
     declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, INVALID_DEFER_UNTIL, MAILBOX_CARD_SUPERSEDED, IDEMPOTENCY_CONFLICT]
-    happy_path: {status: covered, proof_refs: []}
     required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
-    declared_error_tests: {status: covered, proof_refs: []}
-    idempotency: {status: covered, proof_refs: []}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
@@ -877,12 +861,10 @@ methods:
     transport: http
     required_params: [source_run_id]
     declared_errors: [BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, RUN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, DATA_DEPENDENCY_INCOMPLETE, DATA_PIN_CONFLICT, DATA_SCHEMA_MISMATCH, DATA_PAYLOAD_PRUNED, DATA_VERSION_NOT_FOUND, DATA_INTEGRITY_ERROR]
-    happy_path: {status: covered, proof_refs: []}
     required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorRunForkHandlersFailClosedOnBundleAvailability}, {kind: go_test, name: TestOperatorRunForkHandlersMapSourceAndEventErrors}]}
-    idempotency: {status: covered, proof_refs: []}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
@@ -1073,7 +1055,6 @@ methods:
     required_params: [service_id]
     declared_errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorStandingServiceHandlersUseCanonicalOwner}]}
-    required_param_validation: {status: covered, proof_refs: []}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorStandingServiceHandlersUseCanonicalOwner}]}
@@ -1088,7 +1069,6 @@ methods:
     required_params: [service_id]
     declared_errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorStandingServiceHandlersUseCanonicalOwner}]}
-    required_param_validation: {status: covered, proof_refs: []}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorStandingServiceHandlersUseCanonicalOwner}]}
@@ -1103,7 +1083,6 @@ methods:
     required_params: [service_id]
     declared_errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorStandingServiceHandlersUseCanonicalOwner}]}
-    required_param_validation: {status: covered, proof_refs: []}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorStandingServiceHandlersUseCanonicalOwner}]}

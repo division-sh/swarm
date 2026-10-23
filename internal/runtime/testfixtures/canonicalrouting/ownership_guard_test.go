@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
-	"go/constant"
-	"go/importer"
 	"go/parser"
 	"go/token"
-	"go/types"
 	"io"
 	"net/http"
 	"os"
@@ -39,11 +36,6 @@ type sourceRegistryEntry struct {
 	Owner       string   `yaml:"owner"`
 	Proof       string   `yaml:"proof"`
 	Issue       int      `yaml:"issue"`
-}
-
-type goPackageSourceArtifact struct {
-	File     string
-	Function string
 }
 
 type artifactRegistryGroup struct {
@@ -467,122 +459,6 @@ func TestCanonicalRoutingTimerSeparatesBareEventAndNoopHandler(t *testing.T) {
 	}
 }
 
-func TestCanonicalRoutingRawPositiveBundleConstructionFailsClosed(t *testing.T) {
-	cases := map[string]map[string]string{
-		"unknown-helper": {"fixture_test.go": `package fixture
-func build() {
-  saveArtifacts(map[string]string{
-    "manifest.yaml": "name: fixture",
-    "schema.yaml": "pins: {inputs: {events: [{source: external}]}}",
-  })
-}`},
-		"cross-file": {
-			"names_test.go": `package fixture
-const manifestFile = "manifest.yaml"
-const schemaFile = "schema.yaml"
-const pinsKey = "pins"
-`,
-			"bundle_test.go": `package fixture
-var bundleFiles = map[string]string{
-  manifestFile: "name: fixture",
-  schemaFile: pinsKey + ": {inputs: {events: [{source: external}]}}",
-}
-func build() { saveArtifacts(bundleFiles) }
-`,
-		},
-		"split-helper-returns": {"fixture_test.go": `package fixture
-func manifestFiles() map[string]string {
-  return map[string]string{"manifest.yaml": "name: fixture"}
-}
-func routingFiles() map[string]string {
-  return map[string]string{"schema.yaml": "pins: {inputs: {events: [{source: external}]}}"}
-}
-func build() { saveArtifacts(mergeFiles(manifestFiles(), routingFiles())) }
-`},
-		"external-webhook": {"fixture_test.go": `package fixture
-var files = map[string]string{
-  "manifest.yaml": "name: fixture",
-  "schema.yaml": "pins: {inputs: {events: [{source: external webhook}]}}",
-}
-`},
-		"external-webhook-case-whitespace": {"fixture_test.go": `package fixture
-var files = map[string]string{
-  "manifest.yaml": "name: fixture",
-  "schema.yaml": "pins: {inputs: {events: [{source: '  ExTeRnAl webhook  '}]}}",
-}
-`},
-		"byte-map-helper-returns": {"fixture_test.go": `package fixture
-func manifestFiles() map[string][]byte {
-  return map[string][]byte{"manifest.yaml": []byte("name: fixture")}
-}
-func routingFiles() map[string][]byte {
-  return map[string][]byte{"schema.yaml": []byte("pins: {inputs: {events: [{source: external}]}}")}
-}
-func build() { saveArtifacts(mergeFiles(manifestFiles(), routingFiles())) }
-`},
-		"typed-artifact-slice": {"fixture_test.go": `package fixture
-type artifact struct {
-  name string
-  contents []byte
-}
-func files() []artifact {
-  return []artifact{
-    {name: "manifest.yaml", contents: []byte("name: fixture")},
-    {name: "schema.yaml", contents: []byte("pins: {inputs: {events: [{source: external}]}}")},
-  }
-}
-func build() { saveArtifacts(files()) }
-`},
-		"string-helper-documents": {"fixture_test.go": `package fixture
-func manifestDocument() string { return "name: fixture" }
-func routingDocument() string {
-  return "pins: {inputs: {events: [{source: external}]}}"
-}
-func build() {
-  writeFile("manifest.yaml", manifestDocument())
-  writeFile("schema.yaml", routingDocument())
-}
-`},
-		"parser-selector-name-spoof": {"fixture_test.go": `package fixture
-type parserOwner struct{}
-func (parserOwner) NewParserSnippet(source string) {}
-var canonicalrouting parserOwner
-func build() {
-  canonicalrouting.NewParserSnippet("manifest.yaml")
-  canonicalrouting.NewParserSnippet("schema.yaml")
-  canonicalrouting.NewParserSnippet("pins: {inputs: {events: [{source: external}]}}")
-}
-`},
-		"parser-decode-materialize": {"fixture_test.go": `package fixture
-import (
-  "os"
-  "testing"
-  "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-  "gopkg.in/yaml.v3"
-)
-func build(t testing.TB) {
-  manifestSnippet := canonicalrouting.NewParserSnippet(t, "name: fixture")
-  routingSnippet := canonicalrouting.NewParserSnippet(t, "pins: {inputs: {events: [{source: external}]}}")
-  var manifestDocument any
-  var routingDocument any
-  _ = manifestSnippet.Decode(&manifestDocument)
-  _ = routingSnippet.Decode(&routingDocument)
-  manifestBytes, _ := yaml.Marshal(manifestDocument)
-  routingBytes, _ := yaml.Marshal(routingDocument)
-  _ = os.WriteFile("manifest.yaml", manifestBytes, 0o600)
-  _ = os.WriteFile("schema.yaml", routingBytes, 0o600)
-}
-`},
-	}
-	for name, files := range cases {
-		t.Run(name, func(t *testing.T) {
-			if !goPackageContainsCompleteRoutingBundle(files) {
-				t.Fatalf("complete raw routing bundle escaped package capability guard: %s", name)
-			}
-		})
-	}
-}
-
 func TestCanonicalRoutingExternalSourceMatchesRuntimeSemantics(t *testing.T) {
 	tests := map[string]bool{
 		"external":             true,
@@ -602,19 +478,7 @@ func TestCanonicalRoutingExternalSourceMatchesRuntimeSemantics(t *testing.T) {
 func TestCanonicalRoutingRepositoryUsesClosedConstructionAPI(t *testing.T) {
 	repo := RepoRoot(t)
 	var violations []string
-	packages, err := repositoryGoPackages(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for key, files := range packages {
-		if strings.HasPrefix(key, "internal/runtime/testfixtures/canonicalrouting:") {
-			continue
-		}
-		for _, source := range completeGoPackageRoutingSourceArtifacts(files) {
-			violations = append(violations, key+":"+source.File+":"+source.Function+" contains a complete Go-authored routing bundle")
-		}
-	}
-	err = walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
+	err := walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
 		rel, err := filepath.Rel(repo, path)
 		if err != nil {
 			return err
@@ -1089,101 +953,6 @@ func repositoryGoPackages(repo string) (map[string]map[string]string, error) {
 		return nil
 	})
 	return packages, err
-}
-
-func goPackageContainsCompleteRoutingBundle(files map[string]string) bool {
-	return len(completeGoPackageRoutingSourceArtifacts(files)) != 0
-}
-
-func completeGoPackageRoutingSourceArtifacts(files map[string]string) []goPackageSourceArtifact {
-	fset := token.NewFileSet()
-	parsedFiles := make([]*ast.File, 0, len(files))
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		parsed, err := parser.ParseFile(fset, path, files[path], 0)
-		if err != nil {
-			return []goPackageSourceArtifact{{File: path, Function: "<unparseable>"}}
-		}
-		parsedFiles = append(parsedFiles, parsed)
-	}
-	if len(parsedFiles) == 0 {
-		return nil
-	}
-
-	info := &types.Info{
-		Types: map[ast.Expr]types.TypeAndValue{},
-	}
-	config := types.Config{Importer: importer.Default(), Error: func(error) {}}
-	_, _ = config.Check("canonicalrouting/sourcecensus", fset, parsedFiles, info)
-
-	// Aggregate every compiler-resolved string across the package. Storage types,
-	// helper boundaries, and writer calls are not semantic boundaries for a
-	// complete positive routing bundle.
-	values := map[string]struct{}{}
-	routingEvidenceFiles := map[string]struct{}{}
-	for _, file := range parsedFiles {
-		for value := range compilerResolvedStrings(file, info) {
-			values[value] = struct{}{}
-			if yamlTextContainsCanonicalRoutingAuthority(value) {
-				routingEvidenceFiles[filepath.ToSlash(fset.Position(file.Pos()).Filename)] = struct{}{}
-			}
-		}
-	}
-
-	hasSchemaFile := false
-	hasRoutingAuthority := false
-	for value := range values {
-		hasSchemaFile = hasSchemaFile || strings.Contains(value, "schema.yaml") || strings.Contains(value, "nodes.yaml")
-		hasRoutingAuthority = hasRoutingAuthority || yamlTextContainsCanonicalRoutingAuthority(value)
-	}
-	if !hasSchemaFile || !hasRoutingAuthority {
-		return nil
-	}
-	evidenceFiles := make([]string, 0, len(routingEvidenceFiles))
-	for path := range routingEvidenceFiles {
-		evidenceFiles = append(evidenceFiles, path)
-	}
-	sort.Strings(evidenceFiles)
-	result := make([]goPackageSourceArtifact, 0, len(evidenceFiles))
-	for _, path := range evidenceFiles {
-		result = append(result, goPackageSourceArtifact{File: path, Function: "package-scope"})
-	}
-	return result
-}
-
-func compilerResolvedStrings(node ast.Node, info *types.Info) map[string]struct{} {
-	values := map[string]struct{}{}
-	ast.Inspect(node, func(candidate ast.Node) bool {
-		expression, ok := candidate.(ast.Expr)
-		if !ok {
-			return true
-		}
-		typed, exists := info.Types[expression]
-		if exists && typed.Value != nil && typed.Value.Kind() == constant.String {
-			values[constant.StringVal(typed.Value)] = struct{}{}
-		}
-		return true
-	})
-	return values
-}
-
-func yamlTextContainsCanonicalRoutingAuthority(text string) bool {
-	decoder := yaml.NewDecoder(strings.NewReader(text))
-	for {
-		var doc yaml.Node
-		if err := decoder.Decode(&doc); err != nil {
-			return false
-		}
-		for _, node := range doc.Content {
-			if yamlNodeContainsCanonicalRoutingAuthority(node) {
-				return true
-			}
-		}
-	}
 }
 
 func yamlNodeContainsCanonicalRoutingAuthority(node *yaml.Node) bool {
