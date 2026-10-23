@@ -248,6 +248,8 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		run.BundleHash = source.bundleHash
 	}
 	ctx := testAuthorActivityContextForBundle(source.bundleHash)
+	ctx = storeTestOriginalProcessContext(t, ctx, s)
+	source.ctx = ctx
 	requireRunFixtureForTest(t, ctx, s, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
