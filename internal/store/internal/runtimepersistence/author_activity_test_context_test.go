@@ -88,6 +88,27 @@ func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
 	return worklifetime.WithOccurrence(ctx, storeTestWorkOwner(t))
 }
 
+func storeTestOriginalProcessContext(t *testing.T, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	}
+	storeTestWorkOwner(t)
+	value, _ := storeTestWorkFixtures.Load(t)
+	work := value.(*storeTestWorkFixture)
+	capability := selectedMaterializationProcessForTest(t, work, selected)
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := work.process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	return worklifetime.WithProcess(ctx, work.process)
+}
+
 func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {
 	t.Helper()
 	t.Cleanup(func() {

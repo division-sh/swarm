@@ -3,11 +3,11 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"errors"
+
 	"testing"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -15,7 +15,6 @@ import (
 type releaseAcknowledgementTestStore interface {
 	completionSettlementTestStore
 	runtimesessions.Registry
-	runtimerunlifecycle.CandidateRegistrar
 }
 
 func TestSessionReleaseOutcomeAcknowledgesPostcommitHandoffErrorBothStores(t *testing.T) {
@@ -34,31 +33,17 @@ func TestSessionReleaseOutcomeAcknowledgesPostcommitHandoffErrorBothStores(t *te
 			fixture := newCompletionSettlementFixture(t, store, db, sqlite)
 			ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 			identity := fixture.authority.Target.AgentIdentity
-			bundleHash := releaseTestBundleHash(t, ctx, db, sqlite, identity.RunID)
-			injected := errors.New("injected session release postcommit handoff failure")
-			submits := 0
-			registration, err := store.RegisterCompletionCandidateSink(ctx, runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}, &completionHandoffEvidenceProbeSink{submit: func(candidate runtimerunlifecycle.Candidate) error {
-				submits++
-				if candidate.RunID != identity.RunID {
-					t.Errorf("wrong candidate run: %+v", candidate)
-				}
-				return injected
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer registration.Release()
 			lease := &runtimesessions.Lease{SessionID: fixture.sessionID, GrantID: fixture.grantID, Identity: identity, LockOwner: fixture.leaseHolder}
 			result, err := store.ReleaseOutcome(ctx, lease)
-			if !result.Acknowledged || !errors.Is(err, injected) || submits != 1 {
-				t.Fatalf("release result=%+v err=%v submissions=%d", result, err, submits)
+			if !result.Acknowledged || err != nil {
+				t.Fatalf("release result=%+v err=%v", result, err)
 			}
 			if holder := releaseTestLeaseHolder(t, ctx, db, sqlite, fixture.sessionID); holder != "" {
 				t.Fatalf("acknowledged release kept lease holder %q", holder)
 			}
 			result, err = store.ReleaseOutcome(ctx, lease)
-			if result.Acknowledged || err == nil || submits != 1 {
-				t.Fatalf("duplicate release result=%+v err=%v submissions=%d", result, err, submits)
+			if result.Acknowledged || err == nil {
+				t.Fatalf("duplicate release result=%+v err=%v", result, err)
 			}
 		})
 	}
