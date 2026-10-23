@@ -809,6 +809,11 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if collector == debtSelectedFixtureComposedCollectorTo {
+			if err := debtSelectedFixtureSourcePins(root, baseRoot); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := debtValidateCollectorIdentity(baseCollector, collector, trusted, head, collector); err != nil {
 			t.Fatal(err)
 		}
@@ -896,6 +901,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtQ1ReopenCollectorTo && trusted.Collector == base &&
+		current == debtSelectedFixtureComposedCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // Exact five source-pinned continuations; source is checked before this transition.
 	}
 	if current == debtQ1ReopenCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
 		prior := head
@@ -1147,10 +1157,19 @@ func debtSelectedFixtureTransferNeeded(actual, base, source map[string]authority
 
 func debtSelectedFixtureSourcePins(root, baseRoot string) error {
 	const path = "internal/runtime/runforkexecution/execution_test.go"
-	for _, pin := range []struct{ source, checksum, checkout string }{
+	pins := []struct{ source, checksum, checkout string }{
 		{debtSelectedFixtureOldSource, debtSelectedFixtureOldSHA256, baseRoot},
 		{debtSelectedFixtureCurrentSource, debtSelectedFixtureCurrentSHA256, root},
-	} {
+	}
+	before, err := os.ReadFile(filepath.Join(baseRoot, path))
+	if err != nil {
+		return err
+	}
+	if debtBaselineChecksum(before) == debtSelectedFixtureComposedOldSHA256 {
+		pins[0].source, pins[0].checksum = debtSelectedFixtureComposedOldSource, debtSelectedFixtureComposedOldSHA256
+		pins[1].source, pins[1].checksum = debtSelectedFixtureComposedCurrentSource, debtSelectedFixtureComposedCurrentSHA256
+	}
+	for _, pin := range pins {
 		archived, err := debtGit(root, "show", pin.source+":"+path)
 		if err != nil {
 			return err

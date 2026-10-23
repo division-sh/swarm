@@ -3063,13 +3063,13 @@
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithGraceLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "67601fca619436c475cf0137f4b166f2258f3a69f4ca55381266d42496947e3c"
+    "body_sha256": "7a0833849c45cebc0201cf26f0db7ebae95182c20b19ef60157d8c04284e7c2e"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "986133cede30ca721bc5a75cb068e35cbb75da36bf18ee95920e6751502605a0"
+    "body_sha256": "10ae9cab9c3e7bd5265b76eb112969b9762cba74160d8724f21213b9ea04aaf4"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.verifyBootPublished",
@@ -3171,7 +3171,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "2f0f58ed63ff022beec032877ac1d34c9d9e8b303d13c5a8c71302357f4074a5"
+    "body_sha256": "34a4d3ac01b544a009b835e3a0154aac2fc7db637ae9906fd6e1ea91d0c9e086"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -4701,7 +4701,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "b43ee704f748bba458c196f13c4c9c3cc8883e047219635f1d06021be9870a15"
+    "body_sha256": "655ef1d44584ffc3cc31c2dc395229575e0166e83327004c2b1d3a17ada2131e"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
