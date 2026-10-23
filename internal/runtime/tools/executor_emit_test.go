@@ -2045,7 +2045,8 @@ func emitRoutePlanTestBundle(t testing.TB, flows []emitRoutePlanTestFlow, connec
 		byID[root.Children[index].Paths.FlowPath] = &root.Children[index]
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Events: eventCatalog,
+		SourceArtifact: sourceartifactfixture.Artifact(),
+		Events:         eventCatalog,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: byID,

@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -21,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -183,11 +185,28 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	t.Helper()
 	// Record the causal input without selecting the as-yet unconstructed child.
 	// This proof exercises explicit activation, not connect-time construction.
-	trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.recorded", "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
+	recorded := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.recorded", "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
 		events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
-	if err := h.rt.Bus.PublishAndWait(ctx, trigger); err != nil {
+	if err := h.rt.Bus.PublishAndWait(ctx, recorded); err != nil {
 		t.Fatal(err)
 	}
+	trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.prepare", "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
+		events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
+	admit := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(h.bundle), catalogSourceArtifactFact(t, h.bundle))
+	admission, err := admit(ctx, trigger, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err = events.ApplyPayloadAdmission(trigger, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected any = h.pg
+	if h.sqlite != nil {
+		selected = h.sqlite
+	}
+	storetest.CommitSemanticEvent(t, ctx, selected, trigger)
+	storetest.CaptureRunForkSnapshot(t, ctx, selected, catalogRuntimeRunID)
 	schema, _ := semanticview.Wrap(h.bundle).FlowSchemaByID("worker-flow")
 	directCreation := schema.AutoEmitOnCreate.Event == eventName
 	p := &localReadinessEntryProbe{pauseReadinessEntry: pauseReadinessEntry{h: h, node: identitytest.FlowNode(t, "worker-flow", strings.ReplaceAll(eventName, ".", "-")+"-entry").Key()}, done: make(chan struct{})}

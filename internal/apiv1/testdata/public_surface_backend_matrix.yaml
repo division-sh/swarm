@@ -568,7 +568,7 @@ store_parity:
       evidence:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [external-effect-recovery, turn-cancellation-atomic]}
       runtime_deps: [EffectsStore, CompletionStore, CompletionHeartbeatStore, EffectsRecoveryStore, ManagedCapabilitiesStore]
-      platform_tables: [runtime_external_effect_operations, runtime_external_effect_attempts, runtime_provider_attempt_drains, runtime_agent_turn_lifetimes, reply_contexts, activity_attempts]
+      platform_tables: [runtime_external_effect_operations, runtime_external_effect_attempts, runtime_provider_attempt_drains, runtime_agent_turn_lifetimes, reply_contexts, activity_attempts, activity_attempt_live_parents]
     - id: selected_contract_fork
       semantic_owners: [internal/store/selected.RunFork]
       selected_purposes: [runtime]
@@ -580,7 +580,7 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [selected_construction], proof_ids: [served-selected-reset-construction]}
       optional_products: [runFork]
       nested_roles: {product_run_fork: [planner, availability, operations, activation, executionOwner, construction]}
-      platform_tables: [run_fork_operations, run_fork_selected_contract_bindings, run_fork_selected_contract_branch_divergences, run_fork_selected_contract_executions, run_fork_selected_contract_route_recoveries, run_fork_selected_contract_runtime_executions]
+      platform_tables: [run_fork_operations, run_fork_operation_live_parents, run_fork_selected_contract_bindings, run_fork_selected_contract_branch_divergences, run_fork_selected_contract_executions, run_fork_selected_contract_route_recoveries, run_fork_selected_contract_runtime_executions, run_fork_selected_contract_activity_detachments, run_fork_selected_contract_execution_detachments, run_fork_selected_contract_execution_live_parents, run_fork_selected_contract_turn_detachments]
       public_methods: [run.fork]
     - id: workflow_runtime
       semantic_owners: [internal/runtime/pipeline workflow persistence]
@@ -609,7 +609,7 @@ store_parity:
       runtime_deps: [SessionRegistry, LiveSessionAcquirer, SessionResetter, ConversationStore]
       optional_products: [conversationFork]
       nested_roles: {product_conversation_fork: [reader, lifecycle]}
-      platform_tables: [agent_sessions, managed_agent_capability_surfaces, agent_turns, agent_conversation_audits, conversation_fork_snapshots, conversation_fork_turn_completions, conversation_fork_turns, conversation_forks]
+      platform_tables: [agent_sessions, managed_agent_capability_surfaces, agent_turns, agent_turn_live_parents, agent_conversation_audits, conversation_fork_snapshots, conversation_fork_turn_completions, conversation_fork_turns, conversation_forks]
       public_methods: [conversation.fork, conversation.fork_chat, conversation.fork_delete, conversation.fork_list, conversation.fork_view, conversation.get_turn, conversation.list, conversation.list_turns]
     - id: startup_authority
       semantic_owners: [internal/runtime/startupownership, internal/store/selected authority purposes]

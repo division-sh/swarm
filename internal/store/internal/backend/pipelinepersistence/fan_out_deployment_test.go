@@ -256,8 +256,8 @@ func TestSelectedDeploymentCandidateRequiresExactBindingAndLiveExecution(t *test
 	handler.TriggeringDeliveryID = uuid.NewString()
 	handler.ElementRef = runtimecontracts.FanOutElementRef{FlowPath: ".", Family: "fan_out", SemanticPath: "nodes.scatter"}
 	claim.Candidate = &handler
-	if err := validateFanOutCandidate(claim, grant); err == nil {
-		t.Fatal("selected grant admitted handler origin")
+	if err := validateFanOutCandidate(claim, grant); err != nil {
+		t.Fatalf("selected exact-run handler candidate was refused: %v", err)
 	}
 	foreign := request.Key
 	foreign.RunID = uuid.NewString()
