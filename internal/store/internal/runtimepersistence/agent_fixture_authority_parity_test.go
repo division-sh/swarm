@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -23,7 +23,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimeexecutionmode "github.com/division-sh/swarm/internal/runtime/executionmode"
+
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -32,7 +32,7 @@ import (
 
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -310,8 +310,6 @@ func assertExactAgentFixtureFlowAuthority(
 	t.Fatalf("activated agent for flow path %s is missing", path)
 }
 
-const agentFixtureTestBundleHash = sourceartifactfixture.BundleHash
-
 func newAgentFixtureAuthorityStore(t *testing.T, backend string) (context.Context, agentFixtureFlowStore) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
@@ -337,79 +335,4 @@ func agentFixtureStaticRecord(t *testing.T, identity runtimeagentidentity.Identi
 		}),
 		Status: "active", HiredBy: "fixture-authority-proof", StartedAt: time.Now().UTC(),
 	}
-}
-
-func seedExactAgentFixtureFlowState(
-	t *testing.T,
-	ctx context.Context,
-	selected agentFixtureFlowStore,
-	identity runtimeagentidentity.Identity,
-	grant runtimestartupownership.LiveGenerationGrant,
-) runtimemanager.AgentLifecycleState {
-	t.Helper()
-	plan := currentAgentFixtureSourceSet(t, ctx, selected)
-	if len(plan.Sources) != 1 {
-		t.Fatalf("fixture source set sources = %#v, want one", plan.Sources)
-	}
-	record := agentFixtureStaticRecord(t, identity)
-	revision, err := canonicaljson.Hash(record.Config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	revision = strings.TrimPrefix(revision, "sha256:")
-	runID := identity.RunID
-	ctx = storeTestOriginalProcessContext(t, ctx, selected)
-	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
-	readinessPlan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Identity: runtimeflowidentity.Instance{
-			TemplateID: "review", ScopeKey: "review", InstanceID: "fixture", InstancePath: identity.FlowInstance(),
-			EntityID: uuid.NewString(), HasStoredPath: true,
-		},
-		RunID: runID, BundleHash: plan.Sources[0].BundleHash,
-		WorkflowVersion: "1.0.0", ExecutionMode: runtimeexecutionmode.Live,
-		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{Identity: identity, ConfigRevision: revision, EntityID: record.Config.EntityID}},
-	}).Normalized()
-	if err != nil {
-		t.Fatalf("normalize flow readiness owner: %v", err)
-	}
-	readinessPlan = seedLifecycleReadinessOwner(t, ctx, selected, readinessPlan, time.Now().UTC())
-	fingerprint, err := readinessPlan.Hash()
-	if err != nil {
-		t.Fatal(err)
-	}
-	topology, err := runtimeagenttopology.FlowReadinessAdmission(runID, identity.FlowInstance(), fingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binding, err := grant.ProcessExecutionBinding()
-	if err != nil {
-		t.Fatalf("bind flow fixture grant: %v", err)
-	}
-	readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(identity.FlowInstance()))
-	if err != nil || !found {
-		t.Fatalf("load seeded flow readiness: found=%v err=%v", found, err)
-	}
-	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
-	if err != nil || !admitted.Acknowledged {
-		t.Fatalf("admit seeded flow activation: acknowledged=%v err=%v", admitted.Acknowledged, err)
-	}
-	topology, err = topology.WithFlowActivationAttempt(admitted.Attempt.ID())
-	if err != nil {
-		t.Fatalf("bind seeded flow topology to activation attempt: %v", err)
-	}
-	record.Topology = topology
-	if _, err := agentfixture.CommitExact(t, ctx, selected, runtimemanager.AgentLifecycleTransition{
-		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: "flow-survivor",
-		Identity: identity, AgentID: identity.AgentID(), Trigger: "fixture-proof",
-		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
-		ConfigRevision: revision, RunMode: runtimemanager.AgentRunModeStopped,
-		Agent: &record, Topology: topology, Now: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("seed exact flow fixture survivor: %v", err)
-	}
-	state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
-	if err != nil || !found {
-		t.Fatalf("load exact flow fixture survivor: found=%v err=%v", found, err)
-	}
-	return state
 }
