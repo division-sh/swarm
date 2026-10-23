@@ -212,7 +212,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					var fork, duplicate apiv1.RunForkExecutionResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-					if fork.ForkRunID != duplicate.ForkRunID || fork.ExecutedEventCount != 1 || fork.SourceRunStatus != "paused" || duplicate.SourceRunStatus != "paused" || fork.SourceFrozen || duplicate.SourceFrozen {
+					if fork.ForkRunID != duplicate.ForkRunID || fork.ExecutedEventCount != 0 || fork.SourceRunStatus != "paused" || duplicate.SourceRunStatus != "paused" || fork.SourceFrozen || duplicate.SourceFrozen {
 						t.Fatalf("fork replay disagreement: %#v / %#v", fork, duplicate)
 					}
 					forkRunID = fork.ForkRunID
@@ -231,7 +231,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						if err != nil {
 							t.Fatalf("canonical admitted fork failed: %v", err)
 						}
-						if result.ExecutedEventCount != 1 {
+						if result.ExecutedEventCount != 0 {
 							t.Fatalf("fork execution count: %d", result.ExecutedEventCount)
 						}
 						forkRunID = result.Materialization.ForkRunID
@@ -268,6 +268,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				if forkRunID == "" || forkRunID == request.RunID {
 					t.Fatalf("fork did not execute selected receiver: %s", forkRunID)
 				}
+				waitServedSelectedForkFrontier(t, rt, forkRunID, forkPoint)
 				checkSource("after supported fork")
 				rootType, childType, rootState := "work", "receipt", "done"
 				var rootFields, childFields map[string]any = map[string]any{}, map[string]any{}

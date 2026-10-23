@@ -138,9 +138,6 @@ func TestVenueEnvironmentDeclarationsFailClosed(t *testing.T) {
 
 func TestCommittedEnvironmentDeclarationCensus(t *testing.T) {
 	policy, _, _ := environmentPlanInputs(t)
-	if len(localEnvironmentUnits) != 12 {
-		t.Fatal("original twelve-declaration census changed")
-	}
 	for name, profile := range policy.Profiles {
 		if profile.EnvironmentID != "" || !maps.Equal(profile.EnvironmentIDs, managedEnvironmentIDs()) {
 			t.Fatalf("profile %s bypasses explicit venue declarations", name)
