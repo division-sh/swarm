@@ -147,7 +147,7 @@ func TestRunCommandUsesRunningServeAPITokenFile(t *testing.T) {
 			}
 
 			var stdout, stderr bytes.Buffer
-			args := []string{"run", "start", ".", "--event", "scan.requested", "--payload", payloadPath}
+			args := []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}
 			if explicit {
 				args = append(args, "--api-token-file", tokenFile)
 			}
@@ -892,7 +892,7 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 		})
 		defer server.Close()
 		port := server.URL[strings.LastIndex(server.URL, ":")+1:]
-		args := []string{"run", "start", ".", "--api-port", port, "--config", config, "--event", "scan.requested", "--payload", payloadPath}
+		args := []string{"run", "start", "--api-port", port, "--config", config, "--event", "scan.requested", "--payload", payloadPath}
 		for _, mode := range []string{"--timeout", "--no-follow"} {
 			var stdout, stderr bytes.Buffer
 			command := append([]string{}, args...)
@@ -1085,7 +1085,7 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", ".", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
