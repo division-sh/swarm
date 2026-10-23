@@ -1,6 +1,8 @@
 package pipelinepersistence
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -14,6 +16,10 @@ import (
 )
 
 type snapshotHistoricalReader struct{ HistoricalFlowInstanceReader }
+
+func (*snapshotHistoricalReader) WithHistoricalFlowInstancePlanningTx(ctx context.Context, _ *sql.Tx, _ semanticview.Source, _ runlifecycle.Snapshot, read func(context.Context) error) error {
+	return read(ctx)
+}
 
 func TestInstanceSnapshotSourceConflictRequiresValidSourceAndLineage(t *testing.T) {
 	artifact := sourceartifactfixture.Artifact()
