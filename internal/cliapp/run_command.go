@@ -776,7 +776,11 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	if poll <= 0 {
 		poll = time.Second
 	}
-	pollTimer := time.NewTimer(0)
+	firstPoll := poll
+	if opts.reattachRunID == "" {
+		firstPoll = 0
+	}
+	pollTimer := time.NewTimer(firstPoll)
 	defer pollTimer.Stop()
 	observer := startForegroundRunTraceObserver(
 		ctx,
@@ -840,6 +844,9 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 			pollTimer.Reset(poll)
 			run, diagnosis, ready, err := readRunCommandFollowState(ctx, client, opts, runID)
 			if err != nil {
+				if errors.Is(ctx.Err(), context.Canceled) {
+					continue
+				}
 				settleObservation()
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					return timeout()
@@ -886,7 +893,10 @@ func readRunCommandFollowState(ctx context.Context, client *cliAPIClient, opts r
 		return run, nil, runCommandTerminalStatus(run.Status), err
 	}
 	diagnosis, err := readRunDiagnosis(ctx, client, runID)
-	return diagnosis.Run, &diagnosis, BoolPointerValue(diagnosis.TestQuiescence.Ready), err
+	if err != nil {
+		return diagnosticRunHeader{}, nil, false, err
+	}
+	return diagnosis.Run, &diagnosis, BoolPointerValue(diagnosis.TestQuiescence.Ready), nil
 }
 
 func writeRunCommandFollowResult(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, run diagnosticRunHeader, diagnosis *DiagnosticRunDiagnosisResult, publication runStartResult) error {
