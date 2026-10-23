@@ -5,6 +5,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"testing"
 )
 
@@ -12,7 +13,11 @@ func openManagerNativeSelectedDelivery(t *testing.T, backend string) *manager.Ma
 	t.Helper()
 	fixture := openManagerNativeDelivery(t, backend)
 	selected := fixture.Store.(selectedtest.SelectedDeliveryFixtureStore)
-	execution := selectedtest.OpenSelectedDeliveryExecution(t, manager.TerminalPanicFixtureContext(), selected)
+	original, err := agentfixture.ProcessCapability(t, fixture.Context, fixture.Store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := selectedtest.OpenSelectedDeliveryExecution(t, manager.TerminalPanicFixtureContext(), selected, original)
 	fixture.Authority, fixture.NormalAuthority = execution.Authority, execution.NormalAuthority
 	fixture.SelectedAdmission, fixture.SelectedRoute = execution.SelectedAdmission, execution.SelectedRoute
 	fixture.SelectedEvent, fixture.SemanticSource, fixture.Context = execution.SelectedEvent, execution.SemanticSource, execution.Context

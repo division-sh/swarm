@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
@@ -23,6 +24,10 @@ type receiptOutcomeStore struct {
 	postCommitRenewals atomic.Int32
 	committed          atomic.Bool
 	returned           runtimedelivery.Snapshot
+}
+
+func (s *receiptOutcomeStore) managerTestOriginalProcess() *worklifetime.Process {
+	return managerTestOriginalProcessFromStore(s.Store)
 }
 
 func (s *receiptOutcomeStore) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {
@@ -192,12 +197,7 @@ func ProveNativeProcessEventDoesNotResettleAcknowledgedReceiptError(t *testing.T
 // retirement tests do, to avoid a manager/store import cycle.
 func ProveSelectedStoreReceiptOutcome(t *testing.T, ctx context.Context, selected runtimedelivery.Store, evt events.Event, claimed runtimedelivery.ClaimedObligation, status ReceiptStatus, handoffErr error) {
 	t.Helper()
-	store := &receiptOutcomeStore{Store: selected, authority: claimed.Snapshot.Authority}
-	// Retry settlement has no completion-candidate handoff. Inject its owner
-	// return error only after the real selected-store settlement returns.
-	if status == ReceiptStatusError {
-		store.failure = handoffErr
-	}
+	store := &receiptOutcomeStore{Store: selected, authority: claimed.Snapshot.Authority, failure: handoffErr}
 	bus := &receiptOutcomeBus{}
 	if handoffErr != nil {
 		bus.failure = errors.New("independent continuation failure")

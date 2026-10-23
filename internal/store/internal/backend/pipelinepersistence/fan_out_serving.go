@@ -90,7 +90,7 @@ func (s *fanOutServingStore) BindFanOutGrant(grant startupownership.GrantEvidenc
 	return s.bindFanOutGrant(grant)
 }
 
-func (s *fanOutServingStore) bindFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *fanOutServingStore) bindFanOutGrant(grant startupownership.GrantEvidence) (pipeline.SelectedFanOutObligationOwner, error) {
 	if err := grant.Validate(); err != nil {
 		return nil, err
 	}
@@ -104,14 +104,14 @@ func (s *fanOutServingStore) bindFanOutGrant(grant startupownership.GrantEvidenc
 	return &fanOutSQLiteOwner{PipelineSQLiteOwner: s.sqlite, grant: grant, admission: s.admission}, nil
 }
 
-func (s *PipelinePostgresOwner) BindSelectedDeploymentFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *PipelinePostgresOwner) BindSelectedDeploymentFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.SelectedFanOutObligationOwner, error) {
 	if s == nil || s.backend == nil || admission == nil || grant.SelectedFork == nil {
 		return nil, errors.New("selected deployment serving requires selected grant and admission")
 	}
 	return (&fanOutServingStore{postgres: s, admission: admission}).bindFanOutGrant(grant)
 }
 
-func (s *PipelineSQLiteOwner) BindSelectedDeploymentFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *PipelineSQLiteOwner) BindSelectedDeploymentFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.SelectedFanOutObligationOwner, error) {
 	if s == nil || s.backend == nil || admission == nil || grant.SelectedFork == nil {
 		return nil, errors.New("selected deployment serving requires selected grant and admission")
 	}

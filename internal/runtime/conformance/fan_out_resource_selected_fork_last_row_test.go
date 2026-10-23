@@ -9,7 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
@@ -21,12 +23,22 @@ type selectedDeploymentForkSettlementProbe struct {
 	evaluated chan string
 }
 
-func (p selectedDeploymentForkSettlementProbe) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (p selectedDeploymentForkSettlementProbe) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.SelectedFanOutObligationOwner, error) {
 	owner, err := p.SelectedContractForkLifecycle.BindSelectedDeploymentFanOutGrant(grant)
 	if owner == nil || err != nil {
 		return owner, err
 	}
-	return selectedDeploymentSettlementOwner{FanOutObligationOwner: owner, committed: p.committed, evaluated: p.evaluated}, nil
+	return selectedDeploymentBoundSettlementOwner{SelectedFanOutObligationOwner: owner, committed: p.committed, evaluated: p.evaluated}, nil
+}
+
+type selectedDeploymentBoundSettlementOwner struct {
+	pipeline.SelectedFanOutObligationOwner
+	committed chan string
+	evaluated chan string
+}
+
+func (o selectedDeploymentBoundSettlementOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
+	return (selectedDeploymentSettlementOwner{FanOutObligationOwner: o.SelectedFanOutObligationOwner, committed: o.committed, evaluated: o.evaluated}).BeginFanOutEvaluation(ctx, claim, validate)
 }
 
 // R6a: a committed final ordinal cannot make a selected fork quiescent while
