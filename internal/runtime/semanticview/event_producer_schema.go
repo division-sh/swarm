@@ -26,6 +26,12 @@ func ResolveProducerEventSchema(source Source, producer events.PayloadProducer, 
 			return EventSchemaResolution{}, fmt.Errorf("event producer flow %q is not declared in the semantic source", flowID)
 		}
 		if event.AdmissionClass() == events.EventAdmissionRuntimeControl {
+			if event.Producer().ID() == "runtime.generic_schedule" {
+				if _, _, found := source.ResolveFlowEventCatalogEntry(flowID, string(event.Type())); !found {
+					return EventSchemaResolution{}, fmt.Errorf("scheduled event %q is not declared by flow %q", event.Type(), flowID)
+				}
+				return ResolveEventSchema(source, flowID, string(event.Type())), nil
+			}
 			declared := false
 			for _, timer := range source.WorkflowTimers() {
 				if timer.OwningFlowID() == flowID && source.ResolveFlowEventReference(flowID, timer.Event) == string(event.Type()) {

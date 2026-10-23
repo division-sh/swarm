@@ -327,7 +327,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			}
 			ctx, target := seedCapturedProviderTarget(t, ctx, selected, source, runID, entityID, boundedProviderFlowID, "ack-operator", "telegram", "telegram-secret", "")
-			plan := compileEmbeddedTelegramOperatorChannelPlan(t)
+			plan := compileCapturedTelegramOperatorChannelPlan(t, source)
 			identity, err := plan.InterfaceIdentity()
 			if err != nil {
 				t.Fatal(err)

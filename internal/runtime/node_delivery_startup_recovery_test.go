@@ -160,6 +160,10 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 		t.Fatalf("construct persisted startup bundle source: %v", err)
 	}
 	persistedBundleHash := persistedSource.BundleHash()
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, backend := range []struct {
 		name  string
 		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore)
@@ -172,10 +176,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
+				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-					BundleHash: persistedBundleHash,
+					BundleHash: persistedBundleHash, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 				})
 				return ctx, db, db, selected
 			},
@@ -186,10 +191,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
+				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-					BundleHash: persistedBundleHash,
+					BundleHash: persistedBundleHash, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 				})
 				return ctx, nil, storetest.Database(selected), selected
 			},
@@ -561,7 +567,12 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 }
 
 func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *testing.T) {
-	source, err := runtimecorrelation.NewSourceArtifactFact(authorActivityTestSourceArtifactFact.BundleHash())
+	artifact := startupRecoverySourceArtifact(t, "pipeline-handoff-cleanup")
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct pipeline handoff source: %v", err)
 	}
@@ -578,7 +589,8 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			}
 			runID := eventtest.UUID("pipeline-handoff-cleanup-run-" + backend)
 			ctx := startupRecoverySourceContext(source, runID)
-			seedStartupRecoverySourceRun(t, ctx, selected, source, authorActivityTestSourceArtifact, runID)
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+			seedStartupRecoverySourceRun(t, ctx, selected, source, artifact, runID)
 			route := startupRecoveryNodeRoute(t, "complete-task")
 			event := eventtest.ExistingRunRootIngress(
 				eventtest.UUID("pipeline-handoff-cleanup-event-"+backend),

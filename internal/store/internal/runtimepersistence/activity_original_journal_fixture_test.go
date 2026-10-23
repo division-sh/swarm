@@ -78,13 +78,33 @@ func captureActivityFixtureJournalWithBinding(t testing.TB, ctx context.Context,
 	if err != nil {
 		t.Fatal(err)
 	}
+	var coordinate agenttopology.SourceCoordinate
 	if !found {
-		plan, err = agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+		root, present, rootErr := correlation.RootAdmissionFromContext(ctx)
+		if rootErr != nil || !present || root.BundleHash() != fact.BundleHash() {
+			t.Fatalf("native activity fixture requires its captured source: present=%v err=%v", present, rootErr)
+		}
+		coordinate, err = agenttopology.NewSourceCoordinate(root)
 		if err != nil {
 			t.Fatal(err)
 		}
+		plan, err = agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		matches := 0
+		for _, source := range plan.Sources {
+			if source.BundleHash == fact.BundleHash() {
+				coordinate = source
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Fatal("native activity fixture requires one exact retained source coordinate")
+		}
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, store, plan, agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()})
+	grant, err := agentfixture.AdmitGeneration(t, ctx, store, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}

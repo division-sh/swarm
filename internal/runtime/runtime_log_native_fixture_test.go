@@ -121,7 +121,14 @@ func nativeRecoveryLogRuntimeForTest(t *testing.T, fixture RuntimeLogNativeFixtu
 		}
 	})
 	fact := deps.Options.SourceArtifactFact
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !present || root.BundleHash() != fact.BundleHash() {
+		t.Fatalf("native recovery source root differs from its fact: present=%v err=%v", present, err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		return nil, err
+	}
 	agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(deps.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		return nil, err

@@ -104,11 +104,13 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 }
 
 func TestRunForkSelectedContractBindingUsesPersistedPostgresTimestampPrecision(t *testing.T) {
+	rooted, _ := sourceartifactfixture.Rooted(t, "timestamp-binding", sourceartifactfixture.Artifact())
 	createdAt := time.Date(2026, time.July, 30, 1, 2, 3, 123456700, time.FixedZone("test", -4*60*60))
 	binding, err := normalizeRunForkSelectedContractBinding(runfork.RunForkSelectedContractBindingRequest{
-		ForkRunID:   uuid.NewString(),
-		SourceRunID: uuid.NewString(),
-		ForkPoint:   runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: uuid.NewString()},
+		ForkRunID:           uuid.NewString(),
+		SourceRunID:         uuid.NewString(),
+		ForkPoint:           runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: uuid.NewString()},
+		TargetRootAdmission: rooted.Admission(),
 		ContractSelection: runfork.RunForkContractSelection{
 			Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 		},

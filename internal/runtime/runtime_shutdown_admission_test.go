@@ -145,7 +145,8 @@ func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthorityOutcome(ctx cont
 
 func newRuntimeShutdownDeliveryStore(t *testing.T, open RuntimeLogNativeOpenerForTest) (*runtimeShutdownDeliveryStore, RuntimeLogNativeFixtureForTest) {
 	t.Helper()
-	fixture := open(t, sourceartifactfixture.Artifact())
+	rooted, _ := sourceartifactfixture.Rooted(t, "shutdown", sourceartifactfixture.Artifact())
+	fixture := open(t, rooted.Artifact())
 	if err := fixture.RequireRun(fixture.Context, agentidentitytest.DefaultRunID); err != nil {
 		t.Fatal(err)
 	}

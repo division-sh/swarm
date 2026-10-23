@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -85,6 +86,11 @@ func proveExactEntityProducerSpelling(t *testing.T, backend, producer, spelling 
 		})
 	}
 	if producer == "scenario_setup" {
+		rooted, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 		req := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "receiver", EntityID: input, FlowInstance: instance, EntityType: "review_item", Fields: map[string]any{"account_id": "preserved"}}}}
 		if _, err := owner.SetupScenarioEntities(ctx, req); err != nil {
 			t.Fatalf("actual scenario insertion (%s): %v", spelling, err)

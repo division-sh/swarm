@@ -428,7 +428,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								if err != nil || blocked.ExecutionReady || len(blocked.Entities) != wantEntities || !reflect.DeepEqual(blocked.UnsupportedBlockers, wantBlockers) {
 									t.Fatalf("native import history escaped exact fork admission: %+v %v", blocked, err)
 								}
-								refused, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: poisonID})
+								refused, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: poisonID, RootAdmission: rooted.Admission()})
 								if err == nil || err.Error() != "fork materialization requires execution-ready plan; blockers: "+runfork.RunForkBlockerEntitySnapshotMetadataUnproven || refused.ForkRunID != "" || refused.ExecutionReady || !reflect.DeepEqual(refused.UnsupportedBlockers, wantBlockers) {
 									t.Fatalf("native import history materialized or lost exact refusal: %+v %v", refused, err)
 								}
@@ -439,7 +439,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								if !reflect.DeepEqual(prior.Entities, plan.Entities) || prior.ForkPoint != plan.ForkPoint {
 									t.Fatalf("later imported history poisoned the earlier clean cut: before=%+v after=%+v", plan, prior)
 								}
-								valid, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+								valid, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 								if err != nil || (phase == "exact_replay" && valid.ForkRunID != forkRunID) {
 									t.Fatalf("earlier admitted import cut stopped materializing: %+v %v", valid, err)
 								}

@@ -141,7 +141,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	}))
 	defer server.Close()
 
-	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "telegram_bot_token", "provider-secret")
+	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "telegram.telegram_bot_token", "provider-secret")
 	source := telegramConnectorSupportedSurfaceSource(t, server.URL, backend.flowInstance)
 	backend.source = source
 	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")

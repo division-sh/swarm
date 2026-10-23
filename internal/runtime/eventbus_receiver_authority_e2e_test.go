@@ -127,7 +127,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			}
 
 			materializeCtx := worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			constructExternalRuntimeTestRoot(t, materializeCtx, rt.Manager, source)
+			constructExternalRuntimeTestRoot(t, materializeCtx, rt.Manager, rt.Options.WorkflowModule.SemanticSource())
 			entityID := runID
 			rootSource := eventtest.RootRoutingSource(entityID)
 			root := eventtest.ExistingRunRootIngressWithRoutingSource(
