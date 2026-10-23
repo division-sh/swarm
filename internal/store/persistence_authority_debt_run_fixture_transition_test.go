@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+const debtSelectedFixtureOldSource = "d47682d5c0bf8c921b4468668cefda60d2ac0cbe"
+const debtSelectedFixtureCurrentSource = "ea11297ceb7a0213f2c113c0c17f93e88be8a529"
+const debtSelectedFixtureCollectorTo = "01ab5bf120c64a12a5f7aa34e2948c740063673eb3f71377faee913db0fb5827"
+
 func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]authorityDebtSite) {
 	old, current := debtControlSet(), debtControlSet()
 	for _, pair := range debtRunFixtureSignatureTransitions() {
@@ -17,6 +21,28 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("selected-original-owner-threading", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		for _, pair := range debtSelectedFixtureSignatureTransitions() {
+			before[pair[0].identity()] = pair[0]
+			after[pair[1].identity()] = pair[1]
+		}
+		if authorityDebtCount(before) != 5 || authorityDebtCount(after) != 5 {
+			t.Fatal("original-owner threading must preserve five distinct occurrences")
+		}
+		if failures := authorityDebtRatchet(after, before, before, before); len(failures) != 0 {
+			t.Fatal(failures)
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse original-owner signature continuation admitted")
+		}
+		if failures := authorityDebtRatchet(after, after, before, debtControlSet()); len(failures) == 0 {
+			t.Fatal("original-owner signature continuation admitted without its source")
+		}
+		for _, pair := range debtSelectedFixtureSignatureTransitions() {
+			debtRunFixtureSignatureHostileControls(t, pair, before, after)
+		}
+	})
 	if authorityDebtCount(old) != 9 || authorityDebtCount(current) != 9 {
 		t.Fatal("signature accounting must preserve all nine distinct debt occurrences")
 	}
@@ -203,7 +229,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 func TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo) {
+	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo && digest != debtSelectedFixtureCollectorTo) {
 		t.Fatalf("reviewed fork/process successor=%s/%s actual=%s error=%v", debtForkProofCollectorTo, debtProcessLeaseCollectorTo, digest, err)
 	}
 	prior := materializeDebtBase(t, root, "40c0b18bf315a949959417688adb32e358413b78")

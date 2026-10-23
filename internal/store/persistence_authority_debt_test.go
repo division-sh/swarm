@@ -195,7 +195,8 @@ func debtRunFixtureSignatureSite(declaration, resolved string) authorityDebtSite
 }
 
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
-	for _, pair := range debtRunFixtureSignatureTransitions() {
+	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
+	for _, pair := range append(runFixtures[:], selectedFixtures[:]...) {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
 			if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
@@ -795,6 +796,11 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if debtSelectedFixtureTransferNeeded(actual, trusted.Sites, baseActual) {
+		if err := debtSelectedFixtureSourcePins(root, baseRoot); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := debtValidateProcessLeaseRelocationSource(root, baseRoot, actual, baseActual); err != nil {
 		t.Fatal(err)
 	}
@@ -861,6 +867,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if base == debtProcessLeaseCollectorTo && trusted.Collector == base &&
+		current == debtSelectedFixtureCollectorTo && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil
 	}
 	if base == debtForkProofCollectorFrom && current == debtForkProofCollectorTo &&
@@ -1054,8 +1065,6 @@ func debtSelectedBoundarySource(path string, file *ast.File) []authorityFinding 
 }
 
 // Exact original-owner threading correspondence, authorized in 6252008831.
-const debtSelectedFixtureOldSource = "d47682d5c0bf8c921b4468668cefda60d2ac0cbe"
-const debtSelectedFixtureCurrentSource = "ea11297ceb7a0213f2c113c0c17f93e88be8a529"
 const debtSelectedFixtureOldSHA256 = "b95339d282c82e0800e9e4771b0163b3b30dca0225e8ad27bb1bd65a34192164"
 const debtSelectedFixtureCurrentSHA256 = "12c5a5cb5815a5fd2629178bce159bb5fdcdeadafc1f386d538c6d164781a7fe"
 
@@ -1082,4 +1091,36 @@ func debtSelectedFixtureSignatureTransitions() [5][2]authorityDebtSite {
 			{Kind: "raw-operation", File: "internal/runtime/runforkexecution/execution_test.go", Declaration: "seedSelectedExecutionSourceRunWithPrimaryRoute", Operation: "call:github.com/division-sh/swarm/internal/runtime/runforkexecution.seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource", Resolved: "func=func(t *testing.T, selected *github.com/division-sh/swarm/internal/store.PostgresStore, db *database/sql.DB, sourceRunID string, entityID string, sourceEventID string, eventName string, at time.Time, entityType string, mode github.com/division-sh/swarm/internal/runtime/executionmode.Mode, primaryRoute github.com/division-sh/swarm/internal/events.DeliveryRoute, extraRoutes []github.com/division-sh/swarm/internal/events.DeliveryRoute, routingSource github.com/division-sh/swarm/internal/events.RoutingSource, envelope github.com/division-sh/swarm/internal/events.EventEnvelope, input github.com/division-sh/swarm/internal/runtime/runforkexecution.selectedExecutionInputFixture, sourceFacts ...github.com/division-sh/swarm/internal/runtime/correlation.SourceArtifactFact) github.com/division-sh/swarm/internal/events.Event|recv=<nil>|arg=*testing.T|arg=*github.com/division-sh/swarm/internal/store.PostgresStore|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|arg=time.Time|arg=string|arg=github.com/division-sh/swarm/internal/runtime/executionmode.Mode|arg=github.com/division-sh/swarm/internal/events.DeliveryRoute|arg=[]github.com/division-sh/swarm/internal/events.DeliveryRoute|arg=github.com/division-sh/swarm/internal/events.RoutingSource|arg=github.com/division-sh/swarm/internal/events.EventEnvelope|arg=github.com/division-sh/swarm/internal/runtime/runforkexecution.selectedExecutionInputFixture|arg=[]github.com/division-sh/swarm/internal/runtime/correlation.SourceArtifactFact|results=(github.com/division-sh/swarm/internal/events.Event)", Family: "fork", Replacement: "selected fork/source/event/lifecycle operation and bounded fork observation", Multiplicity: 1},
 		},
 	}
+}
+
+func debtSelectedFixtureTransferNeeded(actual, base, source map[string]authorityDebtSite) bool {
+	for _, pair := range debtSelectedFixtureSignatureTransitions() {
+		old, current := pair[0], pair[1]
+		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+			base[old.identity()] == old && source[old.identity()] == old {
+			return true
+		}
+	}
+	return false
+}
+
+func debtSelectedFixtureSourcePins(root, baseRoot string) error {
+	const path = "internal/runtime/runforkexecution/execution_test.go"
+	for _, pin := range []struct{ source, checksum, checkout string }{
+		{debtSelectedFixtureOldSource, debtSelectedFixtureOldSHA256, baseRoot},
+		{debtSelectedFixtureCurrentSource, debtSelectedFixtureCurrentSHA256, root},
+	} {
+		archived, err := debtGit(root, "show", pin.source+":"+path)
+		if err != nil {
+			return err
+		}
+		current, err := os.ReadFile(filepath.Join(pin.checkout, path))
+		if err != nil {
+			return err
+		}
+		if debtBaselineChecksum(archived) != pin.checksum || !bytes.Equal(current, archived) {
+			return fmt.Errorf("selected fixture signature continuation differs from its exact source %s", pin.source)
+		}
+	}
+	return nil
 }
