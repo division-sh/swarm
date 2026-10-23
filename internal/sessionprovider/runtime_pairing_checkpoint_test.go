@@ -106,10 +106,11 @@ func TestWhatsAppSessionIdentityUsesNativeAdmissionBothStores(t *testing.T) {
 
 func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, hitl := range []bool{false, true} {
+		for _, mode := range []string{"comms", "hitl", "reject_comms", "reject_hitl"} {
+			hitl, rejectPreview := strings.HasSuffix(mode, "hitl"), strings.HasPrefix(mode, "reject_")
 			label := backend + "/deployment_invocation"
-			if hitl {
-				label += "_hitl"
+			if mode != "comms" {
+				label += "_" + mode
 			}
 			t.Run(label, func(t *testing.T) {
 				f := newRuntimeBootstrapFixture(t, backend)
@@ -218,7 +219,6 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				if _, err := f.connection.AdmitSessionAccount(ctx, checkpoint.SessionAccount); err == nil {
 					t.Fatal("unconfirmed account granted operator authority")
 				}
-				registered, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID})
 				logout := func(op channelonboarding.Operation) channelonboarding.Result {
 					t.Helper()
 					reconcile := completion.fail || completion.failUnlink
@@ -265,6 +265,15 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 						return channelonboarding.Result{}
 					}
 				}
+				if rejectPreview {
+					loggedOut := logout(preview.Operation)
+					if !loggedOut.Operation.LogoutCompleted || loggedOut.Operation.AccountConfirmed ||
+						loggedOut.Operation.IdentityOperationID != "" || loggedOut.Operation.ActivationRevision != 0 {
+						t.Fatal("rejected account gained approval or could not be unlinked")
+					}
+					return
+				}
+				registered, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID})
 				if hitl {
 					if err != nil || !registered.Operation.AccountConfirmed || registered.IdentityOperation == nil ||
 						registered.IdentityOperation.State != operatorchannel.StateAwaitingClaim ||

@@ -196,7 +196,7 @@ type ServiceOptions struct {
 
 type Service struct {
 	deployment      bool
-	operatorAccount *AccountReference
+	operatorAccount AccountReference
 	sourceArtifacts sourceartifact.Reader
 	store           Store
 	identities      IdentityLifecycle
@@ -273,18 +273,18 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	if opts.Secret == nil {
 		opts.Secret = randomSigningSecret
 	}
-	if opts.Deployment {
-		if opts.OperatorAccount != nil && opts.OperatorAccount.Validate() != nil {
+	var operatorAccount AccountReference
+	if opts.Deployment && opts.OperatorAccount != nil {
+		if err := opts.OperatorAccount.Validate(); err != nil {
 			return nil, ErrInvalidRequest
 		}
-		if opts.OperatorAccount != nil {
-			account := *opts.OperatorAccount
-			opts.OperatorAccount = &account
-		}
+		operatorAccount = *opts.OperatorAccount
+	}
+	if opts.Deployment {
 		opts.Store = deploymentStore{RuntimeStore: opts.Store, OperationStore: opts.Operations}
 	}
 	return &Service{
-		deployment: opts.Deployment, operatorAccount: opts.OperatorAccount,
+		deployment: opts.Deployment, operatorAccount: operatorAccount,
 		sourceArtifacts: opts.SourceArtifacts,
 		store:           opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
 		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
@@ -1284,7 +1284,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			operatorRequired := candidate.OperatorRequired
 			if op.DeploymentRegistration {
-				operatorRequired = s.operatorAccount != nil && s.operatorAccount.Provider == op.Provider && s.operatorAccount.Account == op.AccountReference
+				operatorRequired = s.operatorAccount == (AccountReference{Provider: op.Provider, Account: op.AccountReference})
 			}
 			if (op.AccountConnection() || op.DeploymentRegistration) && !operatorRequired && op.IdentityOperationID == "" {
 				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,

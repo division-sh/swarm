@@ -12,33 +12,31 @@ import (
 // onboarding writer and phase checks; it never searches another scope by ID.
 type deploymentOperations struct{ runner }
 
-type deploymentRunner struct{ runner }
-
-func (deploymentRunner) deployment() bool                                        { return true }
-func (deploymentRunner) publishChannelChange(bool, render.ReconcileDemand) error { return nil }
+func (deploymentOperations) deployment() bool                                        { return true }
+func (deploymentOperations) publishChannelChange(bool, render.ReconcileDemand) error { return nil }
 
 func (s *PostgresOwner) DeploymentOperations() domain.OperationStore {
-	return deploymentOperations{deploymentRunner{postgresRunner{s}}}
+	return deploymentOperations{postgresRunner{s}}
 }
 
 func (s *SQLiteOwner) DeploymentOperations() domain.OperationStore {
-	return deploymentOperations{deploymentRunner{sqliteRunner{s}}}
+	return deploymentOperations{sqliteRunner{s}}
 }
 
 func (s deploymentOperations) ReserveChannelOnboarding(ctx context.Context, request domain.StartRequest) (domain.Operation, error) {
-	return reserve(ctx, s.runner, request)
+	return reserve(ctx, s, request)
 }
 
 func (s deploymentOperations) GetChannelOnboarding(ctx context.Context, id string) (domain.Operation, error) {
-	return getOperation(ctx, s.runner, id)
+	return getOperation(ctx, s, id)
 }
 
 func (s deploymentOperations) ListChannelOnboardingOperations(ctx context.Context) ([]domain.Operation, error) {
-	return listOperations(ctx, s.runner)
+	return listOperations(ctx, s)
 }
 
 func (s deploymentOperations) AdvanceChannelOnboarding(ctx context.Context, request domain.AdvanceRequest) (domain.Operation, error) {
-	return advance(ctx, s.runner, request)
+	return advance(ctx, s, request)
 }
 
 func (s deploymentOperations) SetChannelClientLocale(context.Context, domain.SetClientLocaleRequest) (domain.Operation, error) {

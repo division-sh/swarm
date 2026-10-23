@@ -2,7 +2,6 @@ package channelonboarding
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -602,7 +601,7 @@ type Operation struct {
 	Verb                    Verb                              `json:"verb"`
 	Provider                string                            `json:"provider"`
 	Interface               operatorchannel.InterfaceIdentity `json:"interface"`
-	Coordinate              ChannelRuntimeContextCoordinate   `json:"coordinate"`
+	Coordinate              ChannelRuntimeContextCoordinate   `json:"coordinate,omitzero"`
 	TargetSelector          string                            `json:"target_selector"`
 	Posture                 ActivationPosture                 `json:"activation_posture"`
 	Ceremony                IdentityCeremony                  `json:"identity_ceremony"`
@@ -648,17 +647,6 @@ type AdvanceRequest struct {
 	FailureCode                  string
 	FailureMessage               string
 	Now                          time.Time
-}
-
-func (o Operation) MarshalJSON() ([]byte, error) {
-	type operation Operation
-	if !o.DeploymentRegistration {
-		return json.Marshal(operation(o))
-	}
-	return json.Marshal(struct {
-		operation
-		Coordinate *ChannelRuntimeContextCoordinate `json:"coordinate,omitempty"`
-	}{operation: operation(o)})
 }
 
 func (o Operation) DeploymentAccount() string {

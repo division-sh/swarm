@@ -30,7 +30,7 @@ type Scope struct {
 	Kind                channelonboarding.SessionInputScope
 	Session             operatorchannel.SessionAccountAdmission
 	PublicationBinding  runtimeinbound.BindingGeneration
-	Source              channelonboarding.ChannelDurableContextIdentity
+	Source              channelonboarding.ChannelDurableContextIdentity `json:",omitzero"`
 	OnboardingOperation string
 	OperationRevision   int64
 	ActivationID        string
@@ -89,32 +89,10 @@ type Event struct {
 }
 
 type Source struct {
-	Coordinate        channelonboarding.ChannelRuntimeContextCoordinate
+	Coordinate        channelonboarding.ChannelRuntimeContextCoordinate `json:",omitzero"`
 	CatalogGeneration triggergeneration.Generation
 
 	DeploymentRegistration bool `json:",omitempty"`
-}
-
-func (s Scope) MarshalJSON() ([]byte, error) {
-	type scope Scope
-	if s.DeploymentRegistration {
-		return json.Marshal(struct {
-			scope
-			Source *channelonboarding.ChannelDurableContextIdentity `json:"Source,omitempty"`
-		}{scope: scope(s)})
-	}
-	return json.Marshal(scope(s))
-}
-
-func (s Source) MarshalJSON() ([]byte, error) {
-	type source Source
-	if s.DeploymentRegistration {
-		return json.Marshal(struct {
-			source
-			Coordinate *channelonboarding.ChannelRuntimeContextCoordinate `json:"Coordinate,omitempty"`
-		}{source: source(s)})
-	}
-	return json.Marshal(source(s))
 }
 
 func (e Event) Validate() error {
@@ -201,7 +179,7 @@ type publicationAuthority struct {
 	Kind                channelonboarding.SessionInputScope
 	Session             operatorchannel.SessionAccountAdmission
 	PublicationBinding  runtimeinbound.BindingGeneration
-	Source              channelonboarding.ChannelDurableContextIdentity
+	Source              channelonboarding.ChannelDurableContextIdentity `json:",omitzero"`
 	OnboardingOperation string
 	ActivationID        string
 	TargetSelector      string
@@ -212,17 +190,6 @@ type publicationAuthority struct {
 	AccountOnly         bool `json:",omitempty"`
 
 	DeploymentRegistration bool `json:",omitempty"`
-}
-
-func (a publicationAuthority) MarshalJSON() ([]byte, error) {
-	type record publicationAuthority
-	if a.DeploymentRegistration {
-		return json.Marshal(struct {
-			record
-			Source *channelonboarding.ChannelDurableContextIdentity `json:"Source,omitempty"`
-		}{record: record(a)})
-	}
-	return json.Marshal(record(a))
 }
 
 func (s Scope) publicationAuthority() publicationAuthority {

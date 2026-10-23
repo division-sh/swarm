@@ -28,6 +28,7 @@ type sessionAuthorityOwner struct {
 
 type sessionWorkParent interface {
 	Begin(context.Context) (*worklifetime.Lease, error)
+	BeginStanding(context.Context) (*worklifetime.Lease, error)
 }
 
 func newSessionAuthorityOwner(state *sessionState, store channelonboarding.OperationStore, operation channelonboarding.Operation, credentials operatorchannel.CredentialCurrentness, invocation sessionWorkParent) (*sessionAuthorityOwner, error) {

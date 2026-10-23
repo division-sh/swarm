@@ -45,11 +45,21 @@ func (s *Service) RollSessionSources(ctx context.Context) error {
 		if !current {
 			continue
 		}
-		name, _, valid := strings.Cut(op.Coordinate.BundleIdentity, "@")
-		if !valid || name == "" {
+		separator := strings.IndexByte(op.Coordinate.BundleIdentity, '@')
+		if separator < 1 {
 			return ErrRevisionConflict
 		}
-		matches := catalog.sourceRolloverCandidates(op, name)
+		name := op.Coordinate.BundleIdentity[:separator]
+		var matches []Candidate
+		for _, candidate := range catalog.candidates {
+			nextName, _, _ := strings.Cut(candidate.Coordinate.BundleIdentity, "@")
+			if nextName != name || candidate.Provider != op.Provider || candidate.Posture != op.Posture || candidate.Ceremony != op.Ceremony ||
+				candidate.Interface.Normalized() != op.Interface.Normalized() || candidate.Target.Selector != op.TargetSelector ||
+				candidate.Coordinate.BundleHash == op.Coordinate.BundleHash {
+				continue
+			}
+			matches = append(matches, candidate)
+		}
 		switch len(matches) {
 		case 0:
 			continue
@@ -68,17 +78,4 @@ func (s *Service) RollSessionSources(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (catalog *CandidateCatalog) sourceRolloverCandidates(op Operation, name string) []Candidate {
-	var matches []Candidate
-	for _, candidate := range catalog.candidates {
-		nextName, _, _ := strings.Cut(candidate.Coordinate.BundleIdentity, "@")
-		if nextName == name && candidate.Provider == op.Provider && candidate.Posture == op.Posture && candidate.Ceremony == op.Ceremony &&
-			candidate.Interface.Normalized() == op.Interface.Normalized() && candidate.Target.Selector == op.TargetSelector &&
-			candidate.Coordinate.BundleHash != op.Coordinate.BundleHash {
-			matches = append(matches, candidate)
-		}
-	}
-	return matches
 }

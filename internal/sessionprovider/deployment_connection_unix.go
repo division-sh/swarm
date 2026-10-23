@@ -55,27 +55,12 @@ func OpenDeploymentConnection(ctx context.Context, opts DeploymentConnectionOpti
 	if opts.Trigger.Valid() && (opts.Trigger.Provider() != op.Provider || opts.Trigger.Transport() != packs.ChannelTransportSession) {
 		return nil, errPairingScope
 	}
-	work, err := opts.Process.BeginStanding(context.WithoutCancel(ctx))
-	if err != nil {
-		return nil, err
-	}
-	owned, cancel := context.WithCancel(work.Context())
-	c := &RuntimeConnection{parent: opts.Process, work: work, ctx: owned, cancel: cancel,
-		closed: make(chan struct{}), lifecycle: make(chan struct{}, 1), directory: opts.Directory,
-		store: opts.Store, operations: opts.Operations, operation: op, plan: opts.Plan, credentials: opts.Credentials}
-	if op.SessionAccount != (operatorchannel.SessionAccountAdmission{}) {
-		account := op.SessionAccount
-		c.account.Store(&account)
-	}
-	go c.joinRetirement()
 	var incoming *RuntimeIncomingOptions
 	if opts.Trigger.Valid() {
 		incoming = &RuntimeIncomingOptions{Trigger: opts.Trigger}
 	}
-	if err := c.open(incoming); err != nil {
-		return c, errors.Join(err, c.Close(context.WithoutCancel(ctx)))
-	}
-	return c, nil
+	return openOwnedConnection(context.WithoutCancel(ctx), opts.Process, RuntimeConnectionOptions{
+		Directory: opts.Directory, Store: opts.Store, Credentials: opts.Credentials, Plan: opts.Plan, Incoming: incoming}, opts.Operations, op)
 }
 
 func (c *RuntimeConnection) VerifyDeploymentRegistration(ctx context.Context, expected channelonboarding.Operation) (bool, error) {
