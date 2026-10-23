@@ -106,7 +106,7 @@ func waitFixedReadPreparation(t *testing.T, slot *FixedReadStatement) {
 }
 
 func TestFixedReadStatementCanceledPreparationDoesNotPoison(t *testing.T) {
-	b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "fixed-cancel.db"))
+	b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "fixed-cancel.db")).Backend
 	b.db.SetMaxOpenConns(1)
 	ctx := context.Background()
 	held, err := b.db.Conn(ctx)
@@ -149,7 +149,7 @@ func TestFixedReadStatementCanceledPreparationDoesNotPoison(t *testing.T) {
 }
 
 func TestFixedReadStatementFreshRowsSchemaAndConcurrentBindings(t *testing.T) {
-	b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "fixed-fresh.db"))
+	b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "fixed-fresh.db")).Backend
 	b.db.SetMaxOpenConns(4)
 	ctx := context.Background()
 	var slot FixedReadStatement
@@ -286,7 +286,7 @@ func TestFixedReadStatementCancellationDuringExecutionThenReuse(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "executing.db"))
+			b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "executing.db")).Backend
 			b.db.SetMaxOpenConns(1)
 			// The long canceled branch cannot finish before the driver's
 			// interrupt goroutine observes cancellation after the callback.
@@ -353,7 +353,7 @@ func TestFixedReadStatementCancellationDuringExecutionThenReuse(t *testing.T) {
 }
 
 func TestFixedReadStatementConnectionRetirementAndReplacement(t *testing.T) {
-	b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "replacement.db"))
+	b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "replacement.db")).Backend
 	b.db.SetMaxOpenConns(1)
 	ctx := context.Background()
 	for _, sql := range []string{"CREATE TABLE replacement (value INTEGER)", "INSERT INTO replacement VALUES (11)"} {
