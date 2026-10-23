@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -19,10 +18,6 @@ func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openManagerNativeDelivery(t, backend)
 			selected := fixture.Store
-			dialect := authoractivityfixture.DialectSQLite
-			if backend == "postgres" {
-				dialect = authoractivityfixture.DialectPostgres
-			}
 			for _, status := range []manager.ReceiptStatus{manager.ReceiptStatusProcessed, manager.ReceiptStatusError, manager.ReceiptStatusDeadLetter, manager.ReceiptStatusTerminal} {
 				for _, fail := range []bool{false, true} {
 					phase := "healthy"
@@ -39,8 +34,7 @@ func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 						identity := agentidentitytest.RootRuntimeForRun(t, runID, "agent-a", "receipt-selected-store")
 						route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 						evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
-						storetest.InsertCanonicalEventRecord(t, ctx, storetest.Database(selected), dialect, evt)
-						storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, evt, []events.DeliveryRoute{route})
+						fixture.Publish(t, ctx, evt, []events.DeliveryRoute{route}, fixture.Authority)
 						claimed, err := storetest.ClaimDelivery(ctx, selected, evt, route)
 						if err != nil {
 							t.Fatal(err)
