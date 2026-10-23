@@ -338,7 +338,11 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 			return err
 		}
 	}
-	reconciliations, err := reconcileServeStandingServices(ctx, candidates[0].runtime.Pipeline, candidates, !s.resetRequests[0].Options.LocalRun)
+	standingCtx, err := startupownership.WithProcessMutationAuthority(ctx, s.processCapability)
+	if err != nil {
+		return err
+	}
+	reconciliations, err := reconcileServeStandingServices(standingCtx, candidates[0].runtime.Pipeline, candidates, !s.resetRequests[0].Options.LocalRun)
 	if err != nil {
 		return err
 	}
