@@ -68,6 +68,7 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 			reads := 0
 			botID := 420079
 			polls := 0
+			confirmations := 0
 			webhook := false
 			webhookClaims := 0
 			factory := func(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
@@ -161,6 +162,36 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 						if webhook {
 							t.Fatal("holder started a competing Telegram poll receiver")
 						}
+						if request.URL.Query().Get("limit") == "1" {
+							if request.URL.Query().Get("offset") != "3" {
+								t.Fatal("confirmation acknowledged beyond the exact matched challenge")
+							}
+							operations, err := opts.Identities.ListOperatorChannelOperations(ctx, opts.Principal.ID)
+							if err != nil {
+								t.Fatal(err)
+							}
+							settled := false
+							for _, op := range operations {
+								if op.State != operatorchannel.StateAwaitingConfirmation {
+									continue
+								}
+								receipt, found, err := opts.Identities.LoadOperatorChannelClaimReceipt(ctx, operatorchannel.SessionClaimReceiptID(op.OnboardingOperationID, "2"))
+								if err != nil || !found || receipt.OperationID != op.OperationID || receipt.NativeCaptureFingerprint == "" {
+									t.Fatal("confirmation preceded durable native claim settlement", err)
+								}
+								settled = true
+							}
+							if !settled {
+								t.Fatal("confirmation preceded the durable claimant preview")
+							}
+							confirmations++
+							if confirmations == 1 {
+								return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":false}`))}, nil
+							}
+							// Later updates returned by this read must not be acknowledged.
+							body = `{"ok":true,"result":[{"update_id":50}]}`
+							break
+						}
 						polls++
 						text := "ordinary customer message"
 						if polls > 1 {
@@ -224,7 +255,13 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 			out.Reset()
 			errOut.Reset()
 			code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)
-			if code != 0 || polls != 2 || !strings.Contains(out.String(), "Send the code SWARM-") || !strings.Contains(out.String(), "Claimed by 12*45 in a direct conversation.") ||
+			if code == 0 || confirmations != 1 || polls != 2 || !strings.Contains(out.String(), "Send the code SWARM-") {
+				t.Fatalf("failed confirmation was not retained after settlement: exit=%d polls=%d confirmations=%d out=%s err=%s", code, polls, confirmations, out.String(), errOut.String())
+			}
+			out.Reset()
+			errOut.Reset()
+			code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)
+			if code != 0 || polls != 2 || confirmations != 2 || !strings.Contains(out.String(), "Claimed by 12*45 in a direct conversation.") ||
 				!strings.Contains(out.String(), "Reverified telegram account 420079.") {
 				t.Fatalf("pre-serve HITL exit=%d polls=%d out=%s err=%s", code, polls, out.String(), errOut.String())
 			}
