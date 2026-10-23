@@ -102,6 +102,24 @@ func TestRunAdmissionExactNativeAttemptAndTransaction(t *testing.T) {
 			if got, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || cached || got != (runtimecorrelation.SourceArtifactFact{}) {
 				t.Fatalf("new attempt had admission: fact=%v cached=%v err=%v", got, cached, err)
 			}
+			if exclusive, err := RunRowLock(ctx, tx, runID, false); err != nil || exclusive {
+				t.Fatalf("ordinary admission: exclusive=%v err=%v", exclusive, err)
+			}
+			if _, err := RunRowLock(ctx, tx, runID, true); err == nil {
+				t.Fatal("shared run admission upgraded to a lifecycle writer")
+			}
+			if err := InvalidateActiveRunSource(ctx, tx, runID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := RunRowLock(ctx, tx, runID, true); err == nil {
+				t.Fatal("cache invalidation permitted a run-lock upgrade")
+			}
+			lifecycleRun := uuid.NewString()
+			for _, exclusive := range []bool{true, false, true} {
+				if got, err := RunRowLock(ctx, tx, lifecycleRun, exclusive); err != nil || !got {
+					t.Fatalf("initial lifecycle admission lost exclusivity: exclusive=%v err=%v", got, err)
+				}
+			}
 			if err := attempt.RequireActiveRunSourceAdmission(ctx, runID, fact); err == nil {
 				t.Fatal("unadmitted source minted record permission")
 			}

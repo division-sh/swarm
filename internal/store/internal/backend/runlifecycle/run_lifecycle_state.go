@@ -125,24 +125,26 @@ func loadPostgresRunLifecycleSnapshot(
 	if q == nil || runID == "" {
 		return runtimerunlifecycle.Snapshot{}, errors.New("run lifecycle snapshot requires query authority and run_id")
 	}
-	if tx, ok := q.(*sql.Tx); ok {
-		if err := mutationprotocol.FlushEventCountBeforeRead(ctx, tx, runID); err != nil {
-			return runtimerunlifecycle.Snapshot{}, err
-		}
-	}
 	query := `
 		SELECT run_id::text, status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_point_kind, ''),
 		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id::text, ''),
-		       COALESCE(event_count, 0),
+		       (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id),
 		       COALESCE((SELECT COUNT(DISTINCT es.entity_id)::integer FROM entity_state es WHERE es.run_id = runs.run_id), 0),
 		       failure, COALESCE(continued_as_run_id::text, ''), started_at, ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
 	`
 	if forUpdate {
+		tx, ok := q.(*sql.Tx)
+		if !ok {
+			return runtimerunlifecycle.Snapshot{}, errors.New("run lifecycle change requires transaction")
+		}
+		if _, err := mutationprotocol.RunRowLock(ctx, tx, runID, true); err != nil {
+			return runtimerunlifecycle.Snapshot{}, err
+		}
 		query += ` FOR UPDATE`
 	}
 	var (
@@ -171,6 +173,12 @@ func loadPostgresRunLifecycleSnapshot(
 	}
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("load PostgreSQL run lifecycle snapshot: %w", err)
+	}
+	if tx, ok := q.(*sql.Tx); ok {
+		snapshot.EventCount, err = mutationprotocol.EventCountForRead(ctx, tx, runID, snapshot.EventCount)
+		if err != nil {
+			return runtimerunlifecycle.Snapshot{}, err
+		}
 	}
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
 		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
@@ -214,11 +222,6 @@ func loadSQLiteRunLifecycleSnapshot(
 	if q == nil || runID == "" {
 		return runtimerunlifecycle.Snapshot{}, errors.New("run lifecycle snapshot requires query authority and run_id")
 	}
-	if tx, ok := q.(*sql.Tx); ok {
-		if err := mutationprotocol.FlushEventCountBeforeRead(ctx, tx, runID); err != nil {
-			return runtimerunlifecycle.Snapshot{}, err
-		}
-	}
 	var (
 		snapshot      runtimerunlifecycle.Snapshot
 		state         string
@@ -241,7 +244,7 @@ func loadSQLiteRunLifecycleSnapshot(
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_point_kind, ''),
 		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id, ''),
-		       COALESCE(event_count, 0),
+		       (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id),
 		       COALESCE((SELECT COUNT(DISTINCT es.entity_id) FROM entity_state es WHERE es.run_id = runs.run_id), 0),
 		       failure, COALESCE(continued_as_run_id, ''), started_at, ended_at
 		FROM runs
@@ -256,6 +259,12 @@ func loadSQLiteRunLifecycleSnapshot(
 	}
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("load SQLite run lifecycle snapshot: %w", err)
+	}
+	if tx, ok := q.(*sql.Tx); ok {
+		snapshot.EventCount, err = mutationprotocol.EventCountForRead(ctx, tx, runID, snapshot.EventCount)
+		if err != nil {
+			return runtimerunlifecycle.Snapshot{}, err
+		}
 	}
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
 		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
@@ -507,6 +516,9 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if tx == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle mutation requires transaction")
+	}
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, request.RunID, true); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if attempt == nil {
 		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("terminal run lifecycle mutation requires attempt")
