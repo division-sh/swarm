@@ -106,7 +106,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002210, 0).UTC()
 			entityID := uuid.NewString()
-			seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, test.eventName, at, "test_entity",
+			seedSelectedExecutionSourceRunWithPrimaryRoute(t, pg, db, sourceRunID, entityID, sourceEventID, test.eventName, at, "test_entity",
 				selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "flow-a/1"), nil)
 
 			sourceTimerID := uuid.NewString()
