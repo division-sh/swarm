@@ -98,7 +98,7 @@ func TestSelectedForkLifecycleStorageRetainsPendingAndGlobalAttributionBothStore
 			if !reflect.DeepEqual(physicalRuns, map[string]int{runID: 1, foreignRun: 1}) {
 				t.Fatalf("foreign duplicate log hidden: %v", physicalRuns)
 			}
-			if _, err := db.ExecContext(ctx, `UPDATE events SET run_id=NULL WHERE event_id=$1`, diagnosticEventID(foreign.OutboxID)); err != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE events SET run_id=NULL,run_owner_key='' WHERE event_id=$1`, diagnosticEventID(foreign.OutboxID)); err != nil {
 				t.Fatal(err)
 			}
 			nullable, err := ReadSelectedForkLifecycleDiagnosticStorageForTest(ctx, selected, uuid.NewString())

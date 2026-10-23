@@ -232,9 +232,9 @@ func TestOrdinaryForkActivityReplayCardDependencyBothStores(t *testing.T) {
 								t.Fatalf("ordinary activity replay: %+v error=%v", activation, err)
 							}
 							wantHint := render.ReconcileDemand(0)
-							if approved || pendingCard {
-								// Source terminalization supersedes the predecessor card;
-								// historical attempt copying has no child-card dependency.
+							if pendingCard {
+								// The source approval is already routed. Only an actual
+								// pending child card adds reconciliation demand here.
 								wantHint = render.ReconcileOrdinary
 							}
 							hints.expect(t, wantHint)

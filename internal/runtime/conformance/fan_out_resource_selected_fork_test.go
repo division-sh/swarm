@@ -363,6 +363,26 @@ func deploymentForkRPC(t *testing.T, ctx context.Context, server *httptest.Serve
 	return result, rpcErr
 }
 
+func waitSelectedDeploymentExecutionClosed(t *testing.T, ctx context.Context, f *deploymentResourceFixture, runID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for {
+		state, err := storetest.ReadSelectedExecutionStorage(ctx, f.selected, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Occurrences == 1 && state.State == "closed" {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("selected child execution did not close: %+v error=%v", state, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func deploymentForkRPCRequest(ctx context.Context, server *httptest.Server, params map[string]any) (apiv1.RunForkExecutionResult, json.RawMessage, error) {
 	encoded, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "run.fork", "params": params})
 	if err != nil {
@@ -502,6 +522,9 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 		t.Fatal(err)
 	}
 	if parentRunID.Valid {
+		if wantClosed == 1 {
+			waitSelectedDeploymentExecutionClosed(t, f.ctx, f, runID)
+		}
 		var closed int
 		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed'`, runID).Scan(&closed); err != nil {
 			t.Fatal(err)

@@ -134,7 +134,7 @@ func TestSelectedCausalDiagnosticStorageDiscardsFailedCutsBothStores(t *testing.
 						t.Fatal(err)
 					}
 				case "null-run":
-					if _, err := db.ExecContext(ctx, `UPDATE events SET run_id=NULL,source_event_id=NULL WHERE event_id=$1`, diagnosticEventID(item.OutboxID)); err != nil {
+					if _, err := db.ExecContext(ctx, `UPDATE events SET run_id=NULL,run_owner_key='',source_event_id=NULL WHERE event_id=$1`, diagnosticEventID(item.OutboxID)); err != nil {
 						t.Fatal(err)
 					}
 				case "null-cause":
