@@ -5,6 +5,8 @@ package sessionprovider
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -103,7 +105,7 @@ func (c *RuntimeConnection) VerifyDeploymentRegistration(ctx context.Context, ex
 	return err == nil, err
 }
 
-func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, original, retired channelonboarding.Operation) (err error) {
+func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, original, expected channelonboarding.Operation) (err error) {
 	work, err := c.begin(ctx)
 	if err != nil {
 		return err
@@ -111,22 +113,50 @@ func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, or
 	defer func() { err = errors.Join(err, work.Done()) }()
 	op, err := c.operations.GetChannelOnboarding(work.Context(), original.OperationID)
 	if err != nil || !c.operation.DeploymentRegistration || !original.DeploymentRegistration || !op.DeploymentRegistration ||
-		op.OperationID != c.operation.OperationID || op.OperationID != retired.OperationID || op.Revision != retired.Revision ||
-		op.Revision != original.Revision+1 || op.PrincipalID != c.operation.PrincipalID || op.PrincipalID != original.PrincipalID ||
-		op.Phase != channelonboarding.PhaseRetired || op.LogoutCompleted || op.FailureCode != "account_logout_pending" ||
+		op.OperationID != c.operation.OperationID || op.OperationID != expected.OperationID || op.Revision != expected.Revision ||
+		op.PrincipalID != c.operation.PrincipalID || op.PrincipalID != original.PrincipalID ||
+		op.Phase.Terminal() && op.Phase != channelonboarding.PhaseSucceeded || op.LogoutCompleted ||
 		op.SessionAccount != original.SessionAccount || op.SessionAccount != c.sessionAccount() || op.AccountReference != original.AccountReference {
 		return errors.Join(channelonboarding.ErrRevisionConflict, err)
 	}
 	occurrence := c.state.currentOccurrence()
-	if occurrence == nil || !c.state.ownsConnectedOccurrence(work.Context(), occurrence) ||
-		occurrence.client.Store.Deleted || occurrence.client.Store.ID == nil ||
-		occurrence.client.Store.ID.ToNonAD().String() != op.SessionAccount.AccountRef {
-		return errClientOccurrenceFenced
+	if op.FailureCode == "account_logout_launched" {
+		if occurrence == nil || !occurrence.client.Store.Deleted {
+			return fmt.Errorf("%w: logout outcome is unconfirmed; no unlink was repeated", channelonboarding.ErrConflict)
+		}
+	} else {
+		if op.FailureCode != "account_logout_pending" {
+			return channelonboarding.ErrConflict
+		}
+		if occurrence == nil || !c.state.ownsConnectedOccurrence(work.Context(), occurrence) ||
+			occurrence.client.Store.Deleted || occurrence.client.Store.ID == nil ||
+			occurrence.client.Store.ID.ToNonAD().String() != op.SessionAccount.AccountRef {
+			return errClientOccurrenceFenced
+		}
+		err = func() error {
+			owned, release, err := occurrence.prepareLogout(work.Context())
+			if err != nil {
+				return err
+			}
+			defer release()
+			op, err = c.operations.AdvanceChannelOnboarding(owned, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
+				ExpectedRevision: op.Revision, Phase: op.Phase, FailureCode: "account_logout_launched", Now: time.Now().UTC()})
+			if err != nil {
+				return err
+			}
+			return occurrence.unlink(owned)
+		}()
+		if err != nil {
+			return err
+		}
 	}
-	owned, release, err := occurrence.prepareLogout(work.Context())
-	if err != nil {
+	if err := occurrence.join(context.WithoutCancel(ctx)); err != nil {
 		return err
 	}
-	defer release()
-	return occurrence.unlink(owned)
+	if !occurrence.client.Store.Deleted {
+		return channelonboarding.ErrConflict
+	}
+	_, err = c.operations.AdvanceChannelOnboarding(context.WithoutCancel(ctx), channelonboarding.AdvanceRequest{OperationID: op.OperationID,
+		ExpectedRevision: op.Revision, Phase: op.Phase, FailureCode: "account_logout_unlinked", Now: time.Now().UTC()})
+	return err
 }

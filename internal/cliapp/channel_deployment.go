@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -400,19 +401,18 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	var selected *channelonboarding.Operation
-	for _, row := range rows {
-		if account != "" && row.Operation.AccountReference != account {
-			continue
+	if len(rows) == 0 && provider == "whatsapp" && account == "" {
+		if err := client.close(context.WithoutCancel(ctx)); err != nil {
+			return returnCLIValidationError(errOut, err)
 		}
-		if selected != nil {
-			return returnCLIValidationError(errOut, errors.New("more than one account matches; use swarm channel logout <provider> <account>"))
-		}
-		copy := row.Operation
-		selected = &copy
+		return runChannelLogout(ctx, out, errOut, provider, "", opts, output)
 	}
-	if selected == nil {
-		return returnCLIValidationError(errOut, errors.New("no registered account matches"))
+	selected, err := selectDeploymentAccount(rows, account, opts.input, errOut, !output.asJSON && !output.asYAML && !output.quiet && controlStdinIsTerminal(opts))
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	if selected.OperationID == "" {
+		return nil
 	}
 	var result channelonboarding.Result
 	if err := client.call(ctx, "channel.logout", map[string]any{"operation_id": selected.OperationID, "expected_revision": selected.Revision}, &result); err != nil {
@@ -424,4 +424,45 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 	return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
 		fmt.Fprintf(w, "Logged out %s account %s.\n", provider, selected.AccountReference)
 	}, func() ([]string, error) { return []string{selected.AccountReference}, nil })
+}
+
+func selectDeploymentAccount(rows []channelonboarding.Result, account string, input io.Reader, out io.Writer, interactive bool) (channelonboarding.Operation, error) {
+	var selected channelonboarding.Operation
+	if account == "" && len(rows) > 1 {
+		if !interactive {
+			return selected, errors.New("more than one account matches; use swarm channel logout <provider> <account>")
+		}
+		for _, row := range rows {
+			fmt.Fprintf(out, "%s %s\n", row.Operation.Provider, row.Operation.DeploymentAccount())
+		}
+		if input != nil {
+			input = bufio.NewReader(input)
+		}
+		for _, row := range rows {
+			approved, err := confirmChannelAccount(input, out, "Log out "+row.Operation.DeploymentAccount()+"? [y/N] ")
+			if err != nil {
+				return selected, err
+			}
+			if approved {
+				account = row.Operation.DeploymentAccount()
+				break
+			}
+		}
+		if account == "" {
+			return selected, nil
+		}
+	}
+	for _, row := range rows {
+		if account != "" && row.Operation.DeploymentAccount() != account {
+			continue
+		}
+		if selected.OperationID != "" {
+			return selected, errors.New("account registration is ambiguous")
+		}
+		selected = row.Operation
+	}
+	if selected.OperationID == "" {
+		return selected, errors.New("account is not registered; run swarm channel connect <provider> to link it")
+	}
+	return selected, nil
 }

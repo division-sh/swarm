@@ -118,8 +118,8 @@ func (c Candidate) ValidateDeclaration() error {
 		}
 		if c.Target != (CandidateTarget{}) || c.Ceremony != CeremonyAccountLink ||
 			c.SigningCredentialRole != "" || c.ConfirmationOperation != "" ||
-			c.Provider == "whatsapp" && (c.Posture != ActivationSessionConnection || c.ProviderCredentialRole != "") ||
-			c.Provider == "telegram" && (c.Posture != ActivationWebhookRegistration || c.ProviderCredentialRole == "") {
+			c.Posture != (map[string]ActivationPosture{"whatsapp": ActivationSessionConnection, "telegram": ActivationWebhookRegistration})[c.Provider] ||
+			(c.ProviderCredentialRole == "") != (c.Provider == "whatsapp") {
 			return fmt.Errorf("%w: deployment registration has runtime activation or invalid provider inputs", ErrInvalidRequest)
 		}
 		return validateRegistrationScope(true, c.Provider, "", c.Coordinate, c.Target.Selector)
@@ -147,9 +147,6 @@ func (c Candidate) ValidateDeclaration() error {
 		if c.Target.Generation != c.Coordinate.TargetGeneration {
 			return fmt.Errorf("channel onboarding declaration contradicts its admitted target generation")
 		}
-		if err := c.Target.ValidateDeclaration(); err != nil {
-			return err
-		}
 	case ActivationSessionConnection:
 		if strings.TrimSpace(c.SigningCredentialRole) != "" || strings.TrimSpace(c.ConnectionHealth) == "" {
 			return fmt.Errorf("session channel onboarding candidate requires connection health and forbids signing credential")
@@ -157,11 +154,8 @@ func (c Candidate) ValidateDeclaration() error {
 		if c.Target.Generation != c.Coordinate.TargetGeneration || c.Target.SigningCredentialKey != "" {
 			return fmt.Errorf("session declaration contradicts its target generation or carries webhook signing")
 		}
-		if err := c.Target.ValidateDeclaration(); err != nil {
-			return err
-		}
 	}
-	return nil
+	return c.Target.ValidateDeclaration()
 }
 
 type CandidateSelection struct {

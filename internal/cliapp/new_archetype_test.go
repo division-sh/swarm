@@ -51,6 +51,9 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 			if err != nil || loaded.Source != unifiedConfigSourceDeployment || loaded.Config.Store.Backend != "sqlite" {
 				t.Fatalf("scaffold lacks a valid selected deployment config: %v", err)
 			}
+			if loaded.Config.Workspace.AllowExecOnHost || loaded.Config.Workspace.Backend == "host" {
+				t.Fatal("unrelated scaffold opted into executing work on the host")
+			}
 			for _, private := range []string{".swarm", ".swarm/swarm.yaml", ".swarm/api-token"} {
 				info, err := os.Stat(filepath.Join(destination, private))
 				if err != nil || info.Mode().Perm()&0o077 != 0 {

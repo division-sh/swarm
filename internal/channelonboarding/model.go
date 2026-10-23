@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -660,6 +661,13 @@ func (o Operation) MarshalJSON() ([]byte, error) {
 	}{operation: operation(o)})
 }
 
+func (o Operation) DeploymentAccount() string {
+	if o.AccountReference != "" {
+		return o.AccountReference
+	}
+	return o.ExpectedAccount
+}
+
 const PairingStatusPreparing = "preparing"
 
 // PairingReadback is authenticated control-plane material, never READY or a
@@ -674,12 +682,15 @@ type PairingReadback struct {
 	AccountName         string    `json:"account_name,omitempty"`
 }
 
-// ValidateSessionAccount checks retained provenance, not executable authority.
-func (o Operation) ValidateSessionAccount() error {
+// ValidateDeploymentRegistration validates public scope/account evidence, not
+// private SDK material or executable flow authority.
+func (o Operation) ValidateDeploymentRegistration() error {
+	beforePairing := slices.Contains([]Phase{PhasePreparing, PhaseCredentialsAdmitted, PhaseActivatingProvider}, o.Phase)
+	accountOptional := beforePairing || slices.Contains([]Phase{PhaseFailed, PhaseRetired}, o.Phase)
 	if o.LogoutCompleted && (!o.DeploymentRegistration || o.Phase != PhaseRetired || o.FailureCode != "") {
 		return fmt.Errorf("%w: completed deployment logout requires its retired operation", ErrInvalidRequest)
 	}
-	if o.AccountConfirmed && (!o.DeploymentRegistration || o.AccountReference == "" || o.Phase == PhasePreparing || o.Phase == PhaseCredentialsAdmitted || o.Phase == PhaseActivatingProvider) {
+	if o.AccountConfirmed && (!o.DeploymentRegistration || o.AccountReference == "" || beforePairing) {
 		return fmt.Errorf("%w: account approval requires its deployment pairing checkpoint", ErrInvalidRequest)
 	}
 	if o.DeploymentRegistration {
@@ -697,9 +708,17 @@ func (o Operation) ValidateSessionAccount() error {
 				return fmt.Errorf("%w: linked account differs from the requested account", ErrConflict)
 			}
 		}
-		if o.AccountReference == "" && o.Phase != PhasePreparing && o.Phase != PhaseCredentialsAdmitted && o.Phase != PhaseActivatingProvider && o.Phase != PhaseFailed && o.Phase != PhaseRetired {
+		if o.AccountReference == "" && !accountOptional {
 			return fmt.Errorf("%w: deployment registration requires its verified account", ErrInvalidRequest)
 		}
+	}
+	return nil
+}
+
+// ValidateSessionAccount checks retained provenance, not executable authority.
+func (o Operation) ValidateSessionAccount() error {
+	if err := o.ValidateDeploymentRegistration(); err != nil {
+		return err
 	}
 	if o.Ceremony == CeremonyAccountLink && o.Posture != ActivationSessionConnection && !o.DeploymentRegistration {
 		return fmt.Errorf("%w: account-only linkage requires a native session", ErrInvalidRequest)
@@ -716,11 +735,10 @@ func (o Operation) ValidateSessionAccount() error {
 	} else if o.SessionConnectionID != "" {
 		return fmt.Errorf("%w: webhook responsibility cannot reserve a session connection", ErrInvalidRequest)
 	}
-	if o.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && (o.Phase == PhasePreparing || o.Phase == PhaseCredentialsAdmitted) {
+	if o.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && slices.Contains([]Phase{PhasePreparing, PhaseCredentialsAdmitted}, o.Phase) {
 		return fmt.Errorf("%w: session account evidence contradicts its onboarding responsibility", ErrInvalidRequest)
 	}
-	required := o.Posture == ActivationSessionConnection && o.Phase != PhasePreparing && o.Phase != PhaseCredentialsAdmitted &&
-		o.Phase != PhaseActivatingProvider && o.Phase != PhaseFailed && o.Phase != PhaseRetired
+	required := o.Posture == ActivationSessionConnection && !slices.Contains([]Phase{PhasePreparing, PhaseCredentialsAdmitted, PhaseActivatingProvider, PhaseFailed, PhaseRetired}, o.Phase)
 	return validateSessionAccount(o.Posture, o.Provider, o.SessionAccount, required)
 }
 

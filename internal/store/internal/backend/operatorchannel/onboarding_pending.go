@@ -8,6 +8,7 @@ import (
 
 	domain "github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 )
 
 type StaleOnboardingChildRequest struct {
@@ -17,6 +18,8 @@ type StaleOnboardingChildRequest struct {
 	ChildID                 string
 	RetainedBindingRevision int64
 	AdmittedCredentials     []credentials.ValueEvidence
+	TerminalDeployment      bool
+	SessionAccount          domain.SessionAccountAdmission
 }
 
 // The caller holds the parent lock. Terminal stale children are immutable;
@@ -30,11 +33,20 @@ func RequireStaleOnboardingChild(ctx context.Context, tx *sql.Tx, postgres bool,
 	if err != nil {
 		return err
 	}
-	if !found || child.State != domain.StateCredentialStale || child.OnboardingOperationID != req.ParentID ||
+	settled := child.State == domain.StateCredentialStale && child.ProofID == ""
+	if req.TerminalDeployment {
+		settled = child.State.Terminal() && child.State != domain.StateBound && child.ProviderAuthority.Scope == authority.DeploymentParent
+	}
+	if !found || !settled || child.OnboardingOperationID != req.ParentID ||
 		child.PrincipalID != req.PrincipalID || child.Interface.Normalized() != req.Interface.Normalized() ||
-		child.BindingRevision != 0 || child.ProofID != "" ||
-		child.ProviderAuthority.Kind != domain.ProviderAuthorityCredential ||
-		!slices.Contains(req.AdmittedCredentials, child.ProviderAuthority.Credential) {
+		child.BindingRevision != 0 {
+		return fmt.Errorf("%w: pending reset requires the exact settled stale child and admitted evidence", domain.ErrRevisionConflict)
+	}
+	matched := child.ProviderAuthority.Kind == domain.ProviderAuthorityCredential && slices.Contains(req.AdmittedCredentials, child.ProviderAuthority.Credential)
+	if child.ProviderAuthority.Kind == domain.ProviderAuthoritySession {
+		matched = req.TerminalDeployment && child.ProviderAuthority.Session == req.SessionAccount
+	}
+	if !matched {
 		return fmt.Errorf("%w: pending reset requires the exact settled stale child and admitted evidence", domain.ErrRevisionConflict)
 	}
 	if req.RetainedBindingRevision == 0 {

@@ -339,10 +339,29 @@ func (c *deploymentChannelSession) VerifyRegistration(ctx context.Context, op ch
 
 func (c *deploymentChannelSession) LogoutRegistration(ctx context.Context, original, retired channelonboarding.Operation) error {
 	if original.Provider == "telegram" {
+		for _, state := range []string{"account_logout_launched", "account_logout_unlinked"} {
+			var err error
+			retired, err = c.opts.Operations.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: retired.OperationID,
+				ExpectedRevision: retired.Revision, Phase: retired.Phase, FailureCode: state, Now: time.Now().UTC()})
+			if err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if c.connection == nil {
-		return channelonboarding.ErrInvalidRequest
+		if original.FailureCode != "account_logout_pending" {
+			return fmt.Errorf("%w: logout outcome is unconfirmed; no unlink was repeated", channelonboarding.ErrConflict)
+		}
+		if err := c.BootstrapSession(ctx, original, channelonboarding.Candidate{}); err != nil {
+			return err
+		}
+	}
+	if original.FailureCode == "account_logout_pending" {
+		verified, err := c.VerifyRegistration(ctx, original)
+		if err != nil || !verified {
+			return errors.Join(channelonboarding.ErrConflict, err)
+		}
 	}
 	if err := c.connection.LogoutDeploymentRegistration(ctx, original, retired); err != nil {
 		return err

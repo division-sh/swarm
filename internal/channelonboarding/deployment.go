@@ -31,11 +31,11 @@ func (s *Service) LogoutDeployment(ctx context.Context, id string, revision int6
 	if err != nil {
 		return Result{}, err
 	}
-	if op.Phase == PhaseRetired {
-		if !op.LogoutCompleted {
-			return Result{}, fmt.Errorf("%w: logout outcome is unconfirmed; no unlink was repeated", ErrConflict)
-		}
+	if op.LogoutCompleted {
 		return s.result(ctx, op, &candidate)
+	}
+	if op.Phase == PhaseRetired {
+		return Result{}, fmt.Errorf("%w: logout outcome is unconfirmed; no unlink was repeated", ErrConflict)
 	}
 	principal, err := s.identities.Principal()
 	if err != nil || principal.ID != op.PrincipalID {
@@ -45,37 +45,34 @@ func (s *Service) LogoutDeployment(ctx context.Context, id string, revision int6
 	if !ok {
 		return Result{}, ErrInvalidRequest
 	}
-	if op.Posture == ActivationSessionConnection {
-		if err := s.sessions.ResumeSession(ctx, op, candidate); err != nil {
+	if op.FailureCode == "" || op.FailureCode == "account_logout_pending" {
+		if err := s.retireDeploymentIdentity(ctx, op); err != nil {
 			return Result{}, err
 		}
-		if op.SessionAccount.Validate() == nil {
-			verified, err := session.VerifyRegistration(ctx, op)
-			if err != nil || !verified {
-				return Result{}, errors.Join(ErrConflict, err)
-			}
-		} else {
-			paired, err := s.sessions.ReadSessionPairing(ctx, op, principal)
-			if err != nil || !paired.Paired || !paired.Connected || paired.AccountPresentation != op.AccountReference {
-				return Result{}, errors.Join(ErrConflict, err)
+		if op.FailureCode == "" {
+			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: id, ExpectedRevision: op.Revision,
+				Phase: op.Phase, FailureCode: "account_logout_pending", Now: s.now().UTC()})
+			if err != nil {
+				return Result{}, err
 			}
 		}
 	}
-	if err := s.retireDeploymentIdentity(ctx, op); err != nil {
-		return Result{}, err
+	if op.FailureCode != "account_logout_unlinked" {
+		if err := session.LogoutRegistration(ctx, op, op); err != nil {
+			return Result{}, err
+		}
+		op, err = s.store.GetChannelOnboarding(ctx, id)
+		if err != nil {
+			return Result{}, err
+		}
 	}
-	retired, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: id, ExpectedRevision: revision,
-		Phase: PhaseRetired, FailureCode: "account_logout_pending", Now: s.now().UTC()})
-	if err != nil {
-		return Result{}, err
-	}
-	if err := session.LogoutRegistration(ctx, op, retired); err != nil {
-		return Result{}, err
+	if op.FailureCode != "account_logout_unlinked" {
+		return Result{}, fmt.Errorf("%w: logout outcome is unconfirmed; no credential cleanup performed", ErrConflict)
 	}
 	if err := s.credentials.ReleaseOperation(ctx, op); err != nil {
 		return Result{}, err
 	}
-	retired, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: id, ExpectedRevision: retired.Revision,
+	retired, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: id, ExpectedRevision: op.Revision,
 		Phase: PhaseRetired, CompleteDeploymentLogout: true, Now: s.now().UTC()})
 	if err != nil {
 		return Result{}, err
@@ -111,12 +108,24 @@ func (s *Service) ReverifyDeployment(ctx context.Context, id string) (Result, er
 	}
 	defer unlock()
 	op, err := s.store.GetChannelOnboarding(ctx, id)
-	if err != nil || !op.DeploymentRegistration || !op.AccountConfirmed || op.Phase != PhaseSucceeded {
+	if err != nil || !op.DeploymentRegistration || op.Phase == PhaseFailed || op.LogoutCompleted {
 		return Result{}, errors.Join(ErrInvalidRequest, err)
 	}
 	candidate, err := s.currentCandidate(op)
 	if err != nil {
 		return Result{}, err
+	}
+	if op.Phase == PhaseRetired {
+		if op.FailureCode != "native_account_revoked" {
+			return Result{}, ErrConflict
+		}
+		return s.result(ctx, op, &candidate)
+	}
+	if op.FailureCode != "" {
+		return Result{}, fmt.Errorf("%w: finish logout with swarm channel logout %s %s", ErrConflict, op.Provider, op.DeploymentAccount())
+	}
+	if !op.AccountConfirmed {
+		return s.driveLocked(ctx, op, candidate, "", false)
 	}
 	if err := s.sessions.ResumeSession(ctx, op, candidate); err != nil && !errors.Is(err, ErrSessionPending) {
 		return Result{}, err
@@ -143,7 +152,15 @@ func (s *Service) ReverifyDeployment(ctx context.Context, id string) (Result, er
 		}
 		return s.result(ctx, retired, &candidate)
 	}
-	if s.operatorAccount != nil && s.operatorAccount.Provider == op.Provider && s.operatorAccount.Account == op.AccountReference && op.IdentityOperationID == "" {
+	enroll := op.Phase == PhaseSucceeded && op.IdentityOperationID == ""
+	if op.IdentityOperationID != "" {
+		identity, err := s.currentIdentityOperation(ctx, op.IdentityOperationID)
+		if err != nil {
+			return Result{}, err
+		}
+		enroll = identity.State.Terminal() && identity.State != operatorchannel.StateBound
+	}
+	if s.operatorAccount != nil && *s.operatorAccount == (AccountReference{Provider: op.Provider, Account: op.AccountReference}) && enroll {
 		op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 			BeginOperatorEnrollment: true, Phase: PhaseAwaitingExternalIdentity, Now: s.now().UTC()})
 		if err != nil {
@@ -151,7 +168,7 @@ func (s *Service) ReverifyDeployment(ctx context.Context, id string) (Result, er
 		}
 		return s.driveLocked(ctx, op, candidate, "", false)
 	}
-	return s.result(ctx, op, &candidate)
+	return s.driveLocked(ctx, op, candidate, "", false)
 }
 
 // DeploymentAccounts never consults flow activations or another scope's table.
@@ -163,11 +180,28 @@ func (s *Service) DeploymentAccounts(ctx context.Context, provider string) ([]Re
 	if err != nil {
 		return nil, err
 	}
-	accounts := make([]Result, 0, len(operations))
+	selected := map[string]Operation{}
+	order := []string{}
 	for _, op := range operations {
-		if op.Provider != provider || !op.AccountConfirmed || op.Phase == PhaseRetired {
+		account := op.DeploymentAccount()
+		if op.Provider != provider || account == "" || op.LogoutCompleted {
 			continue
 		}
+		if previous, exists := selected[account]; exists {
+			if op.Phase == PhaseRetired {
+				continue
+			}
+			if previous.Phase != PhaseRetired {
+				return nil, ErrConflict
+			}
+		} else {
+			order = append(order, account)
+		}
+		selected[account] = op
+	}
+	accounts := make([]Result, 0, len(selected))
+	for _, account := range order {
+		op := selected[account]
 		candidate, err := s.currentCandidate(op)
 		if err != nil {
 			return nil, err
