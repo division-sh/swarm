@@ -64,8 +64,7 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 		if eventType == "" {
 			return events.PayloadAdmission{}, fmt.Errorf("event type is required for payload admission")
 		}
-		resolution, err := semanticview.ResolveProducerEventSchema(source, producer, event)
-		if err != nil {
+		if err := producer.ValidateForEvent(event); err != nil {
 			return events.PayloadAdmission{}, err
 		}
 		flowID := producer.FlowID()
@@ -85,6 +84,16 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 					"event_type": eventType,
 				}, err))
 			}
+			return events.PayloadAdmission{}, err
+		}
+		if producer.IsPlatform() {
+			admission, found, err := runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(source, event, bundleHash)
+			if err != nil || found {
+				return admission, err
+			}
+		}
+		resolution, err := semanticview.ResolveProducerEventSchema(source, producer, event)
+		if err != nil {
 			return events.PayloadAdmission{}, err
 		}
 		var executionObject map[string]any

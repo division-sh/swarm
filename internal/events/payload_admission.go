@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 )
 
@@ -87,6 +88,8 @@ func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class Eve
 		reference := ""
 		if eventType == EventTypePlatformRuntimeLog {
 			reference = RuntimeLogSchemaReference
+		} else if joinOccurrencePayloadIdentity(p) {
+			reference = JoinOccurrencePayloadReference
 		}
 		return NewPlatformPayloadSchemaBinding(input, p, reference)
 	}
@@ -134,6 +137,10 @@ func (b PayloadSchemaBinding) Validate() error {
 		if p.event == EventTypePlatformRuntimeLog {
 			if p.class != EventAdmissionDiagnosticDirect || p.producer.ID() != "runtime" || b.reference != RuntimeLogSchemaReference {
 				return fmt.Errorf("runtime-log payload requires exact platform/runtime reference authority")
+			}
+		} else if joinOccurrencePayloadIdentity(p) {
+			if b.reference != JoinOccurrencePayloadReference {
+				return fmt.Errorf("join occurrence payload requires typed declaration authority")
 			}
 		} else if b.reference != "" {
 			return fmt.Errorf("platform payload subtype reference is unsupported")
@@ -192,6 +199,32 @@ func (a PayloadAdmission) Payload() []byte               { return bytes.Clone(a.
 func (a PayloadAdmission) Binding() PayloadSchemaBinding { return a.binding }
 func (a PayloadAdmission) Valid() bool                   { return json.Valid(a.payload) && a.binding.Validate() == nil }
 
+func joinOccurrencePayloadIdentity(producer PayloadProducer) bool {
+	return producer.IsPlatform() && producer.class == EventAdmissionRuntimeControl &&
+		producer.producer.Type() == EventProducerPlatform && producer.producer.ID() == "runtime.generic_schedule" &&
+		(producer.event == "platform.join_complete" || producer.event == "platform.join_timeout")
+}
+
+// JoinOccurrencePayloadDigest binds the occurrence's exact durable identity and
+// bytes. Declaration authority is supplied only by the workflow join resolver.
+func JoinOccurrencePayloadDigest(event Event) (string, error) {
+	if !joinOccurrencePayloadIdentity(PlatformPayloadProducer(event)) {
+		return "", fmt.Errorf("join payload identity requires its platform occurrence producer")
+	}
+	source := event.RoutingSource()
+	raw, err := canonicaljson.Bytes(map[string]any{
+		"reference": JoinOccurrencePayloadReference, "run_id": event.RunID(), "task_id": event.TaskID(),
+		"event": string(event.Type()), "flow_instance": event.FlowInstance(), "entity_id": event.EntityID(),
+		"routing_kind": string(source.Kind()), "routing_flow": source.Route().FlowID,
+		"routing_instance": source.Route().FlowInstance, "routing_entity": source.Route().EntityID,
+		"payload": string(event.Payload()),
+	})
+	if err != nil {
+		return "", err
+	}
+	return canonicaljson.HashBytes(raw), nil
+}
+
 // ApplyPayloadAdmission replaces the pre-admission payload exactly once.
 // Reapplication is accepted only when both bytes and binding are identical.
 func ApplyPayloadAdmission(event Event, admission PayloadAdmission) (Event, error) {
@@ -200,6 +233,12 @@ func ApplyPayloadAdmission(event Event, admission PayloadAdmission) (Event, erro
 	}
 	if err := admission.binding.producer.ValidateForEvent(event); err != nil {
 		return Event{}, err
+	}
+	if admission.binding.reference == JoinOccurrencePayloadReference {
+		digest, err := JoinOccurrencePayloadDigest(event)
+		if err != nil || digest != admission.binding.schemaDigest || !bytes.Equal(event.Payload(), admission.Payload()) {
+			return Event{}, fmt.Errorf("join payload binding contradicts its occurrence identity")
+		}
 	}
 	if current, ok := event.PayloadAdmission(); ok {
 		if !bytes.Equal(current.Payload(), admission.Payload()) || !current.Binding().Equal(admission.Binding()) {
