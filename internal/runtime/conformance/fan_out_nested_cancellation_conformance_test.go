@@ -215,6 +215,10 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			handlers.assertOnlyHeld(t, held.EventID, secondHeld.EventID)
 			stopCtx, cancelStop := context.WithTimeout(ctx, 5*time.Second)
 			defer cancelStop()
+			stopCtx, err = rt.bus.AdmitSourceArtifactFact(stopCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
 			result, err := controller.Stop(stopCtx, runcontrol.TransitionRequest{RunID: runID, Reason: "nested-held-child-proof", ControlledBy: "conformance"})
 			if err != nil || result.Status != runcontrol.StatusCancelled || result.Recovery.Err != nil {
 				t.Fatalf("production run-control cancellation=%+v err=%v", result, err)

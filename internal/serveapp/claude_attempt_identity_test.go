@@ -45,9 +45,11 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -740,6 +742,10 @@ func newClaudeAttemptProofEventBus(
 ) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence, *runtimedeliverycontinuation.Coordinator) {
 	t.Helper()
 	workOwner := newSupervisorTestRuntimeOccurrence(t, backend.source.BundleHash())
+	process, err := agentfixture.ProcessCapability(t, backend.context(), backend.store)
+	if err != nil {
+		t.Fatal(err)
+	}
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(
 		backend.source,
 		"claude-attempt-proof-runtime",
@@ -760,13 +766,17 @@ func newClaudeAttemptProofEventBus(
 	}
 	t.Cleanup(lease.Release)
 	eventBus, err := runtimebus.NewEventBusWithOptions(backend.store, runtimebus.EventBusOptions{
-		ExecutionPosture:    executionposture.Live,
-		RuntimeInstanceID:   claudeAttemptProofRuntimeID,
-		SourceArtifactFact:  backend.source,
-		WorkOwner:           workOwner,
-		ReceiverExecution:   eventreceiver.NormalExecution(),
-		PipelineObligations: backend.store.PipelineObligations(),
-		DeliveryAuthority:   authority,
+		MutationContext: func(ctx context.Context) (context.Context, error) {
+			return startupownership.WithProcessMutationAuthority(ctx, process)
+		},
+		CarryMutationContext: startupownership.CarryMutationAuthority,
+		ExecutionPosture:     executionposture.Live,
+		RuntimeInstanceID:    claudeAttemptProofRuntimeID,
+		SourceArtifactFact:   backend.source,
+		WorkOwner:            workOwner,
+		ReceiverExecution:    eventreceiver.NormalExecution(),
+		PipelineObligations:  backend.store.PipelineObligations(),
+		DeliveryAuthority:    authority,
 		PayloadAdmitter: func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		},

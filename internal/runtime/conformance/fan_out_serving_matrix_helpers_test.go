@@ -308,6 +308,10 @@ func (f *servingMatrixFixture) startRun(t *testing.T, runtimeIndex int) (context
 		f.started[runtimeIndex] = true
 	}
 	publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, f.sources[runtimeIndex], runID, "portfolio.opened", map[string]any{"portfolio_id": runID, "threshold": 75})
+	ctx, err := rt.bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return ctx, runID
 }
 

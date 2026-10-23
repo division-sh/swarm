@@ -4569,7 +4569,7 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.closeAndDrain",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "6bf62dd2d06247e4f863249ee77807620b1417f383fc0f0f4fa7112e4223e68d"
+    "body_sha256": "5f07ce304707454fb2dd66057e5f9a322a8021ae2e3d7e5fd4b5db7c9393cf38"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.failClosedAfterReopen",
@@ -4581,7 +4581,7 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.mutateStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "721f34edf98413502485db2b8b574cbbea2a9be4a18e2f85ed5347c0a3d81cf3"
+    "body_sha256": "97317b8f8ae220022b58b9a6323be4c0f9b66ac80931153193f6e5baf4f77aa1"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.publishActiveService",
@@ -4593,7 +4593,7 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.restoreAdmission",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "49bc0bfae9c6cfeeb5f6312f5903eb49b06b8a990ecd7102cca42152ad6d7d41"
+    "body_sha256": "ec105a30004f78dbd74036cd9c89e0d1f55bc3f9d7fd044d93e995e53e040c4b"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceTransition.Restore",
@@ -4653,7 +4653,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "62920dee6d176c289a590043289f55f41a9a0a72193e364d353331a2b342f53a"
+    "body_sha256": "7cf635128cd0230e054d3e119c1677b49454270c716c816386bc121ad36b5b56"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -4821,7 +4821,7 @@
     "owner": "internal/serveapp/main.go::processOwnedHTTPHandler",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "fd2b3703b587ca2bf9d4b6483709e58ce0a92343f7b65fd0b3fa70dfef185164"
+    "body_sha256": "eddf3b5bc679189384cdd9044328e5fa767c040fe6bacacdb52177dbdd4a16b4"
   },
   {
     "owner": "internal/serveapp/main.go::reconcileServeRuntimeStandingTargets",
@@ -5385,7 +5385,7 @@
     "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.beginLogoutSettlement",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
-    "body_sha256": "83dbad2523e2e9d8fe81291c66ba2886f3920173f9ac3c0fbbf3181c42ba1725"
+    "body_sha256": "d3350d09bfcdeae9fc1b930ff429e8b3b11df4531cd55239e4321316828531ea"
   },
   {
     "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.requireCurrentLogoutDispatch",

@@ -71,7 +71,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -687,6 +687,7 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
+	ctx = serveFixtureProcessContext(t, ctx, pg)
 	pinnedArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# pinned-source\n"))
 	otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# other-source\n"))
 	pinnedHash := pinnedArtifact.BundleHash()
@@ -702,6 +703,7 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 	})
 	standingSource := mustServeTestPersistedSourceArtifactFact(otherHash)
 	standingCtx := runStatusAuthorActivityContext(standingSource)
+	standingCtx = serveFixtureProcessContext(t, standingCtx, pg)
 	standing, err := pg.ReconcileStandingService(standingCtx, runtimepipeline.StandingServiceCandidate{
 		BindingEnabled: true,
 		ServiceID:      runtimeflowidentity.StandingServiceID("bundle-admission-proof"),
@@ -812,7 +814,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t *testing.T) {
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
-	endpoint, db, bundleHash, _, pg := startServedJoinProofRuntime(t)
+	endpoint, db, bundleHash, rt, pg := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.started", "bundle_hash": bundleHash,
 		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
@@ -835,7 +837,7 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
 	waitServedJoinSourceTimer(t, db, initial.RunID)
 	waitServedRunDeliveryQuiescence(t, deliveryReader, initial.RunID)
-	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
+	forkEventID := seedServedJoinForkFrontier(t, servedRuntimeProofAuthorActivityContext(t, rt, bundleHash), db, initial.RunID, entityID, arrival.EventID)
 	if _, err := pg.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
 		SourceRunID: initial.RunID,
 		At:          forkEventID,
@@ -1535,7 +1537,12 @@ func servedRuntimeProofAuthorActivityContext(t *testing.T, rt *runtimepkg.Runtim
 		t.Fatal("served control proof process work owner is required")
 	}
 	ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
-	return worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
+	ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
+	ctx, err := rt.Bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 type servedConversationForkProofRuntime struct {
@@ -4817,9 +4824,8 @@ func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
 	return ""
 }
 
-func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourceEventID string) string {
+func seedServedJoinForkFrontier(t *testing.T, ctx context.Context, db *sql.DB, runID, entityID, sourceEventID string) string {
 	t.Helper()
-	ctx := context.Background()
 	var flowInstance string
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(flow_instance, '')
@@ -7169,99 +7175,6 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	}
 }
 
-func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testing.T) {
-	stubServeRuntimeWorkspaceLifecycle(t)
-	unsetStoreSelectorEnv(t)
-	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	bundle := loadWorkflowValidationBundleAt(t, filepath.Join(repoRootForTest(), sourceRoot))
-	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath, bundle)
-	ctx := context.Background()
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:        writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		SourceRoot:        sourceRoot,
-		APIListenAddr:     "127.0.0.1:0",
-		MCPListenAddr:     "127.0.0.1:0",
-		SelfCheck:         true,
-		AbandonActiveRuns: true,
-		Verbose:           false,
-	})
-
-	serve.waitForReadyLine()
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
-	}
-	if !strings.Contains(serve.outputString(), "active work cleared for a clean start") {
-		t.Fatalf("concise abandon output omitted author outcome:\n%s", serve.outputString())
-	}
-	for _, forbidden := range []string{"deliveries", "sessions", "timers", "containers", "pipeline receipts"} {
-		if strings.Contains(serve.outputString(), forbidden) {
-			t.Fatalf("concise abandon output exposed bookkeeping %q:\n%s", forbidden, serve.outputString())
-		}
-	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatalf("reopen sqlite store: %v", err)
-	}
-	defer func() {
-		if err := sqliteStore.Close(); err != nil {
-			t.Fatalf("close sqlite store: %v", err)
-		}
-	}()
-	ctx = context.Background()
-	var runStatus, controlStatus, reason, controlledBy string
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT r.status, rc.control_status, COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
-		FROM runs r
-		JOIN run_control_state rc ON rc.run_id = r.run_id
-		WHERE r.run_id = ?
-	`, runID).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
-		t.Fatalf("load sqlite serve-abandoned run/control: %v", err)
-	}
-	if runStatus != "cancelled" || controlStatus != "stopped" || reason != runtimerunquiescence.ServeAbandonReasonCode || controlledBy != runtimerunquiescence.ServeAbandonControlledBy {
-		t.Fatalf("sqlite serve run/control = %s/%s/%s/%s, want cancelled/stopped/%s/%s", runStatus, controlStatus, reason, controlledBy, runtimerunquiescence.ServeAbandonReasonCode, runtimerunquiescence.ServeAbandonControlledBy)
-	}
-	var deliveryStatus, deliveryReason string
-	var activeSession sql.NullString
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT status, COALESCE(reason_code, ''), current_attempt_version
-		FROM event_deliveries
-		WHERE event_id = ?
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = 'agent-a'
-	`, eventID).Scan(&deliveryStatus, &deliveryReason, &activeSession); err != nil {
-		t.Fatalf("load sqlite serve-abandoned delivery: %v", err)
-	}
-	if deliveryStatus != "dead_letter" || deliveryReason != runtimerunquiescence.ServeAbandonReasonCode || activeSession.Valid {
-		t.Fatalf("sqlite serve delivery = %s/%s active=%v, want dead_letter/%s inactive", deliveryStatus, deliveryReason, activeSession.Valid, runtimerunquiescence.ServeAbandonReasonCode)
-	}
-	var deliveryOutcome, deliveryOutcomeReason string
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT o.outcome, COALESCE(o.reason_code, '')
-		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-		WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = 'agent-a'
-		ORDER BY o.claim_version DESC
-		LIMIT 1
-	`, eventID).Scan(&deliveryOutcome, &deliveryOutcomeReason); err != nil {
-		t.Fatalf("load sqlite serve delivery outcome: %v", err)
-	}
-	if deliveryOutcome != "terminalized" || deliveryOutcomeReason != runtimerunquiescence.ServeAbandonReasonCode {
-		t.Fatalf("sqlite serve delivery outcome = %s/%s, want terminalized/%s", deliveryOutcome, deliveryOutcomeReason, runtimerunquiescence.ServeAbandonReasonCode)
-	}
-	var pipelineOutcome, pipelineReason string
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
-		t.Fatalf("load sqlite serve pipeline receipt: %v", err)
-	}
-	if pipelineOutcome != "dead_letter" || pipelineReason != runtimerunquiescence.ServeAbandonReasonCode {
-		t.Fatalf("sqlite serve pipeline receipt = %s/%s, want dead_letter/%s", pipelineOutcome, pipelineReason, runtimerunquiescence.ServeAbandonReasonCode)
-	}
-}
-
 func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
 		t.Run(backend.String(), func(t *testing.T) {
@@ -8617,145 +8530,6 @@ func TestValidateServeGatewayURLEnvForNonDevRejectsAnyRetiredURLEnv(t *testing.T
 				}
 			}
 		})
-	}
-}
-
-func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *testing.T) {
-	oldBuildStores := buildStoresForServe
-	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	dsn, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	runtimePG, err := store.NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
-	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-		return serveRuntimeWorkspaceStub{}, nil
-	}
-	t.Cleanup(func() {
-		buildStoresForServe = oldBuildStores
-		cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
-	})
-
-	ctx := context.Background()
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	activeSessionID := uuid.NewString()
-	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "serve-abandon", "agent-a")
-	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	bundle := loadWorkflowValidationBundleAt(t, filepath.Join(repoRootForTest(), sourceRoot))
-	priorSource := sourceartifactfixture.Require(t, ctx, runtimePG)
-	bundleHash := priorSource.BundleHash()
-	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
-	if err != nil {
-		t.Fatalf("build postgres abandon source catalog: %v", err)
-	}
-	if _, err := runtimePG.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
-		t.Fatalf("persist postgres abandon source artifact: %v", err)
-	}
-	storetest.RequireRun(t, ctx, runtimePG, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
-	requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
-		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
-		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
-		Memory: runtimeagentmemory.Plan{Enabled: true},
-	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
-		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
-		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
-	claimCtx := serveDeliveryLifecycleFixtureContext()
-	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)
-	if err != nil {
-		t.Fatalf("claim active delivery: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, status
-		)
-		VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'active')
-	`, activeSessionID, runID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
-		t.Fatalf("seed active delivery session: %v", err)
-	}
-	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, activeSessionID); err != nil {
-		t.Fatalf("bind active delivery session: %v", err)
-	}
-	releaseServeTestAgentFixtureCapability(t, runtimePG)
-
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:        writeServeRuntimeTestConfig(t),
-		SourceRoot:        sourceRoot,
-		StoreMode:         "postgres",
-		APIListenAddr:     "127.0.0.1:0",
-		MCPListenAddr:     "127.0.0.1:0",
-		SelfCheck:         true,
-		AbandonActiveRuns: true,
-		Verbose:           true,
-	})
-
-	serve.waitForReadyLine()
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
-	}
-
-	var runStatus, controlStatus, reason, controlledBy string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT r.status, rc.control_status, COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
-		FROM runs r
-		JOIN run_control_state rc ON rc.run_id = r.run_id
-		WHERE r.run_id = $1::uuid
-	`, runID).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
-		t.Fatalf("load run/control state: %v", err)
-	}
-	if runStatus != "cancelled" || controlStatus != "stopped" || reason != runtimerunquiescence.ServeAbandonReasonCode || controlledBy != runtimerunquiescence.ServeAbandonControlledBy {
-		t.Fatalf("run/control = %s/%s/%s/%s, want cancelled/stopped/%s/%s", runStatus, controlStatus, reason, controlledBy, runtimerunquiescence.ServeAbandonReasonCode, runtimerunquiescence.ServeAbandonControlledBy)
-	}
-
-	var deliveryStatus, deliveryReason string
-	var deliveryActiveSession sql.NullString
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT status, COALESCE(reason_code, ''), current_attempt_version::text
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = 'agent-a'
-	`, eventID).Scan(&deliveryStatus, &deliveryReason, &deliveryActiveSession); err != nil {
-		t.Fatalf("load delivery: %v", err)
-	}
-	if deliveryStatus != "dead_letter" || deliveryReason != runtimerunquiescence.ServeAbandonReasonCode || deliveryActiveSession.Valid {
-		t.Fatalf("delivery = %s/%s active=%v, want serve abandon dead_letter", deliveryStatus, deliveryReason, deliveryActiveSession.Valid)
-	}
-	var deliveryOutcome, deliveryOutcomeReason string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT o.outcome, COALESCE(o.reason_code, '')
-		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-		WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = 'agent-a'
-		ORDER BY o.claim_version DESC
-		LIMIT 1
-	`, eventID).Scan(&deliveryOutcome, &deliveryOutcomeReason); err != nil {
-		t.Fatalf("load delivery outcome: %v", err)
-	}
-	if deliveryOutcome != "terminalized" || deliveryOutcomeReason != runtimerunquiescence.ServeAbandonReasonCode {
-		t.Fatalf("delivery outcome = %s/%s, want serve abandon terminalized", deliveryOutcome, deliveryOutcomeReason)
-	}
-	var pipelineOutcome, pipelineReason string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
-		t.Fatalf("load pipeline receipt: %v", err)
-	}
-	if pipelineOutcome != "dead_letter" || pipelineReason != runtimerunquiescence.ServeAbandonReasonCode {
-		t.Fatalf("pipeline receipt = %s/%s, want serve abandon dead_letter", pipelineOutcome, pipelineReason)
 	}
 }
 

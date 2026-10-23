@@ -91,7 +91,10 @@ func TestSessionLogoutSuccessorFencesOriginalAndPreservesJournalBothStores(t *te
 				if failed, err := f.selected.(startupownership.Store).AcquireProcessCapability(canceled, request); err == nil || failed != nil {
 					t.Fatal("canceled acquisition supplied successor authority", err)
 				}
-				pending, err := f.selected.RecoverUnlaunchedChannelLogout(f.ctx, op.TeardownID, op.Revision, time.Now().UTC())
+				if pending, err := f.selected.RecoverUnlaunchedChannelLogout(f.ctx, op.TeardownID, op.Revision, time.Now().UTC()); err == nil || pending.TeardownID != "" {
+					t.Fatal("retired original admitted a recovery mutation", pending, err)
+				}
+				pending, err := f.selected.GetChannelTeardown(f.ctx, op.TeardownID)
 				if err != nil || pending.Phase != op.Phase || pending.Revision != op.Revision {
 					t.Fatal("release/canceled acquisition fabricated no-launch settlement", pending, err)
 				}
@@ -106,6 +109,7 @@ func TestSessionLogoutSuccessorFencesOriginalAndPreservesJournalBothStores(t *te
 						t.Fatal(err)
 					}
 				}
+				acquireLogoutProcessFixture(t, f, attribution.RuntimeInstanceID, request)
 				if authorization == "committed" {
 					if err := handle.MarkLaunched(ctx); err == nil {
 						t.Fatal("late original launch accepted a successor's authority")
@@ -114,7 +118,7 @@ func TestSessionLogoutSuccessorFencesOriginalAndPreservesJournalBothStores(t *te
 					if err != nil || pending.Phase != op.Phase || pending.Revision != op.Revision {
 						t.Fatal("committed original journal misclassified as absent", pending, err)
 					}
-					if _, err := f.selected.(effects.RecoveryStore).ReconcileExternalEffectAttempts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
+					if _, err := f.selected.(effects.RecoveryStore).ReconcileExternalEffectAttempts(f.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
 						t.Fatal("historical journal settlement required the dead original", err)
 					}
 				} else {
@@ -302,7 +306,10 @@ func TestSessionLogoutPreauthorizationRecoveryRequiresWithdrawnOriginalBothStore
 			if err := process.Release(f.ctx); err != nil {
 				t.Fatal(err)
 			}
-			pending, err := f.selected.RecoverUnlaunchedChannelLogout(f.ctx, op.TeardownID, op.Revision, time.Now().UTC())
+			if pending, err := f.selected.RecoverUnlaunchedChannelLogout(f.ctx, op.TeardownID, op.Revision, time.Now().UTC()); err == nil || pending.TeardownID != "" {
+				t.Fatal("released original admitted a recovery mutation", pending, err)
+			}
+			pending, err := f.selected.GetChannelTeardown(f.ctx, op.TeardownID)
 			if err != nil || pending.Phase != op.Phase || pending.Revision != op.Revision {
 				t.Fatal("physical release fabricated successor authority", pending, err)
 			}
@@ -399,7 +406,7 @@ func TestSessionLogoutSuccessorBeforeSDKUnlinkRetainsUncertainJournalBothStores(
 				t.Fatal("superseded SDK emitted unlink", frame.node)
 			default:
 			}
-			if _, err := f.selected.(effects.RecoveryStore).ReconcileExternalEffectAttempts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
+			if _, err := f.selected.(effects.RecoveryStore).ReconcileExternalEffectAttempts(f.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
 				t.Fatal(err)
 			}
 			if err := c.DispatchSessionLogout(ctx, op); err == nil {
@@ -458,7 +465,7 @@ func TestSessionLogoutPreauthorizationRecoveryPreservesCommittedJournalBothStore
 				t.Fatal("original interrupted authorizer lost cancellation", err)
 			}
 			for range 2 {
-				if _, err := f.selected.(effects.RecoveryStore).ReconcileExternalEffectAttempts(ctx,
+				if _, err := f.selected.(effects.RecoveryStore).ReconcileExternalEffectAttempts(f.ctx,
 					effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
 					t.Fatal("journal recovery lost committed original authorization", err)
 				}

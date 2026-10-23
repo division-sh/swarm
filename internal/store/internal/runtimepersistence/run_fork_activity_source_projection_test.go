@@ -44,11 +44,10 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			fixtureOwner := t
 			for _, owner := range []string{"root", "static"} {
 				for _, corrupt := range []string{"flow", "type"} {
 					t.Run(owner+"/"+corrupt, func(t *testing.T) {
-						ctx, sourceRun, child, event := seedSelectedActivityProjectionFixture(fixtureOwner, fixture, backend.name == "postgres", owner == "root", true, false, json.RawMessage(`{"value":"unchanged"}`))
+						ctx, sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, json.RawMessage(`{"value":"unchanged"}`))
 						store := fixture.store.(selectedActivityProjectionStore)
 						original := originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint)
 						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original)
@@ -125,7 +124,7 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 				t.Run(state, func(t *testing.T) {
 					sourceRun, child, event := seedSelectedOrdinaryRootProjectionFixture(t, fixture, backend.name == "postgres", state)
 					ctx := testAuthorActivityContext()
-					ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+					ctx = originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store)
 					switch state {
 					case "missing":
 						// Missing construction removes the subtree together; deleting
@@ -257,6 +256,10 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 
 func seedSelectedOrdinaryRootProjectionFixture(t *testing.T, fixture authorActivityReceiptFixture, postgres bool, state string) (string, runfork.RunForkMaterialization, events.Event) {
 	t.Helper()
+	// Nested cases share the parent's store and its retained native process.
+	if owner, ok := fixture.activityOwner.(*testing.T); ok {
+		t = owner
+	}
 	runID, parentID, eventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
 	declarations := selectedActivityProducerSourceWithRootFields(t, state == "loop", false, state != "fieldless")
@@ -351,7 +354,7 @@ func TestSelectedContractActivitySourceProjectionBothStores(t *testing.T) {
 					ctx, sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", cell.root, cell.independentTarget, cell.wrongFlow, json.RawMessage(`{"value":"unchanged"}`))
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
 					store := fixture.store.(selectedActivityProjectionStore)
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(originalStoreFixtureContext(t, ctx, fixture.store), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint))
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint))
 					if after := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID()); !reflect.DeepEqual(before, after) {
 						t.Fatal("activity preparation mutated persisted source routing/payload evidence")
 					}
@@ -408,7 +411,7 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 					input := json.RawMessage(`{"large":9007199254740991,"decimal":1.2300e+09,"zero":0,"nested":[-9007199254740991,4.2500]}`)
 					ctx, sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, input)
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
-					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(originalStoreFixtureContext(t, ctx, fixture.store), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), sourceRun, child.ForkPoint))
+					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), sourceRun, child.ForkPoint))
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("load numeric activity: events=%#v err=%v", loaded, err)
 					}
@@ -454,6 +457,10 @@ func seedSelectedActivityProjectionFixture(t *testing.T, fixture authorActivityR
 
 func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture authorActivityReceiptFixture, postgres, root, independentTarget, wrongFlow bool, input json.RawMessage, postEvent func(context.Context, string)) (context.Context, string, runfork.RunForkMaterialization, events.Event) {
 	t.Helper()
+	// Keep every setup command on the process that owns the shared fixture.
+	if owner, ok := fixture.activityOwner.(*testing.T); ok {
+		t = owner
+	}
 	runID, parentID := uuid.NewString(), uuid.NewString()
 	declarations := selectedActivityProducerSource(t)
 	ctx := seedSelectedActivitySourceRun(t, fixture, runID, declarations)

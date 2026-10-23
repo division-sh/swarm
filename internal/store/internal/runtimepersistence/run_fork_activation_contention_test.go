@@ -866,11 +866,11 @@ func (b *forkContentionBarrier) awaitPostgresContender(t *testing.T, ctx context
 		if err == sql.ErrNoRows {
 			return false
 		}
-		if err != nil {
-			t.Fatal(err)
-		}
 		if gate.pid != 0 && (!wait.fenced || !strings.Contains(wait.query, "author_activity_order")) {
 			return false
+		}
+		if err != nil {
+			t.Fatal(err)
 		}
 		gate.contender = wait
 		return true

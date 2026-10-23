@@ -71,7 +71,9 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 					t.Fatal(err)
 				}
 				runID := uuid.NewString()
-				storetest.RequireRun(t, ctx, artifacts.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: artifact.BundleHash()})
+				setupCtx := serveFixtureProcessContext(t, ctx, artifacts)
+				storetest.RequireRun(t, setupCtx, artifacts.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: artifact.BundleHash()})
+				releaseServeTestAgentFixtureCapability(t, artifacts.(storetest.AgentFixtureStore))
 				placeholder := "?"
 				if backend != "sqlite" {
 					placeholder = "$1"

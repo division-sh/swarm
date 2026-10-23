@@ -143,6 +143,10 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 					runID := uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), runID)
 					ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
+					ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+					if err != nil {
+						t.Fatal(err)
+					}
 					storetest.RequireRun(t, ctx, deps.EventBusDurable.RunLifecycle.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifacts[index]})
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), "widget.scored", "test", "", []byte(`{"delta":1}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 					var routes []events.DeliveryRoute

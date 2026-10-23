@@ -182,7 +182,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					rt.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 					rt.AuthorContext = servedRuntimeProofAuthorActivityContext(t, servedTestProcessRuntime(t, process), rt.BundleHash)
 					if profileID == llmselection.BackendClaudeCLI {
-						requireCompletion2270NoBusinessStartup(t, rt.Selected.Effects(), &invocationProof)
+						requireCompletion2270NoBusinessStartup(t, rt.AuthorContext, rt.Selected.Effects(), &invocationProof)
 					}
 					if kind == "selected" {
 						proveCompletion2270ServedSelected(t, rt, selected, profileID, &requests, &invocationProof)
@@ -330,7 +330,7 @@ func proveCompletion2720ServedSiblings(t *testing.T, rt completion2270ServedProo
 	var invocations []completion2270Invocation
 	if profile == llmselection.BackendClaudeCLI {
 		var err error
-		invocations, err = proof.read(context.Background())
+		invocations, err = proof.read(rt.AuthorContext)
 		if err != nil || len(invocations) != 2 || invocations[0].InvocationID == invocations[1].InvocationID || invocations[0].AttemptID == invocations[1].AttemptID {
 			t.Fatalf("expected exactly two original physical CLI invocations: %+v %v", invocations, err)
 		}
@@ -376,7 +376,7 @@ func proveCompletion2270ServedOrdinary(t *testing.T, rt completion2270ServedProo
 	}
 	attemptID := ""
 	if profileID == llmselection.BackendClaudeCLI {
-		attemptID = requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, requests, proof, "")
+		attemptID = requireCompletion2270BusinessInvocation(t, rt.AuthorContext, rt.Selected.Effects(), profileID, requests, proof, "")
 	} else if requests.Load() != int32(wantTurns) {
 		t.Fatalf("provider calls=%d, want exactly %d", requests.Load(), wantTurns)
 	}
@@ -441,7 +441,7 @@ func proveCompletion2270ServedOrdinary(t *testing.T, rt completion2270ServedProo
 		}
 	}
 	if profileID == llmselection.BackendClaudeCLI {
-		requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, requests, proof, attemptID)
+		requireCompletion2270BusinessInvocation(t, rt.AuthorContext, rt.Selected.Effects(), profileID, requests, proof, attemptID)
 	} else if requests.Load() != int32(wantTurns) {
 		t.Fatalf("diagnostics re-invoked provider: calls=%d want%d", requests.Load(), wantTurns)
 	}
@@ -521,10 +521,10 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 	if len(usage.Breakdown) != 1 || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.InputTokens != 12 || usage.Usage.Exact.OutputTokens != 3 {
 		t.Fatalf("served-selected spend: %+v", usage)
 	}
-	attemptID := requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, calls, proof, "")
+	attemptID := requireCompletion2270BusinessInvocation(t, rt.AuthorContext, rt.Selected.Effects(), profileID, calls, proof, "")
 	var replay apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-	requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, calls, proof, attemptID)
+	requireCompletion2270BusinessInvocation(t, rt.AuthorContext, rt.Selected.Effects(), profileID, calls, proof, attemptID)
 	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(parent, readWorkspaceProofSourceDomain(t, owner, seed.RunID)) {
 		t.Fatal("served-selected replay changed parent evidence or repeated the provider effect")
 	}

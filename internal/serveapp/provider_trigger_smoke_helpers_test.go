@@ -214,6 +214,7 @@ func seedProviderTriggerSmokeRuntime(
 	agentID string,
 ) {
 	t.Helper()
+	ctx = serveFixtureProcessContext(t, ctx, sqliteStore)
 	fixtureSource := sourceartifactfixture.Require(t, ctx, sqliteStore)
 	fixtureBundleHash := fixtureSource.BundleHash()
 	now := time.Now().UTC()

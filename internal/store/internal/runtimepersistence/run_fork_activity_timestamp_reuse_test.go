@@ -42,7 +42,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			fixtureTest := t
-			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+			ctx := originalStoreFixtureContext(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
 			for _, approved := range []bool{false, true} {
 				policy := "ordinary"
 				if approved {
@@ -188,7 +188,7 @@ func TestOrdinaryForkActivityReplayCardDependencyBothStores(t *testing.T) {
 							source := selectedActivityProducerSourceOptions(t, false, false, true, !approved)
 							bundle, _ := semanticview.Bundle(source)
 							ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
-							ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+							ctx = originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store)
 							journal := fixture.store.(activityTimestampJournal)
 							sourceOwner, err := activityidentity.ParseOwnerKey(sourceRecord.NodeID)
 							if err != nil {
@@ -309,7 +309,7 @@ func TestSelectedForkRecordedActivityCardDependencyBothStores(t *testing.T) {
 				t.Run(policy, func(t *testing.T) {
 					child, event, sourceRecord := seedActivityEvidenceForFork(t, fixture, backend.name == "postgres", approved, "succeeded", 0, false, true)
 					ctx := testAuthorActivityContext()
-					ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+					ctx = originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store)
 					cards := fixture.store.(decisioncard.ProposedEffectStore)
 					before, cursor, err := fixture.store.(decisioncard.Store).ListDecisionCards(ctx, decisioncard.ListOptions{RunID: child.ForkRunID, Limit: 10})
 					if err != nil || cursor != "" || len(before) != 1 {
@@ -375,7 +375,7 @@ func TestRunForkActivityTimestampRejectsIncompleteReuseBothStores(t *testing.T) 
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			fixtureTest := t
-			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+			ctx := originalStoreFixtureContext(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
 			for _, column := range []string{"started_at", "completed_at", "updated_at"} {
 				t.Run(column, func(t *testing.T) {
 					child, event, sourceRecord := seedActivityTimestampReuse(fixtureTest, fixture, backend.name == "postgres", false, "succeeded")
@@ -401,7 +401,7 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+			ctx := originalStoreFixtureContext(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
 			postgres := backend.name == "postgres"
 			child, event, source := seedActivityTimestampReuse(t, fixture, postgres, false, "succeeded")
 			fraction := 123456789
@@ -469,6 +469,9 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 
 func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixture, postgres, approved bool, status string, loopAttempt int, ordinaryReplay, pendingCard bool) (runfork.RunForkMaterialization, events.Event, runtimepipeline.ActivityAttemptRecord) {
 	t.Helper()
+	if owner, ok := fixture.activityOwner.(*testing.T); ok {
+		t = owner
+	}
 	runID, parentID := uuid.NewString(), uuid.NewString()
 	entityID := ""
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
