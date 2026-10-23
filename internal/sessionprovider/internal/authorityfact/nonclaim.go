@@ -14,7 +14,7 @@ type NonClaim struct {
 }
 
 func SealOwnedNonClaim(parentID string, revision int64, fingerprint string, original []byte, receivedAt time.Time, ctx context.Context, current func() bool, check func(context.Context) error) NonClaim {
-	return NonClaim{original: SealOwnedClaim(parentID, revision, fingerprint, original, receivedAt, ctx, current), check: check}
+	return NonClaim{original: SealOwnedClaim(parentID, revision, RuntimeParent, fingerprint, original, receivedAt, ctx, current), check: check}
 }
 
 func (d NonClaim) Empty() bool { return d.original.value == nil }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -21,10 +22,22 @@ type sessionSetupProjection struct {
 	nonClaim authority.NonClaim
 }
 
+func settleDeploymentClaim(ctx context.Context, identities operatorchannel.Store, op channelonboarding.Operation, claim operatorchannel.InboundClaim, valid func() bool) error {
+	claim.PublicationID = operatorchannel.SessionClaimReceiptID(op.OperationID, claim.ProviderEventID)
+	body, err := json.Marshal(claim)
+	if err != nil {
+		return err
+	}
+	sealed := authorityfact.SealOwnedClaim(op.OperationID, op.Revision, authorityfact.DeploymentParent,
+		operatorchannel.Hash("telegram-registration-claim-v1", op.OperationID, string(body)), body, time.Now().UTC().Truncate(time.Microsecond), ctx, valid)
+	_, err = identities.SettleSessionChannelClaim(ctx, sealed)
+	return err
+}
+
 func prepareSessionSetup(ctx context.Context, admitted input.Admission, trigger providertriggers.InboundAdmissionPlan, channel packs.SatisfactionPlan) (sessionSetupProjection, error) {
 	var absent sessionSetupProjection
 	generation, err := channel.Generation()
-	if err != nil || !generation.Equal(admitted.Coordinate().PlanGeneration) {
+	if err != nil || !admitted.Responsibility().DeploymentRegistration && !generation.Equal(admitted.Coordinate().PlanGeneration) {
 		return absent, fmt.Errorf("native setup requires its exact original channel plan")
 	}
 	var event capturedEvent
@@ -32,7 +45,9 @@ func prepareSessionSetup(ctx context.Context, admitted input.Admission, trigger 
 		return absent, err
 	}
 	if event.Scope.Kind != channelonboarding.SessionInputOnboarding || admitted.Scope() != channelonboarding.SessionInputOnboarding ||
-		!event.Source.Coordinate.MatchesDeclaration(admitted.Coordinate()) || !event.ReceivedAt.Equal(admitted.ReceivedAt()) || !bytes.Equal(event.Body, admitted.Body()) {
+		event.Scope.DeploymentRegistration != admitted.Responsibility().DeploymentRegistration ||
+		(!event.Scope.DeploymentRegistration && !event.Source.Coordinate.MatchesDeclaration(admitted.Coordinate())) ||
+		!event.ReceivedAt.Equal(admitted.ReceivedAt()) || !bytes.Equal(event.Body, admitted.Body()) {
 		return absent, fmt.Errorf("operator setup requires the original onboarding capture")
 	}
 	request, err := trigger.AdmitSessionInput(ctx, admitted)
@@ -79,8 +94,12 @@ func prepareSessionSetup(ctx context.Context, admitted input.Admission, trigger 
 	if err != nil {
 		return absent, err
 	}
+	scope := authority.RuntimeParent
+	if event.Scope.DeploymentRegistration {
+		scope = authority.DeploymentParent
+	}
 	return sessionSetupProjection{claim: authorityfact.SealOwnedClaim(event.Scope.OnboardingOperation, event.Scope.OperationRevision,
-		fingerprint, body, event.ReceivedAt, admitted.Context(), current), inbound: claim}, nil
+		scope, fingerprint, body, event.ReceivedAt, admitted.Context(), current), inbound: claim}, nil
 }
 
 func projectSessionSetupText(delivery providertriggers.Delivery, channel packs.SatisfactionPlan, kind string) (operatorchannel.TextFact, providertriggers.DeliveryEvent, error) {

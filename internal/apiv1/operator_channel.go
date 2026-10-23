@@ -22,6 +22,7 @@ type OperatorChannelHandlerOptions struct {
 	Readback     ConnectedChannelReadbackLifecycle
 	Idempotency  APIIdempotencyStore
 	Now          func() time.Time
+	Deployment   MethodHandler
 }
 
 type ChannelIdentityConfirmationLifecycle interface {
@@ -147,7 +148,7 @@ func OperatorChannelHandlers(opts OperatorChannelHandlerOptions) map[string]Meth
 			return map[string]any{"principal_id": principal.ID, "channels": channels}, nil
 		}
 	}
-	return handlers
+	return scopedChannelHandlers(handlers, opts.Channels, opts.Deployment)
 }
 
 func operatorChannelOperationResult(operation operatorchannel.Operation, binding operatorchannel.Binding) map[string]any {

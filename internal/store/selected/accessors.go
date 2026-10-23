@@ -32,13 +32,18 @@ func (o *Owner) RuntimeDeps() runtime.RuntimeDeps {
 	return deps
 }
 
-func (o *Owner) Schema() store.SchemaBootstrapper                { return o.required.schema }
-func (o *Owner) Pinger() apiv1.Pinger                            { return o.required.pinger }
-func (o *Owner) AuthorActivity() runtimeauthoractivity.Reader    { return o.required.authorActivity }
-func (o *Owner) OperatorChannels() operatorchannel.Store         { return o.required.operatorChannels }
-func (o *Owner) ChannelOnboarding() channelonboarding.Store      { return o.required.channelOnboarding }
-func (o *Owner) ChannelDelivery() runtimechanneldelivery.Store   { return o.required.channelDelivery }
-func (o *Owner) ChannelNative() runtimechannelnative.Store       { return o.required.channelNative }
+func (o *Owner) Schema() store.SchemaBootstrapper              { return o.required.schema }
+func (o *Owner) Pinger() apiv1.Pinger                          { return o.required.pinger }
+func (o *Owner) AuthorActivity() runtimeauthoractivity.Reader  { return o.required.authorActivity }
+func (o *Owner) OperatorChannels() operatorchannel.Store       { return o.required.operatorChannels }
+func (o *Owner) ChannelOnboarding() channelonboarding.Store    { return o.required.channelOnboarding }
+func (o *Owner) ChannelDelivery() runtimechanneldelivery.Store { return o.required.channelDelivery }
+func (o *Owner) ChannelNative() runtimechannelnative.Store     { return o.required.channelNative }
+
+func (o *Owner) DeploymentChannels() channelonboarding.OperationStore {
+	return o.required.deploymentChannels
+}
+
 func (o *Owner) StartupOwnership() runtimestartupownership.Store { return o.required.startupOwnership }
 func (o *Owner) RunQuiescence() runtimerunquiescence.ServeAbandonStore {
 	return o.required.runQuiescence

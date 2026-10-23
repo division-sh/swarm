@@ -114,7 +114,7 @@ func normalizeRetainedBinding(principalID string, binding Binding) (Binding, err
 	default:
 		return Binding{}, fmt.Errorf("%w: retained binding has unknown status", ErrConflict)
 	}
-	binding.ProviderAuthority = ProviderAuthority{Kind: binding.ProviderAuthority.Kind,
+	binding.ProviderAuthority = ProviderAuthority{Scope: binding.ProviderAuthority.Scope, Kind: binding.ProviderAuthority.Kind,
 		Credential: binding.ProviderAuthority.Credential, Session: binding.ProviderAuthority.Session}
 	return binding, nil
 }

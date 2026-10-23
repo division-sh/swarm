@@ -50,11 +50,11 @@ func TestWhatsAppPairingBeforeCommitCancellationPreservesReservationBothStores(t
 			}
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
-			f.connection.store = pairingCommitCancelStore{Store: f.store, cancel: cancel, before: true}
+			f.connection.operations = pairingCommitCancelStore{Store: f.store, cancel: cancel, before: true}
 			if _, paired, err := f.connection.CheckpointPairing(caller, started.Operation.Revision); err == nil || paired {
 				t.Fatal("pre-commit cancellation adopted the SDK account", paired, err)
 			}
-			f.connection.store = f.store
+			f.connection.operations = f.store
 			retained, err := f.store.GetChannelOnboarding(f.ctx, started.Operation.OperationID)
 			if err != nil || retained.Phase != started.Operation.Phase || retained.Revision != started.Operation.Revision ||
 				retained.SessionAccount != (operatorchannel.SessionAccountAdmission{}) || f.connection.sessionAccount() != retained.SessionAccount {
@@ -88,12 +88,12 @@ func TestWhatsAppPairingCommitCancellationRemainsRecoverableBothStores(t *testin
 			}
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
-			f.connection.store = pairingCommitCancelStore{Store: f.store, cancel: cancel}
+			f.connection.operations = pairingCommitCancelStore{Store: f.store, cancel: cancel}
 			_, _, err = f.connection.CheckpointPairing(caller, started.Operation.Revision)
 			if !errors.Is(err, context.Canceled) {
 				t.Fatal("canceled checkpoint did not report cancellation")
 			}
-			f.connection.store = f.store
+			f.connection.operations = f.store
 			retained, err := f.store.GetChannelOnboarding(f.ctx, started.Operation.OperationID)
 			if err != nil || retained.Phase != channelonboarding.PhaseAwaitingExternalIdentity || retained.SessionAccount.AccountRef != accountRef {
 				t.Fatal("pairing did not commit before cancellation", retained, err)

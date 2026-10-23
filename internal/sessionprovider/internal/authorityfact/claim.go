@@ -8,6 +8,7 @@ import (
 )
 
 type ownedClaim struct {
+	scope          ParentScope
 	parentID       string
 	parentRevision int64
 	body           []byte
@@ -20,17 +21,24 @@ type ownedClaim struct {
 type Claim struct{ value *ownedClaim }
 
 // SealOwnedClaim is called only after native admission and compiled text mapping.
-func SealOwnedClaim(parentID string, parentRevision int64, fingerprint string, body []byte, receivedAt time.Time, ctx context.Context, current func() bool) Claim {
-	return Claim{value: &ownedClaim{parentID: parentID, parentRevision: parentRevision,
+func SealOwnedClaim(parentID string, parentRevision int64, scope ParentScope, fingerprint string, body []byte, receivedAt time.Time, ctx context.Context, current func() bool) Claim {
+	return Claim{value: &ownedClaim{scope: scope, parentID: parentID, parentRevision: parentRevision,
 		fingerprint: fingerprint, body: bytes.Clone(body), receivedAt: receivedAt, ctx: ctx, current: current}}
 }
 
 func (c Claim) Validate(ctx context.Context) error {
-	if c.value == nil || ctx == nil || ctx.Err() != nil || c.value.ctx == nil || c.value.ctx.Err() != nil ||
+	if c.value == nil || c.value.scope.Validate() != nil || ctx == nil || ctx.Err() != nil || c.value.ctx == nil || c.value.ctx.Err() != nil ||
 		c.value.parentID == "" || c.value.parentRevision < 1 || c.value.fingerprint == "" || len(c.value.body) == 0 || c.value.receivedAt.IsZero() || c.value.current == nil || !c.value.current() {
 		return fmt.Errorf("native claim requires its original current admitted input")
 	}
 	return nil
+}
+
+func (c Claim) Scope() ParentScope {
+	if c.value == nil {
+		return RuntimeParent
+	}
+	return c.value.scope
 }
 
 func (c Claim) Parent() (string, int64) {

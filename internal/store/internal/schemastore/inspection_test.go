@@ -55,7 +55,7 @@ func TestSchemaInspectionSharesBootDecisionWithoutPreparation(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err := inspect(ctx, request)
-			if err != nil || !result.Fresh || !reflect.DeepEqual(result.MissingStateTables, []string{"inspection_state"}) {
+			if err != nil || !result.Fresh || !reflect.DeepEqual(result.MissingStateTables, []string{"deployment_channel_operations", "inspection_state"}) {
 				t.Fatalf("fresh preparation decision = %+v, %v", result, err)
 			}
 			after, err := listTables(ctx, db)
@@ -64,13 +64,20 @@ func TestSchemaInspectionSharesBootDecisionWithoutPreparation(t *testing.T) {
 			}
 			platformOnly := request
 			platformOnly.StatePlans = nil
+			platformOnly.PlatformPlans = nil
+			for _, plan := range plans {
+				if plan.TableName != "deployment_channel_operations" {
+					platformOnly.PlatformPlans = append(platformOnly.PlatformPlans, plan)
+				}
+			}
 			if err := bootstrap(ctx, platformOnly); err != nil {
 				t.Fatal(err)
 			}
 			result, err = inspect(ctx, request)
-			if err != nil || result.Fresh || result.Origin == nil || len(result.MissingStateTables) != 1 {
+			if err != nil || result.Fresh || result.Origin == nil || !reflect.DeepEqual(result.MissingStateTables, []string{"deployment_channel_operations", "inspection_state"}) {
 				t.Fatalf("compatible platform with missing generated table = %+v, %v", result, err)
 			}
+			originalOrigin := *result.Origin
 			if tables, err := listTables(ctx, db); err != nil {
 				t.Fatal(err)
 			} else if _, exists := tables["inspection_state"]; exists {
@@ -82,6 +89,19 @@ func TestSchemaInspectionSharesBootDecisionWithoutPreparation(t *testing.T) {
 			result, err = inspect(ctx, request)
 			if err != nil || result.Fresh || len(result.MissingStateTables) != 0 {
 				t.Fatalf("prepared schema = %+v, %v", result, err)
+			}
+			if result.Origin == nil || *result.Origin != originalOrigin {
+				t.Fatal("deployment-table preparation replaced the existing store origin")
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE deployment_channel_operations ADD COLUMN unexpected TEXT`); err != nil {
+				t.Fatal(err)
+			}
+			var registrationDrift *SchemaCompatibilityError
+			if err := bootstrap(ctx, request); !errors.As(err, &registrationDrift) {
+				t.Fatalf("existing registration-table drift was not refused: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE deployment_channel_operations DROP COLUMN unexpected`); err != nil {
+				t.Fatal(err)
 			}
 			if _, err := db.ExecContext(ctx, `ALTER TABLE inspection_state ADD COLUMN unexpected TEXT`); err != nil {
 				t.Fatal(err)

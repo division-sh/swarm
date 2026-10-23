@@ -13,10 +13,16 @@ import (
 
 // PairedDevice supplies persisted-device fixture data, not native admission or
 // an SDK client. Production constructors still verify and own the actual state.
-func PairedDevice(t testing.TB, owner *sessionstate.Owner) *store.Device {
+func PairedDevice(t testing.TB, owner *sessionstate.Owner, account ...types.JID) *store.Device {
 	t.Helper()
-	device := owner.NewDevice()
 	jid := types.NewJID("synthetic_test_account", types.DefaultUserServer)
+	if len(account) > 1 {
+		t.Fatal("paired fixture requires one exact account")
+	}
+	if len(account) == 1 {
+		jid = account[0]
+	}
+	device := owner.NewDevice()
 	device.ID = &jid
 	device.Account = &waAdv.ADVSignedDeviceIdentity{
 		Details: []byte{1}, AccountSignature: make([]byte, 64),

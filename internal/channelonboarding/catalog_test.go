@@ -21,6 +21,28 @@ func TestA9ChannelCandidateUsesExactAlias(t *testing.T) {
 }
 
 func TestChannelOnboardingCandidateCatalogRequiresOneExactCandidate(t *testing.T) {
+	t.Run("deployment_has_no_runtime_target", func(t *testing.T) {
+		candidate := testCandidate(strings.Repeat("c", 64), "support")
+		candidate.DeploymentRegistration = true
+		candidate.Coordinate, candidate.Target = ChannelRuntimeContextCoordinate{}, CandidateTarget{}
+		candidate.Ceremony, candidate.SigningCredentialRole, candidate.ConfirmationOperation = CeremonyAccountLink, "", ""
+		if err := candidate.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		for _, mutate := range []func(*Candidate){
+			func(c *Candidate) { c.Coordinate = testCoordinate() },
+			func(c *Candidate) { c.Target = testCandidate(strings.Repeat("c", 64), "support").Target },
+			func(c *Candidate) { c.Ceremony = CeremonyAuthenticatedTextChallenge },
+			func(c *Candidate) { c.ConfirmationOperation = "runtime-confirmation" },
+			func(c *Candidate) { c.SigningCredentialRole = "webhook-secret" },
+		} {
+			foreign := candidate
+			mutate(&foreign)
+			if _, err := NewCandidateCatalog([]Candidate{foreign}); err == nil {
+				t.Fatal("deployment registration acquired runtime authority")
+			}
+		}
+	})
 	left := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
 	right := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "alerts")
 	catalog, err := NewCandidateCatalog([]Candidate{right, left})

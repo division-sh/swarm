@@ -256,6 +256,64 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("initial registration readiness = %#v", initial)
 	}
 	handler := runtimeProcessInboundHandler{contexts: manager, publicRegistration: controller}
+	claimReads := 0
+	handler.pendingClaim = func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
+		if account.Provider != "telegram" || account.Account != "42" || !current() {
+			t.Fatal("claim bridge lost the admitted receiving account or current credentials")
+		}
+		providerAdmission := pair.CredentialAdmissions[0]
+		for _, admission := range pair.CredentialAdmissions {
+			if admission.StoreKey == "bot" {
+				providerAdmission = admission
+			}
+		}
+		if !credential(providerAdmission) {
+			t.Fatal("receiving provider credential was lost")
+		}
+		delivery, err := admit()
+		if err != nil {
+			return false, err
+		}
+		claimReads++
+		for _, event := range delivery.Events {
+			if event.Kind == providertriggers.OutputKindNormalized && event.Payload["text"] == "SWARM-123456" {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if !controller.OwnsAccountCallback(t.Context(), initial.Registrations[0].CallbackURL, "42") ||
+		controller.OwnsAccountCallback(t.Context(), initial.Registrations[0].CallbackURL, "43") ||
+		controller.OwnsAccountCallback(t.Context(), strings.Replace(initial.Registrations[0].CallbackURL, "hooks.example.test", "foreign.example.test", 1), "42") {
+		t.Fatal("holder accepted a different receiving account or callback")
+	}
+	claimBody := `{"update_id":98,"message":{"message_id":6,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"SWARM-123456"}}`
+	for _, secret := range []string{"", "wrong-secret", "telegram-secret-v1"} {
+		before := claimReads
+		request := httptest.NewRequest(http.MethodPost, initial.Registrations[0].CallbackURL, strings.NewReader(claimBody))
+		request.Header.Set("X-Telegram-Bot-Api-Secret-Token", secret)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if secret == "telegram-secret-v1" {
+			if response.Code != http.StatusOK || claimReads != before+1 || len(eventsStore.events) != 0 {
+				t.Fatalf("exact pending claim reached runtime publication: status=%d reads=%d", response.Code, claimReads)
+			}
+		} else if response.Code != http.StatusUnauthorized || claimReads != before || len(eventsStore.events) != 0 {
+			t.Fatalf("callback generation replaced payload authentication: status=%d reads=%d", response.Code, claimReads)
+		}
+	}
+	wrongMethod := httptest.NewRequest(http.MethodGet, initial.Registrations[0].CallbackURL, strings.NewReader(claimBody))
+	wrongMethod.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v1")
+	methodRefused := httptest.NewRecorder()
+	handler.ServeHTTP(methodRefused, wrongMethod)
+	if methodRefused.Code != http.StatusMethodNotAllowed || claimReads != 1 || len(eventsStore.events) != 0 {
+		t.Fatal("pending claim accepted a non-POST callback", methodRefused.Code, claimReads)
+	}
+	// With no pending deployment claim, the runtime's original credential/target
+	// refusal order remains authoritative and the callback body is not read.
+	handler.pendingClaim = func(_ context.Context, _ channelonboarding.AccountReference, _ func(channelonboarding.CredentialAdmission) bool, _ func() (providertriggers.Delivery, error), _ func() bool) (bool, error) {
+		return false, nil
+	}
 	use, lookup, err := manager.AcquireIngress(t.Context(), "chat", "telegram")
 	if err != nil || use == nil {
 		t.Fatalf("registration control did not acquire its context: %+v err=%v", lookup, err)

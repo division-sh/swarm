@@ -191,7 +191,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			if err != nil {
 				t.Fatal(err)
 			}
-			owner, err := newSessionInputOwner(selected, reader, op.OperationID)
+			owner, err := newSessionInputOwner(selected, selected, reader, op.OperationID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -290,7 +290,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			}
 			canceled, cancel := context.WithCancel(peer.ctx)
 			cancelStore := &sessionInputCancelLookupStore{sessionInputSelectedStore: selected, cancel: cancel}
-			cancelOwner, err := newSessionInputOwner(cancelStore, reader, op.OperationID)
+			cancelOwner, err := newSessionInputOwner(cancelStore, cancelStore, reader, op.OperationID)
 			if err != nil {
 				t.Fatal(err)
 			}

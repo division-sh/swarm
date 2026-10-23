@@ -10,6 +10,9 @@ import (
 // never a fuzzy durable-successor match or authority borrowed from an old bundle.
 // Execution remains deferred to Recover, after the serving grant is admitted.
 func (s *Service) RollSessionSources(ctx context.Context) error {
+	if s.deployment {
+		return ErrInvalidRequest
+	}
 	owner, supported := s.sessions.(interface {
 		RollSessionSource(context.Context, Operation, Candidate) (Operation, error)
 	})
@@ -42,10 +45,11 @@ func (s *Service) RollSessionSources(ctx context.Context) error {
 		if !current {
 			continue
 		}
-		name, _, valid := strings.Cut(op.Coordinate.BundleIdentity, "@")
-		if !valid || name == "" {
+		separator := strings.IndexByte(op.Coordinate.BundleIdentity, '@')
+		if separator < 1 {
 			return ErrRevisionConflict
 		}
+		name := op.Coordinate.BundleIdentity[:separator]
 		var matches []Candidate
 		for _, candidate := range catalog.candidates {
 			nextName, _, _ := strings.Cut(candidate.Coordinate.BundleIdentity, "@")

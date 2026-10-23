@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -1578,6 +1579,15 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
+	var deploymentRegistration *runtimepublicingress.ProviderRegistrationController
+	deploymentChannels, deploymentClaims, closeDeploymentChannels := deploymentChannelHandlers(repo, cfgResult.Path, swarmDir.Path, stores, processWorkOwner, processCapability, func(ctx context.Context, callback, account string) bool {
+		return deploymentRegistration != nil && deploymentRegistration.OwnsAccountCallback(ctx, callback, account)
+	})
+	defer func() {
+		if err := closeDeploymentChannels(); err != nil {
+			log.Printf("deployment channel shutdown failed: %T", err)
+		}
+	}()
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: posture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
 		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity, Publication: runtimeContextManager}),
@@ -1589,8 +1599,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		supervisor.executionDispatch(),
 		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager, supervisor: supervisor}, Idempotency: idempotency}),
 		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: idempotency}),
-		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Confirmation: channelOnboarding, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency, Now: opts.TestChannelOnboardingNow}),
-		apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: channelOnboarding, Channels: operatorChannels}),
+		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Confirmation: channelOnboarding, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency, Now: opts.TestChannelOnboardingNow, Deployment: deploymentChannels}),
+		apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: channelOnboarding, Channels: operatorChannels, Deployment: deploymentChannels}),
 	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		AuthTokens:          apiAuth.Tokens,
@@ -1645,13 +1655,14 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			presenter.fail(20, "public_ingress", controllerErr)
 			return 1
 		}
+		deploymentRegistration = registrationController
 		reconcilePublicIngress = func(reconcileCtx context.Context, generation runtimepublicingress.Generation) error {
 			_, manager := supervisor.PublicIngressState()
 			return reconcileServeProviderRegistrations(reconcileCtx, generation, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner, registrationController, stores.ChannelDelivery().NotifyChannelPublication)
 		}
 		publicHandler := http.NotFoundHandler()
 		if inboundHandler != nil {
-			publicHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager, publicRegistration: registrationController}
+			publicHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager, publicRegistration: registrationController, pendingClaim: deploymentClaims}
 		}
 		publicExposure, controllerErr = runtimepublicingress.NewController(runtimepublicingress.Options{
 			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,

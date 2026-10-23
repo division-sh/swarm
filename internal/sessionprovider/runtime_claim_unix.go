@@ -24,6 +24,9 @@ func (i *runtimeIncoming) drain(ctx context.Context) error {
 			return err
 		}
 	}
+	if i.connection.operation.DeploymentRegistration {
+		return nil
+	}
 	return i.handoff.drain(ctx)
 }
 

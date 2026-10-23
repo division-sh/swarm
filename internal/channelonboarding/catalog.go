@@ -50,11 +50,12 @@ func (t CandidateTarget) ValidateDeclaration() error {
 }
 
 type Candidate struct {
+	DeploymentRegistration bool                              `json:"deployment_registration,omitempty"`
 	SourceLabel            string                            `json:"source_label,omitempty"`
 	Provider               string                            `json:"provider"`
 	Interface              operatorchannel.InterfaceIdentity `json:"interface"`
-	Coordinate             ChannelRuntimeContextCoordinate   `json:"coordinate"`
-	Target                 CandidateTarget                   `json:"target"`
+	Coordinate             ChannelRuntimeContextCoordinate   `json:"coordinate,omitzero"`
+	Target                 CandidateTarget                   `json:"target,omitzero"`
 	Posture                ActivationPosture                 `json:"activation_posture"`
 	Ceremony               IdentityCeremony                  `json:"identity_ceremony"`
 	ProviderCredentialRole string                            `json:"provider_credential_role"`
@@ -67,6 +68,9 @@ type Candidate struct {
 
 func (c Candidate) MarshalJSON() ([]byte, error) {
 	type readback Candidate
+	if c.DeploymentRegistration {
+		return json.Marshal(readback(c))
+	}
 	return json.Marshal(struct {
 		readback
 		Capabilities packs.ChannelCapabilityVector `json:"capabilities"`
@@ -94,6 +98,9 @@ func (c Candidate) Validate() error {
 	if err := c.ValidateDeclaration(); err != nil {
 		return err
 	}
+	if c.DeploymentRegistration {
+		return nil
+	}
 	if err := c.Coordinate.Validate(); err != nil {
 		return err
 	}
@@ -101,6 +108,18 @@ func (c Candidate) Validate() error {
 }
 
 func (c Candidate) ValidateDeclaration() error {
+	if c.DeploymentRegistration {
+		if err := c.Interface.Validate(); err != nil {
+			return err
+		}
+		if c.Target != (CandidateTarget{}) || c.Ceremony != CeremonyAccountLink ||
+			c.SigningCredentialRole != "" || c.ConfirmationOperation != "" ||
+			c.Posture != (map[string]ActivationPosture{"whatsapp": ActivationSessionConnection, "telegram": ActivationWebhookRegistration})[c.Provider] ||
+			(c.ProviderCredentialRole == "") != (c.Provider == "whatsapp") {
+			return fmt.Errorf("%w: deployment registration has runtime activation or invalid provider inputs", ErrInvalidRequest)
+		}
+		return validateRegistrationScope(true, c.Provider, "", c.Coordinate, c.Target.Selector)
+	}
 	if strings.TrimSpace(c.Provider) == "" || strings.TrimSpace(c.ConfirmationOperation) == "" {
 		return fmt.Errorf("channel onboarding candidate requires provider and confirmation operation")
 	}
@@ -124,9 +143,6 @@ func (c Candidate) ValidateDeclaration() error {
 		if c.Target.Generation != c.Coordinate.TargetGeneration {
 			return fmt.Errorf("channel onboarding declaration contradicts its admitted target generation")
 		}
-		if err := c.Target.ValidateDeclaration(); err != nil {
-			return err
-		}
 	case ActivationSessionConnection:
 		if strings.TrimSpace(c.SigningCredentialRole) != "" || strings.TrimSpace(c.ConnectionHealth) == "" {
 			return fmt.Errorf("session channel onboarding candidate requires connection health and forbids signing credential")
@@ -134,11 +150,8 @@ func (c Candidate) ValidateDeclaration() error {
 		if c.Target.Generation != c.Coordinate.TargetGeneration || c.Target.SigningCredentialKey != "" {
 			return fmt.Errorf("session declaration contradicts its target generation or carries webhook signing")
 		}
-		if err := c.Target.ValidateDeclaration(); err != nil {
-			return err
-		}
 	}
-	return nil
+	return c.Target.ValidateDeclaration()
 }
 
 type CandidateSelection struct {
