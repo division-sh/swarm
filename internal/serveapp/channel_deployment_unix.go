@@ -64,10 +64,12 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		var result json.RawMessage
 		err = client.Dispatch(ctx, req.Method, req.Params, &result)
 		var head channelonboarding.Result
-		if err == nil && len(result) != 0 {
-			if decodeErr := json.Unmarshal(result, &head); decodeErr != nil {
-				return nil, decodeErr
-			}
+		var decodeErr error
+		if err == nil {
+			decodeErr = json.Unmarshal(result, &head)
+		}
+		if decodeErr != nil {
+			return nil, decodeErr
 		}
 		var required *channelonboarding.CredentialRequiredError
 		if errors.As(err, &required) {
@@ -101,12 +103,12 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 			return false, err
 		}
 		operations, err := stores.DeploymentChannels().ListChannelOnboardingOperations(work.Context())
-		if err != nil {
+		switch {
+		case err != nil:
 			return false, err
-		}
-		if !slices.ContainsFunc(operations, func(op channelonboarding.Operation) bool {
+		case !slices.ContainsFunc(operations, func(op channelonboarding.Operation) bool {
 			return op.PendingDeploymentClaim(account)
-		}) {
+		}):
 			return false, nil
 		}
 		client, err := cliapp.UseDeploymentChannelControl(work.Context(), root, config, directory, account.Provider, stores, process, factory)
