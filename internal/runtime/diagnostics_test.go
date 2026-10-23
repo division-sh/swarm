@@ -68,7 +68,8 @@ func TestRuntimeLogCaptureRetainsExactFactsWithoutInventingDurability(t *testing
 }
 
 func newTestRuntimeLogger(persistence RuntimeLogPersistence) *RuntimeLogger {
-	return NewRuntimeLogger(persistence, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return NewRuntimeLogger(persistence, executionposture.Live, func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 }
@@ -89,7 +90,8 @@ func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCaptur
 
 func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		var payload map[string]any
 		if err := json.Unmarshal(event.Payload(), &payload); err != nil {
 			return events.PayloadAdmission{}, err
@@ -130,7 +132,8 @@ func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
 
 func TestRuntimeLoggerOmitsAbsentNestedDetailFieldsBeforeAdmission(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 	if err := logger.Log(context.Background(), RuntimeLogEntry{
@@ -161,7 +164,8 @@ func TestRuntimeLoggerOmitsAbsentNestedDetailFieldsBeforeAdmission(t *testing.T)
 
 func TestRuntimeLoggerRejectsNullDetailListElements(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 	err := logger.Log(context.Background(), RuntimeLogEntry{

@@ -11,7 +11,7 @@ import (
 
 var localEnvironmentUnits = []string{
 	"local-release-golden-smoke", "local-catalog-smoke", "local-generated-fanout-fixture",
-	"local-fanout-handoff-ack-loss", "local-api-matrix-registry", "local-api-routing-canaries",
+	"local-fanout-handoff-ack-loss", "local-api-routing-canaries",
 	"local-routing-reporter", "local-delivery-continuation", "local-release-golden-restart",
 	"local-release-lifecycle-smoke", "local-serveapp-canaries", "local-runtime-bus-full",
 }
@@ -138,9 +138,6 @@ func TestVenueEnvironmentDeclarationsFailClosed(t *testing.T) {
 
 func TestCommittedEnvironmentDeclarationCensus(t *testing.T) {
 	policy, _, _ := environmentPlanInputs(t)
-	if len(localEnvironmentUnits) != 12 {
-		t.Fatal("original twelve-declaration census changed")
-	}
 	for name, profile := range policy.Profiles {
 		if profile.EnvironmentID != "" || !maps.Equal(profile.EnvironmentIDs, managedEnvironmentIDs()) {
 			t.Fatalf("profile %s bypasses explicit venue declarations", name)

@@ -301,7 +301,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	if cut == "native_before_activation" {
 		seedSelectedAgentExecutionSource(t, ctx, capabilityStore, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC(), executionmode.Mock)
 	} else {
-		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+		seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID)
 	}
 	checkpoint := func(forkRun string) {
 		pipe := os.NewFile(3, "selected-checkpoint")
@@ -330,6 +330,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		}}
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
+		SourceArtifactFact: loaded.SourceArtifactFact, ForkOperation: selectedForkFixtureOperation(t, loaded, sourceRun, eventID),
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime:      options})
 	if err != nil {

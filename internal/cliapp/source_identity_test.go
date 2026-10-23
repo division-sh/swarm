@@ -31,7 +31,7 @@ func Test2376LocalIdentitySelectorsUseAdmittedSource(t *testing.T) {
 			t.Fatalf("%q: %v %#v", operand, err, got)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(path, "manifest.yaml"), []byte("name: Reception\nversion: 1.0.0\nplatform_version: '>=99.0.0'\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(path, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '>=99.0.0'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := admitCLIIdentitySource(root, "selected"); err == nil || !strings.Contains(err.Error(), "platform_version") {

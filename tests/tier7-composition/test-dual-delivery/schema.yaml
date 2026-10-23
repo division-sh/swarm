@@ -1,4 +1,4 @@
-name: test-dual-delivery
+# fixture: test-dual-delivery
 stages:
   pending: {}
   done: {final: true}

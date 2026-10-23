@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,10 +14,13 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -24,8 +28,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -111,6 +117,225 @@ func TestSelectedBranchPointActivationAtomicityBothStores(t *testing.T) {
 				})
 			}
 		}
+	}
+	t.Run("unadvanced_distinct_roots", proveSelectedForkFreezeAuthority)
+}
+
+// Reach: the admitted operation freezes A's real gate/draft subtree, not merely
+// the source-advanced branch, and commits that work atomically with F under B.
+func proveSelectedForkFreezeAuthority(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			f := newBranchPointCleanupEventFixture(t, backend)
+			owner := f.store.(workflowTestSelectedStore)
+			a, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			inputCard := newDecisionCardTestCard(t, f.runID, now)
+			inputCard.BundleHash = a.Admission().BundleHash()
+			if err := owner.CreateDecisionCard(f.ctx, inputCard); err != nil {
+				t.Fatal(err)
+			}
+			draft, err := DecisionCardDomainForTest(f.store).BeginInputForTest(f.ctx, decisioncard.BeginInputRequest{
+				CardID: inputCard.CardID, Verdict: "revise", PrincipalID: "operator", Now: now, TTL: time.Hour,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			b := captureSelectedSourceEventTarget(t, a)
+			otherA, _ := sourceartifactfixture.Rooted(t, "other-activation-original", a.Artifact())
+			otherB, _ := sourceartifactfixture.Rooted(t, "other-activation-target", b.Artifact())
+			if a.Admission().BundleHash() == b.Admission().BundleHash() || a.Admission().Equal(otherA.Admission()) || b.Admission().Equal(otherB.Admission()) {
+				t.Fatal("activation requires distinct A/B content and independent same-content root controls")
+			}
+			ctxB := correlation.WithRootAdmission(testAuthorActivityContextForBundle(b.Admission().BundleHash()), b.Admission())
+			for _, rooted := range []sourceartifact.RootedSource{b, otherA, otherB} {
+				if _, err := f.store.(selectedSourceArtifactStore).EnsureRootedSource(ctxB, rooted); err != nil {
+					t.Fatal(err)
+				}
+			}
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, b, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatal(err)
+			}
+			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
+			request := prepareSelectedStoreMaterializationForTest(t, ctxB, f.store, f.runID, f.eventID, selection, b.Admission().BundleHash())
+			request.ForkOperation = &runfork.ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "bearer:activation-authority", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:activation-authority",
+				SourceRunID: f.runID, ForkEventID: f.eventID, TargetBundleHash: b.Admission().BundleHash(), TargetRootReference: b.Admission().Reference(),
+				ContractSelection: selection, AllowSourceFreeze: true,
+			}
+			selected := f.store.(runforkexecution.SelectedContractForkLifecycle)
+			staged, err := selected.MaterializeRunForkForSelectedContractExecution(ctxB, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, _ := storeTestWorkFixtures.Load(t)
+			capability := selectedMaterializationProcessForTest(t, value.(*storeTestWorkFixture), f.store)
+			process, err := capability.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, ids, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := runfork.RunForkSelectedContractExecutionActivateRequest{
+				OriginalRootAdmission: a.Admission(), Process: process.LeaseStamp(), ForkOperation: request.ForkOperation,
+				ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, DataPins: staged.DataPins, ExecutionSource: semanticview.Wrap(bundle), AllowedSourceEventIDs: ids,
+				FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
+			}
+			snapshot := func() map[string]SelectedForkStorageTableSnapshot {
+				out, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctxB, f.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			}
+			for _, cell := range []struct {
+				name   string
+				ctx    context.Context
+				change func(*runfork.RunForkSelectedContractExecutionActivateRequest)
+				want   string
+			}{
+				{"root_without_process", ctxB, func(r *runfork.RunForkSelectedContractExecutionActivateRequest) {
+					r.Process = processbinding.LeaseStamp{}
+				}, startupownership.ErrProcessNotCurrent.Error()},
+				{"foreign_process", ctxB, func(r *runfork.RunForkSelectedContractExecutionActivateRequest) { r.Process.OwnerID = uuid.NewString() }, startupownership.ErrProcessNotCurrent.Error()},
+				{"stale_generation", ctxB, func(r *runfork.RunForkSelectedContractExecutionActivateRequest) { r.Process.Generation++ }, startupownership.ErrProcessNotCurrent.Error()},
+				{"stamp_without_original", ctxB, func(r *runfork.RunForkSelectedContractExecutionActivateRequest) {
+					r.OriginalRootAdmission = sourceartifact.RootAdmission{}
+				}, sourceartifact.ErrRootAdmissionMissing.Error()},
+				{"foreign_original", ctxB, func(r *runfork.RunForkSelectedContractExecutionActivateRequest) {
+					r.OriginalRootAdmission = b.Admission()
+				}, "activation requires the exact original and fork roots"},
+				{"same_hash_other_original", ctxB, func(r *runfork.RunForkSelectedContractExecutionActivateRequest) {
+					r.OriginalRootAdmission = otherA.Admission()
+				}, "activation requires the exact original and fork roots"},
+				{"cleared_target", correlation.WithRootAdmission(ctxB, sourceartifact.RootAdmission{}), nil, sourceartifact.ErrRootAdmissionMissing.Error()},
+				{"swapped_target", f.ctx, nil, "activation requires the exact original and fork roots"},
+				{"target_fact_mismatch", correlation.WithRootAdmission(ctxB, a.Admission()), nil, "rooted context does not match its content fact"},
+				{"same_hash_other_target", correlation.WithRootAdmission(ctxB, otherB.Admission()), nil, "activation requires the exact original and fork roots"},
+				{"consent_differs", ctxB, func(r *runfork.RunForkSelectedContractExecutionActivateRequest) { r.AllowSourceFreeze = false }, "activation consent differs from immutable fork operation"},
+				{"foreign_operation", ctxB, func(r *runfork.RunForkSelectedContractExecutionActivateRequest) {
+					op := *r.ForkOperation
+					op.OperationID = uuid.NewString()
+					r.ForkOperation = &op
+				}, "fork operation"},
+			} {
+				t.Run(cell.name, func(t *testing.T) {
+					invalid := req
+					if cell.change != nil {
+						cell.change(&invalid)
+					}
+					before := snapshot()
+					out, err := selected.ActivateRunForkForSelectedContractExecution(cell.ctx, invalid)
+					if err == nil || !strings.Contains(err.Error(), cell.want) || out.Activated {
+						t.Fatalf("activation missed intended refusal %q: out=%+v err=%v", cell.want, out, err)
+					}
+					if !reflect.DeepEqual(before, snapshot()) {
+						t.Fatal("refused activation changed application storage")
+					}
+				})
+			}
+			before := snapshot()
+			// The F transition follows A's canonical lifecycle/card/gate/draft work.
+			remove := installReceiverComposedFault(t, f.db, backend.name, "runs", "UPDATE", "NEW.run_id='"+staged.ForkRunID+"' AND NEW.status='running'")
+			out, err := selected.ActivateRunForkForSelectedContractExecution(ctxB, req)
+			remove()
+			if err == nil || !strings.Contains(err.Error(), "typed_receiver_owner_fault") || out.Activated {
+				t.Fatalf("post-A fault missed final activation cut: %+v err=%v", out, err)
+			}
+			if !reflect.DeepEqual(before, snapshot()) {
+				t.Fatal("post-A fault partially committed lifecycle/card/gate/draft/activity/operation work")
+			}
+			out, err = selected.ActivateRunForkForSelectedContractExecution(ctxB, req)
+			if err != nil || !out.Activated || !out.SourceFrozen || out.BranchDivergence != nil || out.SourceAdvancedAfterFork || out.SourceRunStatus != runfork.RunForkSourceFrozenStatus || out.ForkPoint.Kind != staged.ForkPoint.Kind || out.ForkPoint.Revision != staged.ForkPoint.Revision || out.ForkPoint.EventID != staged.ForkPoint.EventID {
+				t.Fatalf("exact A/B activation failed to freeze source at its fixed point: %+v err=%v", out, err)
+			}
+			after := snapshot()
+			rows := func(table string) []map[string]SelectedForkSnapshotCell {
+				out, err := DecodeSelectedForkSnapshotRowsForTest(after[table])
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			}
+			text := func(row map[string]SelectedForkSnapshotCell, column string) string {
+				cell, found := row[column]
+				if !found {
+					t.Fatalf("snapshot has no %q column", column)
+				}
+				out, err := cell.Text()
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			}
+			var sourceStatus, targetStatus, continued, draftStatus string
+			for _, row := range rows("runs") {
+				switch text(row, "run_id") {
+				case f.runID:
+					sourceStatus, continued = text(row, "status"), text(row, "continued_as_run_id")
+				case staged.ForkRunID:
+					targetStatus = text(row, "status")
+				}
+			}
+			if sourceStatus != runfork.RunForkSourceFrozenStatus || targetStatus != runfork.RunForkActivatedStatus || continued != staged.ForkRunID {
+				t.Fatalf("wrong A/F lifecycle: %s/%s continued=%s", sourceStatus, targetStatus, continued)
+			}
+			for _, cardID := range []string{f.cardID, inputCard.CardID} {
+				card, err := owner.GetDecisionCard(f.ctx, cardID)
+				if err != nil || card.Status != decisioncard.StatusSuperseded || card.SupersededReason != "run_forked" {
+					t.Fatalf("A gate/input card was not superseded: %+v err=%v", card, err)
+				}
+			}
+			for _, row := range rows("decision_card_input_drafts") {
+				if text(row, "input_draft_id") == draft.InputDraftID {
+					draftStatus = text(row, "status")
+				}
+			}
+			if draftStatus != decisioncard.DraftStatusCancelled {
+				t.Fatalf("A draft status=%q", draftStatus)
+			}
+			for _, activity := range []struct{ run, transition, hash string }{{f.runID, "forked", a.Admission().BundleHash()}, {staged.ForkRunID, "fork_started", b.Admission().BundleHash()}} {
+				var count int
+				for _, row := range rows("author_activity_occurrences") {
+					if text(row, "run_id") == activity.run && text(row, "transition") == activity.transition && text(row, "bundle_hash") == activity.hash && text(row, "scope_kind") == "bundle" {
+						count++
+					}
+				}
+				if count != 1 {
+					t.Fatalf("activity %s/%s does not belong exclusively to its admitted root: %d", activity.run, activity.transition, count)
+				}
+			}
+			root, present, err := correlation.RootAdmissionFromContext(ctxB)
+			if err != nil || !present || !root.Equal(b.Admission()) {
+				t.Fatalf("A subtree changed outer B: present=%t err=%v", present, err)
+			}
+			operations := f.store.(interface {
+				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
+			})
+			operation, found, err := operations.LoadForkOperation(ctxB, req.ForkOperation.Actor, req.ForkOperation.IdempotencyKey, req.ForkOperation.TransportHash)
+			if err != nil || !found || operation.Status != runfork.ForkOperationActivated || operation.ForkRunID != staged.ForkRunID || operation.Result == nil || operation.Result.ForkPoint.Kind != staged.ForkPoint.Kind || operation.Result.ForkPoint.Revision != staged.ForkPoint.Revision || operation.Result.ForkPoint.EventID != staged.ForkPoint.EventID || !operation.Result.SourceFrozen || operation.Result.SourceRunStatus != runfork.RunForkSourceFrozenStatus {
+				t.Fatalf("permanent freeze result=%+v found=%t err=%v", operation, found, err)
+			}
+			if _, err := selected.ActivateRunForkForSelectedContractExecution(ctxB, req); err == nil {
+				t.Fatal("repeated final activation was accepted")
+			}
+			if !reflect.DeepEqual(after, snapshot()) {
+				t.Fatal("repeated final activation changed storage")
+			}
+			if err := capability.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := selected.ActivateRunForkForSelectedContractExecution(ctxB, req); !errors.Is(err, startupownership.ErrProcessNotCurrent) {
+				t.Fatalf("released activation process retained authority: %v", err)
+			}
+		})
 	}
 }
 

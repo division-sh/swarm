@@ -103,8 +103,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	ctx, now := context.Background(), time.Now().UTC().Truncate(time.Microsecond)
 	source := sourceartifactfixture.Require(t, ctx, f.selected)
 	manifest := sessionInputManifestFixture(t)
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-		Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "1.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -644,5 +643,10 @@ func TestWhatsAppNativeIdentityBeginRejectsStaleParentBothStores(t *testing.T) {
 
 func activeInputChannelFixture(t *testing.T, catalog *providertriggers.CatalogSnapshot) packs.SatisfactionPlan {
 	t.Helper()
-	return packfixture.WhatsAppSessionChannel(t, "../../platform-spec.yaml", catalog)
+	entry, present := catalog.EntryByProvider("whatsapp")
+	if !present {
+		t.Fatal("native input catalog has no WhatsApp trigger")
+	}
+	_, plan := packfixture.WhatsAppSessionProvider(t, "../../platform-spec.yaml", entry.Manifest.SourceBytes())
+	return plan
 }

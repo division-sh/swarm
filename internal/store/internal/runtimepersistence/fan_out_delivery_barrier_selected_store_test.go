@@ -725,7 +725,11 @@ func runForkBarrierFixedRevisionMatrix(t *testing.T, generationMode string) {
 						t.Fatal(err)
 					}
 					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
-					request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointID, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
+					rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointID, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
 					if tc.status == fanoutbarrier.StatusClosedPending || tc.status == fanoutbarrier.StatusFired || tc.status == fanoutbarrier.StatusOutcomeDeadLettered {
 						var ownedScheduleCount int
 						if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE run_id=$1 AND entity_id=$1 AND schedule_key=$2`, fixture.runID, handle.TaskID()).Scan(&ownedScheduleCount); err != nil || ownedScheduleCount != 1 {

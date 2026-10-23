@@ -11,7 +11,7 @@ import (
 func TestReceiverConfigurationRetiredForms(t *testing.T) {
 	for _, value := range []string{"null", "{}", "[]", "false", "''", "{variables: {brief: text}}"} {
 		t.Run("variables/"+value, func(t *testing.T) {
-			_, err := admitSchemaFragment("name: retired\ninstance_variables: " + value + "\n")
+			_, err := admitSchemaFragment("# fixture: retired\ninstance_variables: " + value + "\n")
 			if err == nil || !strings.Contains(err.Error(), "instance_variables") || !strings.Contains(err.Error(), "is not supported") {
 				t.Fatalf("retired variable form admitted: %v", err)
 			}

@@ -8,9 +8,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -23,6 +25,9 @@ type sqliteNormalRunCompletionFixture struct {
 func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStore, state string) sqliteNormalRunCompletionFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -140,6 +145,9 @@ func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *
 func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	eventEntityA := uuid.NewString()
@@ -147,8 +155,8 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	currentEntity := uuid.NewString()
 	RequireCorruptRunSnapshotForTest(t, ctx, store, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: runID, State: "running",
-		BundleHash: authorActivityTestBundleHash,
-		StartedAt:  now,
+		BundleHash: authorActivityTestBundleHash, RootDirectory: rooted.Admission().RootDirectory(),
+		StartedAt: now,
 	})
 	for _, fixture := range []struct {
 		id, name, entityID string

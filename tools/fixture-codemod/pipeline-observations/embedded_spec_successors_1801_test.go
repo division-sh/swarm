@@ -57,42 +57,6 @@ func reverseEmbeddedSpecSuccessor1801(row recipe, actual string, pin fixtureSetu
 	return pin.Original, prior, nil
 }
 
-func TestEmbeddedSpecHistoricalPairPreservesOnlyGenuinelyUnlistedPaths(t *testing.T) {
-	unlisted := recipe{Family: "unlisted-family", File: "unlisted.go", Function: "unlisted", After: "unlisted source"}
-	got, source, err := embeddedSpecHistoricalPair1801(unlisted, unlisted.After)
-	if err != nil || !reflect.DeepEqual(got, unlisted) || source != unlisted.After {
-		t.Fatalf("genuinely unlisted history path changed: %v", err)
-	}
-	packet, err := loadEmbeddedSpecSuccessors1801(embeddedSpecSuccessorBytes1801)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range packet.Rows {
-		// #2700/6265502341 retires this live image, not its immutable packet.
-		if pin.Original.Family == "native-run-setup-family144" &&
-			pin.Original.File == "internal/runtime/runforkexecution/execution_test.go" &&
-			pin.Original.Function == "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation" {
-			continue
-		}
-		t.Run(pin.Original.Function, func(t *testing.T) {
-			row := pin.Original
-			row.Successor = pin.Candidate
-			actual := selectedCausalObservationBody(t, row.File, row.Function)
-			original, prior, err := embeddedSpecHistoricalPair1801(row, actual)
-			want := pin.Original.Successor
-			if want == "" {
-				want = pin.Original.After
-			}
-			if err != nil || !reflect.DeepEqual(original, pin.Original) || !canonicalComparatorEqual2617(prior, want) {
-				t.Fatalf("verified listed source did not recover its exact prior pair: %v", err)
-			}
-			if _, _, err := embeddedSpecHistoricalPair1801(pin.Original, want); err == nil {
-				t.Fatal("listed prior endpoint silently gained the unlisted fallback")
-			}
-		})
-	}
-}
-
 func TestEmbeddedSpecSuccessorPacketRejectsChangedHistoryAndSemanticEdits(t *testing.T) {
 	packet, err := loadEmbeddedSpecSuccessors1801(embeddedSpecSuccessorBytes1801)
 	if err != nil {

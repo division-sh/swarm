@@ -27,7 +27,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
@@ -140,7 +139,13 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				sourceID, eventID := uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceID, eventID)
+				input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, sourceID,
+					events.EventEnvelope{}, eventtest.RootRoutingSource(sourceID), time.Unix(1700002200, 0).UTC(), executionmode.Mock)
+				input, err = eventtest.AdmitPayload(input, ".", "item.received")
+				if err != nil {
+					t.Fatal(err)
+				}
+				seedSelectedOperationSource(t, ctx, selected, loaded, sourceID, eventID, input)
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				retireRuntime := func() {
 					t.Helper()
@@ -223,8 +228,9 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				}
 				request := SelectedContractExecutionRequest{
 					SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
 				}
 				var result SelectedContractExecutionResult
 				if point == "delayed_submission" {
@@ -331,10 +337,16 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 	}
 }
 
-func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, loaded LoadedSelectedContractSource, runID, eventID string, input ...events.Event) {
+func seedSelectedOperationSource(t *testing.T, ctx context.Context, selected any, loaded LoadedSelectedContractSource, runID, eventID string, input ...events.Event) {
 	t.Helper()
 	at := time.Unix(1700002200, 0).UTC()
-	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)})
+	if err := loaded.RootedSource.Validate(); err != nil {
+		t.Fatalf("selected operation source fixture requires its loaded root: %v", err)
+	}
+	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
+		Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(), StartedAt: at.Add(-time.Minute),
+	})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
 		events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	if len(input) == 1 {
@@ -342,22 +354,25 @@ func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend stri
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
-	tx, err := db.BeginTx(ctx, nil)
+	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
+}
+
+func selectedForkFixtureOperation(t testing.TB, loaded LoadedSelectedContractSource, runID, eventID string) *runfork.ForkOperationRequest {
+	t.Helper()
+	if err := loaded.RootedSource.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	operation := runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "selected-fork-fixture", TransportHash: "selected-fork-fixture",
+		SourceRunID: runID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+		TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true,
+		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
+	}
+	canonical, _, err := operation.Canonical()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
-	if backend == "sqlite" {
-		_, err = runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...)
-	} else {
-		_, err = runforkrevision.Capture(ctx, tx, runID, runforkrevision.AllFamilies()...)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
+	return &canonical
 }
 
 // This is explicit component construction with no route/arm installation, not

@@ -154,7 +154,8 @@ func TestW5ToolLiteralHTTPPresenceAndSerialization(t *testing.T) {
 func TestW5ToolAdmissionDiskCatalogRetainedParity(t *testing.T) {
 	for _, body := range []string{"worker: {}\n", "worker: {input_schema: {}, output_schema: {type: string}}\n", "worker: {input_schema: {type: string, minLength: 1.5}}\n", "worker: {<<: {parameters: null}}\n"} {
 		root := t.TempDir()
-		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: parity\n")
+		writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: parity\n")
 		writeFixtureFile(t, filepath.Join(root, "tools.yaml"), body)
 		disk, diskErr := loadOptionalToolDeclarations(filepath.Join(root, "tools.yaml"))
 		artifact, err := sourceartifact.AdmitDirectory(root)

@@ -31,11 +31,24 @@ func AdmitPayload(event events.Event, flowID, eventKey string) (events.Event, er
 // PayloadAdmission returns deterministic schema evidence for fixture
 // admitters without granting them ownership of the event value.
 func PayloadAdmission(event events.Event, flowID, eventKey string) (events.PayloadAdmission, error) {
-	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+	input := events.PayloadSchemaBindingInput{
 		BundleHash: fixtureBundleHash, FlowID: strings.TrimSpace(flowID),
 		EventKey: strings.TrimSpace(eventKey), SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		SchemaClass: events.PayloadSchemaSchemaLess,
-	})
+	}
+	producer := events.EventPayloadProducer(event, flowID)
+	var binding events.PayloadSchemaBinding
+	var err error
+	if producer.IsPlatform() {
+		input.FlowID, input.SchemaClass = "", events.PayloadSchemaPlatform
+		reference := ""
+		if event.Type() == events.EventTypePlatformRuntimeLog {
+			reference = events.RuntimeLogSchemaReference
+		}
+		binding, err = events.NewPlatformPayloadSchemaBinding(input, producer, reference)
+	} else {
+		binding, err = events.NewPayloadSchemaBinding(input)
+	}
 	if err != nil {
 		return events.PayloadAdmission{}, err
 	}

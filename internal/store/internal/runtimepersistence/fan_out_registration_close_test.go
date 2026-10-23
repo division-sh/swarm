@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestFanOutRegistrationCloseJoinsCommittedHandoffBothStores(t *testing.T) {
@@ -105,7 +106,8 @@ func TestFanOutRegistrationCloseIsSourceLocalBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			raw, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			first := seedFanOutOwnerFixture(t, ctx, db, raw, postgres, 0, time.Now().UTC())
-			other := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, postgres, 0, time.Now().UTC(), storeTestSourceArtifact("registration-close-other-source"))
+			otherRooted, _ := sourceartifactfixture.Rooted(t, "other", storeTestSourceArtifact("registration-close-other-source"))
+			other := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, postgres, 0, time.Now().UTC(), otherRooted.Artifact())
 			_, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, raw, []fanOutOwnerFixture{first, other})
 			workers := 1
 			registrations := make([]*startupownership.FanOutServingRegistration, 2)

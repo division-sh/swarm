@@ -13,7 +13,8 @@ import (
 func CopyGateCompletionDiagnostic(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", `name: gate-completion-diagnostic
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: gate-completion-diagnostic
 stages:
   waiting: {}
   review:
@@ -75,7 +76,8 @@ func CopyLifecycleSelectedCarriers(t testing.TB, reordered bool) string {
 		flows = []string{"child/nested/", "sibling/", "child/", ""}
 	}
 	for _, prefix := range flows {
-		writeClosedVariantFile(t, root, prefix+"schema.yaml", `name: selected-carriers
+		writeClosedVariantFile(t, root, prefix+"manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, prefix+"schema.yaml", `# fixture: selected-carriers
 stages:
   waiting: {}
   active: {}
@@ -144,7 +146,7 @@ pins:
 			connects.WriteString(fmt.Sprintf("  - {event: %s, from: ., to: %s}\n", event, child))
 		}
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: selected-carriers\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n"+inputs.String()+"  outputs:\n"+outputs.String()+"connect:\n"+connects.String())
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: selected-carriers\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n"+inputs.String()+"  outputs:\n"+outputs.String()+"connect:\n"+connects.String())
 	events.WriteString("work.completed:\n  result: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", events.String())
 	return root
@@ -188,8 +190,10 @@ func CopyLifecycleGateAdvanceOnly(t testing.TB) string {
 func CopyLifecycleNestedCascade(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	rootInputs, rootOutputs, rootEvents, rootConnects := "", "", "", ""
-	writeClosedVariantFile(t, root, "outer/schema.yaml", "name: outer\n")
+	writeClosedVariantFile(t, root, "outer/schema.yaml", "stages: []\n# fixture: outer\n")
 	for _, side := range []string{"left", "right"} {
 		for _, command := range []struct{ name, field, typ string }{
 			{"work.requested", "seed", "boolean"},
@@ -206,7 +210,7 @@ func CopyLifecycleNestedCascade(t testing.TB) string {
 		}
 		prefix := "outer/" + side + "/"
 		loopRoot := CopyLifecycleEmitter(t, LifecycleLoopConnected)
-		for _, path := range []string{"schema.yaml", "events.yaml", "entities.yaml", "nodes.yaml", "sink/entities.yaml", "sink/nodes.yaml"} {
+		for _, path := range []string{"manifest.yaml", "schema.yaml", "events.yaml", "entities.yaml", "nodes.yaml", "sink/manifest.yaml", "sink/entities.yaml", "sink/nodes.yaml"} {
 			raw, err := os.ReadFile(filepath.Join(loopRoot, path))
 			if err != nil {
 				t.Fatal(err)
@@ -220,7 +224,7 @@ func CopyLifecycleNestedCascade(t testing.TB) string {
 			}
 			writeClosedVariantFile(t, root, prefix+path, text)
 		}
-		writeClosedVariantFile(t, root, prefix+"sink/schema.yaml", fmt.Sprintf(`name: review
+		writeClosedVariantFile(t, root, prefix+"sink/schema.yaml", fmt.Sprintf(`# fixture: review
 stages:
   waiting: {}
   review:
@@ -240,7 +244,8 @@ connect:
   - {event: work.completed, from: ., to: final}
 `, side))
 		writeClosedVariantFile(t, root, prefix+"sink/events.yaml", "work.completed:\n  result: text\n")
-		writeClosedVariantFile(t, root, prefix+"sink/final/schema.yaml", "name: final\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.completed\n")
+		writeClosedVariantFile(t, root, prefix+"sink/final/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, prefix+"sink/final/schema.yaml", "# fixture: final\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.completed\n")
 		writeClosedVariantFile(t, root, prefix+"sink/final/entities.yaml", "receipt:\n  result: text\n")
 		writeClosedVariantFile(t, root, prefix+"sink/final/nodes.yaml", `collector:
   execution_type: system_node
@@ -254,7 +259,7 @@ connect:
       advances_to: done
 `)
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: cascade\npins:\n  inputs:\n"+rootInputs+"  outputs:\n"+rootOutputs+"connect:\n"+rootConnects)
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: cascade\npins:\n  inputs:\n"+rootInputs+"  outputs:\n"+rootOutputs+"connect:\n"+rootConnects)
 	writeClosedVariantFile(t, root, "events.yaml", rootEvents)
 	return root
 }
@@ -299,7 +304,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		schema := strings.Replace(string(raw), "name: lifecycle-loop\n", "name: lifecycle-loop\ninstance: case_id\n", 1)
+		schema := strings.Replace(string(raw), "# fixture: lifecycle-loop\n", "# fixture: lifecycle-loop\ninstance: case_id\n", 1)
 		begin := strings.Index(schema, "    - work.requested")
 		end := strings.Index(schema, "  outputs:")
 		if begin < 0 || end <= begin {
@@ -324,10 +329,10 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sink := strings.Replace(string(raw), "name: review\n", "name: review\ninstance: revision_id\n", 1)
+		sink := strings.Replace(string(raw), "# fixture: review\n", "# fixture: review\ninstance: revision_id\n", 1)
 		writeClosedVariantFile(t, root, prefix+"sink/schema.yaml", sink)
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: template-driver\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.observed\n    - work.finished\n"+inputs+"  outputs:\n"+outputs+"connect:\n"+connects)
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: template-driver\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.observed\n    - work.finished\n"+inputs+"  outputs:\n"+outputs+"connect:\n"+connects)
 	writeClosedVariantFile(t, root, "events.yaml", events)
 	writeClosedVariantFile(t, root, "entities.yaml", "driver: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes+"]\n"+handlers)
@@ -424,7 +429,8 @@ const (
 func CopyLifecycleEmitter(t testing.TB, variant LifecycleEmitterVariant) string {
 	t.Helper()
 	root := t.TempDir()
-	schema := `name: lifecycle-emitter
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	schema := `# fixture: lifecycle-emitter
 stages:
   waiting: {}
   review:
@@ -475,9 +481,11 @@ pins:
 		schema = strings.Replace(schema, "          emit:\n            event: work.completed\n            fields: {result: \"approved\"}\n", "", 1)
 	case LifecycleGateNested:
 		prefix = "outer/inner/"
-		writeClosedVariantFile(t, root, "schema.yaml", "name: lifecycle-parent\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - work.requested\nconnect:\n  - {event: work.requested, from: ., to: outer/inner}\n")
+		writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, "outer/inner/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: lifecycle-parent\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - work.requested\nconnect:\n  - {event: work.requested, from: ., to: outer/inner}\n")
 		writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\n")
-		writeClosedVariantFile(t, root, "outer/schema.yaml", "name: lifecycle-middle\n")
+		writeClosedVariantFile(t, root, "outer/schema.yaml", "stages: []\n# fixture: lifecycle-middle\n")
 		events = "work.completed:\n  result: text\n"
 		nodes += consumer
 	case LifecycleLoopConnected:
@@ -500,7 +508,8 @@ pins:
 			}
 			writeClosedVariantFile(t, root, edit.path, strings.Replace(string(raw), edit.old, edit.replacement, 1))
 		}
-		writeClosedVariantFile(t, root, "ordinary/schema.yaml", "name: ordinary\nstages:\n  waiting: {}\n  observed: {final: true}\npins:\n  inputs:\n    - ordinary.repeated\n")
+		writeClosedVariantFile(t, root, "ordinary/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, "ordinary/schema.yaml", "# fixture: ordinary\nstages:\n  waiting: {}\n  observed: {final: true}\npins:\n  inputs:\n    - ordinary.repeated\n")
 		writeClosedVariantFile(t, root, "ordinary/entities.yaml", "receipt:\n  token: text\n  revision_id: text\n")
 		writeClosedVariantFile(t, root, "ordinary/nodes.yaml", `collector:
   execution_type: system_node
@@ -547,7 +556,7 @@ pins:
 }
 
 func writeLifecycleLoopConnected(t testing.TB, root string) {
-	writeClosedVariantFile(t, root, "schema.yaml", `name: lifecycle-loop
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: lifecycle-loop
 stages:
   waiting: {}
   drafting: {}
@@ -596,7 +605,8 @@ connect:
       loop: {close: revision, from: review}
       advances_to: done
 `)
-	writeClosedVariantFile(t, root, "sink/schema.yaml", `name: sink
+	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sink/schema.yaml", `# fixture: sink
 stages:
   waiting: {}
   done: {final: true}

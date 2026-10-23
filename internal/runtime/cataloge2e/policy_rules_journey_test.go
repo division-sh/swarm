@@ -100,7 +100,7 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			var artifact interface {
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				runforkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			if h.sqlite != nil {

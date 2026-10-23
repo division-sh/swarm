@@ -14,6 +14,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		t.Fatal("state-only acquisition fixture requires an exact target flow")
 	}
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	var keyedParents []string
 	for path, mode := range modes {
 		if mode == "template" && strings.HasPrefix(targetFlow, path+"/") {
@@ -21,7 +22,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		}
 	}
 	sort.Strings(keyedParents)
-	rootSchema := "name: " + workflowName + "\npins:\n  inputs: [test.node_emitted.selector, test.node_emitted.upserter]\n"
+	rootSchema := "# fixture: " + workflowName + "\npins:\n  inputs: [test.node_emitted.selector, test.node_emitted.upserter]\n"
 	if len(keyedParents) != 0 {
 		rootSchema = strings.Replace(rootSchema, "inputs: [test.node_emitted.selector, test.node_emitted.upserter]", "inputs: [test.node_emitted.selector, test.node_emitted.upserter, test.fixture_parent.construct]", 1)
 	}
@@ -71,10 +72,13 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 
 func writeStateOnlyAcquisitionFlow(t testing.TB, root, workflowName, rootSchema, path, mode, targetFlow, baseEventSchemas string) {
 	t.Helper()
+	if path != "." {
+		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "manifest.yaml")), "version: 1.0.0\nplatform_version: '*'\n")
+	}
 	parentConstructor := mode == "template" && strings.HasPrefix(targetFlow, path+"/")
-	schema := fmt.Sprintf("name: %s\nstages:\n  active: {}\n  done: {final: true}\n", filepath.Base(path))
+	schema := fmt.Sprintf("# fixture: %s\nstages:\n  active: {}\n  done: {final: true}\n", filepath.Base(path))
 	if path == "." {
-		schema = strings.Replace(schema, "name: .", "name: "+workflowName, 1) + strings.TrimPrefix(rootSchema, "name: "+workflowName+"\n")
+		schema = strings.Replace(schema, "# fixture: .", "# fixture: "+workflowName, 1) + strings.TrimPrefix(rootSchema, "# fixture: "+workflowName+"\n")
 	} else {
 		if mode == "template" {
 			schema += "instance: instance_key\n"

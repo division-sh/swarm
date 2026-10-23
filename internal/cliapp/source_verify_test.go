@@ -81,7 +81,7 @@ func Test2376VerifyJSONExactMemberTable(t *testing.T) {
 		t.Run(map[bool]string{false: "absent", true: "present"}[named], func(t *testing.T) {
 			root := outputModeVerifyFixture(t)
 			if named {
-				if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: Reception\nversion: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			} else if err := os.Remove(filepath.Join(root, "manifest.yaml")); err != nil && !os.IsNotExist(err) {

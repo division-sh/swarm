@@ -87,7 +87,11 @@ func TestFanOutGrantedGlobalReadinessIsNotOwedSuffixBothStores(t *testing.T) {
 			if err := acknowledgePipelineEventFixture(ctx, selected, source.eventID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES ($1,$2,$3,'event',1,$4,'selected_contracts',$5)`, uuid.NewString(), fixture.runID, source.runID, source.eventID, time.Now().UTC()); err != nil {
+			target, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,target_bundle_hash,source_root_directory,created_at) VALUES ($1,$2,$3,'event',1,$4,'selected_contracts',$5,$6,$7)`, uuid.NewString(), fixture.runID, source.runID, source.eventID, target.Admission().BundleHash(), target.Admission().RootDirectory(), time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			assertReady(false)

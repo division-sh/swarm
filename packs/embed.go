@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed inventory.yaml provider-triggers/*/*.yaml provider-connectors/*/*.yaml channels/*/*.yaml
+//go:embed inventory.yaml providers/*/*.yaml
 var embedded embed.FS
 
 // FS returns the binary-owned platform pack assets. Membership remains owned

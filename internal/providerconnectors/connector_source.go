@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -21,6 +22,9 @@ func parseConnectorManifestAt(body []byte, file string) (ConnectorManifest, erro
 	out := ConnectorManifest{source: root}
 	if err := connectorTextFields(root, fields, map[string]*string{"provider": &out.Provider}); err != nil {
 		return out, err
+	}
+	if err := runtimepaths.ValidateFlowSegment(out.Provider); err != nil {
+		return out, connectorError(fields["provider"], "provider requires an exact portable directory key: "+err.Error())
 	}
 	tools, err := connectorRequired(root, fields, "tools")
 	if err != nil {

@@ -318,7 +318,15 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runID, entityID := boundedInboundTestCoordinates()
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-operator", "")
+			source := capturedTelegramOperatorSource(t)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			var selected operatorChannelInboundSelectedStore
+			if backend == "postgres" {
+				selected = storetest.StartPostgresRuntimeStore(t)
+			} else {
+				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+			}
+			ctx, target := seedCapturedProviderTarget(t, ctx, selected, source, runID, entityID, boundedProviderFlowID, "ack-operator", "telegram", "telegram-secret", "")
 			plan := compileEmbeddedTelegramOperatorChannelPlan(t)
 			identity, err := plan.InterfaceIdentity()
 			if err != nil {
@@ -365,7 +373,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source)}, "inbound.telegram.raw", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -406,8 +414,8 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 				t.Fatalf("missing-ack claim persisted: found=%v err=%v", found, err)
 			}
 			requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingConfirmation, 2)
-			var deliveries int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries`).Scan(&deliveries); err != nil || deliveries != 0 {
+			deliveries, err := storetest.CountPhysicalEventDeliveries(ctx, selected)
+			if err != nil || deliveries != 0 {
 				t.Fatalf("operator claim deliveries=%d err=%v, want 0", deliveries, err)
 			}
 		})

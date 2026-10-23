@@ -1,4 +1,4 @@
-name: entity-progressive-presence
+# fixture: entity-progressive-presence
 stages:
   draft: {}
   assess: {}

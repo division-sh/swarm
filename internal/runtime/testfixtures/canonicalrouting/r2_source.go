@@ -10,6 +10,7 @@ import (
 func CopyR2ValueSource(t testing.TB, value string) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "value-node:\n  execution_type: system_node\n  event_handlers:\n    value.requested:\n      emit:\n        event: value.completed\n        fields:\n          value:\n            "+strings.ReplaceAll(value, "\n", "\n            ")+"\n")
 	return root
 }

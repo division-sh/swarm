@@ -30,7 +30,9 @@ func CopyReceiverOptionalChild(t testing.TB, existing bool) string {
 		seedHandler = "    work.seeded:\n      advances_to: active\n"
 	}
 	files := map[string]string{
-		"schema.yaml": `name: receiver-composition
+		"manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+		"sink/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: receiver-composition
 stages:
   waiting: {}
 ` + activeStage + `  done: {final: true}
@@ -57,7 +59,7 @@ connect:
         event: work.completed
         fields: {result: "emitted"}
 `,
-		"sink/schema.yaml": `name: sink
+		"sink/schema.yaml": `# fixture: sink
 pins:
   inputs:
     - work.completed
@@ -81,7 +83,9 @@ func CopyReceiverCreatingChild(t testing.TB, existing bool) string {
 	t.Helper()
 	root := CopyReceiverOptionalChild(t, existing)
 	files := map[string]string{
-		"sink/schema.yaml": `name: sink
+		"manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+		"sink/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"sink/schema.yaml": `# fixture: sink
 stages:
   waiting: {}
   done: {final: true}
@@ -122,7 +126,8 @@ func CopyReceiverMixedPolicies(t testing.TB, optionalFirst bool) string {
 		edges = optional + creating
 	}
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), creating, edges)
-	writeClosedVariantFile(t, root, optionalScope+"/schema.yaml", "name: "+optionalScope+"\npins:\n  inputs: [work.completed]\n")
+	writeClosedVariantFile(t, root, optionalScope+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, optionalScope+"/schema.yaml", "# fixture: "+optionalScope+"\npins:\n  inputs: [work.completed]\n")
 	writeClosedVariantFile(t, root, optionalScope+"/entities.yaml", "receipt: {}\n")
 	writeClosedVariantFile(t, root, optionalScope+"/nodes.yaml", "collector:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed: {}\n")
 	return root
@@ -132,7 +137,8 @@ func CopyReceiverUnavailableAfterPublish(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml": `name: receiver-failure
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: receiver-failure
 stages:
   waiting: {}
   active: {}
@@ -171,8 +177,11 @@ func CopyReceiverEntitylessOnward(t testing.TB, existing bool) string {
 	t.Helper()
 	root := CopyReceiverOptionalChild(t, existing)
 	files := map[string]string{
-		"sink/events.yaml": "child.finished:\n  result: text\n",
-		"sink/schema.yaml": `name: sink
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"sink/manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+		"sink/tail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"sink/events.yaml":        "child.finished:\n  result: text\n",
+		"sink/schema.yaml": `# fixture: sink
 pins:
   inputs:
     - work.completed
@@ -190,7 +199,7 @@ connect:
         event: child.finished
         fields: {result: payload.result}
 `,
-		"sink/tail/schema.yaml": `name: tail
+		"sink/tail/schema.yaml": `# fixture: tail
 stages:
   waiting: {}
   done: {final: true}
@@ -226,7 +235,7 @@ func CopyReceiverEntitylessLocal(t testing.TB) string {
 	t.Helper()
 	root := CopyReceiverOptionalChild(t, false)
 	writeClosedVariantFile(t, root, "sink/events.yaml", "child.finished:\n  result: text\n")
-	writeClosedVariantFile(t, root, "sink/schema.yaml", `name: sink
+	writeClosedVariantFile(t, root, "sink/schema.yaml", `# fixture: sink
 stages:
   waiting: {}
   done: {final: true}
@@ -261,7 +270,8 @@ local:
 func CopyReceiverEntitylessRootExport(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", "name: root-export\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.finished\n")
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: root-export\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.finished\n")
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nchild.finished:\n  result: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
@@ -278,7 +288,7 @@ func CopyReceiverEntitylessUnrouted(t testing.TB) string {
 	t.Helper()
 	root := CopyReceiverOptionalChild(t, false)
 	writeClosedVariantFile(t, root, "sink/events.yaml", "child.finished:\n  result: text\n")
-	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - work.completed\n  outputs:\n    - child.finished\n")
+	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n    - work.completed\n  outputs:\n    - child.finished\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
   execution_type: system_node
   event_handlers:
@@ -297,7 +307,7 @@ func CopyReceiverMixedAgent(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: child.seeded, from: ., to: sink}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.seeded:\n", "child.seeded:\n  seed: boolean\nwork.seeded:\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: active\n", "      advances_to: active\n      emit:\n        event: child.seeded\n        fields: {seed: true}\n")
-	writeClosedVariantFile(t, root, "sink/schema.yaml", `name: sink
+	writeClosedVariantFile(t, root, "sink/schema.yaml", `# fixture: sink
 stages:
   waiting: {}
   active: {}
@@ -338,7 +348,7 @@ pins:
 func CopyReceiverFieldlessFork(t testing.TB) string {
 	t.Helper()
 	root := CopyReceiverOptionalChild(t, false)
-	writeClosedVariantFile(t, root, "schema.yaml", `name: receiver-composition
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: receiver-composition
 pins:
   inputs:
     - work.requested

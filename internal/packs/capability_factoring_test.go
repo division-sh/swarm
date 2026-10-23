@@ -101,7 +101,7 @@ func TestFactoringCapabilitySubject(t *testing.T) {
 	})
 	t.Run("sort-dedup-and-facts", func(t *testing.T) {
 		s := base
-		s.ID, s.Provider, s.Action, s.Source, s.Provenance, s.SourcePath, s.Applicability = " tool ", " acme ", " write ", " flow_local ", " external ", " tools.yaml ", " effective "
+		s.ID, s.Provider, s.Action, s.Source, s.Provenance, s.SourcePath, s.Applicability = " tool ", "acme", " write ", " flow_local ", " external ", " tools.yaml ", " effective "
 		s.Capabilities = []Capability{{Code: " z_unknown ", Target: " z "}, {Code: " a_unknown ", Target: " a "}}
 		s.Requirements = []Requirement{RequirementWithStatus(RequirementSecret, "z", "deployment", RequirementStatusBound, "file"), RequirementWithStatus(RequirementSecret, "a", "deployment", RequirementStatusUnbound, "file")}
 		s.Guarantees = []Guarantee{{Code: GuaranteeActivityJournal}}

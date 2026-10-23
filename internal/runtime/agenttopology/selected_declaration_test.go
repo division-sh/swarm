@@ -79,7 +79,7 @@ func TestSelectedDeclarationPlanCanonicalCensus(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return DesiredAgent{Identity: identity, Source: SourceCoordinate{BundleHash: hash}, ConfigRevision: strings.Repeat("c", 64)}
+		return DesiredAgent{Identity: identity, Source: SourceCoordinate{BundleHash: hash, RootDirectory: "selected"}, ConfigRevision: strings.Repeat("c", 64)}
 	}
 	a, b := makeAgent("a"), makeAgent("b")
 	input := []DesiredAgent{b, a}

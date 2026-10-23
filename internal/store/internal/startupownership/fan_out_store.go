@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -114,7 +113,7 @@ func (a *fanOutAdmission) proveSource(ctx context.Context, tx *sql.Tx, authority
 	if err != nil {
 		return err
 	}
-	if !exists || plan.Revision != grant.SourceSetRevision || !sourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: grant.BundleHash}) {
+	if !exists || plan.Revision != grant.SourceSetRevision || !sourceSetContainsBundle(plan, grant.BundleHash) {
 		return errFanOutSourceNotCurrent
 	}
 	return nil

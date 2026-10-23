@@ -1,4 +1,4 @@
-name: worker
+# fixture: worker
 instance: worker_id
 stages:
   ready: {}

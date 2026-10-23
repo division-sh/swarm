@@ -272,7 +272,7 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelAlias, llmBackend string) ([]byte, error) {
 	desc := PersistedAgentRuntimeDescriptor{
 		Type:                 strings.TrimSpace(cfg.Type),
-		FlowID:               strings.TrimSpace(cfg.FlowID),
+		FlowID:               cfg.FlowID,
 		Model:                strings.TrimSpace(modelAlias),
 		AuthoredLLMBackend:   strings.TrimSpace(cfg.LLMBackend),
 		ResolvedModel:        strings.TrimSpace(cfg.ResolvedModel),
@@ -329,7 +329,6 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (PersistedAgentRuntimeDes
 		}
 	}
 	desc.Type = strings.TrimSpace(desc.Type)
-	desc.FlowID = strings.TrimSpace(desc.FlowID)
 	desc.Model = strings.TrimSpace(desc.Model)
 	desc.AuthoredLLMBackend = strings.TrimSpace(desc.AuthoredLLMBackend)
 	desc.ResolvedModel = strings.TrimSpace(desc.ResolvedModel)

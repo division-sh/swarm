@@ -1,20 +1,41 @@
 package providertriggers
 
 import (
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
+	"testing/fstest"
 )
+
+func s1LoadProviderMembers(directory string, members map[string][]byte) (packartifact.AdmittedProvider, error) {
+	files := fstest.MapFS{}
+	for name, body := range members {
+		files[directory+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	return packartifact.LoadProviderFS(files, directory, "0.7.0")
+}
 
 // Authoring fixtures are mutable until admitted. Even focused request tests
 // enter the lexical BODY owner instead of executing a writable DTO.
 type triggerFixture manifestDefinition
 
 func (f triggerFixture) admit() (Manifest, error) {
+	key := f.Provider
+	f.Provider = ""
 	body, err := yaml.Marshal(manifestDefinition(f))
 	if err != nil {
 		return Manifest{}, err
 	}
-	return ParseManifest(body)
+	provider, err := s1LoadProviderMembers(key, map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n"),
+		"trigger.yaml":  body,
+	})
+	if err != nil {
+		return Manifest{}, err
+	}
+	trigger, _ := provider.Body(packmodel.BodyTrigger)
+	return AdmitBody(trigger)
 }
 
 func (f triggerFixture) Validate() error {

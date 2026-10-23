@@ -713,7 +713,8 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 	}
 }
 
-func strictWorkflowTimerPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func strictWorkflowTimerPayloadAdmitter(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	flowID := payloadProducer.FlowID()
 	if event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	}
@@ -744,8 +745,8 @@ func newFailOnceWorkflowTimerPayloadAdmitter() *failOnceWorkflowTimerPayloadAdmi
 	}
 }
 
-func (v *failOnceWorkflowTimerPayloadAdmitter) admit(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
-	admitted, err := strictWorkflowTimerPayloadAdmitter(ctx, event, flowID)
+func (v *failOnceWorkflowTimerPayloadAdmitter) admit(ctx context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	admitted, err := strictWorkflowTimerPayloadAdmitter(ctx, event, payloadProducer)
 	if err != nil || event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
 		return admitted, err
 	}
@@ -889,7 +890,8 @@ func workflowTimerTestParseTime(raw string) (time.Time, error) {
 func workflowTimerServedLifecycleBundle(t *testing.T, recurring bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":   "name: timer-proof\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 40ms, advances_to: done}\n  done: {final: true}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 40ms, advances_to: done}\n  done: {final: true}\n",
 		"entities.yaml": "test_entity: {}\n",
 	})
 	// Recurrence is a runtime scheduler variant; the admitted timer transition stays exact.

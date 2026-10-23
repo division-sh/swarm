@@ -46,13 +46,14 @@ func TestRetainedSelectedAndOriginalSourceUseConfiguredPackGeneration(t *testing
 	}
 	sourceID := uuid.NewString()
 	reader := &fakeSourceArtifactSelectedContractSourceStore{
-		record:       record,
-		availability: runbundle.Availability{RunID: sourceID, Status: "running", BundleHash: record.BundleHash, SourceArtifactPresent: true},
+		record: record,
+		availability: runbundle.Availability{RunID: sourceID, Status: "running", BundleHash: record.BundleHash,
+			RootReference: record.rooted.Admission().Reference(), RootAdmissionPresent: true, SourceArtifactPresent: true},
 	}
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: reader, PlatformPackBases: bases}
 	for _, request := range []SelectedContractSourceLoadRequest{
-		{SourceRunID: sourceID, BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}},
-		{SourceRunID: sourceID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}},
+		{Responsibility: FreshSelectedSource(record.BundleHash), BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}},
+		{Responsibility: OriginalRunSource(sourceID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}},
 	} {
 		loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(context.Background(), request)
 		if err != nil {
@@ -83,11 +84,12 @@ func TestPublicVerifyRetainedForkUsesConfiguredPackGeneration(t *testing.T) {
 	s := storetest.StartSQLiteRuntimeStore(t)
 	db := storetest.Database(s)
 	sourceID, eventID := uuid.NewString(), uuid.NewString()
-	seedSelectedOperationSource(t, ctx, "sqlite", db, s, loaded, sourceID, eventID)
+	seedSelectedOperationSource(t, ctx, s, loaded, sourceID, eventID)
 	capability := selectedContractTestProcessCapability(t, ctx, s)
 	owner := selectedContractSQLiteExecutionOwnerForTest(t, s)
 	fork, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+		SourceArtifactFact: loaded.SourceArtifactFact, ForkOperation: selectedForkFixtureOperation(t, loaded, sourceID, eventID),
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 	})

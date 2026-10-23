@@ -245,8 +245,8 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 			mockOracles[`UPDATE runs SET event_count = event_count \+`] = true
 		}
 		if path == "internal/store/internal/backend/runlifecycle/run_admission_test.go" && fn.Name.Name == "TestRunAdmissionCanonicalSourceRevisionReloads" {
-			mockOracles["UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused')"] = true
-			mockOracles["UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = $2, source_root_directory = $3 WHERE run_id = $1::uuid AND status IN ('running', 'paused')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = ?, source_root_directory = ? WHERE run_id = ? AND status IN ('running', 'paused')"] = true
 		}
 		if len(mockOracles) != 0 {
 			ast.Inspect(fn, func(node ast.Node) bool {
@@ -332,6 +332,9 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 	if path == "internal/store/internal/backend/pipelinepersistence/a2_collection_projection_test.go" {
 		return classifyA2CollectionMinimalRunLiterals(file)
 	}
+	if path == "internal/store/internal/backend/runforkpersistence/selected_binding_root_test.go" {
+		return classifySelectedBindingRootMinimalRunLiterals(file)
+	}
 	type fixtureShape struct {
 		schema string
 		writes []string
@@ -397,6 +400,40 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 	})
 	if !schemaFound {
 		return nil, fmt.Errorf("minimal backend runs schema is missing")
+	}
+	return approved, nil
+}
+
+func classifySelectedBindingRootMinimalRunLiterals(file *ast.File) (map[token.Pos]bool, error) {
+	const schema = "CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT, source_root_directory TEXT)"
+	const insert = "INSERT INTO runs (run_id, bundle_hash, source_root_directory) VALUES ($1, $2, $3)"
+	schemas, inserts := 0, 0
+	approved := map[token.Pos]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		scope := eventBoundaryEnclosingScope(file, literal.Pos())
+		switch compactSQLForLifecycleGuard(value) {
+		case schema:
+			if scope == "selectedBindingRootDatabase" {
+				schemas++
+			}
+		case insert:
+			if scope == "insertSelectedBindingChildFixture" {
+				inserts++
+				approved[literal.Pos()] = true
+			}
+		}
+		return true
+	})
+	if schemas != 1 || inserts != 1 {
+		return nil, fmt.Errorf("selected binding reduced root fixture requires one exact schema/insert in their named fixture operations, got %d/%d", schemas, inserts)
 	}
 	return approved, nil
 }
@@ -717,8 +754,8 @@ func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 			compact == "UPDATE runs SET completion_revision = 1, completion_due_at = $1 WHERE run_id = $2::uuid"
 	case "internal/store/internal/schemastore/fork_point_schema_test.go":
 		// This test exercises physical CHECK and FK constraints on the real schema.
-		return compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')" ||
-			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6)"
+		return compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,source_root_directory) VALUES ($1,$2,'scenario_setup',$3)" ||
+			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id,source_root_directory) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6,$7)"
 	}
 	return false
 }

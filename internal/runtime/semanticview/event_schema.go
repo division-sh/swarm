@@ -7,10 +7,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 )
 
 type EventSchemaResolution struct {
+	Reference         runtimecontracts.PlatformEventAuthority
 	Schema            runtimecontracts.EventSchema
 	CompiledSchema    runtimecontracts.CompiledEventSchema
 	StructuralType    runtimecontracts.ResolvedCatalogType
@@ -59,9 +61,15 @@ func (r EventSchemaResolution) RequiredFieldNames() []string {
 }
 
 func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaResolution {
-	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	if source == nil || eventType == "" {
+		return EventSchemaResolution{}
+	}
+	if _, err := runtimeidentity.AdmitFlowIdentity(flowID); err != nil {
+		return EventSchemaResolution{}
+	}
+	scope, found := source.FlowScopeByID(flowID)
+	if !found || scope.ID != flowID {
 		return EventSchemaResolution{}
 	}
 	if compiled, ok, err := source.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType); err == nil && ok {
@@ -73,19 +81,8 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 		bindStructuralEventSchema(&resolution)
 		return resolution
 	}
-	if flowID == "" || flowID == "." {
-		if compiled, ok := source.SemanticCapabilities().ProviderTriggerSchemaReadback(eventType); ok {
-			resolution := EventSchemaResolution{
-				Schema: compiled.EventSchema(), CompiledSchema: compiled,
-				EventKey: compiled.EventName(), HasSchema: true, HasCompiled: true,
-				Classification: compiled.Classification(), HasClassification: true,
-			}
-			bindStructuralEventSchema(&resolution)
-			return resolution
-		}
-	}
 	if bundle, ok := Bundle(source); ok && bundle != nil {
-		if flowID != "" && flowID != "." {
+		if flowID != "." {
 			if _, found := source.FlowSchemaByID(flowID); !found {
 				return EventSchemaResolution{}
 			}

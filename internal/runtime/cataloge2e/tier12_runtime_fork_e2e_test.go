@@ -281,7 +281,7 @@ func selectedContractAgentRuntimeOptionsForCatalogHarness(h *runtimeHarness, cfg
 }
 
 func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string, selected interface {
-	storetest.DurableDataCatalogStore
+	storetest.RootedDataCatalogStore
 	runtimerunforkexecution.SourceArtifactSelectedContractSourceStore
 }) (runtimerunforkexecution.SelectedContractSourceLoader, runfork.RunForkContractSelection, runtimerunforkexecution.LoadedSelectedContractSource) {
 	t.Helper()

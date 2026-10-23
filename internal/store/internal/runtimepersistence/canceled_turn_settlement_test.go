@@ -36,7 +36,11 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		ctx = correlation.WithRunID(ctx, fixture.origin.RunID())
 		ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
 		ctx = runtimeeffects.WithLifecycleToken(ctx, authority.Normal)
-		bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", sourceartifactfixture.Artifact(), platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
+		rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(fixture.context, fixture.origin.RunID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

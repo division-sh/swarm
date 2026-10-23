@@ -298,10 +298,17 @@ func TestR7PreparedSelectionRechecksDurableAdmissionBothStores(t *testing.T) {
 						RunID: request.Lookup.RunID(), State: runlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 					})
 				case "source_replaced":
-					artifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  replacement: {}\n"))
-					sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), artifact)
+					replacement := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# replacement selection source\n"})
+					rooted, rootErr := replacement.RootedSource()
+					if rootErr != nil {
+						t.Fatal(rootErr)
+					}
+					if replacement.SourceArtifact.BundleHash() == f.bundle.SourceArtifact.BundleHash() {
+						t.Fatal("replacement selection source reused the current artifact")
+					}
+					sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), replacement.SourceArtifact)
 					_, err = f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{
-						RunID: request.Lookup.RunID(), Source: sourceartifactfixture.FactFor(artifact),
+						RunID: request.Lookup.RunID(), Source: sourceartifactfixture.FactFor(replacement.SourceArtifact), RootAdmission: rooted.Admission(),
 					})
 				case "stored_winner", "terminal_winner":
 					constructor := request.Constructor

@@ -12,15 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providerconnectors"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -34,8 +30,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
@@ -44,7 +38,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -60,8 +53,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
@@ -70,7 +61,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
@@ -94,7 +84,7 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 	defer fake.server.Close()
 
 	managedStore := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
-		Key:          "notion_oauth",
+		Key:          "notion.notion_oauth",
 		Provider:     "notion",
 		GrantType:    runtimemanagedcredentials.GrantAuthorizationCode,
 		TokenURL:     fake.server.URL + "/v1/oauth/token",
@@ -114,6 +104,8 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 		ExpiresAt:    time.Now().Add(-time.Hour),
 	})
 	source := notionManagedConnectorSource(t, fake.server.URL, backend.flowInstance)
+	backend.source = source
+	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
@@ -326,115 +318,9 @@ func (f *fakeNotionManagedConnectorServer) providerHTTPRequestCount() int {
 	return int(f.notionCalls.Load())
 }
 
-func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
-	t.Helper()
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "notion_append_block_children",
-			Tool: "notion.append_block_children",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"block_id": runtimecontracts.LiteralExpression("block-123"),
-				"children": runtimecontracts.LiteralExpression([]map[string]any{
-					{
-						"object": "block",
-						"type":   "paragraph",
-						"paragraph": map[string]any{
-							"rich_text": []map[string]any{
-								{
-									"type": "text",
-									"text": map[string]any{"content": "hello from swarm"},
-								},
-							},
-						},
-					},
-				}),
-			},
-		},
-	}
-	const nodeID = "notion-responder"
-	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.telegram.text_message": handler,
-		},
-	}
-	bundle := boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "notion", Tool: "notion.append_block_children"}}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram.text_message"}},
-				},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{nodeID: node},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "notion_connector_managed_credential_supported_surface",
-			Version: "1.0.0",
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				nodeID: {
-					ID:                   nodeID,
-					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.telegram.text_message"},
-				},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				nodeID: {"inbound.telegram.text_message": handler},
-			},
-			EventOwners: map[string][]string{
-				"inbound.telegram.text_message": {nodeID},
-			},
-		},
-	})
-	declareTelegramTextMessageProviderImport(t, bundle)
-	base := semanticview.Wrap(bundle)
-	source, err := providerconnectors.SourceWithConnectorPackImports(base, notionManagedConnectorPackRegistry(t, baseURL))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports: %v", err)
-	}
-	return withTelegramTextMessageProviderSchema(t, source)
-}
-
-func notionManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
-	t.Helper()
-	tool, ok := embeddedConnectorTool(t, "notion", "notion.append_block_children")
-	if !ok {
-		t.Fatal("provider connector pack notion.append_block_children not found")
-	}
-	httpSpec, ok := tool.HTTP()
-	if !ok {
-		t.Fatal("provider connector pack notion.append_block_children missing http block")
-	}
-	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/v1/blocks/{{input.block_id}}/children"
-	tool, err := tool.WithHTTP(httpSpec)
-	if err != nil {
-		t.Fatalf("replace Notion connector HTTP endpoint: %v", err)
-	}
-	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
-		Envelope: packs.Envelope{
-			ID: "provider.notion.connector",
-			Provenance: packs.Provenance{
-				Source: packs.ProvenancePlatform,
-			},
-		},
-		Manifest: providerconnectors.ConnectorManifest{
-			Provider: "notion",
-			Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"notion.append_block_children": tool,
-			},
-		},
-		Source: "test:provider.notion.connector",
-	})
-	if err != nil {
-		t.Fatalf("NewPackRegistry: %v", err)
-	}
-	return registry
-}
-
 func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackManagedConnectorBackend, baseURL string) {
 	t.Helper()
-	source := notionManagedConnectorSource(t, baseURL, backend.flowInstance)
+	source := backend.source
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
 	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)

@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -145,7 +146,8 @@ type recordingPipelineBus struct {
 func handlerEngineProjectNodeModule(t *testing.T) *previewWorkflowModule {
 	t.Helper()
 	module := &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: handler-engine-test\nstages:\n  queued: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  queued: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "custom.trigger:\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
 		"types.yaml":    "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
@@ -375,7 +377,10 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: render\nstages:\n  ready: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages:\n  ready: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte("node-a:\n  execution_type: system_node\n"), 0o644); err != nil {
@@ -431,7 +436,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact("../../..", artifact, "", runtimecontracts.WorkflowContractLoadOptions{})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource("../../..", sourceartifactfixture.CapturedRoot(t, artifact), "", runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,9 +459,10 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 
 func VerifyExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmitForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml": "name: runtime-test\n",
-		"scoring/schema.yaml": `name: scoring
-stages:
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":           "stages: []\n",
+		"scoring/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"scoring/schema.yaml": `stages:
   queued: {}
 `,
 		"scoring/entities.yaml": `
@@ -671,7 +677,8 @@ func VerifyNativeExecuteNodeContractHandlerPublishesAfterPersistencePrerequisite
 func handlerDataAccumulationModule(t *testing.T) *previewWorkflowModule {
 	t.Helper()
 	return &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: validation\nstages:\n  queued: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  queued: {}\n",
 		"entities.yaml": "test_entity:\n  revision_count: integer\n  kill_reason: text\n  kill_reason_missing: boolean\n",
 		"events.yaml":   "validation.spec_requested:\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
@@ -822,9 +829,10 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 
 func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReadsForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `name: validation
-stages:
+		"manifest.yaml":            "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":              "stages: []\n",
+		"validation/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"validation/schema.yaml": `stages:
   queued: {}
 `,
 		"validation/entities.yaml": `
@@ -913,9 +921,10 @@ node-a:
 
 func VerifyNativeExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContextForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `name: validation
-instance: validation_id
+		"manifest.yaml":            "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":              "stages: []\n",
+		"validation/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"validation/schema.yaml": `instance: validation_id
 stages:
   queued: {}
 `,
@@ -994,9 +1003,10 @@ node-a:
 
 func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentityForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml": "name: runtime-test\n",
-		"review/schema.yaml": `name: review
-stages:
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":          "stages: []\n",
+		"review/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"review/schema.yaml": `stages:
   queued: {}
 `,
 		"review/entities.yaml": `
@@ -1061,9 +1071,10 @@ node-a:
 
 func VerifyNativeExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValueForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `name: validation
-stages:
+		"manifest.yaml":            "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":              "stages: []\n",
+		"validation/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"validation/schema.yaml": `stages:
   queued: {}
 `,
 		"validation/entities.yaml": `
@@ -1137,7 +1148,8 @@ func VerifyNativeExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntit
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: demo\nstages:\n  queued: {}\n  done: {final: true}\n",
+				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
 				"entities.yaml": "test_entity: {}\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  event_handlers:\n    finish:\n      advances_to: done\n    custom.trigger: {}\n",
 				"events.yaml":   "finish:\ncustom.trigger:\n",
@@ -1302,7 +1314,8 @@ func declarativeEmitContractTestBundle(t *testing.T) *runtimecontracts.WorkflowC
 func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  queued: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
 		"events.yaml":   "rule.emitted:\nhandler.succeeded:\n",
@@ -1312,7 +1325,8 @@ func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowCon
 func rulesEmitTemplateContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  queued: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
 		"events.yaml":   "account.scored:\n  account_id: text\n  score: float\naccount.bucketed:\n  account_id: text\n  score: float\n  bucket: text\n",

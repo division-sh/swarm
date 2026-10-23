@@ -214,8 +214,18 @@ func (s *recoveryTestStore) CommitAgentLifecycleTransition(ctx context.Context, 
 
 func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *recoveryTestStore) {
 	t.Helper()
-	ensureManagerTestSemanticSource(am)
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
+	bundle, present := semanticview.Bundle(am.semanticSource)
+	if !present || bundle == nil {
+		t.Fatal("recovery topology fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(store.agents))
 	for i := range store.agents {
 		if err := am.resolveAgentModel(&store.agents[i].Config); err != nil {
@@ -323,6 +333,7 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 				Identity: managerScopedRuntimeAgentIdentity(
 					"reviewer", "test://recovery/reviewer", "review", "inst-1", "review/inst-1",
 				),
+				FlowID:        "review",
 				FlowPath:      "review/inst-1",
 				Subscriptions: []string{subscription},
 			})}}}
@@ -740,7 +751,6 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 		hydrated = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
-	ensureManagerTestSemanticSource(am)
 	if err := bindCanonicalAgentPrompt(am.semanticSource, &store.agents[0].Config); err != nil {
 		t.Fatal(err)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -125,7 +126,7 @@ func TestProviderIngressDeclaringFlowAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			repo := canonicalrouting.RepoRoot(t)
-			reconstructed, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, decoded, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			reconstructed, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, artifact, decoded), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 			if err != nil {
 				t.Fatal(err)
 			}

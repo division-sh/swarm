@@ -53,7 +53,7 @@ func InspectSelectedForkRecoveries(ctx context.Context, reader SelectedForkRecov
 			return nil, err
 		}
 		selected, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
-			SourceRunID: entry.Binding.ForkRunID, BundleHash: entry.BundleHash,
+			Responsibility: RetainedForkSource(entry.Binding.ForkRunID), BundleHash: entry.BundleHash,
 			SourceArtifactFact: fact, Selection: entry.Binding.ContractSelection,
 		})
 		if err != nil {
@@ -62,8 +62,8 @@ func InspectSelectedForkRecoveries(ctx context.Context, reader SelectedForkRecov
 		inspection := InspectedSelectedForkRecovery{Entry: entry, Evidence: evidence, SelectedSource: selected}
 		if action == selectedRecoveryResumeFiniteFeed || action == selectedRecoveryActivateFiniteFeed {
 			original, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
-				SourceRunID: entry.Binding.SourceRunID,
-				Selection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+				Responsibility: OriginalRunSource(entry.Binding.SourceRunID),
+				Selection:      runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 			})
 			if err != nil {
 				return nil, err

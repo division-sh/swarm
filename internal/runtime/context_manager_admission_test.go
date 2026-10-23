@@ -9,10 +9,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -20,6 +23,9 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -42,8 +48,8 @@ func (s *blockingCredentialSnapshotStore) Snapshot(ctx context.Context, key stri
 
 func TestRuntimeContextManagerReadbackSeparatesPresenceFromFrozenAdmission(t *testing.T) {
 	ctx := context.Background()
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +82,7 @@ func TestRuntimeContextManagerReadbackSeparatesPresenceFromFrozenAdmission(t *te
 	}
 	assertEffectiveTargetStatus(packs.StatusNotReady, packs.RequirementStatusUnbound)
 	const secretValue = "issue-1944-secret-value-must-not-leak"
-	if err := store.Set(ctx, "webhook_signing.acme", secretValue); err != nil {
+	if err := store.Set(ctx, contextDef.StandingTargets[0].SigningSecret, secretValue); err != nil {
 		t.Fatal(err)
 	}
 	assertEffectiveTargetStatus(packs.StatusNotReady, packs.RequirementStatusBound)
@@ -92,7 +98,7 @@ func TestRuntimeContextManagerReadbackSeparatesPresenceFromFrozenAdmission(t *te
 			t.Fatal("credential value leaked into capability readback")
 		}
 	}
-	if err := store.Delete(ctx, "webhook_signing.acme"); err != nil {
+	if err := store.Delete(ctx, contextDef.StandingTargets[0].SigningSecret); err != nil {
 		t.Fatal(err)
 	}
 	assertEffectiveTargetStatus(packs.StatusNotReady, packs.RequirementStatusUnbound)
@@ -100,8 +106,8 @@ func TestRuntimeContextManagerReadbackSeparatesPresenceFromFrozenAdmission(t *te
 
 func TestRuntimeContextManagerRejectsCredentialProjectionStaleAfterSuppression(t *testing.T) {
 	ctx := context.Background()
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +116,7 @@ func TestRuntimeContextManagerRejectsCredentialProjectionStaleAfterSuppression(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Set(ctx, "webhook_signing.acme", "secret"); err != nil {
+	if err := store.Set(ctx, contextDef.StandingTargets[0].SigningSecret, "secret"); err != nil {
 		t.Fatal(err)
 	}
 	blocking := &blockingCredentialSnapshotStore{Store: store, entered: make(chan struct{}), release: make(chan struct{})}
@@ -124,7 +130,7 @@ func TestRuntimeContextManagerRejectsCredentialProjectionStaleAfterSuppression(t
 		errCh <- projectionErr
 	}()
 	<-blocking.entered
-	if err := manager.SuppressStandingServiceTargets("service-primary"); err != nil {
+	if err := manager.SuppressStandingServiceTargets(contextDef.StandingTargets[0].ServiceID); err != nil {
 		t.Fatal(err)
 	}
 	close(blocking.release)
@@ -135,20 +141,23 @@ func TestRuntimeContextManagerRejectsCredentialProjectionStaleAfterSuppression(t
 
 func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossOrdinaryUnload(t *testing.T) {
 	ctx := context.Background()
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	blocking, owner := runtimeAdmissionBlockingCredentialOwner(t, "secret")
+	if err := blocking.Store.Set(ctx, contextDef.StandingTargets[0].SigningSecret, "secret"); err != nil {
+		t.Fatal(err)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		_, projectionErr := manager.EvaluatedCapabilitySubjects(ctx, owner)
 		errCh <- projectionErr
 	}()
 	<-blocking.entered
-	result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	result := manager.DeactivateBundleHash(contextDef.BundleHash(), RuntimeContextCauseUnloaded)
 	if !result.Changed || result.ShutdownErr != nil {
 		t.Fatalf("deactivation = %#v, want successful visibility withdrawal", result)
 	}
@@ -163,8 +172,24 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossOrdinaryUnloa
 }
 
 func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenceAndAbort(t *testing.T) {
-	module := loadRuntimeOwnershipWorkflowModule(t)
-	ctx, fact := runtimeOwnershipFixtureContext(t, module)
+	catalog, source := runtimeAdmissionTestCatalog(t, "source-set", "source-set-fixture")
+	module := semanticOnlyWorkflowRuntime{source: source}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		t.Fatal("source-set fixture requires its compiled captured source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	ctx := testAuthorActivityContextForBundle(context.Background(), fact.BundleHash())
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -181,10 +206,12 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		},
 		Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
-			ExecutionPosture:   executionposture.Live,
-			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
-			SourceArtifactFact: fact,
-			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),
+			ProviderTriggerCatalog: catalog,
+			ProviderCredentials:    identityInboundCredentialStore{},
+			ExecutionPosture:       executionposture.Live,
+			RuntimeInstanceID:      authorActivityTestRuntimeInstanceID,
+			SourceArtifactFact:     fact,
+			ProcessWorkOwner:       runtimeTestProcessWorkOwner(t),
 		},
 	}))
 	if err != nil {
@@ -203,6 +230,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	if err != nil {
 		t.Fatalf("new process capability: %v", err)
 	}
+	t.Cleanup(func() { _ = capability.Release(context.Background()) })
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatalf("InstallStartupGrant: %v", err)
 	}
@@ -217,35 +245,23 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	if err := plan.Validate(); err != nil {
 		t.Fatalf("source-set plan: %v", err)
 	}
-	bundleHash := fact.BundleHash()
-	if len(plan.Sources) != 1 || plan.Sources[0].BundleHash != bundleHash {
+	if len(plan.Sources) != 1 || plan.Sources[0] != coordinate {
 		t.Fatalf("source-set coordinates = %#v, want exact runtime coordinate", plan.Sources)
 	}
 
-	bundle, ok := semanticview.Bundle(module.source)
-	if !ok || bundle == nil || bundle.PackInventory == nil {
-		t.Fatal("runtime bundle effective pack inventory is required")
+	contextDef := BundleContext{
+		SourceArtifactFact: fact, RootAdmission: rooted.Admission(), Source: source,
+		Runtime: rt, WorkOwner: rt.WorkOccurrence(), ProviderTriggerCatalog: catalog,
 	}
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, bundle.Platform.Platform.Version)
+	contextDef.BundleIdentity, err = runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
-		t.Fatalf("derive runtime bundle provider-trigger catalog: %v", err)
+		t.Fatal(err)
 	}
-	planAdmission, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: "primary", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
-	})
+	contextDef.StandingTargets, err = rt.PlanStandingTargets()
 	if err != nil {
-		t.Fatalf("compile bundle-owned admission: %v", err)
+		t.Fatal(err)
 	}
-	contextDef := testBundleContext(t, bundleHash, "inbound.telegram")
-	contextDef.SourceArtifactFact = fact
-	contextDef.Source = module.source
-	contextDef.Runtime = rt
-	contextDef.WorkOwner = rt.WorkOccurrence()
-	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: bundleHash, ServiceID: runtimeflowidentity.StandingServiceID("telegram-flow"), FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
-		RunID: "run-primary", Generation: 1,
-		SigningSecret: "webhook_signing.telegram", AdmissionPlan: planAdmission,
-	}}
+	contextDef.StandingTargets = bindStandingContextFixtureTargets(t, source, contextDef.StandingTargets, "run-primary")
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	contextDef.PackInventoryDigest = bundle.PackInventory.Digest()
 	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
@@ -254,6 +270,12 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		t.Fatal(err)
 	}
 	blocking, owner := runtimeAdmissionBlockingCredentialOwner(t, "secret")
+	if len(contextDef.StandingTargets) != 1 {
+		t.Fatal("source-set fixture requires one captured standing declaration")
+	}
+	if err := blocking.Set(ctx, contextDef.StandingTargets[0].SigningSecret, "secret"); err != nil {
+		t.Fatal(err)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		_, projectionErr := manager.EvaluatedCapabilitySubjects(ctx, owner)
@@ -326,8 +348,8 @@ func assertRuntimeAdmissionEffectiveSubjectCount(t *testing.T, subjects []packs.
 }
 
 func TestValidateRuntimeContextSetDoesNotActivateStandingOccurrences(t *testing.T) {
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	owner := contextDef.Runtime.WorkOccurrence()
 	before := owner.ActiveCount()
 
@@ -340,15 +362,15 @@ func TestValidateRuntimeContextSetDoesNotActivateStandingOccurrences(t *testing.
 }
 
 func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmission(t *testing.T) {
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	serviceID := contextDef.StandingTargets[0].ServiceID
-	standing := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+	standing := manager.contexts[contextDef.BundleHash()].standing[serviceID]
 	managerOwner, err := worklifetime.NewManagerRunOccurrence(
 		context.Background(), contextDef.WorkOwner, worklifetime.ManagerRunIdentity{Generation: 1},
 	)
@@ -405,15 +427,15 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 }
 
 func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(t *testing.T) {
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	serviceID := contextDef.StandingTargets[0].ServiceID
-	standing := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+	standing := manager.contexts[contextDef.BundleHash()].standing[serviceID]
 	managerOwner, err := worklifetime.NewManagerRunOccurrence(
 		context.Background(), contextDef.WorkOwner, worklifetime.ManagerRunIdentity{Generation: 1},
 	)
@@ -457,15 +479,15 @@ func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(
 }
 
 func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	serviceID := contextDef.StandingTargets[0].ServiceID
-	predecessor := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+	predecessor := manager.contexts[contextDef.BundleHash()].standing[serviceID]
 	transition, err := manager.BeginStandingServiceTransition(context.Background(), serviceID)
 	if err != nil {
 		t.Fatalf("begin standing reset transition: %v", err)
@@ -499,7 +521,7 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 	if err := prepared.Publish(successorTargets, nil); err != nil {
 		t.Fatalf("publish standing successor: %v", err)
 	}
-	successor := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+	successor := manager.contexts[contextDef.BundleHash()].standing[serviceID]
 	if successor == nil || successor == predecessor {
 		t.Fatal("prepared standing publication did not install a fresh occurrence")
 	}
@@ -534,44 +556,79 @@ func runtimeContextTestWakeup(t *testing.T, key string, dueAt time.Time) runtime
 	return wakeup
 }
 
-func runtimeAdmissionTestCatalog(t *testing.T, hashToken string) *providertriggers.CatalogSnapshot {
+func runtimeAdmissionTestCatalog(t *testing.T, revision, directory string) (*providertriggers.CatalogSnapshot, semanticview.Source) {
 	t.Helper()
-	manifest, err := providertriggers.ParseManifest([]byte(`provider: acme
-secret: {required: true}
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml":                []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":                  []byte("# fixture directory " + directory + "\nstages: []\n"),
+		"acme-flow/manifest.yaml":      []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"acme-flow/schema.yaml":        []byte("stages: []\npins: {inputs: [inbound.acme.raw]}\n"),
+		"acme-flow/acme/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [bypass journal]}\n"),
+		"acme-flow/acme/trigger.yaml": []byte("# captured revision " + revision + "\n" + `secret: {required: true}
 signature: {type: token_equality, header: X-Acme-Token}
 delivery_id: {header: X-Acme-Delivery, required: true}
 event_type: {literal: event, required: true}
-event_name: {literal: inbound.acme}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-		Identity: providertriggers.PackIdentity{
-			ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat(hashToken, 64), Provenance: packs.ProvenanceExternal,
-		},
-		Manifest: manifest, Source: "test", SourcePath: "/packs/acme",
+event_name: {literal: raw}
+`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return catalog
+	rooted, _ := sourceartifactfixture.Rooted(t, directory, artifact)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitRuntimeTestBundle(t, bundle)
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope("acme-flow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog, source
 }
 
-func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *providertriggers.CatalogSnapshot) BundleContext {
+func runtimeAdmissionTestContext(t *testing.T, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, runID string) BundleContext {
 	t.Helper()
-	contextDef := testBundleContext(t, hash, "inbound.acme")
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: alias, Provider: "acme", SigningSecret: "webhook_signing.acme",
-	})
+	bundle, present := semanticview.Bundle(source)
+	if !present {
+		t.Fatal("admission fixture requires its compiled captured source")
+	}
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
-	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: hash, ServiceID: runtimeflowidentity.StandingServiceID("acme-flow"), FlowPath: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
-		Generation:    1,
-		SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
-	}}
+	contextDef := rootedContextForSource(t, source, rooted)
+	contextDef.ProviderTriggerCatalog = catalog
+	contextDef.BundleIdentity, err = runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef.RuntimeInstanceID = contextDef.WorkOwner.Identity().RuntimeInstanceID
+	contextDef.Runtime.Options = RuntimeOptions{
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
+		ProviderCredentials: identityInboundCredentialStore{}, SourceArtifactFact: contextDef.SourceArtifactFact,
+		RuntimeInstanceID: contextDef.RuntimeInstanceID,
+	}
+	contextDef.StandingTargets, err = contextDef.Runtime.PlanStandingTargets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contextDef.StandingTargets) > 0 && runID == "" {
+		t.Fatal("standing admission fixture requires its bound run identity")
+	}
+	contextDef.StandingTargets = bindStandingContextFixtureTargets(t, source, contextDef.StandingTargets, runID)
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
 	return contextDef

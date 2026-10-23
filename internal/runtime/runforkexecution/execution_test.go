@@ -3104,33 +3104,30 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
-	now := time.Now().UTC()
-	sourceRunID := uuid.NewString()
-	forkRunID := uuid.NewString()
-	forkEventID := uuid.NewString()
-	bindingID := uuid.NewString()
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
-		Artifact: runForkTestSourceArtifact,
-	})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
-		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	revision := captureSelectedExecutionSourceRevision(t, selected, sourceRunID)
-	forkOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, storerunlifecycle.ForkOriginPointEvent, revision, forkEventID)
+	root := t.TempDir()
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
+	repoRoot := runForkExecutionRepoRoot(t)
+	loader := admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repoRoot, SourceRoot: root,
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, selection)
 	if err != nil {
 		t.Fatal(err)
 	}
+	admittedRoot := loaded.RootedSource.Admission()
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), admittedRoot)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+	now := time.Now().UTC()
+	sourceRunID := uuid.NewString()
+	forkEventID := uuid.NewString()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: forkOrigin,
-		Artifact: runForkTestSourceArtifact, StartedAt: now,
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
+		Artifact: loaded.RootedSource.Artifact(), RootAdmission: admittedRoot,
 	})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_bindings
-			(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at)
-		VALUES ($1::uuid,$2::uuid,$3::uuid,'event',$4,$5::uuid,'selected_contracts',$6)
-	`, bindingID, forkRunID, sourceRunID, revision, forkEventID, now); err != nil {
-		t.Fatalf("seed selected-contract container competition binding: %v", err)
-	}
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
+		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
+	captureSelectedExecutionSourceRevision(t, selected, sourceRunID)
 
 	servedDB, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -3151,6 +3148,15 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
 	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
 	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
+	operation := selectedForkFixtureOperation(t, loaded, sourceRunID, forkEventID)
+	operation.AllowSourceFreeze = false
+	materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, selectedContractExecutionOwnerForTest(t, servedStore), SelectedContractExecutionRequest{
+		SourceRunID: sourceRunID, At: forkEventID, SourceLoader: loader, ContractSelection: selection,
+		SourceArtifactFact: loaded.SourceArtifactFact, ForkOperation: operation,
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: processCapability,
+			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}}},
+	})
+	forkRunID := materialized.ForkRunID
 	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
 	process := fixtureValue.(*runForkTestWorkFixture).process
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)
@@ -3176,10 +3182,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatal(err)
 	}
 
-	selection := runfork.RunForkContractSelection{
-		Mode: "selected_contracts",
-	}
-	selectedSource := testSelectedSource(selection)
+	selectedSource := loaded.Source
 	deferredWorkAdmission := selectedContractDeferredWorkAdmissionForTest(t, sourceRunID, forkEventID, selectedSource)
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
 		Owner:                      runfork.RunForkSelectedContractExecutionAdmissionOwner,
@@ -3196,8 +3199,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		AdmissionUse:               runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner:        runfork.RunForkSelectedContractExecutionModelOwner,
 		DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
-		SourceWorkflowName:         "workflow",
-		SourceWorkflowVersion:      "v1",
+		SourceWorkflowName:         selectedSource.WorkflowName(),
+		SourceWorkflowVersion:      selectedSource.WorkflowVersion(),
 	}
 	planning := runfork.RunForkSelectedContractRecipientPlanning{
 		Owner:                      runfork.RunForkSelectedContractRecipientPlanningOwner,
@@ -3207,13 +3210,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		ContractSelection:          selection,
 	}
 	baseRequest := publishSelectedContractForkEventsRequest{
-		Admission: admission,
-		LoadedSource: LoadedSelectedContractSource{
-			Selection:               selection,
-			Source:                  selectedSource,
-			SourceArtifactFact:      testEphemeralSourceArtifactFact(runForkTestBundleHash),
-			EffectiveSourceIdentity: testEffectiveSourceIdentity(testEphemeralSourceArtifactFact(runForkTestBundleHash)),
-		},
+		Admission:             admission,
+		LoadedSource:          loaded,
 		RecipientPlanning:     planning,
 		SourceRunID:           sourceRunID,
 		ForkRunID:             forkRunID,
@@ -3247,8 +3245,12 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseRequest.AgentRuntime.Declarations, err = runtimeagenttopology.NewSelectedDeclarationPlan(runForkTestBundleHash, []runtimeagenttopology.DesiredAgent{{
-		Identity: targetPlan, ConfigRevision: targetRevision, Source: runtimeagenttopology.SourceCoordinate{BundleHash: runForkTestBundleHash},
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(admittedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRequest.AgentRuntime.Declarations, err = runtimeagenttopology.NewSelectedDeclarationPlan(coordinate.BundleHash, []runtimeagenttopology.DesiredAgent{{
+		Identity: targetPlan, ConfigRevision: targetRevision, Source: coordinate,
 	}})
 	if err != nil {
 		t.Fatal(err)

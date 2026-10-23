@@ -5211,9 +5211,20 @@ handler_specification:
         runtime-only state.
       minimal_form:
         id: 'required for handler.rules activities; optional for handler-level activities'
-        tool: string — authored tools.yaml tool id
+        tool: string — effective tool id in the activity's declaring flow
         input: object — maps tool input field names to the same expression value grammar used by emit.fields
         approval: 'optional object for any authored HTTP activity; canonical minimal form is `{decision: <stable-decision-id>}`'
+      tool_contract_owner: >
+        WorkflowContractBundle.ActivityToolEntry and the mandatory semanticview.Source.ActivityToolEntry adapter resolve
+        activities by their exact typed declaring node/flow, never a global tool alias or the concrete execution route.
+        Before effective composition, nearest whole authored declarations shadow ancestors; siblings are not visible.
+        CompileActivityToolBindings merges those inherited declarations with the effective scope tools and freezes the
+        resulting tool contracts in the existing private activityToolsByFlow snapshot. When that snapshot exists, a missing
+        flow/tool refuses without authored/global fallback. Generated outcome schemas, runtime and boot expression checks,
+        intent construction, selected lineage, ordinary dispatch and approval readback consume this same contract. Exported
+        tool/scope readbacks and later source-map mutation cannot replace a frozen binding. Private channel activities retain
+        their separate exact activation/generation-bound target owner; this rule does not admit platform, MCP or native tools
+        as ordinary authored activities, change credential policy or grant execution from source visibility.
       mock_execution: >
         Mock-mode activity execution is admitted before journal, credential, preparation, or transport work. Only an exact
         effective provider_connector tool with a source-compiled deterministic response matching that tool's output_schema may execute,
@@ -10457,7 +10468,7 @@ engine:
           Unperformed observations and startup execution obligations remain visible; never bare ok or an unconditional
           promise of live readiness. Portable validation explicitly reports structural scope.
         stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
-    check_count: 69 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation and constructor eligibility has one source check
+    check_count: 71 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation, constructor eligibility has one source check, and human-gate channel visibility has one source check
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and
@@ -11021,7 +11032,11 @@ tool_model:
         field; it evaluates its response-rooted path against parsed HTTP response data.
       variables:
         input: Tool call arguments from the agent. Accessed as {{input.field_name}}.
-        credentials: Values from the credential store for keys listed in the tool's credentials field. Accessed as {{credentials.key_name}}.
+        credentials: >
+          Values from the credential store for keys listed in the tool's credentials field. The suffix of
+          {{credentials.key_name}} is one exact store key, including a directory-qualified key such as
+          {{credentials.telegram.bot_token}}. It is not nested object or array traversal and cannot fall back to an
+          unqualified, foreign or nested-map value. Input and response paths retain their ordinary traversal semantics.
         response: HTTP response data. Available only in response_success and response_mapping. Accessed as
           {{response.body}}, {{response.status}}, {{response.headers.header_name}}.
       missing_variable: If a required template variable cannot be resolved (missing input field, missing credential), the tool
@@ -11251,10 +11266,35 @@ tool_model:
       canonical `ToolSchemaEntry` object. The category is a readback and validation profile, not a new runtime dispatcher:
       HTTP dispatch remains owned by the HTTP activity executor and non-idempotent writes remain owned by `activity_attempts`.
       Native target declaration and execution consume session_outbound_tool_target in the channel capability model;
-      neither an installed pack nor an imported declaration supplies native execution authority.
+      neither an installed pack nor a copied declaration supplies native execution authority.
+    provider_directory_identity: >
+      A compiled connector provider key is the exact portable provider-directory spelling. Admission, registry lookup,
+      generated profile/index/evidence comparisons, conformance identity and capability readback retain it unchanged.
+      Never trim, lowercase or replace hyphens, underscores or spaces to select a provider or tool. team-bot and team_bot
+      are distinct keys, including in the provider prefix of compiled tool IDs. Tool-map and evidence lookup compare exact
+      identities; invalid provider keys fail through the portable-directory owner rather than a token normalizer.
+      Structural channel joins compare the raw channel, trigger and connector keys after portable key admission;
+      onboarding-profile projection and capability subjects likewise cannot repair a provider key into another identity.
+      Effective and installed connector capability readback must honor the exact tool-ID parser's refusal before
+      constructing any subject or evaluating credential requirements. Accepted IDs and actions remain unchanged;
+      malformed tool IDs cannot become capability rows through display normalization.
+      Existing wire protocol URLs, headers, credentials, payloads, descriptions and HTTP response rules are not renamed
+      by provider-key admission. Directory-owned BODY lowering qualifies local names separately; a name cannot grant
+      installation, credential, activity or journal authority.
+    directory_body_admission: >
+      A connector BODY consumes the immutable admitted provider-directory view. Authored tool names and static or
+      managed credential roles are short local identifiers; the directory qualifies them once to <directory>.<local>.
+      The canonical tool declaration owner projects existing schemas, HTTP execution and credential policies from the
+      captured lexical source, retaining the original source bytes and hash. Static credential references in compiled
+      URL, header and recursive body templates bind only declared short roles; input paths and literal payload values
+      are not renamed. Managed role qualification preserves grant, scopes, header and token-request policy and creates
+      no static template variables. Generation tool_id references likewise name declared short tools before projection.
+      Qualified authored names, foreign/undeclared roles and whitespace aliases refuse with source-local teaching
+      errors. The existing registry, conformance, response policy, effect admission and journal remain authoritative;
+      BODY membership, namespace projection or readback alone does not grant installation or execution authority.
     canonical_owners:
       declaration: "ToolSchemaEntry with `category: provider_connector`, authored in tools.yaml or imported from a verified connector pack."
-      pack_import: schema.yaml imports.connector_packs owns explicit connector tool enablement; selected-root packs/manifest.yaml owns project pack inventory.
+      provider_scope: Captured provider directories in the declaring flow or its enclosing flows own connector visibility; the nearest whole directory with the exact provider key wins.
       pack_envelope: "internal/packs universal envelope plus internal/providerconnectors connector body verifier."
       execution: "handler `activity` lowering to `platform.activity_requested`."
       non_idempotent_journal: "`activity_attempts`."
@@ -11291,7 +11331,7 @@ tool_model:
     connector_pack_profile:
       status: "first slices: Telegram static connector pack proof, Slack managed-credential connector pack proof, Notion Basic+JSON workspace-grant connector proof, Microsoft Graph client_credentials `.default` connector proof, and GitHub App installation-token issue/comment multi-action connector proof"
       body_file: connector.yaml
-      import_syntax: schema.yaml imports.connector_packs entries name provider and tool; omitted imports expose nothing.
+      directory_syntax: Place connector.yaml beside a provider manifest.yaml in a subfolder of the flow that uses it. Authored tool names are short; the directory qualifies them to <provider>.<tool>. There is no schema imports list.
       body_rule: >
         The connector body wraps/carries real `ToolSchemaEntry` values. The body MUST NOT define a second connector DSL,
         second validator, second execution model, or provider-specific Go adapter path.
@@ -11674,6 +11714,35 @@ tool_model:
       runtime_adapter: internal/runtime/tools channel handler consuming internal/packs.OutboundBindingPlan
       private_activity_targets: internal/runtime/pipeline.ChannelActivityTarget
       durable_execution: internal/runtime/pipeline activity attempt owner
+    directory_body_admission:
+      owner: internal/packs.AdmitChannelBody
+      admission_owner: internal/packadmission.AdmitProviderDirectory
+      structural_owner: internal/packs.CompileProviderChannel
+      identity_owner: internal/packs.NewProviderBodyIdentity
+      rule: >
+        A channel.yaml BODY consumes its captured provider directory key and original lexical source; it does not
+        author provider, requires.packs or implements. Its operation and registration tool references use short local
+        names, qualified once as <directory>.<tool>. Its event references use short local event names, qualified by
+        the same event-identity owner as trigger declarations to inbound.<directory>.<event>. Registration and
+        onboarding credential roles use short local names qualified to <directory>.<role>, matching connector
+        requirements. Qualified, foreign, routed, wildcard or whitespace-repaired references are refused with the
+        short form named, not accepted as aliases. Opaque schemas, mapping paths, interface operation/event names,
+        native Inbox operation references, registration slot namespace, identity ceremony, confirmation and connection
+        health remain their existing owners' policy; namespace projection does not rewrite them. Provider-private
+        session material does not become a credential. Source bytes and body hashes remain unchanged, and a BODY
+        alone supplies no installed transport, connection, claim, enabled route, delivery or effect authority.
+      structural_contract: >
+        The directory admission owner derives every role input directly from one opaque captured provider, validates
+        the manifest's platform constraint, and publishes no partial definition if any role or structural relation
+        fails. Readback cannot choose replacement role descriptors or re-admit source. Structural compilation selects
+        exactly swarm.hitl-channel/v2 from the platform interface registry; it never
+        guesses another compatible interface. The selected provider directory supplies its channel, trigger and
+        connector role identities directly, without authored implements or requires.packs. Each role retains the exact
+        captured directory key, metadata version, role, body hash and source label, not a synthesized dotted role ID or
+        acquisition provenance. Crossed provider, source, version, role or body identity refuses before structural plan
+        publication. Both directory and ordinary compiler entrances use the same schema, capability, directional mapping,
+        credential requirement, native-profile and generation owners. A structural plan does not install a session
+        provider or supply connection/claim/effect authority; executable source admission remains separately mandatory.
     capability_model:
       exact_fields: [card_render, reply_to_reference, actions_as_buttons, actions_as_text, edit, acknowledgment, inbox_listing]
       admission: >
@@ -12405,7 +12474,7 @@ tool_model:
         provider-native menus or installed launcher settings. Telegram native qualification remains a separate strict
         compiled extension, not a prerequisite for neutral Inbox listing or text/reply authority.
     contract: >
-      A channel pack is a universal-envelope satisfier of one immutable provider-neutral interface. The interface owns
+      A channel BODY is a directory-owned satisfier of one immutable provider-neutral interface. The interface owns
       presentation, ordered actions, operation/event names, effects, and required semantic fields. It does not own provider
       request paths, identifier topology, transport limits, credentials, ingress targets, signing, callback registration,
       operator binding, or provider-specific branches. One accepted trigger generation, one accepted connector generation,
@@ -13291,6 +13360,16 @@ tool_model:
       provider trigger admission. Runtime-local Go implementations for selected configured providers are non-authoritative.
       A selected configured provider must consume a provider-trigger manifest for signing, replay checks, delivery-id
       extraction, event-type extraction, event naming, acknowledgement timing, and redaction.
+    provider_directory_identity: >
+      The trigger provider key is its exact admitted portable directory spelling, not a normalized protocol token.
+      Manifest admission, catalog lookup and generation, admission-plan compilation, explicit request matching,
+      normalized-output authorization and capability subjects preserve that key byte-for-byte. Validate raw keys
+      through the portable-directory owner; never trim, lowercase or replace dots, hyphens, underscores or spaces
+      to select an installed provider or grant execution. `telegram-sales` and `telegram_sales` are distinct keys.
+      Webhook routing and standing-context lookup compare the exact key. An omitted request provider may consume
+      its already-selected immutable plan, but a nonempty mismatched key refuses before authentication/projection.
+      Provider wire event-type conversion remains the separate declared event-type operation; it cannot rename
+      the directory, select another catalog entry, or confer normalized-output authority.
     body_admission_authority:
       owner: internal/providertriggers.Manifest
       source_owner: internal/yamlsource and existing shared ToolInputSchema admission
@@ -13310,45 +13389,22 @@ tool_model:
     compiled_admission_authority:
       owner: internal/providertriggers.CatalogSnapshot and InboundAdmissionPlan
       issue: '#1936'
-      declaration_owner: schema.yaml ingress.providers[].admission in the owning FlowNode
+      declaration_owner: captured provider trigger.yaml plus the holding flow's declared provider input pins
       omission_rule: >
-        Omitted `admission` or omitted `admission.kind` always means `pack`, independent of environment. Pack mode must
-        resolve exactly one verified provider-trigger pack from the current immutable CatalogSnapshot or verification fails.
-        Missing packs never select raw mode. Platform and external packs resolve through the identical rule and verifier.
-      pack_grammar:
-        minimal: '{provider: telegram, signing_secret: webhook_signing.telegram}'
-        optional_pin: 'admission: {kind: pack, pack: {id: provider.telegram}}'
-        rules:
-        - '`kind` may be omitted or exactly `pack`'
-        - '`pack.id` is optional and pins one exact loaded pack id; wrong, missing, or provider-mismatched ids fail with loaded-pack remediation'
-        - authentication, event, delivery_id, and payload are raw-only and forbidden
-        - signed pack plans require one non-empty signing_secret reference; unauthenticated pack plans forbid it
-        - an unauthenticated pack plan requires `acknowledge: unsigned_webhook`; authenticated plans forbid acknowledgement
-      raw_grammar:
-        required:
-        - 'kind: raw'
-        - 'authentication.kind: none | token | hmac_sha256'
-        - exact literal event
-        - 'delivery_id.source: header | json_path | body_sha256'
-        - 'payload: json | raw'
-        conditional:
-        - token requires one explicit header, permits an optional prefix, and forbids encoding
-        - hmac_sha256 requires one explicit header, permits an optional prefix, signs exact raw body bytes, and uses encoding hex or base64
-        - none forbids header, prefix, encoding, and signing_secret
-        - header delivery identity requires exactly one value from the named header
-        - json_path delivery identity requires one syntactically valid declared JSONPath and a non-empty resolved value
-        - body_sha256 derives identity only from exact body bytes
-        rules:
-        - raw is legal only through explicit `kind: raw`; there is no raw default, fallback, or compatibility path
-        - raw provider names cannot equal a provider owned by any installed pack; intentional raw use must choose a distinct namespace such as `<provider>-raw`
-        - provider-specific signature headers, delivery fields, event fields, or payload heuristics not named by the declaration are ignored
-        - duplicate declared authentication or delivery-id header values fail closed
-        - authenticated raw plans require signing_secret; unauthenticated raw plans forbid it
-      unsigned_acknowledgement: >
-        `acknowledge: unsigned_webhook` is the only accepted acknowledgement token. For explicit unauthenticated raw
-        admission, absence emits the non-blocking `inbound_unsigned_webhook` verify warning with remediation naming the
-        token; presence suppresses that warning. Effective readback always renders request_authentication=UNAUTHENTICATED
-        regardless of acknowledgement. Comments and booleans are not controls.
+        A provider directory in scope supplies typed schemas and tools, not a route by visibility alone. Only the exact
+        holding flow's consumed provider input pins declare standing ingress. Inherited, sibling, unused and connector-only
+        directories cannot declare that ingress. Clock-only declarations keep their existing construction and lifecycle owner.
+        The captured BODY supplies authentication, normalization, event naming and delivery identity; there is no schema-side
+        pack/raw selection, alias override, import list or fallback to an installed global role catalog.
+      scoped_catalog_authority: >
+        Scope composition combines already-admitted immutable snapshots without repeating BODY admission. Context admission
+        preserves its supplied captured catalog and validates exact scope membership, generation, BODY member paths and
+        installed subjects. It never replaces that catalog with the global pack projection. Standing target plans validate
+        against their own holder declaration and scoped generation, not another flow's catalog generation.
+      unsigned_route_note: >
+        A BODY with no required secret declares an open route. Verification reports a NOTE; there is no second acknowledgement
+        grammar or automatic acknowledgement. Readback reports request_authentication=UNAUTHENTICATED. Signed BODYs still
+        require their exact provider-qualified signing role, and missing, empty or invalid credentials cannot enable a route.
       exact_request_authentication:
         TOKEN_EQUALITY: pack manifest token_equality
         TOKEN: explicit raw token equality
@@ -13586,7 +13642,25 @@ tool_model:
       - provider setup/teardown, OAuth, connector tools, or provider action calls
       - arbitrary code/WASM before provider-trigger admission
     manifest_vocabulary:
-      provider: normalized provider token matched from `/webhooks/{alias}/{provider}` after alias resolves exactly one loaded standing ingress target
+      directory_body_admission: >
+        A trigger BODY is projected from the immutable admitted provider-directory role view and its captured lexical
+        source. The directory alone supplies the exact provider key; body provider fields are refused. Authored raw
+        literals and normalized event declarations use short local names, qualified once as inbound.<directory>.<local>.
+        Authored raw templates are exactly {event_type} or raw.{event_type}, qualified by that same directory. Qualified
+        inbound names, route paths, malformed names and whitespace aliases are refused with a teaching error at the
+        original source. Admission does not rewrite captured bytes or body hashes, signature recipes, payload values,
+        field paths or wire event-type conversion. Final compiled validation, typed schemas and output consumers share
+        the existing trigger owner; BODY presence alone grants no ingress, catalog generation or publication authority.
+      captured_catalog_admission: >
+        The trigger catalog consumes frozen typed BODY admission through
+        internal/providertriggers.NewCatalogSnapshotFromAdmittedBodies, preserving the private captured role evidence.
+        Byte-only manifests and catalog readbacks cannot substitute for that evidence. Identity comes from the exact
+        BODY directory, version, role, hash and source label without inventing acquisition provenance. Catalog indexing,
+        duplicate refusal, generation and schema descriptors retain their existing owners. A catalog generation is not
+        an enabled ingress binding, authenticated request or publication permission.
+      provider: >
+        Compiled-only exact provider-directory key matched from `/webhooks/{alias}/{provider}` after alias resolves
+        one loaded standing ingress target. An authored body `provider:` is refused; the directory supplies the key.
       transport: >
         Omission selects webhook. Authored text may be exactly webhook or session; nulls, empty text, other kinds,
         unknown values and whitespace variants fail at the exact source path. Session BODY forbids secret, signature,
@@ -13605,8 +13679,8 @@ tool_model:
         and requires the relevant signed-payload recipe to fail closed on malformed form input.
       normalized_events:
         shape: >
-          Optional list entries use `{event, fields, when, author_subject}`. `event` must be an exact
-          `inbound.<provider>.*` literal.
+          Optional list entries use `{event, fields, when, author_subject}`. Authored `event` uses a short local name;
+          directory BODY admission qualifies it once into the exact `inbound.<provider-directory>.<local>` literal.
           Each field declares `from`, one required post-conversion JSON `schema`, optional `optional`, and an optional closed
           conversion. The schema is the sole admitted-value owner: runtime normalization, imported event refinements,
           accepted trigger descriptors, channel assignability, carry eligibility, and capability type projection derive
@@ -13666,7 +13740,7 @@ tool_model:
           malformed, foreign, terminated, or ordinary target failure. Consumerless settlement has no recipient target;
           its source owner is not relabeled as a recipient. Duplicate and acknowledgment-loss reconciliation reuse the
           exact committed settlement and complete recipients without replanning or redispatching.
-        source_composition: Before boot verification, schema.yaml imports.provider_trigger_events imports normalized schemas from the effective pack inventory.
+        source_composition: Before boot verification, the exact captured provider directories supply normalized schemas through the declaring flow's scoped BODY compiler. There is no schema imports list or global catalog loan.
         capability_surface: >
           Installed and effective trigger subjects carry structured event descriptors with event, raw|normalized kind,
           field names/types/requiredness, carry eligibility, and pack provenance. Singular event-name or prose-only
@@ -13697,11 +13771,14 @@ tool_model:
       event_type: authoritative provider event type source for normalized provider_event_type payload metadata. Sources may be header, JSONPath, form parameter, query parameter, or manifest literal.
       event_name: literal or `{event_type}` template for the emitted Swarm event name.
       event_name_policy: >
-        New provider-trigger manifests MUST use a literal Swarm event name and carry the provider-specific event kind in
-        `provider_event_type`. The `{event_type}` template form is grandfathered only for the existing GitHub and Slack
-        manifests because live subscriptions already consume `inbound.github.raw.<event_type>` and
-        `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
-        decision.
+        Provider-local raw naming is a literal or one of the two bounded template policies `{event_type}` and
+        `raw.{event_type}`. The admitted directory qualifies the policy once under its exact `inbound.<directory>.`
+        namespace. Template admission depends on that exact policy, never a GitHub/Slack directory-name whitelist;
+        copying or renaming a provider cannot select a physical protocol or alter authentication. The compiled policy
+        refuses foreign prefixes, repeated/unknown placeholders, suffixes, route segments, wildcards and whitespace.
+        Only the separately normalized wire event-type value fills the single placeholder; the admitted key is unchanged.
+        This rule replaces the prior named-provider grandfathering under S1 Gate F 6208241566; additional template
+        shapes remain unsupported.
       ack.mode: >
         Omission selects `after_publish`; the only authored mode is `durable_before_dispatch`. Explicit `after_publish`
         is not an authored alternative.
@@ -13723,7 +13800,7 @@ tool_model:
       signed_payload_recipe_discipline: >
         Signed-payload recipes are shared scheme families, not provider-specific escape hatches. New recipes should be added
         only when they generalize a provider family; recipe count should grow sublinearly as provider coverage expands.
-    secret_binding: schema.yaml ingress.providers[].signing_secret is the target-scoped credential reference owner; source never carries the secret value.
+    secret_binding: The admitted trigger BODY derives the target-scoped provider.webhook_signing_secret role; source never carries its secret value or a schema-side signing-secret override.
     configured_provider_manifests:
     - provider: github
       signature: >
@@ -14704,7 +14781,7 @@ flow_model:
     standing_activation_model:
       status: merge_bearing_contract_runtime_behavior
       implementation_tracker: '#2438'
-      declaration_surface: 'schema.yaml ingress or compiled schedules; retention derives from an enabled binding or an active deployment clock'
+      declaration_surface: 'provider directories held by a flow with their events in schema.yaml pins.inputs, or compiled schedules; retention derives from an enabled binding or an active deployment clock'
       canonical_owners:
         declaration: internal/runtime.ResolveStandingTargetDeclarations over the admitted ingress and compiled clock declarations
         alias: internal/runtime/contracts.WorkflowContractBundle.FlowIngressAlias compiled with the immutable workflow semantics and typed authored alias presence
@@ -14722,14 +14799,13 @@ flow_model:
         routing_projection: internal/runtime/routingtopology.Build root_input_sources
       authoring_shape:
         example:
-          name: telegram-chat
-          pins:
-            inputs: [inbound.telegram]
-          ingress:
-            alias: chat
-            providers:
-            - provider: telegram
-              signing_secret: webhook_signing.telegram
+          flow_directory: telegram-ingress
+          manifest.yaml: {version: 1.0.0, platform_version: '*'}
+          schema.yaml:
+            pins:
+              inputs: [inbound.telegram]
+          provider_body: telegram/trigger.yaml
+          raw_admission_owner: The captured trigger BODY owns authentication, acknowledgement, delivery identity and raw payload policy.
         rules:
         - 'activation is not an authored schema key; every presence is rejected by ordinary strict unknown-key admission, including retained source artifacts. Ingress and compiled clock declarations supply declaration identity; no producer means no service candidate, execution, or retention'
         - 'Keyless standing construction consumes the declaring flow and every ancestor, including the root, through the eligible canonical no-argument constructor. Runtime declaration, reconstructed-source admission, and boot verification consume that constructor contract, not contained-flow singleton resolution'
@@ -14739,9 +14815,8 @@ flow_model:
         - 'A deployment clock may retain its declaring service without ingress. Connect edges remain delivery authority, not independent service-retention declarations. An ingress binding retains its service only when the binding is admitted and enabled; dormant declarations grant no retention'
         - 'Provider publications carry the exact pinned declaring flow, not a concrete source instance or entity. InboundAdmissionPlan authenticates the request and transfers its exact ordered output names, kinds, payloads and pack authorization through PublicationAdmission before planning. An ingress source enum, schema import, endpoint alias or capability subject ID cannot grant that admission. Concrete execution still requires the shared constructor, explicit connection where crossing a boundary, selected-run receiver ownership and actual attachment'
         - 'The inbound receipt identity is exactly service/run/generation/provider/provider-delivery. Alias and concrete receiver coordinates are projections, never deduplication identity. Exact retries return the immutable committed batch before current output projection or construction; changed semantic content at the same identity refuses before mutation. Current binding source, generation, publication sequence and run fences remain mandatory for fresh publication'
-        - 'Omitted ingress.alias is derived once from the selected root flow name and declaration path: root shop becomes shop, child shop becomes shop.shop, and nested shop/leaf becomes shop.shop.leaf. The root name must be an exact single-segment addressable name; an absent or invalid name cannot be repaired from a host directory, execution hash or label. An explicit valid override does not require a derivable root name'
-        - 'Explicit alias presence is recorded by the optional decoded alias field and requires exact non-empty text and a valid URL segment; empty, null, malformed and normalized-equivalent spellings refuse rather than becoming omission. Provider composition, runtime declaration/lookup, describe/topology and registration consume the same compiled alias, never a side-table presence check or raw-override reconstruction'
-        - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
+        - 'The flow holding the provider directory is its ingress. The webhook alias is that flow path; the root alias is the exact captured root folder, not the literal dot flow coordinate. No authored alias override remains'
+        - 'Provider composition, runtime declaration/lookup, describe/topology and registration consume that one directory-owned identity. Empty or normalized-equivalent flow selectors cannot acquire authority through an alias, a display label or a hash'
         - 'Declaration inventory and dormant discovery preserve equal aliases with distinct source/flow/provider identity. An enabled alias can have only one declaring flow owner in the process; providers on that same declaration share its alias and retain their provider path segment. Complete-set startup admission and later channel promotion reject a collision naming both owners before durable mutation or publication, preserving incumbent state and readback'
         - ingress providers are a list so duplicate provider declarations remain visible to strict verification
         - admission omission is always pack-required; raw admission requires explicit kind plus its complete closed policy
@@ -15249,6 +15324,19 @@ flow_model:
       compiled declaration projection may exclude a valid pattern from exact
       importable schemas, but it must error rather than silently omit an invalid
       concrete declaration.
+    provider_namespace_admission: >-
+      Flow-authored events.yaml declarations cannot own the inbound.* provider
+      namespace, including route-qualified leaves and supported wildcard
+      declarations that match that namespace. A leading whole-token star can
+      consume dots, so patterns such as *.completed also claim provider events
+      and are refused as declarations. Admission reports the authored key,
+      introduction and resolved value coordinates and points to trigger.yaml.
+      Provider events are supplied only through admitted provider evidence;
+      spelling the namespace in a programmatic catalog or a publication does
+      not grant provider authority. References in inputs, outputs, handlers and
+      connect rows remain legal and are subject to their existing ownership and
+      routing checks. Business-only wildcard declarations and the event
+      identity/subscription grammar are otherwise unchanged.
   compiled_event_schema_projection:
     status: implemented_recursive_structural_presence
     detached_type_evidence: >-
@@ -16260,7 +16348,7 @@ versioning:
   description: Platform and products version independently.
   platform_versioning:
     scheme: semver (major.minor.patch)
-    author_facing_version: platform.version is the runtime platform version; optional strict root manifest.yaml metadata declares the authored version and required platform range, never source identity or topology.
+    author_facing_version: platform.version is the runtime platform version; each admitted flow and provider directory requires manifest.yaml metadata declaring its authored version and required platform range, never source identity or topology.
     active_train_policy: Semantic PRs land on the active platform train without repeatedly editing platform.version.
       Release validation confirms the train version and tags the binary as v<platform.version>.
     major: Breaking changes to flow model, handler fields, boot validation, or contract formats
@@ -16272,7 +16360,7 @@ versioning:
     minor: New agents, new events, new tools, threshold adjustments
     patch: Agent-intent content improvements, policy tuning, bug fixes
   compatibility:
-    declaration: 'Optional manifest.yaml contains exactly name, version, and platform_version; all three are required when present. The root platform_version uses the existing Masterminds SemVer constraint grammar.'
+    declaration: 'Every admitted flow directory requires manifest.yaml with exactly version and platform_version. Provider manifests additionally declare capabilities. The directory is the name and the files beside the manifest determine kind; neither name nor type is authored. The root platform_version uses the existing Masterminds SemVer constraint grammar.'
     enforcement: All flow manifests are grammar-validated during immutable construction and stored decode. Only the selected root range is checked against the running platform before executable admission or local identity selection; nested metadata never resets scope or compatibility.
     forward_compatible: Platform minor/patch releases do not break existing products
     example: 'Product v3.0.0 declares platform_version: ">=0.7.0 <0.8.0". Works on platform 0.7.x after re-verification.
@@ -16783,7 +16871,7 @@ platform_tables:
       - Nested registered producers MUST join the exact outer transaction and draft batch. A registered producer reached through a raw transaction without the story context MUST fail closed.
       - Source transitions, story rows, and counter advancement MUST commit or roll back atomically.
       - A named selected-store mutation attempt binds one native transaction, its evidence mode, retry-local result, story drafts, declared historical effects, and any completion-candidate reservation. Only the private lifecycle owner may finalize evidence or interpret native COMMIT acknowledgement. Retry discards the failed attempt's drafts, generated identities, results, and reservations while retaining explicit baseline declarations and the operation's occurrence lease. A positive COMMIT acknowledgement exposes only that attempt's typed result; later cleanup or handoff failure cannot erase it. Runtime consumers of that result MUST complete the exact committed finalization and dispatch before reporting the joined post-commit error, and MUST NOT release or retry it as an uncommitted attempt. Missing acknowledgement exposes no attempt value and fails closed, but is not proof of rollback. A completion candidate is reserved only from its canonical durable request in the same attempt and is submitted only after acknowledged COMMIT. Standalone and composed writers join this same attempt rather than pair unrelated transaction, story, revision, and handoff values.
-      - RunLifecycle owns one physical active-run/source admission leaf, consumed by lifecycle loading and nested writer guards. Its mutable transaction path may reuse an unchanged admission only within the exact live native mutation attempt and SQL transaction. The first admission retains its existing run-lock acquisition, ordering and lifetime; every use still verifies source-artifact availability and current and original caller cancellation. Read-only, generic-queryer and present-run reads remain fresh and nonminting; a queryer's dynamic transaction receiver is not mutable authority. Context source facts, foreign transactions and ended or retried attempts cannot mint or lend admission. Successful run creation, fork insertion, active-state transition, source revision, terminalization and deletion invalidate matching admission before later consumers. PostgreSQL UUID-equivalent lookups, contributions and writes name the same physical run; SQLite TEXT identities remain distinct. Every mutation record must match this attempt's admitted run/source and retain its individual path, type, writer and cause validation. This reuse never suppresses fresh generation, process, grant or expiry authorization.
+      - RunLifecycle owns one physical active-run/source admission leaf, consumed by lifecycle loading and nested writer guards. Its mutable transaction path may reuse an unchanged admission only within the exact live native mutation attempt and SQL transaction. Admission includes the complete retained (bundle_hash, source_root_directory) pair, not just content identity. The first admission retains its existing run-lock acquisition, ordering and lifetime; every use still verifies source-artifact availability, exact retained-root availability, and current and original caller cancellation. Supplied rooted execution context must agree with that exact pair on both fresh and cached admission and on every mutation-record check; an equal content hash under another root cannot lend authority. Read-only, generic-queryer and present-run reads remain fresh and nonminting; a queryer's dynamic transaction receiver is not mutable authority. Context source facts, foreign transactions and ended or retried attempts cannot mint or lend admission. Successful run creation, fork insertion, active-state transition, source revision, terminalization and deletion invalidate matching admission before later consumers. PostgreSQL UUID-equivalent lookups, contributions and writes name the same physical run; SQLite TEXT identities remain distinct. Every mutation record must match this attempt's admitted run/source and retain its individual path, type, writer and cause validation. This reuse never suppresses fresh generation, process, grant or expiry authorization.
       - Sequence ranges MUST be assigned only while the singleton is locked. BIGSERIAL, allocation-order cursors, timestamps, UUID order, post-commit appends, and fallback readers are forbidden.
       - Replayed source identities MUST return the existing identical occurrence or fail on conflict. ON CONFLICT DO NOTHING MUST NOT hide a conflicting story registration.
       - Mutable source helpers MUST report whether the authoritative source transition changed. A semantic no-op or duplicate receipt MUST NOT draft, append, or rewrite author activity; only a real source transition may produce an occurrence.
@@ -17094,8 +17182,8 @@ platform_tables:
       description: >-
         Durable declaration-owned standing-service identity and desired-state owner.
         flow_path is stable across source revisions. current_run_id and current_generation
-        select one generation. current_bundle_hash records the latest admitted declaration
-        source artifact, which can differ from a terminal or
+        select one generation. current_bundle_hash and source_root_directory record the exact latest admitted declaration
+        source pair, which can differ from a terminal or
         invalid current run's immutable source until explicit reset creates its successor.
         Operator override and publication sequence are explicit persisted facts rather than
         source-hash inference.
@@ -17108,6 +17196,7 @@ platform_tables:
             operator_override      TEXT NOT NULL DEFAULT 'none' CHECK (operator_override IN ('none', 'suspended')),
             effective_state        TEXT NOT NULL CHECK (effective_state IN ('active', 'suspended', 'orphaned', 'dormant', 'recovery_required', 'session_required')),
             current_bundle_hash    TEXT NOT NULL CHECK (current_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            source_root_directory  TEXT NOT NULL CHECK (LENGTH(source_root_directory) >= 1 AND LENGTH(source_root_directory) <= 100),
             revision_sequence      BIGINT NOT NULL CHECK (revision_sequence > 0),
             current_generation     BIGINT NOT NULL CHECK (current_generation > 0),
             current_run_id         UUID NOT NULL UNIQUE REFERENCES runs(run_id),
@@ -18901,7 +18990,11 @@ platform_tables:
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
         selected-contract execution; CLI/API arguments, dry-run JSON, and local model output are not semantic owners. It
         does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
-        contract-swap mutation.
+        contract-swap mutation. The required target_bundle_hash and source_root_directory freeze the target's exact
+        root admission independently of the selection-mode bundle_hash. The writer consumes opaque admission, verifies
+        the retained pair and child run in its materialization transaction, and never substitutes the source run's root.
+        History retains this pair without a restrictive source-artifact foreign key; executable reconstruction separately
+        requires the retained pair and exact content, and agreement with the child and permanent operation.
       ddl: |-
         CREATE TABLE run_fork_selected_contract_bindings (
             binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -18912,6 +19005,8 @@ platform_tables:
             fork_event_id    UUID REFERENCES events(event_id),
             mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),
             bundle_hash      TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            target_bundle_hash TEXT NOT NULL CHECK (target_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            source_root_directory TEXT NOT NULL CHECK (source_root_directory <> ''),
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
             CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
@@ -20650,7 +20745,10 @@ platform_tables:
         discriminated origin: event, deployment, scenario setup, standing generation, or fork materialization. Every event,
         delivery, session, and turn belongs to exactly one run. run_id is the primary correlation key for
         observability, debugging, and fork/replay. Nullable origin payload columns never imply a kind and readers never
-        infer origin from event history. Standing origins are additionally validated against the exact
+        infer origin from event history. source_root_directory pins the exact admitted root alongside bundle_hash;
+        creation replay compares both and only the explicit source-revision owner may atomically revise the pair.
+        The historical reference has no cascading source-content foreign key, so deletion removes availability,
+        never run history. Standing origins are additionally validated against the exact
         standing_service_generations relation. Fork-materialized runs link back to their parent through the origin-owned
         forked_from_run_id, forked_from_point_kind, and positive forked_from_revision coordinates. Event forks also
         retain forked_from_event_id; deployment-revision forks have no event ID and never invent one.
@@ -20671,6 +20769,7 @@ platform_tables:
             run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled', 'forked')),
             bundle_hash        TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            source_root_directory TEXT NOT NULL CHECK (LENGTH(source_root_directory) >= 1 AND LENGTH(source_root_directory) <= 100),
             origin_kind        TEXT NOT NULL CHECK (origin_kind IN ('event', 'deployment', 'scenario_setup', 'standing_generation', 'fork_materialization')),
             trigger_event_id   UUID,
             trigger_event_type TEXT,
@@ -21128,6 +21227,15 @@ platform_tables:
             total_bytes      BIGINT NOT NULL CHECK (total_bytes >= 0 AND total_bytes <= 50331648),
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+    source_root_admissions:
+      description: Immutable internal rooted-admission evidence, separate from byte-content identity. Only genuine filesystem admission or the closed selected-store decoder yields a RootAdmission. Exact root spelling is validated through the portable flow-segment owner; caller-provided references alone confer no admission. Equal content may retain several historical roots without changing bundle_hash or creating multiple public contexts. Content deletion removes these dependent rows, never run history, and missing content remains unavailable.
+      ddl: |-
+        CREATE TABLE source_root_admissions (
+            bundle_hash      TEXT NOT NULL,
+            root_directory   TEXT NOT NULL CHECK (length(root_directory) > 0 AND length(root_directory) <= 100),
+            PRIMARY KEY (bundle_hash, root_directory),
+            FOREIGN KEY (bundle_hash) REFERENCES source_artifacts(bundle_hash) ON DELETE CASCADE
+        );
   notes:
     product_tables: Product-specific typed entity tables are not runtime-store schema inputs. Entity contracts shape
       entity_state values and validation; they do not generate product DDL or per-entity SQL schemas.
@@ -21488,6 +21596,15 @@ run_model:
         activates the paused child, and records both lifecycle author activities. Ordinary activation and selected-contract
         unadvanced activation consume this owner. Generic terminal mutation rejects forked. Rollback leaves every coupled
         source, child, decision, pointer, and activity fact unchanged.
+      selected_write_authority: >
+        The admitted fork-activation operation, together with its explicit current source-freeze consent and the
+        current native process generation admitted in that same transaction attempt, authorizes the original run's
+        complete freeze subtree. Exact original-root admission identifies that source but does not grant writes by
+        itself. The existing fork coordinator delegates source lifecycle, card, draft, gate and activity mutations to
+        canonical RunLifecycle under the original source's exact admission. Fork activation, result and cleanup retain
+        the selected target's admission. Neither the selected root nor its context nor a standing cross-run grant
+        authorizes source writes. A retained explicit activation has its own consent; a supplied permanent operation's
+        immutable consent must agree with that activation and must not be upgraded or discarded on mismatch.
       preserved_lineage: >
         Freeze preserves source events, deliveries, receipts, dead letters, timers, sessions, turns, audits, reply contexts,
         state history, decision/effect/directive evidence, and fork facts as immutable history. It does not dead-letter,
@@ -23050,10 +23167,20 @@ platform_events:
       schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding
       producer_evidence:
         produced_by_type: platform
+        produced_by: runtime
         locations:
         - internal/store/internal/backend/eventpersistence/runtime_log_persistence.go
       routing_class: diagnostic_direct_persisted
-      note: Full payload schema defined in platform_tables. Not duplicated here.
+      note: >-
+        Payload authority is the retained diagnostics_encoding reference, not an inline
+        structural schema or schema-less permission. The producer-schema lookup accepts
+        explicit admitted platform/runtime diagnostic identity; authored producers instead
+        require their exact declared flow coordinate. Empty flow is never a producer class.
+        The existing canonical runtime-log decoder validates the referenced subtype.
+        Payload admission binds the reference and a deterministic digest of the pinned
+        referenced law, with platform provenance. Application and durable restoration
+        require agreement with event producer, class and identity; a platform schema label
+        alone is insufficient. The reference is not added to structural schema registries.
     platform.activity_requested:
       description: Internal durable request to execute a handler activity after its immediate handler or proposed-effect approval transaction commits.
       schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.activity_requested"].payload'
@@ -43995,6 +44122,10 @@ filesystem_source_model:
         - rules.yaml
       flow_metadata:
         - manifest.yaml
+      provider_role_bodies:
+        - trigger.yaml
+        - connector.yaml
+        - channel.yaml
       source_semantic_inert:
         - README
         - README.md
@@ -44014,28 +44145,59 @@ filesystem_source_model:
         - docs
       selected_root_only_branch: packs
       rule: |
-        Resource descendants are resource labels, never child flows. For scenario discovery, tests is a scenario resource branch only when it is the first typed-resource segment after the owning flow path; a nested tests directory below data, mocks, or another resource branch remains part of that first resource and is never a scenario branch. Unknown included paths fail closed. Flow-disposition manifest.yaml bytes are strict metadata, never topology, declaration identity, imports, activation or routing. Resource/document lookalikes retain their original disposition and are not flow metadata.
+        Resource descendants are resource labels, never child flows. For scenario discovery, tests is a scenario resource branch only when it is the first typed-resource segment after the owning flow path; a nested tests directory below data, mocks, or another resource branch remains part of that first resource and is never a scenario branch. Unknown included paths fail closed. Outside typed resource branches, trigger.yaml, connector.yaml and channel.yaml are provider body members with resource disposition; their containing directory is a provider and never a FlowNode. Provider metadata uses manifest disposition. The existing four bundle-v2 disposition codes and exact framing are unchanged. Resource/document lookalikes retain their original disposition and acquire neither provider nor flow metadata authority.
   manifest_metadata:
-    owner: internal/sourceartifact.AdmittedSourceArtifact
+    owner: internal/packmodel.Manifest projected by internal/sourceartifact.AdmittedSourceArtifact
     optional: true
-    fields: [name, version, platform_version]
+    provider_manifest_required: true
+    fields: [version, platform_version]
+    provider_fields: [version, platform_version, capabilities]
     max_field_utf8_bytes: 256
     rule: |
-      A present flow manifest is exactly one YAML mapping with exactly these three required nonempty text fields. Unknown or duplicate fields, null or wrong-kind values, malformed/multiple documents and invalid expansion fail closed. name is free text, not a directory slug; version requires strict SemVer; platform_version uses the existing platform-range grammar. Construction and stored decode project only admitted yamlsource.Value, preserving semantic path, introduction location and separately resolved alias/merge provenance. No flatten/reparse reader exists. Only the selected root range gates executable admission and explicit CLI identity selection, before publication or mutation; every nested manifest is grammar-checked but cannot reset the inherited scope or compatibility.
-      Each decoded name, version, and platform_version scalar is at most 256 UTF-8 bytes, including whitespace, checked before SemVer or range parsing; construction and stored decode reject oversized values with exact field and introduction/resolution evidence, never truncation.
-  human_source_presentation:
-    owner: internal/sourceartifact.AdmittedSourceArtifact.HumanLabel
+      One shared decoder admits manifests against file-derived directory membership. Common version and platform_version are required nonempty text. A provider also requires capabilities; a flow forbids it. There is no authored name, type, id, implements, manifest_hash, provenance, tests or requires field. Deleted name refuses with the instruction that the directory is the name. Deleted credential summaries refuse with a located instruction to declare credentials on the action, trigger or channel that uses them. Deleted type refuses with the instruction that directory kind comes from its files. Unknown or duplicate fields, null or wrong-kind values, malformed/multiple documents and invalid expansion fail closed.
+      A flow or provider is named by its exact directory, not authored metadata. Directory identifiers are non-normalizing portable flow segments; team-bot and team_bot are distinct. Root identity comes from frozen RootAdmission, and child/provider identity from the admitted member path. Dotted role-pack IDs are not provider aliases. Bodies reject top-level provider declarations and consume their admitted directory identity. Copying a provider to a differently named valid directory requires no edits inside it. Version requires strict SemVer; platform_version uses the existing platform-range grammar. Construction and stored decode project only admitted yamlsource.Value, preserving semantic path, introduction location and separately resolved alias/merge provenance. No flatten/reparse reader exists. Only the selected root range gates executable admission and explicit CLI identity selection, before publication or mutation; every nested manifest is grammar-checked but cannot reset the inherited scope or compatibility.
+      In inbound.<directory>.<local-event>, every concrete provider-key token is validated in its exact raw spelling by the portable-directory owner before ordinary event-token rules; ordinary-token acceptance is never an alternative. Keys are at most 100 ASCII bytes, start with a lowercase letter or digit, continue with lowercase letters, digits, underscores or hyphens, and cannot be reserved portable basenames. Leading underscores, surrounding whitespace, reserved basenames and 101-byte keys refuse with or without a hyphen. Exact references, fixed-key wildcard subscriptions and compiled imported schemas retain that token unchanged; team-bot never becomes team_bot. Whole-token provider wildcards retain the existing pattern grammar and are never concrete keys. Other event tokens keep their existing grammar. Admitting a spelling is not declaration ownership or authenticated publication authority: flow-authored inbound.* catalogs remain forbidden.
+      Each decoded version and platform_version scalar is at most 256 UTF-8 bytes, including whitespace, checked before SemVer or range parsing; construction and stored decode reject oversized values with exact field and introduction/resolution evidence, never truncation.
+    directory_kind: |
+      One admitted membership owner governs filesystem construction, logical decoding and retained projection. A directory with trigger.yaml, connector.yaml or channel.yaml is a provider; malformed roles never cause flow fallback. A channel requires trigger.yaml and connector.yaml in that same directory. Providers cannot contain flow declarations, flow resources, child flows or nested providers; inert documents and docs remain inert. Provider directories are attached to their exact enclosing flow, not inserted as executable children. A selected provider root has no executable FlowNode. A directory with a manifest but neither body nor live flow content is refused, as is a directory mixing provider bodies and flow files. Ordinary schema-less resource/intermediate flow topology and manifest-less flows remain supported. Provider lookalikes below typed resources remain resource data, not provider declarations.
+  provider_directory_scope:
+    owner: internal/sourceartifact.AdmittedSourceArtifact.ProviderDirectoriesInScope
+    key_owner: internal/sourceartifact.AdmittedSourceArtifact.ProviderKey and RootedSource.ProviderKey
+    key_admission: |
+      Provider keys come only from exact admitted provider membership. A nested provider's key is the final directory segment in its captured member path. A selected provider root has no such member segment and requires its frozen RootAdmission; neither dot, an import ID, a role body, cwd nor a host-path guess supplies its key. A content-only root cannot become an admitted provider view. Retained RootedSource consumes its exact separately restored pair without attaching that pair to the shared content artifact. Scoped selection and typed provider BODY views consume this same key owner. Equal provider bytes under different selected roots retain equal bundle/body hashes but distinct keys. No host reread or implicit normalization is allowed, and the derived key alone is not execution authority.
     rule: |
-      Human output uses root manifest name@version when present; otherwise a genuinely matching admitted directory basename@hash7; otherwise hash7 alone for stored artifacts with no known directory. hash7 means seven digest hex characters, never a selector. Stored decoding must not invent a basename from synthetic sourceRoot dot, borrow cwd or an unrelated serving tree, or persist display metadata. JSON/API and existing explicit YAML retain exact full machine identities. Equality, candidate ordering, deduplication, fences, idempotency, workspace keys and historical channel BundleIdentity strings never consume human labels. Equal names or abbreviated-prefix collisions must remain distinct.
+      Resolve the exact admitted flow and walk only its enclosing flows. For each provider directory key, select the nearest whole directory before looking up any body role. A nearer trigger-only provider therefore shadows an ancestor channel of the same key; no per-role fallback or body mixing is permitted. Sibling and descendant providers are not visible. Return deterministic directory-key order from immutable admitted membership, without host reads, imported lists or a second topology interpreter. Unknown, noncanonical and provider-directory flow selectors refuse rather than selecting the root.
+      Executable semantic projections consume the original rooted compiler input; mutable exported indexes, substituted content artifacts, optional scope interfaces and content-only programmatic bundles cannot create provider visibility. Logical decoding preserves content membership but does not create rooted execution authority.
+    admitted_definitions: |
+      internal/packadmission.AdmitProviderSource consumes that exact RootedSource and the platform contract, admits each captured directory through AdmitProviderDirectory once, and freezes each admitted flow's selected definition references through ProviderDirectoriesInScope. Definitions are indexed by exact captured directory, never globally by provider key; the same key in distinct branches may name different bodies and versions. No result is published if any role fails. A standalone provider is admitted as a directory definition, not as an executable flow scope. Source readbacks preserve the complete root pair even when content is equal, and neither re-scan a changed/deleted tree nor mint rooted evidence during content decode.
+      ProviderScope distinguishes the selected visible definitions from definitions physically held by that exact flow. Inherited visibility never transfers holder ownership. Held membership alone is not an enabled route, ready connection, claim, retained binding or effect grant; consumed holder inputs and the existing authorized ingress/connection owners remain required. Provider keys and flow selectors are exact and non-normalizing. Returned slices, role descriptors and bytes cannot mutate the frozen scope or its definitions.
+    effective_trigger_schema_admission: |
+      AdmitEffectiveSourceProjection compiles trigger schemas from the same captured ProviderSource and nearest whole-directory selection used by connector composition. An imports list, global role catalog, host reread or independently supplied provider key cannot select a BODY. Each schema is owned by its exact flow/event coordinate and captured BODY identity. A nearer directory without a trigger hides the ancestor trigger, including its schemas; equal short names in separate branches do not share a BODY.
+      Normalized schemas come from the admitted declarative mapping. Raw-only bodies remain supported. Raw event templates bind only concrete matching authored input pins through the existing event-name policy; the directory key is not a protocol hint. Both input and output pin schemas use the same typed imported schema compiler. Visibility alone creates no ingress declaration. The canonical standing declaration compiler consumes only held provider directories and matching input pins, and its compiled normalized-output metadata retains the exact flow's catalog generation separately from the composite schema fingerprint. This declaration metadata is not authenticated wire input, an enabled standing generation, a connection or an effect grant; credential admission and the existing runtime lifecycle owners remain required.
+      The scoped source preserves the existing private activity-tool compiler during repeated composition. Exact rooted selectors, defensive catalog/scope readbacks and closed retained reconstruction preserve schema and activity bindings after host mutation or deletion. Target-free catalog inspection may expose an unambiguous imported schema, but cannot supply an explicit root or foreign flow with receiver authority. Global aliases omit differing scoped BODY owners. The deterministic trigger-selection fingerprint and member labels describe captured schema composition, not credential or connection authority, acquisition provenance, or a new persisted receipt.
+      Event proofs, source-backed node/agent/timer subscription admission, endpoint association and declared-output readers validate the raw explicit flow selector through the existing admitted scope owner before any normalization. Padded, missing or unknown receiver selectors cannot acquire schema proof, handler/route admission or an endpoint by borrowing the root or another flow. Immediate agent/timer, pipeline and public-input wrappers preserve that raw coordinate. Source-free grammar classification and target-free catalog inspection are distinct supported operations, not receiver authority.
+      Descriptor and model preparation, replacement, and actor persistence projection preserve the raw authored FlowID until the existing exact scope owner admits or refuses it. Refusal must not repair a mutable input or readback into a selector that a later call can admit. Agent declaration, name, execution and memory proofs, scoped policy provenance, executable-node lookup, root-coordinate matching and input-producer evidence use the same exact authored coordinate; derived event names and typed route/instance semantics retain their separate existing normalization rules.
+    effective_connector_admission: |
+      AdmitEffectiveSourceProjection admits connector definitions from that same captured ProviderSource, never from the global role inventory or an imports list. Every admitted flow must appear exactly once; a missing, repeated or foreign scope refuses before publishing an effective source. For each flow, the nearest selected directory supplies the entire connector role. A trigger-only nearer directory cannot borrow an ancestor connector. A flow-authored tool cannot redeclare a selected provider namespace, including when that provider has no connector role.
+      The existing activity compiler freezes inherited authored tools plus directory-owned connector tools by declaring flow. Exported scope/tool metadata cannot replace those bindings. Global tool readback omits a connector alias when the selected BODY identity differs between flows; execution and source identity consume exact flow/tool coordinates instead. Connector generation, source label, version and hash metadata are likewise flow-scoped. A source label is the captured member path, not acquisition provenance, and is never an execution grant.
+      Repeated composition must agree with the existing private frozen activity-tool inventory and every admitted tool contract before compiling or publishing a successor. Replacement, deletion or insertion through exposed authored maps refuses rather than becoming new source authority, even under the same rooted pair and effective identity. Unchanged repeats remain valid. Fresh captured source changes and closed retained reconstruction enter through their original source compiler, not mutated readbacks.
+      Declared generation metadata retains the existing reviewed builtin profile hash and source-evidence checks. Its explicit profile path selects that finite generator owner; a directory name is never a protocol or generated-pack registry alias. Unknown, fixture-only or contradictory profile/source evidence refuses at directory admission. Indexed embedded producers retain their independent no-downgrade checks. Role presence does not grant a credential, installed native implementation, enabled connection, journal acknowledgment or provider effect.
+    human_gate_verification: |
+      The source-only stage_gate_channel_scope check requires at least one visible channel.yaml provider for each human stage gate in both structural verification and execution admission. Missing structural visibility is a hard invalidity naming the exact flow, stage and gate and the command swarm import telegram from that flow or an enclosing flow. A visible channel body is not a claim, credential, connection or readiness grant, and does not bypass body-specific admission. Nearest claimed channel selection and connection configuration are separate runtime responsibilities.
+  human_source_presentation:
+    owner: internal/sourceartifact.AdmittedSourceArtifact.HumanLabel and RootedSource.HumanLabel
+    rule: |
+      Human output with exact rooted evidence uses directory@version when root manifest metadata is present, otherwise directory@hash7. Content-only artifacts with no rooted evidence use hash7 alone even when their manifest has a version. hash7 means seven digest hex characters, never a selector. Stored decoding must not invent a basename from synthetic sourceRoot dot, borrow cwd or an unrelated serving tree, or persist display metadata. RootedSource readback consumes its separately retained root pair without mutating the shared content artifact. JSON/API and existing explicit YAML retain exact full machine identities. Equality, candidate ordering, deduplication, fences, idempotency, workspace keys and historical channel BundleIdentity strings never consume human labels. Equal names or abbreviated-prefix collisions must remain distinct.
       HumanLabel replaces Unicode control and format (Cf) characters and line/paragraph separators with spaces for display only; admitted metadata, authored member bytes, logical framing, full hashes, and machine authority are never sanitized or rewritten.
     consumers: [verify, describe, serve, health, version_server_quiet, run_fork, agent_frame_effective, channel_list, channel_status, channel_candidates, test_diagnostics]
-    verify_evidence: swarm verify --json returns the full bundle_hash and ASCII-sorted member table of label, canonical disposition and exact body byte count, plus optional root manifest metadata, from the already-admitted artifact without a second filesystem pass.
+    verify_evidence: swarm verify --json returns the full bundle_hash and ASCII-sorted member table of label, canonical disposition and exact body byte count, plus root manifest metadata, from the already-admitted artifact without a second filesystem pass.
   flow_tree:
     root_path: .
     derivation: |
       Every non-reserved directory segment above a classified declaration, typed resource, or live descendant is a FlowNode. Child identity is its exact slash-relative path from the selected root. The selected root is spelled exactly `.`; an empty path, backslash spelling, or any other normalized-equivalent spelling is invalid rather than repaired. A non-root node must have local semantic/resource content or a live descendant; dead directories fail. The selected root must contain at least one semantic declaration, typed resource, or live descendant.
+      Every such admitted FlowNode requires an explicitly authored manifest.yaml with version and platform_version, including selected-root, intermediate and resource-established nodes. The existing tree, not an independent filesystem scan, owns that requirement. Provider directories require their own provider manifest but do not become flows. Reserved resource folders and organizational parents outside the selected tree acquire no manifest requirement. Capture and retained decoding never synthesize metadata or schema files.
     schema_owner: |
-      schema.yaml owns instance shape, ingress, schedules, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. Deployment retention derives from enabled ingress bindings and active declared clocks, never an activation marker. There is no connect.yaml or manifest-owned routing surface.
+      schema.yaml owns instance shape, schedules, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. The retired name, imports and ingress keys refuse on presence, including empty and null, with teaching that the directory is the name, providers live in directories, and provider events belong in pins.inputs on their holding flow with raw policy in trigger.yaml. There is no alias period or rewrite tool before 1.0. Deployment retention derives from enabled directory-owned ingress bindings and active declared clocks, never an activation marker. There is no connect.yaml or manifest-owned routing surface.
       Effective shape and the compiled stage catalog exist for every admitted FlowNode, including the selected root and schema-omitted intermediate/resource-established nodes. Such nodes are keyless and stateless unless their actual declarations supply those facts; no synthetic schema file, field, pin, activation or authored provenance is created. Constructor compilation, structural identity validation and lexical ancestry selection consume that same admitted node owner. Missing, dead, reserved-resource and outside-tree coordinates do not acquire an effective schema or constructor.
       Stage compilation consumes the admitted-tree effective schema projection, not only authored schema files. A genuinely stageless node has a valid empty catalog, with no invented stage or transition. A missing or invalid catalog remains an admission error; assignment checks never synthesize a runtime fallback.
     discovery_output: |
@@ -44073,8 +44235,29 @@ filesystem_source_model:
       - postgres
     rule: |
       Local durable run/serve persists or reconciles the exact logical blob before publishing a runtime or run that references its hash. Missing, corrupt, conflicting, or hash-mismatched blobs fail closed. Acknowledgment uncertainty is reconciled by exact hash/blob readback; it never permits a runtime without proven source availability.
+    rooted_admission:
+      owner: internal/sourceartifact.RootAdmission and the existing selected-store source-artifact owner
+      rule: |
+        Byte-content identity and rooted admission are distinct facts. Genuine filesystem admission captures the exact validated selected root directory before walking the owned member snapshot. RootAdmission is the immutable pair (bundle_hash, root_directory), and RootedSource pairs that evidence with exact admitted bytes. Neither bundle-v2 framing nor machine WorkflowName dot / WorkflowVersion bundle_hash changes. Content-only logical decoding never invents a root. The selected-store owner inserts source_root_admissions atomically with rooted content ingestion and restores a pair only through exact row/blob readback, without mutating the shared content artifact, a latest-name pointer, cwd, schema/manifest name or a runtime projection basename. A reference is not authority and a root row cannot reconstruct deleted content. This is internal execution evidence, never an authored import receipt, acquisition provenance, new public selector or multi-deployment contract.
+        Source operands and invocation coordinates are filesystem paths, never whitespace-trimmed identifiers. Invalid whitespace in the selected root basename refuses with the rename teaching error and cannot select a valid sibling. Whitespace in ancestor directory names is preserved and does not invalidate a valid selected root. CLI selection, executable loading and project-local scratch coordinates preserve that exact path before admission; they never repair a spelling by opening a different directory.
+        Only a genuinely unbound hash request may resolve a sole retained pair. Zero pairs is missing evidence; multiple pairs is explicit ambiguity, never first/last/latest selection. Discovery freezes one exact pair before content readback, and later work consumes that pair rather than selecting again. Existing bound run, declaration, operation or selected live-context evidence wins and must not fall back to global discovery. Content-only reads remain independent of root ambiguity.
+        Run creation and explicit source revision take opaque RootAdmission alongside their exact content fact. Missing root evidence and a root for another content hash refuse before mutation. Existing run-origin validation remains authoritative; a content hash alone never supplies the rooted portion of a new run or revision.
+        Run creation checks any supplied rooted execution context against the requested pair before insertion or exact-replay acceptance. A genuinely absent rooted context remains valid for root-independent callers; an explicitly cleared or contradictory context refuses without run or story mutation. Explicit source revision still consumes its legitimate predecessor context rather than requiring that context to identify the replacement pair.
+        The selected run-lifecycle owner writes source_root_directory in the same native transaction as run creation or explicit source revision and validates that exact pair through the source owner. Same-content creation under another root conflicts; same-content explicit source revision is not a no-op unless the pair matches. Bound reconstruction reads the run reference and its exact retained content within one native read snapshot. Source deletion makes reconstruction unavailable without erasing the historical pair. Neither fresh filesystem access nor unique-hash discovery repairs a missing bound reference.
+        Historical run headers carry the exact persisted pair through both native scanners into the canonical lifecycle Snapshot validator. Detail, list, origin, clock and header-based diagnostic reads do not reconstruct executable source or require its live blob or filesystem. Invalid root evidence refuses without normalization, inference or a partial successful list/cursor. The root remains internal validation evidence; the public run-header shape and existing lifecycle, origin, standing-relation, failure and continuation checks are unchanged.
+        Standing declarations retain their complete source pair independently of historical generation runs. Same-content root changes are declaration revisions, invalidate the old operation observation and pending publication, and revise an active run only through the existing source-revision owner. Dormant and terminal predecessors keep their own run-bound pair until the existing reconciliation/reset policy permits revision or creates a successor. Predecessor cleanup consumes that run's exact retained source in the same transaction; the latest declaration never supplies its root. Reset restores the exact declaration pair before creating its successor. Publication requires agreement between the active run and declaration pair and rejects a supplied stale rooted context. Service IDs, generation identity, enabled-binding retention and lifecycle transitions are unchanged; no root metadata becomes a public source selector.
+        Removing a dormant declaration also cleans up its predecessor through that run's canonical pair, even when the latest declaration has different content. Quiescence has no caller-supplied source hash: it derives cleanup and journal scope from the predecessor it owns. The run's historical source remains unchanged while the declaration is orphaned; repeated removal does not repeat cleanup or append another journal transition.
+        Budget recovery's selected-store target projection carries the complete run-bound source reference read alongside the entity's exact flow and raw stage. It never substitutes the current declaration, current runtime, or a globally discovered root. Invalid row evidence or a failed read rejects the entire target projection without disclosing a valid prefix. The reference remains a lookup key, not executable admission; bound source restoration and compilation must validate its exact retained pair independently.
+        The internally admitted selected-fork operation carries a required target_root_reference. Its bundle hash must match target_bundle_hash, and its complete pair participates in the existing operation semantic hash. Binding the resolved historical point and durable request serialization preserve that pair; another root with identical bytes is a different operation meaning. The reference alone grants no retained-source or execution authority, and does not alter the public fork selectors or result coordinates.
+        Executable compilation requires RootedSource at its sole compiler entrance. The compiled bundle privately retains that exact source and refuses replacement of its exposed artifact even by another artifact with identical bytes. Content-only logical decoding remains available for inspection but is not an alternate compiler input. An original-run request and a retained selected-fork request consume their separate native reconstruction owners; a fresh target consumes its exact selected rooted context or, only when genuinely unbound, the sole retained pair. An explicitly cleared context is not absence. The retained child reader verifies child, binding, permanent operation and root/blob agreement within one read snapshot without acquiring execution or operation-write authority. Cancellation and native completion errors disclose no reconstructed source.
+        A durable EventBus freezes its opaque root from that compiled source and requires agreement with its content fact. Publication and accepted-work context handoffs carry the complete root alongside the content fact. A supplied contradictory or explicitly cleared root refuses before publication; rebuilding a work context cannot turn a clear into absence or select another admitted root. A selected source's executable module must agree with the same exact compiled root and owned artifact as the selected semantic source.
+        Ordinary, typed-API and exact-route replay recipient preflight enter the same existing EventBus source-context admission before payload consumers, new-run proposal or receiver preparation. Only that publisher's frozen root may supply genuinely absent caller evidence; contradictory or explicitly cleared roots, root-without-content contexts and canceled callers refuse before source callbacks. Preview remains read-only: no run, construction, event, delivery, claim or effect is committed, and success never substitutes for the independent publication, lifecycle or exact-duplicate fences. Explicit source-free ephemeral inspection retains its existing non-executable contract.
+        Runtime-context registration requires the opaque compiled root to agree with the content fact and the runtime EventBus's frozen root. Execution acquisition checks supplied content and rooted-context evidence before admitting a lease and carries the frozen pair into accepted work. Native run availability projects that run's exact reference and the presence of its retained root and content; run dispatch never borrows a same-hash context for another root. Metadata context results are detached values and cannot retarget registration. Context-reset staging, publication and release preserve the identical pair; source-set transition membership compares the complete coordinate before fencing. There remains only one public context per content hash. Root facts and retained-root availability are internal, not new public run-header fields or selectors.
+        Serve's existing source-ingest plan freezes RootedSource and registers that exact root, content and data catalog through the selected-store rooted ingest owner before publication. A failed or uncertain acknowledgment publishes no source fact and is not automatically retried; a successful result must return the same admitted root. Content-only ingest remains valid for content-only responsibilities but is not an executable serve-ingest alternative.
+        Runtime standing-declaration planning, activation preparation/mutation and explicit channel promotion supply the compiled source's opaque admission to the existing StandingServiceCandidate owner. The serve standing controller instead carries its already-selected context's identical admission. Candidate validation requires agreement with the content fact; neither producer discovers another root by hash or reconstructs an opaque grant from a reference. Dormant candidates retain this declaration evidence but remain disabled, with no standing run or executable retention granted by root presence alone. Native reconciliation and caller-context refusal retain their existing transactional and revision fences.
+        The complete root pair participates in the existing effective-source digest; no second global semantic hash is introduced. Budget stage-source loading takes the target's complete retained reference. The current-source shortcut and per-projection compiled classifier cache compare that complete pair, not just bundle_hash; a same-content source under another root must be independently restored and compiled. Returned sources must agree with the exact requested reference before entity spend projection. The complete source-set plan likewise carries root_directory beside each internal source entry and includes it in the existing plan revision. Startup topology preparation and durable source-set rebind require the exact compiled source coordinate to occur in that plan before comparing desired agents, including when the source declares no agents; an empty agent set is not evidence of source membership. Retained-source reset consumes that frozen entry rather than discovering a root again. This does not add a public root selector or permit two public contexts for one content hash.
     reconstruction: |
-      Internal standing recovery, replay, reset and fork decode the selected-store blob and compile only the reconstructed artifact. They never require or inspect the original filesystem. Public process restart admits the same exact directory tree and reconciles its blob; a changed tree is a distinct source, never a fallback for retained work. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
+      Internal standing recovery, replay, reset and fork restore the selected responsibility's exact root and selected-store blob and compile only that RootedSource. They never require or inspect the original filesystem. Public process restart admits the same exact directory tree and reconciles its blob; a changed tree is a distinct source, never a fallback for retained work. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
     process_epoch_rule: |
       Serve admits its source directory once before runtime publication and keeps it fixed for the process epoch. Editing the original directory cannot replace a live runtime source. A different local artifact requires a new serve process; public persisted-hash boot, project reload and dynamic project replacement are retired rather than emulated. Internal retained contexts remain exact stored-artifact authority.
       Retained-source destructive reset is an execution-lifetime reconstruction of that identical admitted set, not source replacement. It consumes the already admitted artifact bytes and canonical serve construction inputs to mint fresh runtime and projection lifetimes. It does not restore retired bundle-management helpers or admit edited source bytes.

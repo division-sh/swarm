@@ -147,7 +147,7 @@ func TestIssue2586GeneratedActivityOptionalNullProbe(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			admission, err := admitter(context.Background(), event, "")
+			admission, err := admitter(context.Background(), event, events.AuthoredPayloadProducer("."))
 			if !tc.valid {
 				if err == nil {
 					t.Fatal("historical null payload acquired normalization instead of refusal")

@@ -57,7 +57,7 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			var artifacts interface {
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				runforkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			if h.sqlite != nil {

@@ -11,6 +11,8 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -20,18 +22,20 @@ import (
 )
 
 type runForkActivationLineage struct {
-	ForkRunID         string
-	ForkStatus        string
-	ForkBundleHash    string
-	SourceRunID       string
-	SourceBundleHash  string
-	ForkPoint         runfork.RunForkPoint
-	ForkEventID       string
-	ForkEventName     string
-	ForkEventTime     time.Time
-	ForkEventRevision int64
-	SourceRunStatus   string
-	EntityIDs         []string
+	ForkRootReference   sourceartifact.RootAdmissionReference
+	SourceRootReference sourceartifact.RootAdmissionReference
+	ForkRunID           string
+	ForkStatus          string
+	ForkBundleHash      string
+	SourceRunID         string
+	SourceBundleHash    string
+	ForkPoint           runfork.RunForkPoint
+	ForkEventID         string
+	ForkEventName       string
+	ForkEventTime       time.Time
+	ForkEventRevision   int64
+	SourceRunStatus     string
+	EntityIDs           []string
 }
 
 type RunForkActivationLineage = runForkActivationLineage
@@ -39,6 +43,11 @@ type RunForkActivationLineage = runForkActivationLineage
 func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (runfork.RunForkActivation, error) {
 	if s == nil || s.backend == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("postgres store is required")
+	}
+	if req.Process.Generation != 0 && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkActivate, s) {
+		var result runfork.RunForkActivation
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkActivateOperation(s, req, &result))
+		return result, err
 	}
 	forkRunID := strings.TrimSpace(req.ForkRunID)
 	if forkRunID == "" {
@@ -59,6 +68,11 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 	mutation := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		changes = privaterunlifecycle.ChannelCardChanges{}
 		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			if req.Process.Generation != 0 {
+				if err := requireForkActivationProcessTx(ctx, tx, req.Process, false); err != nil {
+					return err
+				}
+			}
 			lineage, err := loadRunForkActivationLineage(ctx, s.RunLifecyclePostgresOwner, tx, forkRunID)
 			if err != nil {
 				return err
@@ -86,9 +100,17 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 			if len(lineage.EntityIDs) == 0 {
 				return fmt.Errorf("fork activation requires constructed instance headers")
 			}
+			sourceCtx := ctx
 			binding, err := loadRunForkSelectedContractBinding(ctx, tx, lineage.ForkRunID)
 			if err == nil {
 				result.SelectedContractBinding = &binding
+				if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkActivate, s) || req.Process.Generation == 0 {
+					return runtimeownership.ErrProcessNotCurrent
+				}
+				sourceCtx, err = admitSelectedForkActivationRootsTx(ctx, tx, lineage, req.OriginalRootAdmission, true)
+				if err != nil {
+					return err
+				}
 			} else if err != sql.ErrNoRows {
 				return fmt.Errorf("load selected contract binding: %w", err)
 			}
@@ -146,7 +168,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 			if err := bindRunForkFanOutPendingReplays(ctx, tx, attempt, lineage.ForkRunID, plan, now); err != nil {
 				return err
 			}
-			if err := s.applyRunForkSourceFreeze(ctx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
+			if err := s.applyRunForkSourceFreeze(ctx, sourceCtx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
 				return err
 			}
 			for _, family := range []privaterunforkrevision.Family{
@@ -183,6 +205,10 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 	if s == nil || s.backend == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("sqlite store is required")
 	}
+	if req.Process.Generation != 0 && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkActivate, s) {
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkActivateOperation(s, req, &result))
+		return result, err
+	}
 	forkRunID := strings.TrimSpace(req.ForkRunID)
 	if forkRunID == "" {
 		return runfork.RunForkActivation{}, fmt.Errorf("fork run_id is required")
@@ -199,6 +225,11 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 	mutation := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite run fork activation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		changes = privaterunlifecycle.ChannelCardChanges{}
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if req.Process.Generation != 0 {
+				if err := requireForkActivationProcessTx(txctx, tx, req.Process, true); err != nil {
+					return err
+				}
+			}
 			lineage, err := loadSQLiteRunForkActivationLineage(txctx, s.RunLifecycleSQLiteOwner, tx, forkRunID)
 			if err != nil {
 				return err
@@ -223,9 +254,17 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 			if len(lineage.EntityIDs) == 0 {
 				return fmt.Errorf("fork activation requires constructed instance headers")
 			}
+			sourceCtx := txctx
 			binding, err := loadRunForkSelectedContractBinding(txctx, tx, lineage.ForkRunID)
 			if err == nil {
 				result.SelectedContractBinding = &binding
+				if !runtimeownership.PreparedOperationEntered(txctx, runtimeownership.PreparedForkActivate, s) || req.Process.Generation == 0 {
+					return runtimeownership.ErrProcessNotCurrent
+				}
+				sourceCtx, err = admitSelectedForkActivationRootsTx(txctx, tx, lineage, req.OriginalRootAdmission, false)
+				if err != nil {
+					return err
+				}
 			} else if err != sql.ErrNoRows {
 				return fmt.Errorf("load selected contract binding: %w", err)
 			}
@@ -276,7 +315,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 			if err := bindRunForkFanOutPendingReplays(txctx, tx, attempt, lineage.ForkRunID, plan, now); err != nil {
 				return err
 			}
-			if err := s.applyRunForkSourceFreeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
+			if err := s.applyRunForkSourceFreeze(txctx, sourceCtx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
 				return err
 			}
 			for _, family := range []privaterunforkrevision.Family{
@@ -384,11 +423,12 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 		)
 	}
 	lineage := runForkActivationLineage{
-		ForkRunID:      snapshot.RunID,
-		ForkStatus:     string(snapshot.State),
-		ForkBundleHash: snapshot.BundleHash,
-		SourceRunID:    snapshot.Origin.SourceRunID(),
-		ForkEventID:    snapshot.Origin.SourceEventID(),
+		ForkRunID:         snapshot.RunID,
+		ForkStatus:        string(snapshot.State),
+		ForkBundleHash:    snapshot.BundleHash,
+		ForkRootReference: snapshot.RootReference,
+		SourceRunID:       snapshot.Origin.SourceRunID(),
+		ForkEventID:       snapshot.Origin.SourceEventID(),
 		ForkPoint: runfork.RunForkPoint{Kind: snapshot.Origin.ForkPointKind(), Revision: snapshot.Origin.ForkRevision(),
 			EventID: snapshot.Origin.SourceEventID()},
 	}
@@ -401,6 +441,7 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 		SELECT
 			COALESCE(s.status, ''),
 			COALESCE(s.bundle_hash, ''),
+			COALESCE(s.source_root_directory, ''),
 			COALESCE(e.event_name, ''),
 			e.created_at
 		FROM runs s
@@ -410,6 +451,7 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 	`, lineage.SourceRunID, lineage.ForkEventID).Scan(
 		&lineage.SourceRunStatus,
 		&lineage.SourceBundleHash,
+		&lineage.SourceRootReference.RootDirectory,
 		&lineage.ForkEventName,
 		&forkEventTime,
 	)
@@ -434,6 +476,7 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 	}
 	lineage.ForkBundleHash = strings.TrimSpace(lineage.ForkBundleHash)
 	lineage.SourceBundleHash = strings.TrimSpace(lineage.SourceBundleHash)
+	lineage.SourceRootReference.BundleHash = lineage.SourceBundleHash
 	return lineage, nil
 }
 
@@ -450,7 +493,8 @@ func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privater
 	}
 	lineage := runForkActivationLineage{
 		ForkRunID: snapshot.RunID, ForkStatus: string(snapshot.State), ForkBundleHash: snapshot.BundleHash,
-		SourceRunID: snapshot.Origin.SourceRunID(), ForkEventID: snapshot.Origin.SourceEventID(),
+		ForkRootReference: snapshot.RootReference,
+		SourceRunID:       snapshot.Origin.SourceRunID(), ForkEventID: snapshot.Origin.SourceEventID(),
 		ForkPoint: runfork.RunForkPoint{Kind: snapshot.Origin.ForkPointKind(), Revision: snapshot.Origin.ForkRevision(),
 			EventID: snapshot.Origin.SourceEventID()},
 	}
@@ -460,12 +504,12 @@ func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privater
 	lineage.ForkEventRevision = lineage.ForkPoint.Revision
 	var forkEventTimeRaw any
 	err = tx.QueryRowContext(ctx, `
-		SELECT COALESCE(s.status, ''), COALESCE(s.bundle_hash, ''), COALESCE(e.event_name, ''), e.created_at
+		SELECT COALESCE(s.status, ''), COALESCE(s.bundle_hash, ''), COALESCE(s.source_root_directory, ''), COALESCE(e.event_name, ''), e.created_at
 		FROM runs s
 		LEFT JOIN events e ON e.run_id = s.run_id AND e.event_id = $2
 		WHERE s.run_id = $1
 	`, lineage.SourceRunID, lineage.ForkEventID).Scan(
-		&lineage.SourceRunStatus, &lineage.SourceBundleHash, &lineage.ForkEventName, &forkEventTimeRaw,
+		&lineage.SourceRunStatus, &lineage.SourceBundleHash, &lineage.SourceRootReference.RootDirectory, &lineage.ForkEventName, &forkEventTimeRaw,
 	)
 	if err == sql.ErrNoRows {
 		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run")
@@ -492,6 +536,7 @@ func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privater
 	}
 	lineage.ForkBundleHash = strings.TrimSpace(lineage.ForkBundleHash)
 	lineage.SourceBundleHash = strings.TrimSpace(lineage.SourceBundleHash)
+	lineage.SourceRootReference.BundleHash = lineage.SourceBundleHash
 	return lineage, nil
 }
 

@@ -1,4 +1,4 @@
-name: activity-identity-control
+# fixture: activity-identity-control
 stages: []
 pins:
   inputs:

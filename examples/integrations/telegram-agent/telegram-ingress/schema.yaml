@@ -1,4 +1,4 @@
-name: telegram-ingress
+# fixture: telegram-ingress
 stages:
   active:
     gate:

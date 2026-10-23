@@ -1,4 +1,4 @@
-name: agent-only
+# fixture: agent-only
 stages:
   active: {}
 pins:

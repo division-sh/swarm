@@ -34,6 +34,7 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -77,8 +78,12 @@ func TestRunForkProfileInheritanceRequiresExactEffectiveSourceBeforeMutation(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-		SourceRunID: sourceRunID, At: eventID, EffectiveSourceIdentity: different,
+		SourceRunID: sourceRunID, At: eventID, EffectiveSourceIdentity: different, RootAdmission: rooted.Admission(),
 	}); err == nil || !strings.Contains(err.Error(), "effective source mismatch") {
 		t.Fatalf("different effective source fork error = %v", err)
 	}
@@ -90,7 +95,7 @@ func TestRunForkProfileInheritanceRequiresExactEffectiveSourceBeforeMutation(t *
 		t.Fatalf("fork rows after rejected effective source = %d, want 0", forkRows)
 	}
 
-	request := runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, EffectiveSourceIdentity: identity}
+	request := runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, EffectiveSourceIdentity: identity, RootAdmission: rooted.Admission()}
 	materialized, err := pg.MaterializeRunFork(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +180,11 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
-	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: secondEventID})
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: secondEventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -431,7 +440,11 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 		t.Fatalf("materialization metadata = %#v", metadata)
 	}
 
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -583,6 +596,10 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	at := time.Unix(1700000510, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	selection := runfork.RunForkContractSelection{
 		Mode: runfork.RunForkContractSelectionModeSelectedContracts,
@@ -590,6 +607,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
+		RootAdmission:     rooted.Admission(),
 		ContractSelection: &selection,
 	})
 	if err != nil {
@@ -661,7 +679,13 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 
 	targetArtifact := storeTestSourceArtifact("fork-selected-contract-binding")
 	targetHash := targetArtifact.BundleHash()
-	seedStoreTestPersistedArtifact(t, db, targetArtifact)
+	if targetHash == authorActivityTestBundleHash {
+		t.Fatal("explicit target must differ from the source bundle")
+	}
+	targetRoot, _ := sourceartifactfixture.Rooted(t, "fixture", targetArtifact)
+	if _, err := pg.EnsureRootedSource(ctx, targetRoot); err != nil {
+		t.Fatal(err)
+	}
 	selection := runfork.RunForkContractSelection{
 		Mode:       runfork.RunForkContractSelectionModeBundleHash,
 		BundleHash: targetHash,
@@ -674,6 +698,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 		SourceRunID:        sourceRunID,
 		At:                 eventID,
 		SourceArtifactFact: targetSource,
+		RootAdmission:      targetRoot.Admission(),
 		ContractSelection:  &selection,
 	})
 	if err != nil {
@@ -715,6 +740,10 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	at := time.Unix(1700000520, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	invalidSelection := runfork.RunForkContractSelection{
 		Mode:       runfork.RunForkContractSelectionModeSelectedContracts,
 		BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -722,6 +751,7 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
+		RootAdmission:     rooted.Admission(),
 		ContractSelection: &invalidSelection,
 	}); err == nil || !strings.Contains(err.Error(), "cannot carry bundle_hash") {
 		t.Fatalf("MaterializeRunFork invalid selection error = %v, want selected_contracts/hash conflict", err)
@@ -733,6 +763,7 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
+		RootAdmission:     rooted.Admission(),
 		ContractSelection: &validSelection,
 	})
 	if err != nil {
@@ -741,13 +772,13 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
 			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id,
-			mode, bundle_hash
+			mode, bundle_hash, target_bundle_hash, source_root_directory
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'event', 1, $3::uuid,
-			'selected_contracts', NULL
+			'selected_contracts', NULL, $4, $5
 		)
-	`, materialized.ForkRunID, sourceRunID, eventID)
+	`, materialized.ForkRunID, sourceRunID, eventID, rooted.Admission().BundleHash(), rooted.Admission().RootDirectory())
 	var pqErr *pq.Error
 	if !errors.As(err, &pqErr) || string(pqErr.Code) != "23505" {
 		t.Fatalf("duplicate selected contract binding error = %v, want unique failure", err)
@@ -797,8 +828,12 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	if revision := captureRunForkTestRevision(t, db, sourceRunID); revision != 1 {
 		t.Fatalf("construction, event and in-progress delivery split the original cut: revision=%d", revision)
 	}
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	blocked, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	blocked, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("MaterializeRunFork error = %v, want non-agent delivery blocker", err)
 	}
@@ -823,14 +858,14 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	deletePostgresDeliveryFixturesForRun(t, ctx, db, sourceRunID)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, clearEventID, sourceRunID, "fork.delivery_cleared", events.EventProducerPlatform, "test", entityID, "", at.Add(time.Second))
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
-	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID}); err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()}); err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("MaterializeRunFork original frontier after delete error = %v, want immutable non-agent delivery blocker", err)
 	}
-	first, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID})
+	first, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork first: %v", err)
 	}
-	repeated, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID})
+	repeated, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork exact replay: %v", err)
 	}
@@ -855,8 +890,9 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 		t, ctx, db, first.ForkRunID, storerunlifecycle.ScenarioSetupRunOrigin(),
 	)
 	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          clearEventID,
+		SourceRunID:   sourceRunID,
+		At:            clearEventID,
+		RootAdmission: rooted.Admission(),
 	}); err == nil || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {
 		t.Fatalf("MaterializeRunFork conflicting replay error = %v", err)
 	}
@@ -874,7 +910,11 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1022,7 +1062,11 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady || len(plan.PendingWork) != 1 {
 		t.Fatalf("historical replay plan = %#v, want one executable pending delivery", plan)
 	}
-	materialized, err := store.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: sourceID})
+	rooted, err := store.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := store.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: sourceID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1127,7 +1171,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	pg := newTestPostgresStore(t, db)
 
 	sourceRunID := uuid.NewString()
-	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: pg}, sourceRunID, selectedActivityProducerSource(t))
+	source := selectedActivityProducerSource(t)
+	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: pg}, sourceRunID, source)
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
@@ -1191,7 +1236,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 		t.Fatalf("plan replay readiness = execution:%v admission:%#v", plan.ExecutionReady, plan.ReplayResumeAdmission)
 	}
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1360,7 +1409,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if !ok {
 		t.Fatal("replay fixture requires its admitted source fact")
 	}
-	eb, err := newStoreTestEventBus(t, pg, runtimebus.EventBusOptions{SourceArtifactFact: fact})
+	eb, err := newStoreTestEventBus(t, pg, runtimebus.EventBusOptions{SourceArtifactFact: fact, ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1550,7 +1599,11 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 			seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("safe-agent")}, runtimedelivery.StateQueued, nil)
 			targetDeliveryID := tc.seed(t, ctx, db, sourceRunID, eventID, at)
 			captureRunForkTestRevision(t, db, sourceRunID)
-			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+			rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
@@ -1639,7 +1692,11 @@ func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.
 	seedRunForkSessionProjection(t, db, sourceRunID, "generic-session-agent", sessionID, "terminated", at)
 	selectedRevision := captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1673,7 +1730,11 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	at := time.Unix(1700000900, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1702,7 +1763,11 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	cleanEventID := uuid.NewString()
 	seedActivationReadySourceRun(t, db, cleanSourceRunID, cleanEntityID, cleanEventID, at.Add(time.Minute))
 	captureRunForkTestRevision(t, db, cleanSourceRunID)
-	cleanMaterialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: cleanSourceRunID, At: cleanEventID})
+	cleanRooted, err := pg.LoadRunRootedSource(ctx, cleanSourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanMaterialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: cleanSourceRunID, At: cleanEventID, RootAdmission: cleanRooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork clean: %v", err)
 	}
@@ -1726,7 +1791,11 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	at := time.Unix(1700001000, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1784,7 +1853,11 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 	at := time.Unix(1700001050, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1903,7 +1976,11 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			at := time.Unix(1700001060, 0).UTC()
 			seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 			captureRunForkTestRevision(t, db, sourceRunID)
-			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+			rooted, err := pg.LoadRunRootedSource(ctx, sourceRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, RootAdmission: rooted.Admission()})
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}

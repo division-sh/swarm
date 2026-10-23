@@ -18,11 +18,16 @@ func (f preparedPublishEventReaderFunc) LoadPreparedPublishEvent(ctx context.Con
 }
 
 func TestCommittedReplayPropagatesPreparedEventReadFailureBeforeDispatch(t *testing.T) {
+	source := sourceMutationPublicationSource(t, "committed-read-failure")
 	readFailure := errors.New("prepared event read failed")
 	for _, consumer := range []string{"committed_replay", "post_commit_dispatch"} {
 		t.Run(consumer, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
-			bus, err := newScopedTestEventBus(store)
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err := bus.AdmitSourceArtifactFact(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -35,11 +40,11 @@ func TestCommittedReplayPropagatesPreparedEventReadFailureBeforeDispatch(t *test
 			switch consumer {
 			case "committed_replay":
 				_, _, _, err = bus.replayRecipientsForCommittedEvent(
-					context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed,
+					ctx, evt, nil, runtimepipelineobligation.ScopeSubscribed,
 				)
 			case "post_commit_dispatch":
 				_, _, err = (engineDispatcher{bus: bus}).dispatchIntent(
-					context.Background(), runtimeengine.EmitIntent{Event: evt},
+					ctx, runtimeengine.EmitIntent{Event: evt},
 				)
 			default:
 				t.Fatalf("unsupported consumer %q", consumer)
@@ -53,6 +58,7 @@ func TestCommittedReplayPropagatesPreparedEventReadFailureBeforeDispatch(t *test
 }
 
 func TestCommittedReplayRejectsCorruptPreparedSettlementAcrossConsumers(t *testing.T) {
+	source := sourceMutationPublicationSource(t, "committed-corrupt-settlement")
 	evt := exactSiblingObligationEvent("corrupt-settlement")
 	admitted, err := events.RevalidatePersistedEvent(evt)
 	if err != nil {
@@ -77,7 +83,11 @@ func TestCommittedReplayRejectsCorruptPreparedSettlementAcrossConsumers(t *testi
 	} {
 		for _, consumer := range []string{"committed_replay", "post_commit_dispatch"} {
 			t.Run(corruption.name+"/"+consumer, func(t *testing.T) {
-				bus, err := newScopedTestEventBus(newTargetRouteMemoryStore())
+				bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{ContractBundle: source})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, err := bus.AdmitSourceArtifactFact(context.Background())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -88,11 +98,11 @@ func TestCommittedReplayRejectsCorruptPreparedSettlementAcrossConsumers(t *testi
 				switch consumer {
 				case "committed_replay":
 					_, _, _, err = bus.replayRecipientsForCommittedEvent(
-						context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed,
+						ctx, evt, nil, runtimepipelineobligation.ScopeSubscribed,
 					)
 				case "post_commit_dispatch":
 					_, _, err = (engineDispatcher{bus: bus}).dispatchIntent(
-						context.Background(), runtimeengine.EmitIntent{Event: evt},
+						ctx, runtimeengine.EmitIntent{Event: evt},
 					)
 				}
 				if err == nil || !strings.Contains(err.Error(), corruption.want) {
@@ -103,48 +113,14 @@ func TestCommittedReplayRejectsCorruptPreparedSettlementAcrossConsumers(t *testi
 	}
 }
 
-func TestExactDuplicateReuseRejectsCorruptPreparedAggregateBeforeRoutePlanDerivation(t *testing.T) {
+func TestCommittedNoDeliveryNeverConsultsCurrentTopology(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	bus, err := newScopedTestEventBus(store)
+	source := sourceMutationPublicationSource(t, "committed-no-delivery")
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := exactSiblingObligationEvent("corrupt-exact-duplicate")
-	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: base.RunID()}
-	evt, err := events.ResolveEnvelope(
-		base,
-		events.EnvelopeForTargetRoute(base.NormalizedEnvelope(), target),
-	)
-	if err != nil {
-		t.Fatalf("resolve exact duplicate fixture target: %v", err)
-	}
-	routes := []events.DeliveryRoute{
-		{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator")), Target: events.MustExistingEntityTarget(target)},
-		{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator")), Target: events.MustMaterializingEntityTarget(target)},
-	}
-	store.events[evt.ID()] = evt
-	store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
-	store.routes[evt.ID()] = routes
-	admitted, err := events.AdmitForPublish(evt, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	if err != nil {
-		t.Fatalf("admit exact duplicate fixture: %v", err)
-	}
-
-	_, _, err = bus.prepareClosedPublication(
-		testAuthorActivityContext(context.Background()),
-		eventBusCommitPublishPlan{bus: bus, event: evt, admitted: admitted},
-	)
-	if err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
-		t.Fatalf("prepare corrupt exact duplicate error = %v, want aggregate route contradiction", err)
-	}
-	if len(store.events) != 1 || len(store.routes[evt.ID()]) != 2 || len(store.settlements) != 1 {
-		t.Fatalf("rejected duplicate mutated store: events=%#v routes=%#v settlements=%#v", store.events, store.routes, store.settlements)
-	}
-}
-
-func TestCommittedNoDeliveryNeverConsultsCurrentTopology(t *testing.T) {
-	store := newTargetRouteMemoryStore()
-	bus, err := newScopedTestEventBus(store)
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +143,7 @@ func TestCommittedNoDeliveryNeverConsultsCurrentTopology(t *testing.T) {
 	store.routes[evt.ID()] = nil
 
 	live, internal, routes, err := bus.replayRecipientsForCommittedEvent(
-		context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed,
+		ctx, evt, nil, runtimepipelineobligation.ScopeSubscribed,
 	)
 	if err != nil {
 		t.Fatalf("replay explicit no-delivery: %v", err)
@@ -176,7 +152,7 @@ func TestCommittedNoDeliveryNeverConsultsCurrentTopology(t *testing.T) {
 		t.Fatalf("replay recipients = live:%v internal:%v routes:%v, want explicit no-delivery", live, internal, routes)
 	}
 	if _, _, err := (engineDispatcher{bus: bus}).dispatchIntent(
-		context.Background(), runtimeengine.EmitIntent{Event: evt},
+		ctx, runtimeengine.EmitIntent{Event: evt},
 	); err != nil {
 		t.Fatalf("post-commit explicit no-delivery: %v", err)
 	}

@@ -50,7 +50,16 @@ func TestIndexedFlowInstanceAuthorityRefusesInvalidProvenanceBothStores(t *testi
 				switch fault {
 				case "missing_readiness", "wrong_run_readiness":
 					if fault == "wrong_run_readiness" {
-						other := newReceiverConfigActivationFixtureForStore(t, f.store, false, files, nil, ownStoreTestAgentManager, nil)
+						other := f
+						other.ctx = correlation.WithRunID(f.ctx, uuid.NewString())
+						rooted, err := f.bundle.RootedSource()
+						if err != nil {
+							t.Fatal(err)
+						}
+						requireRunFixtureForTest(t, other.ctx, f.store, semanticRunFixture{
+							Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(other.ctx),
+							Artifact: f.bundle.SourceArtifact, BundleHash: fact.BundleHash(), RootAdmission: rooted.Admission(),
+						})
 						otherPlan, _ := constructR7PublicationReceiver(t, other, false)
 						if otherPlan.Identity.InstancePath != plan.Identity.InstancePath || correlation.RunIDFromContext(other.ctx) == runID {
 							t.Fatal("wrong-run proof requires the same path under another durable run")
@@ -67,9 +76,16 @@ func TestIndexedFlowInstanceAuthorityRefusesInvalidProvenanceBothStores(t *testi
 					}
 					args = append(args, raw)
 				case "foreign_run_source":
-					foreign := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  foreign: {}\n"))
-					sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), foreign)
-					if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: runID, Source: sourceartifactfixture.FactFor(foreign)}); err != nil {
+					foreign := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# foreign indexed publication source\n"})
+					rooted, err := foreign.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if foreign.SourceArtifact.BundleHash() == fact.BundleHash() {
+						t.Fatal("foreign source fixture reused the current artifact")
+					}
+					sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), foreign.SourceArtifact)
+					if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: runID, Source: sourceartifactfixture.FactFor(foreign.SourceArtifact), RootAdmission: rooted.Admission()}); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -120,8 +121,6 @@ func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) 
 			}
 			store := &deploymentRunStartProbeStore{acknowledged: test.acknowledged, replay: test.replay, rejected: test.rejected, fault: fault}
 			source, _ := acknowledgedRootInputEndpoint(t)
-			bundle, _ := semanticview.Bundle(source)
-			bundle.Semantics.Version = "1"
 			var calls int
 			finalized := make(chan struct{}, 1)
 			finalizer := runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, activation runtimepipeline.CommittedFlowInstanceActivation) error {
@@ -147,8 +146,12 @@ func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			command := durabledata.RunCreationCommand{RunID: uuid.NewString(), Actor: "operator", BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), Data: durabledata.RunCreationDataEnvelope{Pins: []durabledata.ExplicitPin{{Declaration: ref, VersionID: "resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}
-			ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+			command := durabledata.RunCreationCommand{RunID: uuid.NewString(), Actor: "operator", BundleHash: bus.sourceArtifactFact.BundleHash(), Data: durabledata.RunCreationDataEnvelope{Pins: []durabledata.ExplicitPin{{Declaration: ref, VersionID: "resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}
+			ctx, err := bus.AdmitSourceArtifactFact(runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(bus.runtimeInstanceID, bus.sourceArtifactFact.BundleHash())))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			if test.cancel {
 				store.cancel = cancel
@@ -178,8 +181,6 @@ func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) 
 func TestDeploymentRunStartForwardsOnlyExactEventlessFeed(t *testing.T) {
 	store := &deploymentRunStartProbeStore{acknowledged: true}
 	source, _ := acknowledgedRootInputEndpoint(t)
-	bundle, _ := semanticview.Bundle(source)
-	bundle.Semantics.Version = "1"
 	planner := newTestFlowInstanceActivationOwner(nil)
 	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: planner})
 	if err != nil {
@@ -194,13 +195,16 @@ func TestDeploymentRunStartForwardsOnlyExactEventlessFeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := durabledata.RunCreationCommand{
-		RunID: uuid.NewString(), Actor: "operator", BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
+		RunID: uuid.NewString(), Actor: "operator", BundleHash: bus.sourceArtifactFact.BundleHash(),
 		Data: durabledata.RunCreationDataEnvelope{Pins: []durabledata.ExplicitPin{{
 			Declaration: ref, VersionID: durabledata.VersionID("resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
 		}}},
 	}
 	request := apiidempotency.Request{Method: "run.start"}
-	ctx := testAuthorActivityContext(context.Background())
+	ctx, err := bus.AdmitSourceArtifactFact(runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(bus.runtimeInstanceID, bus.sourceArtifactFact.BundleHash())))
+	if err != nil {
+		t.Fatal(err)
+	}
 	got, err := bus.StartDeploymentRunAcknowledged(ctx, command, request)
 	if err != nil || got.Record.Summary.RunID != command.RunID || store.calls != 1 || store.got.EventID != "" || len(store.got.InitialEvent) != 0 {
 		t.Fatalf("deployment forward = %#v, %v; calls=%d command=%#v", got, err, store.calls, store.got)
@@ -317,7 +321,11 @@ func TestAPIEventReplayReleaseErrorUsesReplayProofWithoutNewAcknowledgement(t *t
 	store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", event.RunID(), event.RunID())}
 	store.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, source, event.RunID(), store.construction.Identity, "")}
 	completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
-	actual, replayed, err := bus.PublishAPIEventAcknowledged(testAuthorActivityContext(context.Background()), event, &endpoint, apiidempotency.Request{Method: "event.publish"}, completion)
+	ctx, err := bus.AdmitSourceArtifactFact(runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(bus.runtimeInstanceID, bus.sourceArtifactFact.BundleHash())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, replayed, err := bus.PublishAPIEventAcknowledged(ctx, event, &endpoint, apiidempotency.Request{Method: "event.publish"}, completion)
 	if !errors.Is(err, fault) || !replayed || actual.ResourceID != eventID || probe.dispatched.Load() != 0 {
 		t.Fatalf("replay completion=%#v replayed=%t error=%v dispatches=%d", actual, replayed, err, probe.dispatched.Load())
 	}
@@ -515,7 +523,11 @@ func TestAPIEventPostCommitErrorRetainsCompletionAndDispatchesAcknowledgedResult
 			store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", event.RunID(), event.RunID())}
 			store.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, source, event.RunID(), store.construction.Identity, "")}
 			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
-			actual, replay, err := bus.PublishAPIEventAcknowledged(testAuthorActivityContext(context.Background()), event, &endpoint, apiidempotency.Request{Method: "event.publish"}, completion)
+			ctx, err := bus.AdmitSourceArtifactFact(runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(bus.runtimeInstanceID, bus.sourceArtifactFact.BundleHash())))
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, replay, err := bus.PublishAPIEventAcknowledged(ctx, event, &endpoint, apiidempotency.Request{Method: "event.publish"}, completion)
 			if !errors.Is(err, fault) || replay {
 				t.Fatalf("API publication replay=%t error=%v, want post-commit fault", replay, err)
 			}
@@ -564,9 +576,13 @@ func TestPublicCompletionExactOccurrenceSurvivesRuntimeFence(t *testing.T) {
 		t.Run(variant, func(t *testing.T) {
 			process := worklifetime.NewProcess()
 			source, endpoint := acknowledgedRootInputEndpoint(t)
+			bundle, ok := semanticview.Bundle(source)
+			if !ok || bundle == nil || bundle.SourceArtifact == nil {
+				t.Fatal("public completion requires its captured source")
+			}
 			store := &publicationAcknowledgementProbeStore{acknowledged: true}
 			probe := &publicationAcknowledgementProbe{started: make(chan struct{}, 1)}
-			runtime, err := process.NewRuntime(t.Context(), worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+			runtime, err := process.NewRuntime(t.Context(), worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: bundle.SourceArtifact.BundleHash()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -625,7 +641,11 @@ func TestPublicCompletionExactOccurrenceSurvivesRuntimeFence(t *testing.T) {
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "task.requested", "provider", "", json.RawMessage(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
 			store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", event.RunID(), event.RunID())}
 			store.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, source, event.RunID(), store.construction.Identity, "")}
-			ctx := worklifetime.WithOccurrence(testAuthorActivityContext(t.Context()), owner)
+			ctx, err := bus.AdmitSourceArtifactFact(runtimeauthoractivity.WithScope(t.Context(), runtimeauthoractivity.BundleScope(bus.runtimeInstanceID, bus.sourceArtifactFact.BundleHash())))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx = worklifetime.WithOccurrence(ctx, owner)
 			if _, replay, err := bus.PublishAPIEventAcknowledged(ctx, event, &endpoint, apiidempotency.Request{Method: "event.publish"}, apiidempotency.Completion{ResourceID: event.ID(), Response: json.RawMessage(`{"ok":true}`)}); err != nil || replay {
 				t.Fatalf("acknowledged exact occurrence: replay=%t err=%v", replay, err)
 			}

@@ -1,4 +1,4 @@
-name: lu-h1
+# fixture: lu-h1
 pins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}
 connect:
   - {event: hub.start, from: ., to: hub, resolution: select-or-create}

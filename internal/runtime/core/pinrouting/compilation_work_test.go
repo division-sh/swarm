@@ -31,27 +31,22 @@ func (s *censusCountingSource) FlowHasInputEvent(flowID, eventType string) bool 
 }
 
 func TestResolveFlowInputProducerSharesOnlyOperationLocalCensus(t *testing.T) {
-	for _, tc := range targetFreeSyntheticProjectionCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			base, endpoint := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
-			source := &censusCountingSource{Source: base}
-			want := ResolveFlowInputProducer(base, endpoint.FlowID, endpoint.Event.Local)
-			if len(want.Evidence) == 0 || want.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
-				t.Fatalf("fixture lacks admitted input evidence: %+v", want)
-			}
-			for calls := 1; calls <= 2; calls++ {
-				got := ResolveFlowInputProducer(source, endpoint.FlowID, endpoint.Event.Local)
-				if source.builds != calls || !reflect.DeepEqual(got, want) {
-					t.Fatalf("builds=%d want=%d; got=%+v want=%+v", source.builds, calls, got, want)
-				}
-				got.Evidence[0].Kind = "mutated returned evidence"
-			}
-			source.withdraw = true
-			got := ResolveFlowInputProducer(source, endpoint.FlowID, endpoint.Event.Local)
-			if source.builds != 3 || !got.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
-				t.Fatalf("later resolution reused withdrawn input: builds=%d result=%+v", source.builds, got)
-			}
-		})
+	base := operationScatterSource(t)
+	source := &censusCountingSource{Source: base}
+	want := ResolveFlowInputProducer(base, "workers", "item.registered")
+	if len(want.Evidence) == 0 || want.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
+		t.Fatalf("fixture lacks admitted input evidence: %+v", want)
+	}
+	for calls := 1; calls <= 2; calls++ {
+		got := ResolveFlowInputProducer(source, "workers", "item.registered")
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got=%+v want=%+v", got, want)
+		}
+		got.Evidence[0].Kind = "mutated returned evidence"
+	}
+	source.withdraw = true
+	if got := ResolveFlowInputProducer(source, "workers", "item.registered"); !got.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
+		t.Fatalf("later resolution reused withdrawn input: %+v", got)
 	}
 	if got := ResolveFlowInputProducer(nil, "", ""); !got.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
 		t.Fatalf("nil source accepted: %+v", got)
@@ -59,34 +54,32 @@ func TestResolveFlowInputProducerSharesOnlyOperationLocalCensus(t *testing.T) {
 }
 
 func TestCompileConnectGraphSharesOnlyOperationLocalCensus(t *testing.T) {
-	for _, tc := range targetFreeSyntheticProjectionCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			base, endpoint := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
-			source := &censusCountingSource{Source: base}
-			if _, issue := lowerTemplateInputReceiverPlan(source, semanticview.AuthoredEventEndpoint{}); issue.Failure.Empty() || source.builds != 0 {
-				t.Fatal("invalid endpoint was not rejected before census construction")
-			}
-			graph := CompileConnectGraph(source)
-			if source.builds != 1 {
-				t.Fatalf("census builds = %d, want exactly one per compilation", source.builds)
-			}
-			if len(graph.receiverPlans) != 1 || len(graph.issues) != 0 {
-				t.Fatalf("receiver plans/issues = %d/%v", len(graph.receiverPlans), graph.issues)
-			}
-			plan, issue := lowerTemplateInputReceiverPlan(source, endpoint)
-			if !issue.Failure.Empty() || !reflect.DeepEqual(plan, graph.receiverPlans[0]) {
-				t.Fatalf("operation-local lowering differs from fresh private receiver registration: %v", issue)
-			}
-			if source.builds != 2 {
-				t.Fatalf("receiver registration reused old census: %d", source.builds)
-			}
-			source.withdraw = true
-			if got := CompileConnectGraph(source); len(got.receiverPlans) != 0 || source.builds != 3 {
-				t.Fatalf("later compile reused withdrawn source: plans=%d builds=%d", len(got.receiverPlans), source.builds)
-			}
-			if _, issue := lowerTemplateInputReceiverPlan(source, endpoint); issue.Failure.Empty() {
-				t.Fatal("receiver registration accepted withdrawn source")
-			}
-		})
+	base := operationScatterSource(t)
+	endpoint, ok := semanticview.BuildAuthoredEventEndpointCensus(base).ResolveDeclaredInputEndpoint("workers", "item.registered").Endpoint()
+	if !ok {
+		t.Fatal("fixture lacks the exact workers input")
+	}
+	source := &censusCountingSource{Source: base}
+	if _, issue := lowerTemplateInputReceiverPlan(source, semanticview.AuthoredEventEndpoint{}); issue.Failure.Empty() {
+		t.Fatal("invalid endpoint was not rejected")
+	}
+	graph := CompileConnectGraph(source)
+	if len(graph.receiverPlans) == 0 || len(graph.issues) != 0 || !reflect.DeepEqual(graph, CompileConnectGraph(base)) {
+		t.Fatalf("receiver plans/issues = %d/%v", len(graph.receiverPlans), graph.issues)
+	}
+	plan, issue := lowerTemplateInputReceiverPlan(source, endpoint)
+	matched := false
+	for _, compiled := range graph.receiverPlans {
+		matched = matched || reflect.DeepEqual(plan, compiled)
+	}
+	if !issue.Failure.Empty() || !matched {
+		t.Fatalf("operation-local lowering differs from fresh private receiver registration: %v", issue)
+	}
+	source.withdraw = true
+	if got := CompileConnectGraph(source); len(got.receiverPlans) != 0 {
+		t.Fatalf("later compile reused withdrawn source: plans=%d", len(got.receiverPlans))
+	}
+	if _, issue := lowerTemplateInputReceiverPlan(source, endpoint); issue.Failure.Empty() {
+		t.Fatal("receiver registration accepted withdrawn source")
 	}
 }

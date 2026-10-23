@@ -8,7 +8,7 @@ import (
 func CopySelectedStoreExecutionTarget(t testing.TB) string {
 	t.Helper()
 	root := CopySelectedStoreExecution(t)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "name: selected-store-execution\n", "name: selected-store-execution-target\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "# fixture: selected-store-execution\n", "# fixture: selected-store-execution-target\n")
 	return root
 }
 
@@ -18,7 +18,10 @@ func CopySelectedStoreExecutionTarget(t testing.TB) string {
 func CopySelectedStoreExecution(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", `name: selected-store-execution
+	writeClosedVariantFile(t, root, "flow-a/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "selected-state-flow/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: selected-store-execution
 pins:
   inputs:
     - item.received
@@ -42,10 +45,10 @@ connect:
     item.received: {}
     review.ready: {}
 `)
-	writeClosedVariantFile(t, root, "flow-a/schema.yaml", "name: flow-a\n")
-	writeClosedVariantFile(t, root, "selected-state-flow/schema.yaml", "name: selected-state-flow\n")
+	writeClosedVariantFile(t, root, "flow-a/schema.yaml", "stages: []\n# fixture: flow-a\n")
+	writeClosedVariantFile(t, root, "selected-state-flow/schema.yaml", "stages: []\n# fixture: selected-state-flow\n")
 	for _, owner := range []struct{ path, entity string }{{"flow-a/1", "default"}, {"selected-state-flow/at-t", "selected_case"}} {
-		writeClosedVariantFile(t, root, owner.path+"/schema.yaml", `name: selected-store-state
+		writeClosedVariantFile(t, root, owner.path+"/schema.yaml", `# fixture: selected-store-state
 stages:
   pending: {}
   done: {final: true}

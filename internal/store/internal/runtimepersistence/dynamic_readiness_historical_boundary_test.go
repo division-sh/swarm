@@ -35,9 +35,13 @@ func TestR7ReadinessDiagnosticsDoNotExemptLaterNativeForkConstructionBothStores(
 			if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, marker); err != nil {
 				t.Fatal(err)
 			}
+			rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			fork, err := f.store.(interface {
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-			}).MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()})
+			}).MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()})
 			if err != nil {
 				t.Fatal(err)
 			}

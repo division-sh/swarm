@@ -8,10 +8,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -41,8 +43,14 @@ func proveNativeReconfigureMemoryBothStores(t *testing.T, enabled bool, prove fu
 				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
 			record := manager.ReconfigureMemoryNativeFixture(t, enabled)
-			storetest.RequireStaticAgentFixture(t, manager.TerminalPanicFixtureContext(), selected, record)
-			view, found, err := selected.LoadAgentLifecycleState(context.Background(), record.Config.Identity)
+			rooted, _ := sourceartifactfixture.Rooted(t, "review", sourceartifactfixture.Artifact())
+			ctx := correlation.WithRootAdmission(manager.TerminalPanicFixtureContext(), rooted.Admission())
+			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+				RunID: record.Config.Identity.RunID, Origin: storetest.ScenarioSetupOrigin(),
+				Artifact: rooted.Artifact(), StartedAt: record.StartedAt,
+			})
+			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
+			view, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
 			if err != nil || !found {
 				t.Fatalf("native memory fixture row: found=%v err=%v", found, err)
 			}

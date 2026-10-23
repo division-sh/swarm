@@ -44,8 +44,8 @@ func TestSelectedContractLoadersRejectRetiredDynamicAgentTools(t *testing.T) {
 				},
 			}
 			_, err = loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{
-				SourceRunID: sourceRunID,
-				BundleHash:  record.BundleHash,
+				Responsibility: FreshSelectedSource(record.BundleHash),
+				BundleHash:     record.BundleHash,
 				Selection: runfork.RunForkContractSelection{
 					Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash,
 				},

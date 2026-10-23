@@ -346,6 +346,8 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	var proveRecovery func(string)
 	if proof.changedVersionRecovery {
 		request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: loaded.SourceArtifactFact.BundleHash()}
+		request.SourceArtifactFact = loaded.SourceArtifactFact
+		ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
 		proveRecovery = prepareSelectedConstructedRecovery(t, ctx, owner, request, loaded)
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)

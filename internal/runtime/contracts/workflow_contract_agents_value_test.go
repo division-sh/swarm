@@ -245,7 +245,8 @@ func TestW5AgentAdmissionDiskCatalogRetainedParity(t *testing.T) {
 		"worker:\n  intent: {inline: business intent}\n  <<: {memory: false}\n",
 	} {
 		root := t.TempDir()
-		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: w5-parity\n")
+		writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: w5-parity\n")
 		writeFixtureFile(t, filepath.Join(root, "agents.yaml"), body)
 		disk, diskErr := loadOptionalAgentDeclarations(filepath.Join(root, "agents.yaml"))
 		artifact, err := sourceartifact.AdmitDirectory(root)
@@ -312,11 +313,13 @@ func TestW5AgentDocumentWideExpansionBudget(t *testing.T) {
 func TestW5AgentProvenanceComposesWithoutMemorySource(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provenance\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: provenance\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\ntask.done:\n")
+	writeFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      emit: task.done\n")
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: business intent}\n  model: regular\n")
-	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\n")
+	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "stages: []\n# fixture: child\n")
 	writeFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), "worker:\n  intent: {inline: child intent}\n  model: regular\n  memory: true\n")
 	artifact, err := sourceartifact.AdmitDirectory(root)
 	if err != nil {
@@ -329,7 +332,7 @@ func TestW5AgentProvenanceComposesWithoutMemorySource(t *testing.T) {
 			if source == "disk" {
 				bundle, err = LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 			} else {
-				bundle, err = LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+				bundle, err = LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 			}
 			if err != nil {
 				t.Fatal(err)
