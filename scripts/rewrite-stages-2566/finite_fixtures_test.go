@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
+
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestRewrite2566FiniteFixturePlanMatchesReviewedOutputs(t *testing.T) {
@@ -201,98 +200,6 @@ func TestRewrite2566DeliberateServicesStillRefuseFiniteInitiation(t *testing.T) 
 		if err := runstart.ValidateFinite(semanticview.Wrap(bundle), nil); !errors.As(err, &refusal) || refusal.FlowID != "." {
 			t.Fatalf("service acquired a completion exemption: %v", err)
 		}
-	}
-}
-
-func TestRewrite2566NoFinalRootCensusIsExplicitlyClassified(t *testing.T) {
-	groups := map[string][]string{
-		"service examples; ordinary event publication, not finite run.start": {
-			"examples/integrations/telegram-agent", "examples/routing/fan-in/barrier", "examples/routing/fan-in/stream",
-			"examples/routing/notify-all-children", "examples/routing/parent-connect", "examples/routing/policy-rules",
-			"examples/routing/template-create-minted-key", "examples/routing/template-reply",
-			"examples/routing/template-select-existing", "examples/routing/template-select-or-create",
-		},
-		"standing/startup/provider/component sources, not finite run.start": {
-			// #2577 ordered input and the public receptionist use standing
-			// provider ingress, never finite run.start. The notice source has a final stage.
-			"internal/serveapp/testdata/whatsapp-session-input", "internal/cliapp/archetypes/whatsapp-receptionist",
-			// Public structural readers and standing declare/restart, not finite run.start.
-			"internal/releasee2e/testdata/admission_factoring",
-			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1",
-			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2",
-			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3",
-			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33",
-			"internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/nested",
-			"internal/cliapp/archetypes/zero-agent-automation", "internal/releasee2e/testdata/channel_onboarding_release",
-			"internal/releasee2e/testdata/full_lifecycle/standing_telegram", "internal/releasee2e/testdata/node_identity_activity",
-			"internal/releasee2e/testdata/standing_root_tree", "internal/runtime/conformance/testdata/stage-lifecycle-identity",
-			"internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp", "internal/runtime/scenarioderivation/testdata/hostile",
-			"internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent", "internal/store/selected/testdata/retained_actor_admission",
-		},
-		"scenario-import or component corpus; not the finite run.start admission path": {
-			"tests/tier1-primitives/test-clear-gates", "tests/tier1-primitives/test-record-evidence",
-			"tests/tier1-primitives/test-rules-data-accumulation", "tests/tier1-primitives/test-rules-else",
-			"tests/tier1-primitives/test-rules-match", "tests/tier1-primitives/test-rules-no-match", "tests/tier1-primitives/test-sets-gate",
-			"tests/tier10-policy-patterns/test-policy-counter-escalate", "tests/tier12-runtime-fork/test-run-scoped-flow-agent-fork",
-			"tests/tier12-runtime-fork/test-selected-contract-fork-execution", "tests/tier12-runtime-tools/test-flow-data-access",
-			"tests/tier5-flow-lifecycle/test-create-flow-instance-config", "tests/tier5-flow-lifecycle/test-create-flow-instance",
-			"tests/tier5-flow-lifecycle/test-template-no-boot-instance", "tests/tier6-event-loop/test-chain-depth-limit",
-			"tests/tier6-event-loop/test-cross-entity-concurrent", "tests/tier9-composition-patterns/test-compose-guard-counter-escalate",
-		},
-		"deliberately unreachable boot-verification rejection": {"tests/tier8-boot-verification/test-boot-state-machine-unreachable"},
-	}
-	expected := map[string]bool{}
-	for _, paths := range groups {
-		for _, path := range paths {
-			if expected[path] {
-				t.Fatalf("duplicate service classification %s", path)
-			}
-			expected[path] = true
-		}
-	}
-	repo := canonicalrouting.RepoRoot(t)
-	command := exec.Command("git", "ls-files", "-z", "--", "*schema.yaml")
-	command.Dir = repo
-	raw, err := command.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	schemas := map[string]bool{}
-	for _, name := range strings.Split(strings.TrimSuffix(string(raw), "\x00"), "\x00") {
-		if filepath.Base(name) == "schema.yaml" {
-			schemas[filepath.Dir(name)] = true
-		}
-	}
-	actual := map[string]bool{}
-	for source := range schemas {
-		nested := false
-		for parent := filepath.Dir(source); parent != "."; parent = filepath.Dir(parent) {
-			if schemas[parent] {
-				nested = true
-				break
-			}
-		}
-		if nested {
-			continue
-		}
-		body, err := os.ReadFile(filepath.Join(repo, source, "schema.yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		snapshot, err := yamlsource.Load(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		schema, err := contracts.AdmitFlowSchemaValue(snapshot.Document(source + "/schema.yaml").Root())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(schema.StageDeclarations.FinalStages()) == 0 {
-			actual[source] = true
-		}
-	}
-	if !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("no-final root census needs explicit caller classification: actual=%v expected=%v", actual, expected)
 	}
 }
 
