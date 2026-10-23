@@ -155,7 +155,7 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		"flow_activation.go":          3, // Includes process-only standing preparation before executable publication.
 		"flow_readiness_admission.go": 4,
 		"flow_readiness_plan.go":      2,
-		"flow_readiness_startup.go":   4,
+		"flow_readiness_startup.go":   5,
 		"runtime.go":                  1,
 	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSourceCoordinate", map[string]int{
@@ -163,7 +163,7 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	})
 	requireStaticReadinessCalls(t, calls, "validateDynamicFlowRuntimeReadinessCallbackSource", map[string]int{
 		"flow_readiness_admission.go": 3,
-		"flow_readiness_startup.go":   3,
+		"flow_readiness_startup.go":   4,
 		"flow_runtime_readiness.go":   1,
 	})
 	requireStaticReadinessCalls(t, calls, "registerExecutableAgentLifecycle", map[string]int{
@@ -194,7 +194,7 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		"flow_attachment_execution.go":  1,
 		"flow_readiness_admission.go":   2,
 		"flow_readiness_plan.go":        1,
-		"flow_readiness_startup.go":     1,
+		"flow_readiness_startup.go":     2,
 		"flow_runtime_readiness.go":     1,
 	})
 	for _, ownerCall := range []string{
