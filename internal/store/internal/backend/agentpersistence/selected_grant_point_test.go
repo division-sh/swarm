@@ -103,6 +103,19 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 					if want && (err != nil || row.Binding.ForkRunID != forkID || row.BundleHash != bundleHash) {
 						t.Fatalf("exact %s point refused: row=%+v err=%v", arm.kind, row, err)
 					}
+					if want && backend == "postgres" {
+						reader, err := db.BeginTx(ctx, nil)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer reader.Rollback()
+						if _, err := reader.ExecContext(ctx, `SET LOCAL lock_timeout='250ms'`); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := loadSelectedForkGrantExecutionTx(ctx, reader, binding, false); err != nil {
+							t.Fatalf("concurrent selected generation proof required an exclusive lock: %v", err)
+						}
+					}
 					if !want && err == nil {
 						t.Fatalf("contradictory %s point admitted", arm.kind)
 					}

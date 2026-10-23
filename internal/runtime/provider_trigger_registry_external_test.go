@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -155,6 +156,14 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 	writer, ok := persistence.(sourceartifactfixture.Writer)
 	if !ok || !found || bundle.SourceArtifact == nil || bundleHash != bundle.SourceArtifact.BundleHash() {
 		t.Fatal("bounded component binding requires its exact admitted fixture artifact writer")
+	}
+	native, ok := persistence.(agentfixture.Store)
+	if !ok {
+		t.Fatal("bounded component binding requires its original native process owner")
+	}
+	ctx, err := agentfixture.ProcessContext(t, ctx, native)
+	if err != nil {
+		t.Fatal(err)
 	}
 	sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
 
