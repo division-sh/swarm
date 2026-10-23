@@ -205,8 +205,8 @@ func receiverJoinedInventoryStorageOracle(t *testing.T, ctx context.Context, db 
 func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context) (string, string) {
 	t.Helper()
 	runID, sibling := uuid.NewString(), uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-	seedAuthorActivityReceiptRun(t, fixture, ctx, sibling)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, sibling)
 	now := time.Now().UTC()
 	rows := []struct {
 		entity, entityPath, headerRun, headerEntity, headerPath, state string

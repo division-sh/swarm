@@ -77,7 +77,7 @@ func newOperatorSnapshotFixture(t *testing.T, postgres bool) operatorSnapshotFix
 		t.Fatal(err)
 	}
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, f.authorActivityReceiptFixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, f.authorActivityReceiptFixture, ctx, runID)
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "snapshot_before", nil)
 	for i := 0; i < 3; i++ {
 		id := uuid.NewString()

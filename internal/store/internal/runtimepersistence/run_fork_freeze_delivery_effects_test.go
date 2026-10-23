@@ -28,8 +28,8 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
 				runID, childID := uuid.NewString(), uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-				seedAuthorActivityReceiptRun(t, fixture, ctx, childID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, childID)
 				store := fixture.store.(interface {
 					deliverylifecycle.Store
 					runlifecycle.OperationOwner

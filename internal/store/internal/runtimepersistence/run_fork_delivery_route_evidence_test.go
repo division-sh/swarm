@@ -92,7 +92,7 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 				t.Run(cell.name, func(t *testing.T) {
 					ctx := testAuthorActivityContext()
 					runID := uuid.NewString()
-					seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+					ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 					publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
 					target := events.RouteIdentity{FlowID: "sink", FlowInstance: "sink", EntityID: uuid.NewString()}
 					route := cell.route
@@ -325,7 +325,7 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 						assertRouteEvidenceStampedConsumers(t, source, latest, event.ID(), route, true)
 					}
 					foreignRun := uuid.NewString()
-					seedAuthorActivityReceiptRun(t, fixture, ctx, foreignRun)
+					ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, foreignRun)
 					if _, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: foreignRun, At: event.ID()}); err == nil {
 						t.Fatal("foreign-run event selection accepted")
 					}

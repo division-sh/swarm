@@ -35,7 +35,7 @@ func TestRecordDeadLetterExactOnceParity(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.ExistingRunRootIngress(
 				uuid.NewString(), "chain.e5", "node-5", "", []byte(`{}`), 5, runID,
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Date(2026, 8, 9, 4, 0, 0, 0, time.UTC),

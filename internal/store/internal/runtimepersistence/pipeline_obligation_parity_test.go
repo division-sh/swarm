@@ -121,7 +121,7 @@ func provePipelineExactPayloadRecovery(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	payload := []byte("{\n  \"value\": 1.0, \"order\": [2, 1]\n}")
 	event := eventtest.PersistedProjection(
 		uuid.NewString(), events.EventType("recovery.payload_bytes"), "runtime", "", payload,
@@ -159,7 +159,7 @@ func provePipelineCommittedSettlementCleanupOutcome(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	owner := selected.PipelineObligations()
 	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
@@ -210,7 +210,7 @@ func provePipelineClaimRetiredBeforeLifecycleHandoff(
 		t.Fatalf("%T does not expose completion candidate registration", selected)
 	}
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	owner := selected.PipelineObligations()
 	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
@@ -258,7 +258,7 @@ func provePipelineAgeIndependentSelection(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	createdAt := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, createdAt)
 	owner := selected.PipelineObligations()
@@ -294,7 +294,7 @@ func provePipelineClaimLifecycle(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Hour))
 	owner := selected.PipelineObligations()
 
@@ -352,7 +352,7 @@ func provePipelineScopeFailure(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	if err := updatePipelineScopeRaw(ctx, fixture, eventID, "guessed"); err == nil {
 		t.Fatal("fresh schema accepted an invalid committed pipeline scope")
@@ -391,7 +391,7 @@ func provePipelineMalformedRecoveryPreclassification(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := uuid.NewString()
 	event := eventtest.RuntimeDiagnostic(
 		eventID,
@@ -443,7 +443,7 @@ func provePipelineRunSummary(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	base := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
 	owner := selected.PipelineObligations()
 
@@ -487,7 +487,7 @@ func provePipelineRunSummary(
 	}
 
 	terminalOnlyRunID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, terminalOnlyRunID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, terminalOnlyRunID)
 	terminalOnlyID := commitPipelineParityEvent(t, ctx, selected, terminalOnlyRunID, base.Add(6*time.Second))
 	settlePipelineParityEvent(t, ctx, owner, terminalOnlyID, runtimepipelineobligation.DeadLetter("terminal_only", nil))
 	terminalOnly, err := owner.SummarizeRun(ctx, terminalOnlyRunID)
@@ -508,7 +508,7 @@ func provePipelineDecisionRouteDispositions(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	owner := selected.PipelineObligations()
 	at := time.Now().UTC().Add(-time.Minute)
 
@@ -558,7 +558,7 @@ func provePipelineReceiptFamilySeparation(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	insertWorkflowTransitionReceipt(t, ctx, fixture, eventID)
 
@@ -583,7 +583,7 @@ func provePipelineParentTerminalizationFence(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	owner := selected.PipelineObligations()
 	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
@@ -642,7 +642,7 @@ func provePipelineSettlementRollback(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := uuid.NewString()
 	event := eventtest.PersistedProjection(
 		eventID, events.EventType("test.event"), "runtime", "", []byte(`{"ok":true}`),

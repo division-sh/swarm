@@ -45,7 +45,7 @@ func seedEntityToolStorageWitness(t *testing.T, fixture authorActivityReceiptFix
 func seedDeliveryRecoveryClaim(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context) runtimedelivery.ClaimedObligation {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "recovery.requested", "gateway", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: mustTestAgentIdentityForRun(runID, "agent-a", "recovery/instance-a")}
 	selected := fixture.store.(deliveryFixtureStore)
@@ -113,7 +113,7 @@ func seedWorkflowSideEffectStorageRows(t *testing.T, ctx context.Context, fixtur
 func seedWorkflowProjectionFaultCut(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context) (string, string) {
 	t.Helper()
 	run, entity := uuid.NewString(), uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 	// Exact physical cuts qualify fault admission/restoration, not lawful
 	// workflow creation. The pipeline roots exercise the real engine owner.
 	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {

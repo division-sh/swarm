@@ -40,6 +40,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
@@ -297,6 +298,19 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	}
 	processOwner := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, processOwner)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	var fixtureStore agentfixture.Store = pg
+	if pg == nil {
+		fixtureStore = sqlite
+	}
+	ctx, err = agentfixture.ProcessContext(t, ctx, fixtureStore)
+	if err != nil {
+		t.Fatalf("capture catalog setup process: %v", err)
+	}
+	fixtureProcess, err := agentfixture.ProcessCapability(t, ctx, fixtureStore)
+	if err != nil {
+		t.Fatalf("retain catalog setup process: %v", err)
+	}
 	var runSetup storetest.RunFixtureStore = pg
 	if pg == nil {
 		runSetup = sqlite
@@ -336,7 +350,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	} else {
 		selected = sqlite
 	}
-	processTopology := installCatalogRuntimeStartupGrant(t, ctx, selected, rt, !start)
+	processTopology := installCatalogRuntimeStartupGrant(t, ctx, selected, rt, !start, fixtureProcess)
 	if !start {
 		installCatalogHarnessDeliveryAuthority(t, ctx, rt, pg, sqlite)
 	}
@@ -394,6 +408,7 @@ func installCatalogRuntimeStartupGrant(
 	selected runtimestartupownership.Store,
 	rt *runtime.Runtime,
 	componentExecution bool,
+	retained ...runtimestartupownership.ProcessCapability,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
 	if selected == nil || rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {
@@ -409,11 +424,16 @@ func installCatalogRuntimeStartupGrant(
 	if err != nil {
 		t.Fatalf("construct catalog runtime source set: %v", err)
 	}
-	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "catalog-runtime-harness", BootID: uuid.NewString(), RuntimeInstanceID: rt.Options.RuntimeInstanceID,
-	})
-	if err != nil {
-		t.Fatalf("acquire catalog runtime process capability: %v", err)
+	var capability runtimestartupownership.ProcessCapability
+	if len(retained) == 1 {
+		capability = retained[0]
+	} else {
+		capability, err = selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+			OwnerID: "catalog-runtime-harness", BootID: uuid.NewString(), RuntimeInstanceID: rt.Options.RuntimeInstanceID,
+		})
+		if err != nil {
+			t.Fatalf("acquire catalog runtime process capability: %v", err)
+		}
 	}
 	release := true
 	defer func() {

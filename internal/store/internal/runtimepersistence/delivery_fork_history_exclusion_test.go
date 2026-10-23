@@ -25,7 +25,7 @@ func TestDeliveryOperationalWritesDoNotAdvanceForkHistoryBothStores(t *testing.T
 			store := fixture.store.(deliveryReadProjectionStore)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(uuid.NewString(), "delivery.history", "gateway", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 			route := testEntitylessNodeDeliveryRoute("history-worker")
 			if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {

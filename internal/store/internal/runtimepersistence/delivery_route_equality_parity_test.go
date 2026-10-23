@@ -21,7 +21,7 @@ func TestDeliveryRouteEqualityValidationStoreParity(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			t.Run("contradictory_node_ownership_rolls_back", func(t *testing.T) {
 				event := deliveryRouteEqualityEvent(runID, "contradictory-node")
@@ -155,7 +155,7 @@ func TestMixedPubsubConnectCompositionPublicReadbackOnBothBackends(t *testing.T)
 			})
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			producerTarget := events.RouteIdentity{
 				FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString(),

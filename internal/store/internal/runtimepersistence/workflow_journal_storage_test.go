@@ -20,7 +20,7 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			run, other := uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{run, other} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				record := pipeline.ActivityAttemptRecord{
 					RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: executionmode.Live,
 					ActivityID: uuid.NewString(), Tool: "journal.storage",
@@ -94,7 +94,7 @@ func TestWorkflowJournalStorageRefusesInvalidClosedAndLateFailingOwnersBothStore
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			run := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {
 				refuse(t, ctx, fixture.store, invalid)
 			}

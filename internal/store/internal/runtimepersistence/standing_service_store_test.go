@@ -708,7 +708,7 @@ func TestStandingServicePostureCensusRejectsEachLiveWorkFamilyBeforeMutation(t *
 				fixture := openStandingCensusFixture(t, backend)
 				ctx := testAuthorActivityContext()
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				seedStandingCensusFamily(t, fixture, ctx, runID, family, executionmode.Live)
 				if got := countStandingCensusFamily(t, fixture, ctx, runID, family, executionmode.Live); got != 1 {
 					t.Fatalf("seeded %s count = %d, want 1", family, got)
@@ -736,7 +736,7 @@ func TestStandingServicePostureCensusAdmitsExactMockWork(t *testing.T) {
 			fixture := openStandingCensusFixture(t, backend)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			seedStandingCensusFamily(t, fixture, ctx, runID, "raw_pipeline_event", executionmode.Mock)
 			admitter := fixture.store.(interface {
 				AdmitStandingServiceRun(context.Context, string, executionposture.Posture) error

@@ -29,7 +29,7 @@ func TestRunForkRevisionTargetFailurePublicationIsCompleteOnBothStores(t *testin
 			ctx := testAuthorActivityContext()
 			now := time.Date(2026, 8, 26, 2, 30, 0, 0, time.UTC)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
 
 			event := eventtest.ExistingRunRootIngress(
@@ -115,7 +115,7 @@ func TestRunForkRevisionDirectDeliveryTerminalizationIsCompleteOnBothStores(t *t
 			ctx := testAuthorActivityContext()
 			now := time.Date(2026, 8, 26, 2, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(
 				uuid.NewString(), events.EventType("revision.direct_terminalization"), "gateway", "", []byte(`{}`), 0,
 				runID, "", events.EventEnvelope{}, now,

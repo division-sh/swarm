@@ -239,6 +239,7 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityA := uuid.NewString()
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	seedPostgresStoreEvent(t, ctx, pg, uuid.NewString(), runID, "scan.requested", events.EventProducerAgent, "test", eventEntityA, "", time.Now().UTC())
 	seedPostgresStoreEvent(t, ctx, pg, uuid.NewString(), runID, "scan.replayed", events.EventProducerAgent, "test", eventEntityB, "", time.Now().UTC())

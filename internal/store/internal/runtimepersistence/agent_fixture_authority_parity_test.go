@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
@@ -34,6 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type agentFixtureFlowStore interface {
@@ -145,6 +147,10 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			close(errs)
 			for err := range errs {
 				if err != nil {
+					var native *pq.Error
+					if errors.As(err, &native) {
+						t.Logf("concurrent native flow activation: code=%s detail=%s where=%s", native.Code, native.Detail, native.Where)
+					}
 					t.Fatalf("concurrent flow activation: %v", err)
 				}
 			}
@@ -609,6 +615,7 @@ func seedExactAgentFixtureFlowState(
 	}
 	revision = strings.TrimPrefix(revision, "sha256:")
 	runID := identity.RunID
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	readinessPlan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{

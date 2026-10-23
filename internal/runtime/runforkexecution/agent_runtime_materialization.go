@@ -35,7 +35,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -207,26 +206,25 @@ func agentPlanDescriptions(plans []agentidentity.Plan) []string {
 }
 
 type selectedContractAgentRuntime struct {
-	mu                     sync.Mutex
-	shutdownMu             sync.Mutex
-	manager                *runtimemanager.AgentManager
-	generationGrant        runtimestartupownership.GenerationGrant
-	cleanup                func()
-	workspaceProjection    *selectedContractWorkspaceProjection
-	bus                    *runtimebus.EventBus
-	pipeline               selectedFlowActivationRetirementStore
-	pendingActivations     []selectedFlowActivation
-	executionLease         *worklifetime.Lease
-	controlContext         context.Context
-	cancelExecution        context.CancelCauseFunc
-	executionDone          chan error
-	scheduler              *runtimepipeline.Scheduler
-	timerLifecycle         *runtimepipeline.PipelineCoordinator
-	genericSchedules       *genericschedule.Lifecycle
-	fanOutServing          *runtimestartupownership.FanOutServingRegistration
-	completionExecutor     *runlifecycle.Executor
-	completionRegistration runlifecycle.CandidateRegistration
-	completionDiagnostics  *selectedForkCommitDiagnostics
+	mu                  sync.Mutex
+	shutdownMu          sync.Mutex
+	manager             *runtimemanager.AgentManager
+	generationGrant     runtimestartupownership.GenerationGrant
+	cleanup             func()
+	workspaceProjection *selectedContractWorkspaceProjection
+	bus                 *runtimebus.EventBus
+	pipeline            selectedFlowActivationRetirementStore
+	pendingActivations  []selectedFlowActivation
+	executionLease      *worklifetime.Lease
+	controlContext      context.Context
+	cleanupContext      context.Context
+	cancelExecution     context.CancelCauseFunc
+	executionDone       chan error
+	scheduler           *runtimepipeline.Scheduler
+	timerLifecycle      *runtimepipeline.PipelineCoordinator
+	genericSchedules    *genericschedule.Lifecycle
+	fanOutServing       *runtimestartupownership.FanOutServingRegistration
+	diagnostics         *selectedForkCommitDiagnostics
 }
 
 type selectedContractWorkspaceProjection struct {
@@ -513,6 +511,7 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 		return nil, managedexecution.Admission{}, err
 	}
 	runtimeOwner := &selectedContractAgentRuntime{
+		cleanupContext:  ctx,
 		generationGrant: generationGrant, workspaceProjection: req.AgentRuntime.workspaceProjection,
 		bus: bus, pipeline: pipeline,
 	}
@@ -1014,7 +1013,10 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 		r.cleanup = nil
 	}
 	if r.generationGrant != nil {
-		if err := r.generationGrant.Retire(context.Background()); err != nil {
+		if r.cleanupContext == nil {
+			return errors.Join(result, errors.New("selected grant cleanup requires its original context"))
+		}
+		if err := r.generationGrant.Retire(context.WithoutCancel(r.cleanupContext)); err != nil {
 			return errors.Join(result, err)
 		}
 		r.generationGrant = nil
@@ -1052,24 +1054,12 @@ func (r *selectedContractAgentRuntime) stopExecutionWork() error {
 		}
 		r.manager = nil
 	}
-	if r.completionExecutor != nil {
-		retireErr := r.completionExecutor.Retire(context.Background())
-		joined := r.completionExecutor.Wait(context.Background())
-		if !runlifecycle.CompletionJoinSucceeded(joined) {
-			return errors.Join(retireErr, joined)
-		}
-		r.completionExecutor = nil
-		if r.completionDiagnostics != nil {
-			r.completionDiagnostics.add(joined)
-		}
-	}
-	if r.completionRegistration != nil {
-		r.completionRegistration.Release()
-		r.completionRegistration = nil
-	}
 	if len(r.pendingActivations) != 0 {
+		if r.cleanupContext == nil {
+			return errors.New("selected activation cleanup requires its original context")
+		}
 		var err error
-		r.pendingActivations, err = retireSelectedFlowActivations(context.Background(), r.pipeline, r.pendingActivations)
+		r.pendingActivations, err = retireSelectedFlowActivations(context.WithoutCancel(r.cleanupContext), r.pipeline, r.pendingActivations)
 		if err != nil {
 			return err
 		}
