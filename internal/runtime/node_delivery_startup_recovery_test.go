@@ -265,7 +265,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}
 			constructionCtx := testLiveExecutionContext(worklifetime.WithOccurrence(ctx, predecessor.WorkOccurrence()))
 			if err := predecessor.Manager.ActivateFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
-				ContractBundle: source,
+				ContractBundle: predecessor.Options.WorkflowModule.SemanticSource(),
 				Instance:       runtimeflowidentity.Stored(source, ".", templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, ""),
 				OccurredAt:     time.Now().UTC(),
 			}); err != nil {
@@ -572,6 +572,11 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	source, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct pipeline handoff source: %v", err)
@@ -617,6 +622,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 				err:   injectedErr,
 			}
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+				ContractBundle:      semanticview.Wrap(bundle),
 				PipelineObligations: pipelineOwner,
 				SourceArtifactFact:  source,
 				DeliveryAuthority:   snapshot.Authority,

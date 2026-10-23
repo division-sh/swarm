@@ -59,7 +59,7 @@ func writeRetiredSelectedContractFixture(t *testing.T, name string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-retired-tool\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), `worker:
   role: worker
   intent:

@@ -155,7 +155,7 @@ func TestS1ActivityToolBindingsRetainFrozenCompilerSnapshot(t *testing.T) {
 
 func TestS1ActivityToolBindingsNeverFallBackFromMissingCompiledEntry(t *testing.T) {
 	members := packfixture.ScopedActivityMembers()
-	members["tools.yaml"] = append(members["tools.yaml"], []byte("root_only:\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: 'https://root.example.test/only'}\n")...)
+	members["tools.yaml"] = append(members["tools.yaml"], []byte("root_only:\n  handler_type: http\n  http: {method: GET, url: 'https://root.example.test/only'}\n")...)
 	bundle := loadScopedActivityBundle(t, members)
 	tools := map[string]map[string]runtimecontracts.ToolSchemaEntry{}
 	for _, view := range bundle.FlowViews() {

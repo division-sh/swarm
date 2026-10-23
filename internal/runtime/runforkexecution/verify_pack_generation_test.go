@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -25,15 +26,19 @@ import (
 func configuredVerifyForkBase(t *testing.T) (*packartifact.PlatformPackInventory, []string) {
 	t.Helper()
 	embedded := packfixture.EmbeddedBase(t)
-	entry, ok := embedded.Lookup("provider.telegram")
+	entry, ok := embedded.Lookup("telegram")
 	if !ok {
 		t.Fatal("missing Telegram pack")
 	}
-	body := []byte(strings.Replace(string(entry.ManifestBody()), "telegram update object is required", "configured fork telegram object is required", 1))
-	if bytes.Equal(body, entry.ManifestBody()) {
+	trigger, ok := entry.Provider().Body(packmodel.BodyTrigger)
+	if !ok {
+		t.Fatal("missing Telegram trigger body")
+	}
+	body := []byte(strings.Replace(string(trigger.Bytes()), "telegram update object is required", "configured fork telegram object is required", 1))
+	if bytes.Equal(body, trigger.Bytes()) {
 		t.Fatal("development pack mutation missed its field")
 	}
-	return packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": body})
+	return packfixture.DevelopmentBase(t, map[string][]byte{"telegram/trigger.yaml": body})
 }
 
 func TestRetainedSelectedAndOriginalSourceUseConfiguredPackGeneration(t *testing.T) {
