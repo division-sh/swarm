@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -129,7 +131,13 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 					t.Fatalf("invalid input changed construction: before=%+v after=%+v err=%v", before, after, err)
 				}
 			}
-			incidentOutput := issue2394SurfaceCLI(t, servedControlProofRuntime{Endpoint: served.Endpoint}, "incidents", "--component", "inbound-gateway", "--level", "warn", "--limit", "100")
+			config := writeCLIAPIConfigFile(t, map[string]string{"api_server": strings.TrimSuffix(served.Endpoint, "/v1/rpc")})
+			var stdout, stderr bytes.Buffer
+			code := executeCLIFrom(context.Background(), t.TempDir(), []string{"incidents", "--component", "inbound-gateway", "--level", "warn", "--limit", "100", "--config", config}, &stdout, &stderr, nil)
+			if code != 0 {
+				t.Fatalf("incidents CLI exit=%d stderr=%s", code, stderr.String())
+			}
+			incidentOutput := stdout.String()
 			if !strings.Contains(incidentOutput, "schema_validation_failed") || !strings.Contains(incidentOutput, "$.data.nested.user_id") || strings.Contains(incidentOutput, "internal failure") {
 				t.Fatalf("CLI lost sender rejection classification/path: %s", incidentOutput)
 			}
