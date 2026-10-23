@@ -21,6 +21,7 @@ func managedConformanceExecutionContext(t testing.TB, ctx context.Context, autho
 
 func managedConformanceExecutionContextForBundle(t testing.TB, ctx context.Context, authorityID string, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	t.Helper()
+	ctx = testAuthorActivityContextForBundle(ctx, fact)
 	admission, err := managedexecution.New(
 		managedexecution.KindNormalRuntime,
 		authorityID,

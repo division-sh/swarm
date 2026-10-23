@@ -29,6 +29,7 @@ type fanOutObservedClaimOwner struct {
 	pipeline.FanOutObligationOwner
 	service       *fanOutServingService
 	candidate     FanOutCandidate
+	cleanupGrant  *generationGrant
 	commitStarted time.Time
 	committed     bool
 }
@@ -55,6 +56,23 @@ func (o *fanOutObservedClaimOwner) ClaimFanOutIntent(ctx context.Context, reques
 	}
 	o.service.owner.mu.Unlock()
 	return o.FanOutObligationOwner.ClaimFanOutIntent(ctx, request)
+}
+
+func (o *fanOutObservedClaimOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutClaimSettlement, error) {
+	grant := o.cleanupGrant
+	if ctx == nil || grant == nil || grant.owner == nil || claim.Key != o.candidate.Key {
+		return pipeline.FanOutClaimSettlement{}, errors.New("fan-out cleanup requires its original observed owner")
+	}
+	original := ctx.Value(mutationAuthorityContextKey{})
+	owned := original == grant || original == grant.owner
+	if frozen, ok := original.(MutationAuthority); ok {
+		owned = frozen.owner == grant.owner && (frozen.grant == nil || frozen.grant == grant)
+	}
+	if !owned {
+		return pipeline.FanOutClaimSettlement{}, errors.New("fan-out cleanup differs from its original observed owner")
+	}
+	// Exact discard outlives this grant, never its original process possession.
+	return o.FanOutObligationOwner.ReleaseFanOutClaim(grant.owner.processMutationContext(ctx), claim)
 }
 
 // This observer never claims or wakes work. Query failure is unknown state, not
