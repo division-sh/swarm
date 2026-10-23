@@ -33,7 +33,7 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 	if err != nil || len(beforeRows) != 1 || beforeRows[0].State != replycontext.StateTerminal {
 		t.Fatalf("observer-only source lacks its own terminal context: rows=%+v error=%v", beforeRows, err)
 	}
-	waitReplyReforkQuiescence(t, ctx, selected, sourceRun)
+	waitReplyReforkQuiescence(t, ctx, selected, sourceRun, cut)
 	before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 			t.Fatalf("observer-only continuation recreated settled work %s: count=%d error=%v", name, count, err)
 		}
 	}
-	waitReplyReforkQuiescence(t, ctx, selected, staged.ForkRunID)
+	waitReplyReforkQuiescence(t, ctx, selected, staged.ForkRunID, inputID)
 	afterRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
 	if err != nil || !reflect.DeepEqual(afterRows, rows) {
 		t.Fatalf("observer-only execution reopened or rewrote the terminal context: rows=%+v error=%v", afterRows, err)
@@ -144,8 +144,38 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 	return staged.ForkRunID, inputID
 }
 
-func waitReplyReforkQuiescence(t *testing.T, ctx context.Context, selected any, runID string) {
+func waitReplyReforkQuiescence(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, runID, eventID string) {
 	t.Helper()
+	publication, found, err := selected.LoadPreparedPublishEvent(ctx, eventID)
+	if err != nil || !found || publication.Event.Event().RunID() != runID {
+		t.Fatalf("reply-refork quiescence lost its exact input: found=%t error=%v", found, err)
+	}
+	if _, retained := publication.Event.Event().SelectedForkLineage(); retained {
+		logs := selected.(interface {
+			ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
+		})
+		for {
+			page, err := logs.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{RunID: runID,
+				Component: "run_fork", ActionOrEventType: "selected_contract_event_dispatched", Limit: 1000})
+			if err != nil || page.NextCursor != "" {
+				t.Fatalf("reply-refork dispatch observation: %+v error=%v", page, err)
+			}
+			dispatched := false
+			for _, entry := range page.Logs {
+				if entry.EventID == eventID {
+					dispatched = true
+				}
+			}
+			if dispatched {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("reply-refork input dispatch did not finish: %v", context.Cause(ctx))
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
 	reader, ok := selected.(interface {
 		LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 	})

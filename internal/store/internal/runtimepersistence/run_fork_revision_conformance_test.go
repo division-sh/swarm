@@ -249,6 +249,8 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	initialRevision := captureRunForkTestRevision(t, db, runID, runforkrevision.FamilyEvents)
+	before := snapshotForkHistoricalExecutionTables(t, db, true)
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -271,8 +273,8 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	if err != nil {
 		t.Fatalf("finalize transaction revision: %v", err)
 	}
-	if results[runID].Revision != 1 {
-		t.Fatalf("finalized revision = %d, want 1", results[runID].Revision)
+	if results[runID].Revision != initialRevision+1 {
+		t.Fatalf("finalized revision = %d, want next after %d", results[runID].Revision, initialRevision)
 	}
 	reused, err := finalizePostgresRunForkTestRevision(ctx, tx, runID, runforkrevision.FamilyEvents)
 	if err != nil {
@@ -288,26 +290,14 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid`, runID).Scan(&factRows); err != nil {
 		t.Fatalf("count transaction facts: %v", err)
 	}
-	if ledgerRows != 1 || factRows != 2 {
-		t.Fatalf("transaction projection = ledger:%d facts:%d, want 1/2", ledgerRows, factRows)
+	if ledgerRows != len(before["run_fork_revisions"])+1 || factRows != len(before["run_fork_fact_revisions"])+2 {
+		t.Fatalf("transaction projection = ledger:%d facts:%d, want constructor plus 1/2", ledgerRows, factRows)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("rollback transaction: %v", err)
 	}
-	for table, query := range map[string]string{
-		"events":                  `SELECT COUNT(*) FROM events WHERE run_id=$1::uuid`,
-		"entity_mutations":        `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1::uuid`,
-		"run_fork_revisions":      `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`,
-		"run_fork_fact_revisions": `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid`,
-		"run_fork_revision_heads": `SELECT COUNT(*) FROM run_fork_revision_heads WHERE run_id=$1::uuid`,
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, query, runID).Scan(&count); err != nil {
-			t.Fatalf("count rolled-back %s: %v", table, err)
-		}
-		if count != 0 {
-			t.Fatalf("rolled-back %s rows = %d, want 0", table, count)
-		}
+	if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, true)) {
+		t.Fatal("rollback changed the original constructor or application graph")
 	}
 }
 
@@ -318,6 +308,7 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	firstEventID := uuid.NewString()
 	secondEventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	initialRevision := captureRunForkTestRevision(t, db, runID, runforkrevision.FamilyEvents)
 
 	first, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -365,17 +356,17 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	if result.err != nil {
 		t.Fatalf("capture second transaction: %v", result.err)
 	}
-	if firstRevision != 1 || result.revision != 2 {
-		t.Fatalf("serialized revisions = %d then %d, want 1 then 2", firstRevision, result.revision)
+	if firstRevision != initialRevision+1 || result.revision != initialRevision+2 {
+		t.Fatalf("serialized revisions = %d then %d, want consecutive revisions after %d", firstRevision, result.revision, initialRevision)
 	}
 	if err := second.Commit(); err != nil {
 		t.Fatalf("commit second transaction: %v", err)
 	}
 	var firstCount, secondCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='events' AND revision=1 AND present`, runID).Scan(&firstCount); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='events' AND revision=$2 AND present`, runID, firstRevision).Scan(&firstCount); err != nil {
 		t.Fatalf("count first revision facts: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='events' AND revision=2 AND present`, runID).Scan(&secondCount); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='events' AND revision=$2 AND present`, runID, result.revision).Scan(&secondCount); err != nil {
 		t.Fatalf("count second revision facts: %v", err)
 	}
 	if firstCount != 1 || secondCount != 1 {
@@ -394,6 +385,7 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	seedEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, seedEventID, runID, "revision.delivery.seed", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
 	route := testAgentDeliveryRoute(t, runID, "revision-agent", "fixture/revision-agent")
 	deliveryID := seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), seedEvent, route, runtimedelivery.StateQueued, nil).DeliveryID
+	initialRevision := captureRunForkTestRevision(t, db, runID, runforkrevision.FamilyEventDeliveries)
 
 	publishTx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -474,11 +466,11 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	if err := deliveryTx.Commit(); err != nil {
 		t.Fatalf("commit delivery start: %v", err)
 	}
-	if publishRevision != 2 || delivered.revision != 3 {
-		t.Fatalf("concurrent revisions = publish:%d delivery:%d, want 2 then 3 after initial obligation admission", publishRevision, delivered.revision)
+	if publishRevision != initialRevision+1 || delivered.revision != initialRevision+2 {
+		t.Fatalf("concurrent revisions = publish:%d delivery:%d, want next two after initial obligation revision %d", publishRevision, delivered.revision, initialRevision)
 	}
 
-	for revision, wantStatus := range map[int64]string{1: "pending", 3: "in_progress"} {
+	for revision, wantStatus := range map[int64]string{initialRevision: "pending", initialRevision + 2: "in_progress"} {
 		var gotStatus string
 		if err := db.QueryRowContext(ctx, `
 			SELECT fact->>'status'
@@ -492,14 +484,14 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 		}
 	}
 	var publishedFacts, ledgerRows int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND revision=2 AND family='events' AND present`, runID).Scan(&publishedFacts); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND revision=$2 AND family='events' AND present`, runID, publishRevision).Scan(&publishedFacts); err != nil {
 		t.Fatalf("count published event facts: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, runID).Scan(&ledgerRows); err != nil {
 		t.Fatalf("count revision ledger: %v", err)
 	}
-	if publishedFacts != 2 || ledgerRows != 3 {
-		t.Fatalf("revision evidence = changed_events:%d ledger:%d, want 2/3", publishedFacts, ledgerRows)
+	if publishedFacts != 2 || int64(ledgerRows) != initialRevision+2 {
+		t.Fatalf("revision evidence = changed_events:%d ledger:%d, want two events and two revisions after %d", publishedFacts, ledgerRows, initialRevision)
 	}
 }
 
@@ -561,8 +553,10 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 	defer cancel()
 	runIDs := []string{uuid.NewString(), uuid.NewString()}
 	sort.Strings(runIDs)
+	initialRevisions := map[string]int64{}
 	for _, runID := range runIDs {
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		initialRevisions[runID] = captureRunForkTestRevision(t, db, runID, runforkrevision.FamilyEvents)
 	}
 	type workerResult struct {
 		revisions map[string]int64
@@ -614,12 +608,12 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 		t.Fatalf("opposite-order captures failed: first=%v second=%v", first.err, second.err)
 	}
 	for _, revisions := range []map[string]int64{first.revisions, second.revisions} {
-		if revisions[runIDs[0]] != revisions[runIDs[1]] {
+		if revisions[runIDs[0]]-initialRevisions[runIDs[0]] != revisions[runIDs[1]]-initialRevisions[runIDs[1]] {
 			t.Fatalf("one transaction received inconsistent multi-run revisions: %#v", revisions)
 		}
 	}
-	if first.revisions[runIDs[0]]+second.revisions[runIDs[0]] != 3 {
-		t.Fatalf("multi-run revision results = %#v and %#v, want one revision 1 and one revision 2", first.revisions, second.revisions)
+	if first.revisions[runIDs[0]]+second.revisions[runIDs[0]] != 2*initialRevisions[runIDs[0]]+3 {
+		t.Fatalf("multi-run revision results = %#v and %#v, want one first and one second revision after the constructor", first.revisions, second.revisions)
 	}
 }
 

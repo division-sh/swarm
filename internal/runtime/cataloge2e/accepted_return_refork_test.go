@@ -74,10 +74,10 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 		t.Fatalf("immediate source lacks its own terminal row: rows=%+v error=%v", beforeRows, err)
 	}
 	publication, found, err := selected.LoadPreparedPublishEvent(ctx, cut)
-	if err != nil || !found || publication.Event.Event().RunID() != sourceRun || len(publication.DeliveryRoutes) != 2 {
+	if err != nil || !found || publication.Event.Event().RunID() != sourceRun || len(publication.DeliveryRoutes) != 1 {
 		t.Fatalf("refork cut is not the actual complete return: %+v found=%t error=%v", publication, found, err)
 	}
-	waitReplyReforkQuiescence(t, ctx, selected, sourceRun)
+	waitReplyReforkQuiescence(t, ctx, selected, sourceRun, cut)
 	sourceDomain, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 	inputID := activityidentity.ForkLineageEventID(staged.ForkRunID, cut)
 	for {
 		returned, found, err := selected.LoadPreparedPublishEvent(wait, inputID)
-		if err != nil || !found || len(returned.DeliveryRoutes) != 2 {
+		if err != nil || !found || len(returned.DeliveryRoutes) != len(publication.DeliveryRoutes) {
 			t.Fatalf("refork omitted a reply or ordinary recipient: %+v found=%t error=%v", returned, found, err)
 		}
 		lineage, inherited := returned.Event.Event().SelectedForkLineage()
@@ -170,14 +170,14 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 			}
 		}
 		observed, err := storetest.ReadLifecycleEventCardinality(wait, selected, staged.ForkRunID, "reply.observed")
-		if err != nil || observed > 1 || replies != 1 || ordinary != 1 {
+		if err != nil || observed != 0 || replies != 1 || ordinary != 0 {
 			t.Fatalf("refork changed the complete response partition: replies=%d ordinary=%d observed=%d error=%v", replies, ordinary, observed, err)
 		}
 		pending, err := storetest.ReadServedIncompletePipelineHandoffCount(wait, selected, staged.ForkRunID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if settled == 2 && observed == 1 && pending == 0 {
+		if settled == len(publication.DeliveryRoutes) && observed == 0 && pending == 0 {
 			break
 		}
 		select {
@@ -186,7 +186,7 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	waitReplyReforkQuiescence(t, wait, selected, staged.ForkRunID)
+	waitReplyReforkQuiescence(t, wait, selected, staged.ForkRunID, inputID)
 	afterRow, err := selected.LoadReplyContext(wait, row.ID)
 	if err != nil || !reflect.DeepEqual(afterRow, row) {
 		t.Fatalf("return rewrote or reopened terminal evidence: %+v error=%v", afterRow, err)
