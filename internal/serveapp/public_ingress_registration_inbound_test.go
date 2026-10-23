@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -38,7 +39,9 @@ import (
 
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -152,8 +155,15 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("InstalledCapabilitySubjects: %v", err)
 	}
 	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
-		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog, DeclaredChannelPublication: declaredPublication,
+		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: workOwner.Identity().RuntimeInstanceID, ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog, DeclaredChannelPublication: declaredPublication,
 			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash)}}
+	selected := storetest.StartSQLiteRuntimeStore(t)
+	sourceartifactfixture.RequireArtifact(t, t.Context(), selected, bundle.SourceArtifact)
+	rt.Manager = runtimemanager.NewAgentManager(bus, nil)
+	grant := admitServeSessionProcessFixture(t, selected, rt.Options.RuntimeInstanceID, bundleHash)
+	if err := rt.InstallStartupGrant(grant); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := rt.PlanStandingTargets(); err != nil {
 		t.Fatal(err)
 	}
