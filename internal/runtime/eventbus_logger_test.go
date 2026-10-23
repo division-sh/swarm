@@ -128,16 +128,7 @@ func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, eventType := range []events.EventType{"timer.check", "timer.undeclared"} {
-		timer, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-			Facts: events.EventFacts{
-				ID: uuid.NewString(), Type: eventType, Payload: []byte(`{}`), RoutingSource: source,
-				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
-				Envelope: events.EventEnvelope{EntityID: "timer-entity"}, ExecutionMode: executionmode.Live,
-			}, RunID: uuid.NewString(),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
+		timer := eventtest.RuntimeControlWithRoutingSource(uuid.NewString(), eventType, "runtime.workflow_timer", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{EntityID: "timer-entity"}, source, time.Time{})
 		proof, err := timerAdmitter(context.Background(), timer, events.EventPayloadProducer(timer, "."))
 		if eventType == "timer.undeclared" {
 			if err == nil || !strings.Contains(err.Error(), "not declared by flow") || proof.Valid() {
