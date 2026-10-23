@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -355,6 +356,10 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	} else {
 		if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
+			report, reportErr := selected.(interface {
+				LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
+			}).LoadRunDebugReport(ctx, result.Materialization.ForkRunID, operatorread.RunDebugQueryOptions{})
+			t.Logf("selected child failure readback: quiescence=%+v logs=%+v err=%v", report.TestQuiescence, report.RuntimeLogs, reportErr)
 			diagnostics, diagnosticErr := selected.(manager.AgentLifecycleDiagnosticPersistence).ListPendingAgentLifecycleDiagnostics(ctx, 100)
 			t.Logf("selected child failure diagnostics: records=%+v err=%v", diagnostics, diagnosticErr)
 			for identity := range agents {
