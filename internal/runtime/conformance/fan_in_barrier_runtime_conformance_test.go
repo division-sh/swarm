@@ -783,6 +783,7 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 	var (
 		coordinator *runtimepipeline.PipelineCoordinator
 		manager     *runtimemanager.AgentManager
+		grant       runtimestartupownership.GenerationGrant
 	)
 	workOwner := conformanceTestRuntimeOccurrence(t, fact.BundleHash())
 	var joinEvents []string
@@ -790,9 +791,13 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 		joinEvents = []string{"platform.join_complete", "platform.join_timeout"}
 	}
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
-		ContractBundle:     source,
-		SourceArtifactFact: fact,
-		WorkOwner:          workOwner,
+		MutationContext: func(ctx context.Context) (context.Context, error) {
+			return runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+		},
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		ContractBundle:       source,
+		SourceArtifactFact:   fact,
+		WorkOwner:            workOwner,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -891,7 +896,7 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 	} else if current.Revision != plan.Revision {
 		t.Fatalf("fan-in conformance source set changed: current=%s want=%s", current.Revision, plan.Revision)
 	}
-	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+	grant, err = capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 		BundleHash: coordinate.BundleHash, RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		RuntimeGeneration: runtimeGeneration, SourceSetRevision: plan.Revision,
 	})
@@ -933,6 +938,7 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 
 func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, source semanticview.Source, runID string) {
 	t.Helper()
+	ctx = originalConformanceFixtureContext(t, ctx, backend)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		t.Fatal("fan-in run requires an admitted source bundle")

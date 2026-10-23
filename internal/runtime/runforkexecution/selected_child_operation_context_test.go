@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -104,19 +103,10 @@ func (p *selectedChildContextProofCapability) IssueSelectedForkGenerationGrant(c
 	}
 	proof := &selectedChildContextProofGrant{GenerationGrant: grant, proof: p}
 	p.issued = append(p.issued, proof)
-	return proof, nil
-}
-
-func (g *selectedChildContextProofGrant) BindRuntimeMutationContext(ctx context.Context) (context.Context, error) {
-	return startupownership.WithRuntimeMutationAuthority(ctx, g.GenerationGrant)
-}
-
-func (g *selectedChildContextProofGrant) CommitAgentLifecycleTransition(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {
-	result, err := g.GenerationGrant.CommitAgentLifecycleTransition(ctx, req)
-	if err == nil && req.Agent != nil {
-		err = g.requireGatewayCustody(ctx, req.Agent.Config)
+	if _, err := proof.BindSelectedForkMutationContext(ctx); err != nil {
+		return nil, err
 	}
-	return result, err
+	return grant, nil
 }
 
 func (g *selectedChildContextProofGrant) BindSelectedForkMutationContext(ctx context.Context) (context.Context, error) {

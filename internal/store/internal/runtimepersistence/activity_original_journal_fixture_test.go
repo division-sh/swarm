@@ -14,9 +14,10 @@ import (
 )
 
 type activityFixtureJournal struct {
-	once    sync.Once
-	owner   pipeline.ActivityAttemptJournal
-	binding processbinding.ActivityExecutionBinding
+	once     sync.Once
+	owner    pipeline.ActivityAttemptJournal
+	binding  processbinding.ActivityExecutionBinding
+	original context.Context
 }
 
 // Selected preparation must share the seeding owner's possession, rather than
@@ -50,7 +51,7 @@ func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceipt
 		t.Fatal("native activity fixture has no retained original role slot")
 	}
 	fixture.activityJournal.once.Do(func() {
-		fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
+		fixture.activityJournal.owner, fixture.activityJournal.binding, fixture.activityJournal.original = captureActivityFixtureJournalWithBinding(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
 	})
 	return fixture.activityJournal.owner
 }
@@ -59,11 +60,11 @@ func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceipt
 // lookup of a replacement or a role derived from the submitted attempt.
 func captureActivityFixtureJournal(t testing.TB, ctx context.Context, selected any) pipeline.ActivityAttemptJournal {
 	t.Helper()
-	journal, _ := captureActivityFixtureJournalWithBinding(t, ctx, selected)
+	journal, _, _ := captureActivityFixtureJournalWithBinding(t, ctx, selected)
 	return journal
 }
 
-func captureActivityFixtureJournalWithBinding(t testing.TB, ctx context.Context, selected any) (pipeline.ActivityAttemptJournal, processbinding.ActivityExecutionBinding) {
+func captureActivityFixtureJournalWithBinding(t testing.TB, ctx context.Context, selected any) (pipeline.ActivityAttemptJournal, processbinding.ActivityExecutionBinding, context.Context) {
 	t.Helper()
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
 	if !found || fact.Validate() != nil {
@@ -108,7 +109,11 @@ func captureActivityFixtureJournalWithBinding(t testing.TB, ctx context.Context,
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return journal, processbinding.ActivityExecutionBinding{
 		Version: processbinding.ActivityExecutionBindingVersion, GrantID: evidence.GrantID, StateVersion: evidence.StateVersion,
-	}
+	}, ctx
 }

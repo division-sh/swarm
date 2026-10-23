@@ -24,6 +24,7 @@ import (
 
 type operatorSnapshotFixture struct {
 	authorActivityReceiptFixture
+	ctx    context.Context
 	writer *sql.DB
 	probe  *operatorSnapshotProbe
 	ids    []string
@@ -78,6 +79,7 @@ func newOperatorSnapshotFixture(t *testing.T, postgres bool) operatorSnapshotFix
 		t.Fatal(err)
 	}
 	ctx = originalStoreFixtureContext(t, ctx, f.store)
+	f.ctx = ctx
 	if inUse := db.Stats().InUse; inUse != 1 {
 		t.Fatalf("snapshot fixture retained connections = %d, want its one process owner", inUse)
 	}
@@ -169,8 +171,7 @@ func TestOperatorEventSnapshotInterleavingBothStores(t *testing.T) {
 			t.Run(fmt.Sprintf("postgres_%v/%s", postgres, operation), func(t *testing.T) {
 				f := newOperatorSnapshotFixture(t, postgres)
 				store := f.store.(routeSettlementOperatorStore)
-				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
-				ctx = originalStoreFixtureContext(t, ctx, f.store)
+				ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 				defer cancel()
 				kind := "event"
 				if operation == "list" {
@@ -243,8 +244,7 @@ func TestOperatorEventSnapshotFailureReleaseBothStores(t *testing.T) {
 			for _, operation := range []string{"list", "get"} {
 				for _, mode := range []string{"cancel", "read_failure", "commit_failure"} {
 					t.Run(operation+"/"+mode, func(t *testing.T) {
-						ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
-						ctx = originalStoreFixtureContext(t, ctx, f.store)
+						ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 						defer cancel()
 						kind, occurrence := "deadletter", 1
 						if operation == "list" {
