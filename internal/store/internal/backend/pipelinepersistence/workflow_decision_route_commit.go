@@ -37,14 +37,9 @@ func commitProposedEffectRoute(
 		if err != nil {
 			return runtimepipeline.CommittedProposedEffectRoute{}, fmt.Errorf("commit proposed-effect route publication: %w", err)
 		}
-		continuation, changed, err := decisions.CompleteProposedEffectRouteTx(txctx, attempt, command.CardID, command.RouteEventID, command.OccurredAt)
+		_, changed, err := decisions.CompleteProposedEffectRouteTx(txctx, attempt, command.CardID, command.RouteEventID, command.OccurredAt)
 		if err != nil {
 			return runtimepipeline.CommittedProposedEffectRoute{}, err
-		}
-		if changed {
-			if _, err := attempt.RequestCompletion(txctx, candidateWriter, continuation.RunID, nil); err != nil {
-				return runtimepipeline.CommittedProposedEffectRoute{}, err
-			}
 		}
 		evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 		if err != nil {

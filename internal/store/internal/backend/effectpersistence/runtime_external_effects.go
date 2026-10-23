@@ -1182,9 +1182,6 @@ func (s *EffectPostgresOwner) requestRecoveredExternalEffectCandidates(ctx conte
 			continue
 		}
 		seen[runID] = struct{}{}
-		if _, err := mutation.RequestCompletion(ctx, s.lifecycle, runID, nil); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -1210,9 +1207,6 @@ func (s *EffectSQLiteOwner) requestRecoveredExternalEffectCandidates(ctx context
 			continue
 		}
 		seen[runID] = struct{}{}
-		if _, err := mutation.RequestCompletion(ctx, s.lifecycle, runID, nil); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -2168,14 +2162,9 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 					return err
 				}
 				if runID != "" {
-					terminal, err := externalEffectRunTerminal(txctx, tx, true, runID)
+					_, err := externalEffectRunTerminal(txctx, tx, true, runID)
 					if err != nil {
 						return err
-					}
-					if !terminal {
-						if _, err := mutation.RequestCompletion(txctx, s.lifecycle, runID, nil); err != nil {
-							return err
-						}
 					}
 				}
 			}
@@ -2222,14 +2211,9 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 					return err
 				}
 				if runID != "" {
-					terminal, err := externalEffectRunTerminal(txctx, tx, false, runID)
+					_, err := externalEffectRunTerminal(txctx, tx, false, runID)
 					if err != nil {
 						return err
-					}
-					if !terminal {
-						if _, err := mutation.RequestCompletion(txctx, s.lifecycle, runID, nil); err != nil {
-							return err
-						}
 					}
 				}
 			}
