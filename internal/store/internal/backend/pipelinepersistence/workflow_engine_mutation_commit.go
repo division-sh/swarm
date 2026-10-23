@@ -535,11 +535,6 @@ func commitWorkflowEngineMutation(
 			if err != nil {
 				return err
 			}
-			if command.Lifecycle.RequestCompletionCandidate {
-				if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.State.Identity.RunID, nil); err != nil {
-					return err
-				}
-			}
 			if err := commitWorkflowEngineMutationLog(txctx, attempt, store, postgres, command.State, before, nil, command.Writer); err != nil {
 				return err
 			}

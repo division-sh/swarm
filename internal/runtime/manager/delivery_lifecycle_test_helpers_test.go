@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
@@ -51,6 +52,9 @@ func managerClaimedDeliveryContext(
 	agentID string,
 ) context.Context {
 	t.Helper()
+	if process := managerTestOriginalProcessFromStore(am.deliveryStore); process != nil {
+		ctx = worklifetime.WithProcess(ctx, process)
+	}
 	ctx = managerAgentDeliveryContext(ctx, evt.RunID(), agentID)
 	store, ok := am.deliveryStore.(interface {
 		ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)

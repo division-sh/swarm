@@ -635,6 +635,7 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 			}
 			attachment.cancel(cause)
 		},
+		func(ctx context.Context) error { return pipeline.ReconcileSelectedFanOutBarriers(ctx, barriers) },
 	)
 	if err != nil {
 		return fmt.Errorf("create selected delivery continuation owner: %w", err)
