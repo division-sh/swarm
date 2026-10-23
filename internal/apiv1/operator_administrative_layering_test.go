@@ -24,6 +24,7 @@ func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	capability := acquireAdministrativeResetCapability(t, selected)
+	ctx = administrativeResetContext(t, ctx, capability)
 
 	external := newBlockingAdministrativeExternalWork()
 	coordinator := &destructivereset.Coordinator{
@@ -183,6 +184,7 @@ func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.
 			Containers: external,
 		}
 		ctx, cancel := context.WithCancel(context.Background())
+		ctx = administrativeResetContext(t, ctx, capability)
 		result := make(chan error, 1)
 		go func() {
 			_, err := executeRuntimeNuke(ctx, Request{

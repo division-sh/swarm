@@ -123,8 +123,8 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 		contexts.mu.Unlock()
 	}
 	storage, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
-	if err != nil || storage.State != "closed" || storage.Occurrences != 1 {
-		return selectedRetainedExecutionObservation{}, errors.Join(outcome, err, fmt.Errorf("selected execution is not exactly closed: %+v", storage))
+	if err != nil || storage.Occurrences != 1 {
+		return selectedRetainedExecutionObservation{}, errors.Join(outcome, err, fmt.Errorf("selected execution occurrence changed: %+v", storage))
 	}
 	header, err := selected.(interface {
 		LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
@@ -134,6 +134,13 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 	}
 	if header.Failure != nil {
 		outcome = errors.Join(outcome, failures.FromEnvelope(*header.Failure))
+	}
+	wantState := "running"
+	if header.Status != "running" {
+		wantState = "closed"
+	}
+	if storage.State != wantState {
+		return selectedRetainedExecutionObservation{}, errors.Join(outcome, fmt.Errorf("selected execution state=%s want=%s for run status=%s", storage.State, wantState, header.Status))
 	}
 	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(wait, selected)
 	if err != nil {

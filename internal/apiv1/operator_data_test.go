@@ -836,6 +836,7 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("register catalog: %v", err)
 			}
 			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: selected})})
+			bindAPITestHandlerOriginalProcess(t, handler, ctx)
 			call := func(method string, params map[string]any) map[string]any {
 				t.Helper()
 				status, response, body := callReadOnlyProbeRPC(t, handler, method, params, "Bearer "+testToken)

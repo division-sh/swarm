@@ -185,11 +185,13 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 func TestConversationForkLostHTTPResponseReplays(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			_, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
+			ctx, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
 			makeHandler := func(s forkCommitOmissionProbeStore) *Handler {
-				return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
+				handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
 					ConversationForkLifecycle: s, ConversationForks: s, Idempotency: s, Now: func() time.Time { return now },
 				})})
+				bindAPITestHandlerOriginalProcess(t, handler, ctx)
+				return handler
 			}
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"lost-response","method":"conversation.fork","params":{"source_session_id":%q,"fork_point":{"kind":"turn","turn_id":%q},"idempotency_key":"lost-response-key"}}`, sessionID, turnID)
 			handler := makeHandler(selected)

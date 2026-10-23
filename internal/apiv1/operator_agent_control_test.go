@@ -273,7 +273,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 			t.Errorf("shutdown directive integration manager: %v", err)
 		}
 	})
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{
+	storetest.RequireRun(t, apiTestOriginalProcessContext(t, context.Background(), pg), pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 	})
@@ -347,7 +347,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 			t.Errorf("shutdown canonical source manager: %v", err)
 		}
 	})
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{
+	storetest.RequireRun(t, apiTestOriginalProcessContext(t, context.Background(), pg), pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 		BundleHash: bootFact.BundleHash(),
 	})
@@ -374,6 +374,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 
 func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
 	t.Helper()
+	ctx = apiTestOriginalProcessContext(t, ctx, selected)
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if runID == "" {
 		runID = agentidentitytest.DefaultRunID
