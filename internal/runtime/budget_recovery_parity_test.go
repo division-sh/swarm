@@ -71,7 +71,13 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			entityA, entityB, terminalEntity, crossSourceEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# budget-stage-second-source\n"))
+			otherArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.1\nplatform_version: '*'\n"),
+				"schema.yaml":   []byte("stages: []\n# budget-stage-second-source\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			seedBudgetRecoveryRun(t, ctx, selected, runA, now)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: otherArtifact, StartedAt: now.Add(time.Second)})
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, entityA, "active", now)
