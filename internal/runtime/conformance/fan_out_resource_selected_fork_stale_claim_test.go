@@ -126,7 +126,9 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			if err := f.topology.capability.Release(context.Background()); err != nil {
 				t.Fatal(err)
 			}
+			f.ctx = testAuthorActivityContextForBundle(context.Background(), f.runtime.sourceArtifactFact)
 			f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
+			f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
 			successor, recovery := deploymentForkOwner(t, f)
 			var found bool
 			for _, entry := range recovery {

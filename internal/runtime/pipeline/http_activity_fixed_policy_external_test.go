@@ -116,6 +116,7 @@ func TestKeyFreeHTTPActivityFixedSettlementBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					selected = reopen()
+					ctx = activityReplayContext(t, selected, source, runID)
 					replayBus := newActivityJournalProofBus(t, selected, source)
 					replay := newGateRecoveryCoordinator(replayBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 					for range 2 {
