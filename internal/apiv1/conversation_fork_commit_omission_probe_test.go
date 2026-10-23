@@ -124,9 +124,11 @@ func TestConversationForkCommitBeforeAPICompletionProbe(t *testing.T) {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				ctx, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
 				makeHandler := func(owner ConversationForkLifecycleStore) *Handler {
-					return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
+					handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
 						ConversationForkLifecycle: owner, ConversationForks: selected, Idempotency: selected, Now: func() time.Time { return now },
 					})})
+					bindAPITestHandlerOriginalProcess(t, handler, ctx)
+					return handler
 				}
 				const key = "fork-commit-omission-key"
 				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"fork-probe","method":"conversation.fork","params":{"source_session_id":%q,"fork_point":{"kind":"turn","turn_id":%q},"idempotency_key":%q}}`, sessionID, turnID, key)

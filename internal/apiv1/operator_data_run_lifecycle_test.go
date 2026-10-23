@@ -565,7 +565,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		})
 
 		t.Run("fork pin owner preserves exact selected subset and overrides", func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContext(ctx)
 			newTarget := func() string {
 				runID := uuid.NewString()
 				ctx = apiTestOriginalProcessContext(t, ctx, fixture.primary)
