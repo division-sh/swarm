@@ -77,26 +77,16 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
 				t.Fatal(err)
 			}
-			if gate {
-				// Branch isolation needs later business history, not runtime logs.
-				var selected interface {
-					PipelineObligations() pipelineobligation.Store
-				} = rt.Postgres
-				if rt.SQLite != nil {
-					selected = rt.SQLite
-				}
-				advanceLifecycleForkSourceHistory(t, servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), selected, seed.RunID)
-			}
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
 
-			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 || !reflect.DeepEqual(fork, duplicate) {
+			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 || !reflect.DeepEqual(fork, duplicate) {
 				t.Fatalf("fork=%#v duplicate=%#v", fork, duplicate)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+			waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier.EventID)
 			if gate {
 				requireLifecycleFrozenGateControlRefusal(t, rt, seed.RunID, parentCard, fork.ForkRunID)
 			} else {

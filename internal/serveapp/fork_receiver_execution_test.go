@@ -171,34 +171,15 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: fact.BundleHash()}
 					request.ExpectedBundleHash = fact.BundleHash()
 				}
-				type executionResult struct {
-					result runforkexecution.SelectedContractExecutionResult
-					err    error
+				execution, err := family.Execute(ctx, request)
+				if err != nil || execution.Materialization.ForkRunID == "" || execution.ExecutedEventCount != 0 || len(execution.ForkEvents) != 0 {
+					t.Fatalf("fork activation acknowledgment: %+v error=%v", execution, err)
 				}
-				finished := make(chan executionResult, 1)
-				executionDone := make(chan struct{})
-				go func() {
-					defer close(executionDone)
-					result, err := family.Execute(ctx, request)
-					finished <- executionResult{result: result, err: err}
-				}()
-				t.Cleanup(func() {
-					resumeClaim()
-					resumeSettlement()
-					cancel()
-					select {
-					case <-executionDone:
-					case <-time.After(10 * time.Second):
-						t.Error("fork execution did not join test cleanup")
-					}
-				})
 				await := func(ch <-chan forkReceiverExecutionObservation) forkReceiverExecutionObservation {
 					t.Helper()
 					select {
 					case observation := <-ch:
 						return observation
-					case result := <-finished:
-						t.Fatalf("fork returned before receiver barrier: %v", result.err)
 					case <-ctx.Done():
 						t.Fatalf("fork receiver barrier: %v", ctx.Err())
 					}
@@ -283,16 +264,8 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 				}
 				resumeSettlement()
-				select {
-				case execution := <-finished:
-					if execution.err != nil {
-						t.Fatalf("settled fork failed to finish: %v", execution.err)
-					}
-					if execution.result.Materialization.ForkRunID != claim.RunID() {
-						t.Fatal("returned fork differs from actual receiver claim")
-					}
-				case <-ctx.Done():
-					t.Fatalf("settled fork did not relinquish execution: %v", ctx.Err())
+				if execution.Materialization.ForkRunID != claim.RunID() {
+					t.Fatal("returned fork differs from actual receiver claim")
 				}
 				waitForkReceiverExecutionCompletion(t, selected, ctx, claim, unavailable)
 				wantReceipt := "success"
