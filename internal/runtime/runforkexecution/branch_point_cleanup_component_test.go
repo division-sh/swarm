@@ -56,6 +56,17 @@ func proveQ1BranchPointCleanup(t *testing.T, backend string, kind runfork.RunFor
 		if err != nil || !result.Activated || result.BranchDivergence == nil || result.BranchDivergence.ForkPoint.Kind != result.ForkPoint.Kind || result.BranchDivergence.ForkPoint.Revision != result.ForkPoint.Revision || result.BranchDivergence.ForkPoint.EventID != result.ForkPoint.EventID {
 			t.Fatalf("sibling branch fixture did not activate: %+v err=%v", result, err)
 		}
+		if attachment == first && kind == runfork.RunForkPointEvent && operation == "reset" {
+			inputs, err := attachment.container.commitSelectedInputs()
+			if err != nil || len(inputs) != 1 {
+				t.Fatalf("reset requires a real linked selected publication: inputs=%d err=%v", len(inputs), err)
+			}
+			for _, input := range inputs {
+				if err := attachment.container.dispatchCommittedInput(input); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 		attachment.close(t)
 	}
 	before := q1ComponentSnapshot(t, selected)
@@ -64,10 +75,18 @@ func proveQ1BranchPointCleanup(t *testing.T, backend string, kind runfork.RunFor
 		victimAttachment, survivorAttachment = second, first
 	}
 	victim, survivor := victimAttachment.materialized.ForkRunID, survivorAttachment.materialized.ForkRunID
+	if kind == runfork.RunForkPointEvent && operation == "reset" {
+		for _, table := range []string{"events", "event_deliveries"} {
+			if rows := q1ComponentRowsWithIdentity(t, before, table, "run_id", victim); len(rows) == 0 {
+				t.Fatalf("reset lacked its real selected %s precondition", table)
+			}
+		}
+	}
 	if operation == "discard" {
 		q1DiscardBranchPointComponent(t, ctx, owner, victimAttachment)
 	} else {
 		q1ResetBranchPointComponent(t, ctx, owner, []string{victim}, false)
+		q1RequireDiscardedMutableStateAbsent(t, q1ComponentSnapshot(t, selected), victim)
 		permanent := victimAttachment.prepared.forkOperation
 		if permanent == nil {
 			t.Fatal("reset fixture lost its actual permanent operation")

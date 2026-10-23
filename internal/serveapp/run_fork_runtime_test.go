@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -356,6 +357,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal
 
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRootForTest()
 	sourceRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
@@ -380,7 +382,24 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 		"--run", sourceRunID,
 		"--at", forkPointEventID,
 		"--json",
-	}, &buf)
+	}, &buf, func(ctx context.Context, result runtimerunforkexecution.SelectedContractExecutionResult) error {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		for {
+			state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, result.Materialization.ForkRunID)
+			if err != nil {
+				return err
+			}
+			if state.State == "closed" && state.Occurrences == 1 {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("real selected business execution did not settle: %+v: %w", state, ctx.Err())
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	})
 	if code != 0 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
@@ -388,7 +407,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("decode selected execution json: %v\n%s", err, buf.String())
 	}
-	if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+	if result.Owner != runfork.RunForkSelectedContractExecutionOwner || !result.Activation.Activated || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 {
 		t.Fatalf("selected execution result = %#v", result)
 	}
 	if result.Activation.SourceFrozen || result.Activation.BranchDivergence == nil {
@@ -400,13 +419,14 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 		t.Fatalf("selected execution recipient planning admission = %#v", result.SelectedContractExecutionAdmission)
 	}
 	var lineageRows int
+	forkEventID := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, sourceEventID)
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM run_fork_selected_contract_executions
 		WHERE fork_run_id = $1::uuid
 		  AND source_event_id = $2::uuid
 		  AND fork_event_id = $3::uuid
-	`, result.Materialization.ForkRunID, sourceEventID, result.ForkEvents[0].ForkEventID).Scan(&lineageRows); err != nil {
+	`, result.Materialization.ForkRunID, sourceEventID, forkEventID).Scan(&lineageRows); err != nil {
 		t.Fatalf("count selected execution lineage: %v", err)
 	}
 	if lineageRows != 1 {
@@ -435,7 +455,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 		  AND event_name = 'platform.runtime_log'
 		  AND source_event_id = $2::uuid
 		  AND payload->'details'->>'runtime_lineage_owner' = $3
-	`, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID, runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner).Scan(&typedRuntimeDiagnostics); err != nil {
+	`, result.Materialization.ForkRunID, forkEventID, runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner).Scan(&typedRuntimeDiagnostics); err != nil {
 		t.Fatalf("count typed fork-local runtime diagnostics: %v", err)
 	}
 	if typedRuntimeDiagnostics == 0 {

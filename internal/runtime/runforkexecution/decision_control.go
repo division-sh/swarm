@@ -96,9 +96,14 @@ func (o SelectedContractExecutionOwner) CommitSelectedDecisionCardMutation(ctx c
 }
 
 func (o SelectedContractExecutionOwner) acquireDecisionControl(caller context.Context, binding runfork.RunForkSelectedContractBinding, operation runfork.SelectedControl) (*SelectedDecisionCardControl, error) {
+	refusal := runfork.RequireNormalControlForBinding(binding.ForkRunID, operation, binding, true)
+	var unsupported *runfork.SelectedForkControlUnsupported
+	if !errors.As(refusal, &unsupported) {
+		return nil, refusal
+	}
 	contexts := o.ports.contexts
 	if contexts == nil {
-		return nil, fmt.Errorf("selected decision control lacks its reconciled execution owner")
+		return nil, refusal
 	}
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
@@ -111,20 +116,23 @@ func (o SelectedContractExecutionOwner) acquireDecisionControl(caller context.Co
 		if entry.binding.ForkRunID != binding.ForkRunID {
 			continue
 		}
-		if found || entry.retiring || entry.closed || entry.binding.BindingID != binding.BindingID || entry.retained == nil {
+		if found || entry.binding.BindingID != binding.BindingID {
 			return nil, fmt.Errorf("selected decision control requires one current retained fork")
+		}
+		if entry.retiring || entry.closed || entry.retained == nil {
+			return nil, refusal
 		}
 		found = true
 		runtime = entry.retained.retainedRuntime
 	}
 	if runtime == nil {
-		return nil, fmt.Errorf("selected decision control lacks its retained executor")
+		return nil, refusal
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	owned, coordinator := runtime.controlContext, runtime.timerLifecycle
 	if owned == nil || coordinator == nil {
-		return nil, fmt.Errorf("selected decision control is not ready")
+		return nil, refusal
 	}
 	admission, _ := managedexecution.FromContext(owned)
 	if err := runfork.RequireDecisionControlForBinding(binding.ForkRunID, operation, binding, true, admission); err != nil {

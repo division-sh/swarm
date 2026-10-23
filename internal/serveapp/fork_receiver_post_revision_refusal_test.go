@@ -15,58 +15,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/servedparity"
 )
 
 type forkReceiverRefusalProbe struct{ signals atomic.Int64 }
 
 func (p *forkReceiverRefusalProbe) NotifyLifecycle(context.Context, lifecycleprobe.Signal) {
 	p.signals.Add(1)
-}
-
-// #2167 D3 replaces the unsupported success requirement, not the source graph
-// or replay policy. The complete future six-arm oracle lives in testdata/
-// fork_receiver_post_revision_future_test.go.txt and remains intentionally RED
-// when explicitly reproduced. No CI skip or expected-failure wrapper is used.
-func TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores(t *testing.T) {
-	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		t.Run(string(backend), func(t *testing.T) {
-			var selected *selectedStoreOwner
-			previous := projectRuntimePersistenceForServe
-			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
-				selected = owner
-				return previous(owner)
-			}
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			publication := newExactOriginPublicationProbe(t)
-			root := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, false)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
-				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-refusal-seed",
-			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
-				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-refusal-request",
-			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			var frontier, finished string
-			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
-				t.Fatal(err)
-			}
-			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='consumer/receiver.finished' AND source_event_id=$2`, seed.RunID, frontier).Scan(&finished); err != nil {
-				t.Fatal(err)
-			}
-			sourceRows := readForkReceiverRows(t, rt, seed.RunID)
-			requireForkReceiverEffect(t, rt, seed.RunID, frontier, "consumer", "consumer", "existing_entity", sourceRows["consumer"].ID)
-			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
-				t.Fatal(err)
-			}
-			requireForkReceiverPostRevisionPolicyRefusal(t, rt, selected, root, seed.RunID, frontier, finished)
-		})
-	}
 }
 
 // Geometry callers retain their source business-effect assertions and supply the

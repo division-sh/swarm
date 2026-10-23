@@ -68,7 +68,8 @@ func TestSelectedDecisionControlClassificationDoesNotMintExecution(t *testing.T)
 	}
 	store.binding, store.exists = testSelectedContractBinding(runID), true
 	store.binding.BindingID = uuid.NewString()
-	if use, selected, err := owner.AcquireSelectedDecisionCardControl(ctx, runID, runfork.ControlMailboxDecide); err == nil || !selected || use != nil {
+	var unsupported *runfork.SelectedForkControlUnsupported
+	if use, selected, err := owner.AcquireSelectedDecisionCardControl(ctx, runID, runfork.ControlMailboxDecide); !errors.As(err, &unsupported) || !selected || use != nil || unsupported.RunID != runID || unsupported.BindingID != store.binding.BindingID || unsupported.Operation != runfork.ControlMailboxDecide {
 		t.Fatal("a historical binding without its existing execution owner acquired control")
 	}
 	before := store.calls

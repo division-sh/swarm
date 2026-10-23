@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -269,6 +270,9 @@ func validateSelectedContractExecutionFrontierForMutation(frontier runfork.RunFo
 		switch code {
 		case "", runfork.RunForkBlockerContractFrontierExecutionUnsupported:
 			continue
+		case runfork.RunForkBlockerContractFrontierRouteUnresolved:
+			return runtimefailures.New(runtimefailures.ClassTargetUnreachable, code,
+				"selected-contract-run-fork", "admit-frontier", map[string]any{"owner": frontier.Owner})
 		default:
 			if msg := strings.TrimSpace(blocker.Message); msg != "" {
 				return fmt.Errorf("%s: %s", code, msg)

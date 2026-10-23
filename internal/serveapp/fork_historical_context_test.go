@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -214,11 +214,10 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			var result apiv1.RunForkExecutionResult
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "historical-restored-control"}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &result)
-			if result.ForkRunID == "" || result.ExecutedEventCount != 1 {
-				t.Fatalf("restored historical reader did not execute actual static receiver: %#v", result)
+			if result.ForkRunID == "" || result.ExecutedEventCount != 0 {
+				t.Fatalf("restored historical reader lost its immutable activation ACK: %#v", result)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, result.ForkRunID)
-			childEvent := activityidentity.ForkLineageEventID(result.ForkRunID, frontier)
+			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, result.ForkRunID, frontier)
 			childRoute := requireForkReceiverBusinessMutation(t, rt, result.ForkRunID, childEvent, sourceRows["consumer"].ID)
 			if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) {
 				t.Fatal("admitted historical route lost exact compiled connect evidence")

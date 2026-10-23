@@ -15,7 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -898,7 +898,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	cleanupRunID := uuid.NewString()
 	preservedSourceRunID := uuid.NewString()
 	preservedForkRunID := uuid.NewString()
-	cleanupEventID := uuid.NewString()
 	preservedSourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	for _, runID := range []string{cleanupRunID, preservedSourceRunID, preservedForkRunID} {
@@ -921,48 +920,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	); err != nil {
 		t.Fatalf("seed delivery replay: %v", err)
 	}
-	selectedLineage, err := events.NewSelectedForkLineage(
-		cleanupRunID, preservedSourceRunID, preservedSourceEventID,
-		runfork.RunForkSelectedContractExecutionLineageOwner, "", executionmode.Live,
-	)
-	if err != nil {
-		t.Fatalf("construct selected-fork lineage: %v", err)
-	}
-	selectedEvent := eventtest.SelectedForkReplay(
-		cleanupEventID, events.EventType("source.event"), eventtest.Producer(events.EventProducerPlatform, "cleanup-selected-contract"), "",
-		[]byte(`{}`), 0, selectedLineage, entityEnvelope, seededAt.Add(2*time.Second),
-	)
-	if err := commitSelectedForkEventFixture(ctx, pg, selectedEvent, runfork.RunForkSelectedContractExecutionLineage{
-		ForkRunID: cleanupRunID, SourceRunID: preservedSourceRunID, SourceEventID: preservedSourceEventID,
-		ForkEventID: cleanupEventID, EventName: "source.event",
-		SelectionAuthority: runfork.RunForkSelectedContractExecutionLineageOwner, CreatedAt: seededAt.Add(2 * time.Second),
-	}); err != nil {
-		t.Fatalf("seed selected-contract event: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, mode)
-		VALUES ($1::uuid, $2::uuid, 'event', 1, $3::uuid, 'selected_contracts')
-	`, cleanupRunID, preservedSourceRunID, cleanupEventID); err != nil {
-		t.Fatalf("seed selected binding: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
-		VALUES ($1::uuid, $2::uuid, 'event', 1, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
-	`, cleanupRunID, preservedSourceRunID, cleanupEventID); err != nil {
-		t.Fatalf("seed selected branch divergence: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_route_recoveries (
-			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, runtime_recovery_owner, mode,
-			route_topology_owner, recipient_planning_owner, frontier_evidence_fingerprint, route_topology_fingerprint,
-			recipient_planning_fingerprint, route_topology, recipient_planning
-		) VALUES (
-			$1::uuid, $2::uuid, 'event', 1, $3::uuid, 'test', 'test', 'selected_contracts',
-			'topology', 'recipients', 'frontier', 'route', 'recipient', '{}'::jsonb, '{}'::jsonb
-		)
-	`, cleanupRunID, preservedSourceRunID, cleanupEventID); err != nil {
-		t.Fatalf("seed selected route recovery: %v", err)
-	}
+	// Selected lineage reset is exercised with a real attached execution by
+	// TestSelectedBranchPointCleanupIsolationBothStores, not a synthetic binding.
 
 	now := time.Date(2026, 5, 16, 19, 5, 0, 0, time.UTC)
 	result, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
@@ -982,12 +941,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 		t.Fatalf("ApplyDestructiveResetCleanup: %v", err)
 	}
 	assertCleanupTableResult(t, result, "run_fork_delivery_event_replays", 1, 1)
-	assertCleanupTableResult(t, result, "run_fork_selected_contract_bindings", 1, 1)
-	assertCleanupTableResult(t, result, "run_fork_selected_contract_executions", 1, 1)
-	assertCleanupTableResult(t, result, "run_fork_selected_contract_branch_divergences", 1, 1)
-	assertCleanupTableResult(t, result, "run_fork_selected_contract_route_recoveries", 1, 1)
 	assertCleanupTableResult(t, result, "event_deliveries", 1, 1)
-	assertCleanupTableResult(t, result, "events", 2, 2)
+	assertCleanupTableResult(t, result, "events", 1, 1)
 	for _, table := range []string{
 		"run_fork_delivery_event_replays",
 		"run_fork_selected_contract_bindings",
@@ -1395,22 +1350,12 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	); err != nil {
 		t.Fatalf("seed delivery replay event: %v", err)
 	}
-	selectedLineage, err := events.NewSelectedForkLineage(
-		runB, runA, sourceEvent, runfork.RunForkSelectedContractExecutionLineageOwner, "", executionmode.Live,
+	runBEvent := eventtest.PersistedProjectionForProducer(
+		forkEvent, events.EventType("source.event"), eventtest.Producer(events.EventProducerExternal, "cleanup-ingress"), "",
+		[]byte(`{}`), 0, runB, "", entityEnvelope, seededAt.Add(5*time.Second),
 	)
-	if err != nil {
-		t.Fatalf("construct selected-fork lineage: %v", err)
-	}
-	selectedSemanticEvent := eventtest.SelectedForkReplay(
-		forkEvent, events.EventType("source.event"), eventtest.Producer(events.EventProducerPlatform, "selected-contract-runtime"), "",
-		[]byte(`{}`), 0, selectedLineage, entityEnvelope, seededAt.Add(5*time.Second),
-	)
-	if err := commitSelectedForkEventFixture(ctx, pg, selectedSemanticEvent, runfork.RunForkSelectedContractExecutionLineage{
-		ForkRunID: runB, SourceRunID: runA, SourceEventID: sourceEvent, ForkEventID: forkEvent,
-		EventName: "source.event", SelectionAuthority: runfork.RunForkSelectedContractExecutionLineageOwner,
-		CreatedAt: seededAt.Add(5 * time.Second),
-	}); err != nil {
-		t.Fatalf("seed selected-contract fork event: %v", err)
+	if err := insertCanonicalEventRecordFixture(ctx, pg, runBEvent); err != nil {
+		t.Fatalf("seed second run event: %v", err)
 	}
 	if _, err := markRunTerminalStatusForTest(
 		ctx,
@@ -1434,30 +1379,6 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 			(NULL, 'global.failure', '{}'::jsonb, 'flow/a', $1::jsonb)
 	`, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "handler_failed", nil))); err != nil {
 		t.Fatalf("seed dead letters: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, mode)
-		VALUES ($1::uuid, $2::uuid, 'event', 1, $3::uuid, 'selected_contracts')
-	`, runB, runA, forkEvent); err != nil {
-		t.Fatalf("seed selected binding: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
-		VALUES ($1::uuid, $2::uuid, 'event', 1, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
-	`, runB, runA, forkEvent); err != nil {
-		t.Fatalf("seed selected branch divergence: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_route_recoveries (
-			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, runtime_recovery_owner, mode,
-			route_topology_owner, recipient_planning_owner, frontier_evidence_fingerprint, route_topology_fingerprint,
-			recipient_planning_fingerprint, route_topology, recipient_planning
-		) VALUES (
-			$1::uuid, $2::uuid, 'event', 1, $3::uuid, 'test', 'test', 'selected_contracts',
-			'topology', 'recipients', 'frontier', 'route', 'recipient', '{}'::jsonb, '{}'::jsonb
-		)
-	`, runB, runA, forkEvent); err != nil {
-		t.Fatalf("seed selected route recovery: %v", err)
 	}
 	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, agentIdentity, "active")
 	if _, err := pg.backend.ExecContext(ctx, `
