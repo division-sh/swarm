@@ -34,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -177,7 +178,8 @@ func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCa
 			t.Error(err)
 		}
 	})
-	ctx = withLiveGateExecution(worklifetime.WithOccurrence(ctx, work))
+	ctx = withLiveGateExecution(worklifetime.WithOccurrence(worklifetime.WithProcess(ctx, process), work))
+	ctx = nativeProcessContextFixture(t, ctx, selected.events)
 	storetest.RequireRun(t, ctx, selected.events, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
 	descriptors, err := swarmruntime.AuthorActivityEventDescriptors(source)
 	if err != nil {
@@ -216,9 +218,7 @@ func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCa
 		p.schedule, p.driver = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 	}
 	p.restart(t)
-	capability, err := selected.events.(interface {
-		AcquireProcessCapability(context.Context, startupownership.AcquireRequest) (startupownership.ProcessCapability, error)
-	}).AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "a2-map-fan-out", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}

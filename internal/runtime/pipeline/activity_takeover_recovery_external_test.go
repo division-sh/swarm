@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -46,7 +47,14 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 			)
 			source := activityJournalProofSource(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": tool})
 			runID := uuid.NewString()
-			ctx := requireActivityReplayRun(t, selected, source, runID)
+			store := selected.events.(startupownership.Store)
+			request := startupownership.AcquireRequest{OwnerID: "activity-recovery-original", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+			original, err := store.AcquireProcessCapability(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = original.Release(context.Background()) })
+			ctx := requireActivityReplayRun(t, selected, source, runID, original)
 			bus := newActivityJournalProofBus(t, selected, source)
 			pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 			intent := seedSelectedActivitySource(t, ctx, selected, pc, runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString()))
@@ -55,13 +63,6 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				t.Fatal("activity fixture has no admitted source fact")
 			}
 			intent.BundleHash, intent.WorkflowVersion = fact.BundleHash(), source.WorkflowVersion()
-			store := selected.events.(startupownership.Store)
-			request := startupownership.AcquireRequest{OwnerID: "activity-recovery-original", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
-			original, err := store.AcquireProcessCapability(ctx, request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = original.Release(context.Background()) })
 			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: intent.BundleHash}}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -134,6 +135,7 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 			// Serve has process/runtime scope at this pre-dispatch boundary. The
 			// native owner, not a caller-selected primary bundle, knows each row.
 			recoveryCtx := authoractivity.WithScope(ctx, authoractivity.RuntimeScope(successorRequest.RuntimeInstanceID))
+			recoveryCtx = nativeOriginalProcessContextFixture(t, worklifetime.WithProcess(recoveryCtx, worklifetime.NewProcess()), successor)
 			summary, err := startupownership.ReconcileDisplacedHTTPActivities(recoveryCtx, successor)
 			if err != nil || len(summary.Results) != 1 {
 				t.Fatalf("displaced native recovery: results=%d err=%v", len(summary.Results), err)

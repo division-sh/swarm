@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -121,6 +122,18 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	bus := &sqliteFlowActivationBus{}
 	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle, configureLifecycle)

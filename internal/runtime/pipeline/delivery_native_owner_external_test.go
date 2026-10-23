@@ -168,6 +168,13 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		}
 		retire()
 		projectionOnly = true
+		original, err := agentfixture.ProcessCapability(t, base.Context, selected.(agentfixture.Store))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := original.Release(base.Context); err != nil {
+			t.Fatal(err)
+		}
 		if err := selected.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -180,6 +187,13 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		}
 		retire()
 		projectionOnly = true
+		original, err := agentfixture.ProcessCapability(t, base.Context, selected.(agentfixture.Store))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := original.Release(base.Context); err != nil {
+			t.Fatal(err)
+		}
 		if err := selected.Close(); err != nil {
 			t.Fatal(err)
 		}
