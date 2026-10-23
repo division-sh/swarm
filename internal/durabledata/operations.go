@@ -418,15 +418,31 @@ const (
 // DeploymentFeed identifies work created from one selected pin, independent of
 // any operator event. RowCount zero is a real, completed feed, not an absent one.
 type DeploymentFeed struct {
-	RunID        string         `json:"run_id"`
-	BundleHash   string         `json:"bundle_hash"`
-	Declaration  DeclarationRef `json:"declaration"`
-	SchemaDigest SchemaDigest   `json:"schema_digest"`
-	VersionID    VersionID      `json:"version_id"`
-	RowCount     uint64         `json:"row_count"`
+	RunID              string         `json:"run_id"`
+	SourceInvocationID string         `json:"source_invocation_id,omitempty"`
+	BundleHash         string         `json:"bundle_hash"`
+	Declaration        DeclarationRef `json:"declaration"`
+	SchemaDigest       SchemaDigest   `json:"schema_digest"`
+	VersionID          VersionID      `json:"version_id"`
+	RowCount           uint64         `json:"row_count"`
+}
+
+// PublicationID distinguishes imports into the same run and declaration.
+// Explicit pins retain their existing run/declaration identity.
+func (f DeploymentFeed) PublicationID() string {
+	key := "swarm.deployment-feed.v1\x00" + f.RunID + "\x00" + f.Declaration.Key()
+	if f.SourceInvocationID != "" {
+		key += "\x00" + f.SourceInvocationID
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
 }
 
 func (f DeploymentFeed) Validate() error {
+	if f.SourceInvocationID != "" {
+		if parsed, err := uuid.Parse(f.SourceInvocationID); err != nil || parsed == uuid.Nil || parsed.String() != f.SourceInvocationID {
+			return fmt.Errorf("deployment feed requires a canonical source_invocation_id")
+		}
+	}
 	if parsed, err := uuid.Parse(f.RunID); err != nil || parsed == uuid.Nil || parsed.String() != f.RunID {
 		return fmt.Errorf("deployment feed requires a canonical non-zero run_id")
 	}
@@ -676,6 +692,22 @@ type RunCreationOperationRecord struct {
 	Evidence RunCreationEvidence         `json:"evidence"`
 	// RequestBinding is populated only on validated selected-store readback.
 	RequestBinding *RunCreationRequestBinding `json:"-"`
+}
+
+func (r RunCreationOperationRecord) DeploymentFeedIDs() []string {
+	ids := make([]string, 0, len(r.Evidence.RunBinding))
+	for _, item := range r.Evidence.RunBinding {
+		feed := DeploymentFeed{RunID: r.Summary.RunID}
+		if item.Kind == "import" && item.Import != nil {
+			feed.Declaration, feed.SourceInvocationID = item.Import.Declaration, item.Import.SourceInvocationID
+		} else if item.Kind == "pin" && item.Pin != nil && item.Pin.Selection == "explicit" {
+			feed.Declaration = item.Pin.Declaration
+		} else {
+			continue
+		}
+		ids = append(ids, feed.PublicationID())
+	}
+	return ids
 }
 
 // ValidateRunCreationReceiptForCommand admits the closed event-backed and

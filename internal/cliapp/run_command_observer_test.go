@@ -37,7 +37,7 @@ func TestRunCommandPostStartObserverFailuresDetachAndUseTerminalTruth(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			warning := &notifyingBuffer{needle: string(test.reason), notify: make(chan struct{})}
 			serverOpts := test.opts
-			serverOpts.rpcResponder = observerTerminalAfterWarningResponder(t, "run-observer", warning.notify)
+			serverOpts.rpcResponder = observerTerminalAfterWarningResponder(t, "6d271a82-e74c-5368-a367-38367ccbd1b2", warning.notify)
 			server, calls, _ := newRunCommandServer(t, serverOpts)
 			defer server.Close()
 
@@ -56,12 +56,12 @@ func TestRunCommandPostStartObserverFailuresDetachAndUseTerminalTruth(t *testing
 				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), warning.String())
 			}
 			fact := requireSingleRunTraceDetachFact(t, warning.String())
-			assertRunTraceDetachFact(t, fact, test.reason, "run-observer", "swarm run start --connect "+server.URL+" --reattach run-observer")
+			assertRunTraceDetachFact(t, fact, test.reason, "6d271a82-e74c-5368-a367-38367ccbd1b2", "swarm run start --connect "+server.URL+" --reattach 6d271a82-e74c-5368-a367-38367ccbd1b2")
 			methods := runCommandMethodNames(*calls)
-			if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" || methods[len(methods)-1] != "run.get" {
+			if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" || methods[len(methods)-1] != "run.diagnose" {
 				t.Fatalf("methods = %v, want health.check, run.start, then run.get polling", methods)
 			}
-			if !strings.Contains(stdout.String(), "run terminal: run_id=run-observer status=completed") {
+			if !strings.Contains(stdout.String(), "run terminal: run_id=6d271a82-e74c-5368-a367-38367ccbd1b2 status=completed") {
 				t.Fatalf("stdout = %q", stdout.String())
 			}
 		})
@@ -76,7 +76,7 @@ func TestRunCommandTraceObserverOverBudgetNotificationShedsAndContinues(t *testi
 	overBudgetRow["payload"] = map[string]any{"blob": strings.Repeat("a", cliAPIResponseBudget)}
 	serverOpts := runCommandServerOptions{
 		wsRows:       []map[string]any{overBudgetRow},
-		rpcResponder: observerTerminalAfterWarningResponder(t, "run-over-budget", warning.notify),
+		rpcResponder: observerTerminalAfterWarningResponder(t, "8e510ef1-861c-5a1e-a690-fc4be757e0ce", warning.notify),
 	}
 	server, calls, _ := newRunCommandServer(t, serverOpts)
 	defer server.Close()
@@ -105,10 +105,10 @@ func TestRunCommandTraceObserverOverBudgetNotificationShedsAndContinues(t *testi
 		}
 	}
 	methods := runCommandMethodNames(*calls)
-	if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" || methods[len(methods)-1] != "run.get" {
+	if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" || methods[len(methods)-1] != "run.diagnose" {
 		t.Fatalf("methods = %v, want health.check, run.start, then run.get polling to continue", methods)
 	}
-	if !strings.Contains(stdout.String(), "run terminal: run_id=run-over-budget status=completed") {
+	if !strings.Contains(stdout.String(), "run terminal: run_id=8e510ef1-861c-5a1e-a690-fc4be757e0ce status=completed") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
@@ -120,7 +120,7 @@ func TestRunCommandTraceAttachTimeoutDetachesAndContinues(t *testing.T) {
 	wsClosed := make(chan struct{})
 	warning := &notifyingBuffer{needle: string(runTraceDetachAttachTimedOut), notify: make(chan struct{})}
 	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder:   observerTerminalAfterWarningResponder(t, "run-timeout", warning.notify),
+		rpcResponder:   observerTerminalAfterWarningResponder(t, "7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab", warning.notify),
 		wsRequestRead:  requestRead,
 		wsClosed:       wsClosed,
 		wsHoldResponse: true,
@@ -144,7 +144,7 @@ func TestRunCommandTraceAttachTimeoutDetachesAndContinues(t *testing.T) {
 	requireSignal(t, requestRead, "subscription request read")
 	requireSignal(t, wsClosed, "timed-out WebSocket close")
 	fact := requireSingleRunTraceDetachFact(t, warning.String())
-	assertRunTraceDetachFact(t, fact, runTraceDetachAttachTimedOut, "run-timeout", "swarm run start --connect "+server.URL+" --reattach run-timeout")
+	assertRunTraceDetachFact(t, fact, runTraceDetachAttachTimedOut, "7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab", "swarm run start --connect "+server.URL+" --reattach 7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab")
 }
 
 func TestRunCommandObserverDetachPreservesTerminalFailureExit(t *testing.T) {
@@ -157,9 +157,9 @@ func TestRunCommandObserverDetachPreservesTerminalFailureExit(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-detached-failure", "running")
-			case "run.get":
-				run := validDiagnosticRunHeader("run-detached-failure")
+				return runStartCommandResult("b3f5e62f-94a7-5c2d-b9c2-a3969fc91c40", "running")
+			case "run.get", "run.diagnose":
+				run := validDiagnosticRunHeader("b3f5e62f-94a7-5c2d-b9c2-a3969fc91c40")
 				select {
 				case <-warning.notify:
 					run["status"] = "failed"
@@ -167,7 +167,7 @@ func TestRunCommandObserverDetachPreservesTerminalFailureExit(t *testing.T) {
 					run["failure"] = testRuntimeFailureClass(runtimefailures.ClassInternalFailure, "workflow_failed")
 				default:
 				}
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -182,11 +182,11 @@ func TestRunCommandObserverDetachPreservesTerminalFailureExit(t *testing.T) {
 	if code != 7 {
 		t.Fatalf("code = %d, want terminal workflow exit 7 stdout=%s stderr=%s", code, stdout.String(), warning.String())
 	}
-	if !strings.Contains(stdout.String(), "run terminal: run_id=run-detached-failure status=failed") {
+	if !strings.Contains(stdout.String(), "run terminal: run_id=b3f5e62f-94a7-5c2d-b9c2-a3969fc91c40 status=failed") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	fact := requireSingleRunTraceDetachFact(t, warning.String())
-	assertRunTraceDetachFact(t, fact, runTraceDetachAttachFailed, "run-detached-failure", "swarm run start --connect "+server.URL+" --reattach run-detached-failure")
+	assertRunTraceDetachFact(t, fact, runTraceDetachAttachFailed, "b3f5e62f-94a7-5c2d-b9c2-a3969fc91c40", "swarm run start --connect "+server.URL+" --reattach b3f5e62f-94a7-5c2d-b9c2-a3969fc91c40")
 }
 
 func TestRunCommandTerminalStatusCancelsPendingTraceObserver(t *testing.T) {
@@ -200,13 +200,13 @@ func TestRunCommandTerminalStatusCancelsPendingTraceObserver(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-terminal-pending", "running")
-			case "run.get":
+				return runStartCommandResult("3a92a694-7f51-5f37-83b9-6ea21b69d5f0", "running")
+			case "run.get", "run.diagnose":
 				awaitRunCommandTraceRequest(t, requestRead)
-				run := validDiagnosticRunHeader("run-terminal-pending")
+				run := validDiagnosticRunHeader("3a92a694-7f51-5f37-83b9-6ea21b69d5f0")
 				run["status"] = "completed"
 				run["ended_at"] = "2026-05-13T10:01:00Z"
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -243,14 +243,14 @@ func TestRunCommandTerminalFailureCancelsPendingTraceObserver(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-terminal-failure-pending", "running")
-			case "run.get":
+				return runStartCommandResult("cab86c63-7aa1-58c5-87bb-a95e4dd1e56f", "running")
+			case "run.get", "run.diagnose":
 				awaitRunCommandTraceRequest(t, requestRead)
-				run := validDiagnosticRunHeader("run-terminal-failure-pending")
+				run := validDiagnosticRunHeader("cab86c63-7aa1-58c5-87bb-a95e4dd1e56f")
 				run["status"] = "failed"
 				run["ended_at"] = "2026-05-13T10:01:00Z"
 				run["failure"] = testRuntimeFailureClass(runtimefailures.ClassInternalFailure, "workflow_failed")
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -284,7 +284,7 @@ func TestRunCommandActiveReattachObserverFailureDetachesAndPolls(t *testing.T) {
 			if req.Method != "run.get" {
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
-			run := validDiagnosticRunHeader("run-reattach-detach")
+			run := validDiagnosticRunHeader("60b0c147-5008-57f3-97d7-94e475f78cfc")
 			if call > 1 {
 				select {
 				case <-warning.notify:
@@ -293,19 +293,19 @@ func TestRunCommandActiveReattachObserverFailureDetachesAndPolls(t *testing.T) {
 				default:
 				}
 			}
-			return map[string]any{"run": run}
+			return runCommandReadResult(req.Method, run)
 		},
 		wsHTTPStatus: http.StatusServiceUnavailable,
 	})
 	defer server.Close()
 
 	var stdout bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "run-reattach-detach"}, &stdout, warning, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "60b0c147-5008-57f3-97d7-94e475f78cfc"}, &stdout, warning, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), warning.String())
 	}
 	fact := requireSingleRunTraceDetachFact(t, warning.String())
-	assertRunTraceDetachFact(t, fact, runTraceDetachAttachFailed, "run-reattach-detach", "swarm run start --connect "+server.URL+" --reattach run-reattach-detach")
+	assertRunTraceDetachFact(t, fact, runTraceDetachAttachFailed, "60b0c147-5008-57f3-97d7-94e475f78cfc", "swarm run start --connect "+server.URL+" --reattach 60b0c147-5008-57f3-97d7-94e475f78cfc")
 	methods := runCommandMethodNames(*calls)
 	if len(methods) < 2 {
 		t.Fatalf("methods = %v, want initial and followed run.get", methods)
@@ -337,7 +337,7 @@ func TestRunCommandInterruptCancelsPendingTraceObserverByMode(t *testing.T) {
 		{
 			name: "active reattach only detaches",
 			args: func(serverURL string) []string {
-				return []string{"run", "start", "--connect", serverURL, "--reattach", "run-pending-interrupt"}
+				return []string{"run", "start", "--connect", serverURL, "--reattach", "e0b6a02d-8ba3-5523-bd46-5eda1b1d40a1"}
 			},
 			wantMethods: []string{"run.get"},
 		},
@@ -351,9 +351,9 @@ func TestRunCommandInterruptCancelsPendingTraceObserverByMode(t *testing.T) {
 					case "health.check":
 						return runCommandHealthResult()
 					case "run.start":
-						return runStartCommandResult("run-pending-interrupt", "running")
-					case "run.get":
-						return map[string]any{"run": validDiagnosticRunHeader("run-pending-interrupt")}
+						return runStartCommandResult("e0b6a02d-8ba3-5523-bd46-5eda1b1d40a1", "running")
+					case "run.get", "run.diagnose":
+						return map[string]any{"run": validDiagnosticRunHeader("e0b6a02d-8ba3-5523-bd46-5eda1b1d40a1")}
 					case "run.stop":
 						if !test.stopOnInterrupt {
 							t.Fatal("reattach interrupt called run.stop")
@@ -412,7 +412,7 @@ func TestRunCommandInterruptAfterObserverDetachPreservesModeControl(t *testing.T
 		{
 			name: "active reattach only detaches",
 			args: func(serverURL string) []string {
-				return []string{"run", "start", "--connect", serverURL, "--reattach", "run-detached-interrupt"}
+				return []string{"run", "start", "--connect", serverURL, "--reattach", "8be65499-5a47-5254-ba95-c98d788df5d4"}
 			},
 			wantMethods: []string{"run.get"},
 		},
@@ -426,9 +426,9 @@ func TestRunCommandInterruptAfterObserverDetachPreservesModeControl(t *testing.T
 					case "health.check":
 						return runCommandHealthResult()
 					case "run.start":
-						return runStartCommandResult("run-detached-interrupt", "running")
-					case "run.get":
-						return map[string]any{"run": validDiagnosticRunHeader("run-detached-interrupt")}
+						return runStartCommandResult("8be65499-5a47-5254-ba95-c98d788df5d4", "running")
+					case "run.get", "run.diagnose":
+						return map[string]any{"run": validDiagnosticRunHeader("8be65499-5a47-5254-ba95-c98d788df5d4")}
 					case "run.stop":
 						if !test.stopOnInterrupt {
 							t.Fatal("reattach interrupt called run.stop")
@@ -483,7 +483,7 @@ func TestRunCommandBlockedTraceRenderingDoesNotDelayInterruptControl(t *testing.
 		{
 			name: "active reattach leaves the run active",
 			args: func(serverURL string) []string {
-				return []string{"run", "start", "--connect", serverURL, "--reattach", "run-blocked-trace"}
+				return []string{"run", "start", "--connect", serverURL, "--reattach", "46ed30c1-eebe-5006-963b-6ee774bc687a"}
 			},
 			wantMethods: []string{"run.get"},
 		},
@@ -497,9 +497,9 @@ func TestRunCommandBlockedTraceRenderingDoesNotDelayInterruptControl(t *testing.
 					case "health.check":
 						return runCommandHealthResult()
 					case "run.start":
-						return runStartCommandResult("run-blocked-trace", "running")
-					case "run.get":
-						return map[string]any{"run": validDiagnosticRunHeader("run-blocked-trace")}
+						return runStartCommandResult("46ed30c1-eebe-5006-963b-6ee774bc687a", "running")
+					case "run.get", "run.diagnose":
+						return map[string]any{"run": validDiagnosticRunHeader("46ed30c1-eebe-5006-963b-6ee774bc687a")}
 					case "run.stop":
 						if !test.stopOnInterrupt {
 							t.Fatal("reattach interrupt called run.stop")
@@ -563,9 +563,9 @@ func TestRunCommandBlockedDetachRenderingDoesNotDelayTerminalSelection(t *testin
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-blocked-detach", "running")
-			case "run.get":
-				run := validDiagnosticRunHeader("run-blocked-detach")
+				return runStartCommandResult("c9888279-eecc-540d-a91f-1c9bc35ecf1f", "running")
+			case "run.get", "run.diagnose":
+				run := validDiagnosticRunHeader("c9888279-eecc-540d-a91f-1c9bc35ecf1f")
 				select {
 				case <-stderr.blocked:
 					run["status"] = "completed"
@@ -573,7 +573,7 @@ func TestRunCommandBlockedDetachRenderingDoesNotDelayTerminalSelection(t *testin
 					terminalOnce.Do(func() { close(terminalSelected) })
 				default:
 				}
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -614,8 +614,8 @@ func TestRunCommandBlockedDetachRenderingDoesNotDelayTerminalSelection(t *testin
 		t.Fatal("run command did not finish after detach output release")
 	}
 	fact := requireSingleRunTraceDetachFact(t, stderr.String())
-	assertRunTraceDetachFact(t, fact, runTraceDetachTransportLost, "run-blocked-detach", "swarm run start --connect "+server.URL+" --reattach run-blocked-detach")
-	if !strings.Contains(stdout.String(), "run terminal: run_id=run-blocked-detach status=completed") {
+	assertRunTraceDetachFact(t, fact, runTraceDetachTransportLost, "c9888279-eecc-540d-a91f-1c9bc35ecf1f", "swarm run start --connect "+server.URL+" --reattach c9888279-eecc-540d-a91f-1c9bc35ecf1f")
+	if !strings.Contains(stdout.String(), "run terminal: run_id=c9888279-eecc-540d-a91f-1c9bc35ecf1f status=completed") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
@@ -672,16 +672,16 @@ func TestRunCommandHealthyTraceBurstWithinTransportBoundDoesNotDetach(t *testing
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-healthy-burst", "running")
-			case "run.get":
-				run := validDiagnosticRunHeader("run-healthy-burst")
+				return runStartCommandResult("0ab3acf0-22e7-5e71-9fd8-733d351436e7", "running")
+			case "run.get", "run.diagnose":
+				run := validDiagnosticRunHeader("0ab3acf0-22e7-5e71-9fd8-733d351436e7")
 				select {
 				case <-lastRendered:
 					run["status"] = "completed"
 					run["ended_at"] = "2026-05-13T10:01:00Z"
 				default:
 				}
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 				return nil
@@ -723,7 +723,7 @@ func TestRunCommandQueueOverflowDetachesExactlyOnce(t *testing.T) {
 		rows[i] = validRunCommandTraceRow(fmt.Sprintf("evt-overflow-%03d", i))
 	}
 	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: observerTerminalAfterWarningResponder(t, "run-overflow", warning.notify),
+		rpcResponder: observerTerminalAfterWarningResponder(t, "7063c4a3-0896-54c7-89a5-df80077aa6c0", warning.notify),
 		wsRows:       rows,
 	})
 	defer server.Close()
@@ -757,7 +757,7 @@ func TestRunCommandQueueOverflowDetachesExactlyOnce(t *testing.T) {
 		t.Fatal("run command did not finish after observer overflow")
 	}
 	fact := requireSingleRunTraceDetachFact(t, warning.String())
-	assertRunTraceDetachFact(t, fact, runTraceDetachQueueOverflow, "run-overflow", "swarm run start --connect "+server.URL+" --reattach run-overflow")
+	assertRunTraceDetachFact(t, fact, runTraceDetachQueueOverflow, "7063c4a3-0896-54c7-89a5-df80077aa6c0", "swarm run start --connect "+server.URL+" --reattach 7063c4a3-0896-54c7-89a5-df80077aa6c0")
 }
 
 func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T) {
@@ -787,9 +787,9 @@ func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-terminal-overflow", "running")
-			case "run.get":
-				run := validDiagnosticRunHeader("run-terminal-overflow")
+				return runStartCommandResult("a310030f-840b-59b7-b13c-e7d56e8c355c", "running")
+			case "run.get", "run.diagnose":
+				run := validDiagnosticRunHeader("a310030f-840b-59b7-b13c-e7d56e8c355c")
 				select {
 				case <-warning.blocked:
 					run["status"] = "completed"
@@ -797,7 +797,7 @@ func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T
 					terminalObservedOnce.Do(func() { close(terminalObserved) })
 				default:
 				}
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -828,8 +828,8 @@ func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T
 		t.Fatal("run command did not finish after terminal observer join")
 	}
 	fact := requireSingleRunTraceDetachFact(t, warning.String())
-	assertRunTraceDetachFact(t, fact, runTraceDetachQueueOverflow, "run-terminal-overflow", "swarm run start --connect "+server.URL+" --reattach run-terminal-overflow")
-	if !strings.Contains(stdout.String(), "run terminal: run_id=run-terminal-overflow status=completed") {
+	assertRunTraceDetachFact(t, fact, runTraceDetachQueueOverflow, "a310030f-840b-59b7-b13c-e7d56e8c355c", "swarm run start --connect "+server.URL+" --reattach a310030f-840b-59b7-b13c-e7d56e8c355c")
+	if !strings.Contains(stdout.String(), "run terminal: run_id=a310030f-840b-59b7-b13c-e7d56e8c355c status=completed") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
@@ -839,9 +839,9 @@ func TestRunTraceObserverDetachedFactTTYAndNonTTYParity(t *testing.T) {
 		Type:            runTraceObserverDetachedType,
 		Severity:        runTraceObserverWarning,
 		ReasonCode:      runTraceDetachTransportLost,
-		RunID:           "run-parity",
+		RunID:           "950dc6b1-91f8-587b-bbad-cd6561bef9a8",
 		RunContinues:    true,
-		ReattachCommand: "swarm run start --connect http://127.0.0.1:8080 --reattach run-parity",
+		ReattachCommand: "swarm run start --connect http://127.0.0.1:8080 --reattach 950dc6b1-91f8-587b-bbad-cd6561bef9a8",
 	}
 	var machine, human bytes.Buffer
 	writeRunTraceObserverDetachedWithMode(&machine, false, fact)
@@ -849,7 +849,7 @@ func TestRunTraceObserverDetachedFactTTYAndNonTTYParity(t *testing.T) {
 	if got := requireSingleRunTraceDetachFact(t, machine.String()); got != fact {
 		t.Fatalf("machine fact = %#v, want %#v", got, fact)
 	}
-	for _, want := range []string{"WARNING:", "run-parity", string(runTraceDetachTransportLost), "the run continues", fact.ReattachCommand} {
+	for _, want := range []string{"WARNING:", "950dc6b1-91f8-587b-bbad-cd6561bef9a8", string(runTraceDetachTransportLost), "the run continues", fact.ReattachCommand} {
 		if !strings.Contains(human.String(), want) {
 			t.Fatalf("human warning = %q, want %q", human.String(), want)
 		}
@@ -864,7 +864,7 @@ func observerTerminalAfterWarningResponder(t *testing.T, runID string, warning <
 			return runCommandHealthResult()
 		case "run.start":
 			return runStartCommandResult(runID, "running")
-		case "run.get":
+		case "run.get", "run.diagnose":
 			run := validDiagnosticRunHeader(runID)
 			select {
 			case <-warning:
@@ -872,7 +872,7 @@ func observerTerminalAfterWarningResponder(t *testing.T, runID string, warning <
 				run["ended_at"] = "2026-05-13T10:01:00Z"
 			default:
 			}
-			return map[string]any{"run": run}
+			return runCommandReadResult(req.Method, run)
 		default:
 			t.Fatalf("unexpected method = %q", req.Method)
 		}

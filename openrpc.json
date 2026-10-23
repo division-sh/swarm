@@ -9859,7 +9859,7 @@
     },
     {
       "name": "run.fan_out.list",
-      "description": "Read one bounded page of durable fan-out intent headers. Read-only; does not claim, release, retry, repair or hydrate immutable source values or outcomes. Filters are exact persisted predicates combined with AND; omitted filters select all statuses, including terminal rows. Fixed ascending order is triggering_delivery_id, element_ref.flow_path, element_ref.family, element_ref.semantic_path, deployment_feed_id, using byte collation with absent origin-specific components represented as empty strings for ordering only. Deployment keys contain exactly run_id and deployment_feed_id; handler keys contain exactly run_id, triggering_delivery_id and element_ref. The typed origin owns bundle projection for both serving and readback; no fallback to a handler plan or the run's current bundle is permitted. Handler identity filters exclude deployment rows. Progress cannot move a row. Cursor is bound to run, complete filter and order; page size may change. Malformed or differently scoped cursors are invalid params. Each page has its own observation time and current run status; there is no cross-page snapshot promise. Concurrent arrivals before the cursor are not revisited. Durable state precedence consumes Intent.ServingAt: closed/canceled/blocked first, then unexpired lease, then future retry readiness, otherwise eligible. Expiry/due equality is eligible. Durable eligible is not runtime authorization: paused/terminal runs, retired/unavailable generations, and unavailable source admission must never be inferred eligible from it. Runtime evidence is separate; unavailable metrics and eligibility are null, never fabricated zero/false. Existing aggregate status/diagnose and direct delivery barriers are unchanged.",
+      "description": "Read one bounded page of durable fan-out intent headers. Read-only; does not claim, release, retry, repair or hydrate immutable source values. Header-only callers do not hydrate outcomes. An exact deployment_feed_id filter plus outcome_from_ordinal requests a bounded deployment_outcomes page using the same limit, in ordinal order. It includes committed event identity or typed semantic rejection, up to the native committed cursor, with next_ordinal and more. Filters are exact persisted predicates combined with AND; omitted filters select all statuses, including terminal rows. Fixed ascending order is triggering_delivery_id, element_ref.flow_path, element_ref.family, element_ref.semantic_path, deployment_feed_id, using byte collation with absent origin-specific components represented as empty strings for ordering only. Deployment keys contain exactly run_id and deployment_feed_id; handler keys contain exactly run_id, triggering_delivery_id and element_ref. The typed origin owns bundle projection for both serving and readback; no fallback to a handler plan or the run's current bundle is permitted. Handler identity filters exclude deployment rows. Progress cannot move a row. Cursor is bound to run, complete filter and order; page size may change. Malformed or differently scoped cursors are invalid params. Each page has its own observation time and current run status; there is no cross-page snapshot promise. Concurrent arrivals before the cursor are not revisited. Durable state precedence consumes Intent.ServingAt: closed/canceled/blocked first, then unexpired lease, then future retry readiness, otherwise eligible. Expiry/due equality is eligible. Durable eligible is not runtime authorization: paused/terminal runs, retired/unavailable generations, and unavailable source admission must never be inferred eligible from it. Runtime evidence is separate; unavailable metrics and eligibility are null, never fabricated zero/false. Existing aggregate status/diagnose and direct delivery barriers are unchanged.",
       "params": [
         {
           "name": "run_id",
@@ -9893,6 +9893,14 @@
             "maxLength": 16384,
             "minLength": 1,
             "type": "string"
+          }
+        },
+        {
+          "name": "outcome_from_ordinal",
+          "required": false,
+          "schema": {
+            "minimum": 0,
+            "type": "integer"
           }
         }
       ],
@@ -10916,6 +10924,17 @@
           "properties": {
             "data_binding": {
               "$ref": "#/components/schemas/DataBinding"
+            },
+            "deployment_feed_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "event_id": {
+              "format": "uuid",
+              "type": "string"
             },
             "run_id": {
               "$ref": "#/components/schemas/OpaqueId"
@@ -20266,6 +20285,83 @@
         ],
         "type": "object"
       },
+      "FanOutDeploymentOutcomePage": {
+        "additionalProperties": false,
+        "description": "Bounded ordinal read of the exact deployment feed. The native outcome owner validates committed versus semantic_rejected evidence; no rows or receivers are reconstructed.",
+        "properties": {
+          "deployment_feed_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "more": {
+            "type": "boolean"
+          },
+          "next_ordinal": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outcomes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "created_at": {
+                  "$ref": "#/components/schemas/Timestamp"
+                },
+                "event_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "failure": {
+                  "$ref": "#/components/schemas/FailureEnvelope"
+                },
+                "inherited_disposition": {
+                  "enum": [
+                    "succeeded",
+                    "dead_lettered",
+                    "no_route"
+                  ],
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "committed",
+                    "semantic_rejected"
+                  ],
+                  "type": "string"
+                },
+                "ordinal": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "source_event_id": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ordinal",
+                "kind",
+                "created_at"
+              ],
+              "type": "object"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "deployment_feed_id",
+          "outcomes",
+          "next_ordinal",
+          "more"
+        ],
+        "type": "object"
+      },
       "FanOutIntentKey": {
         "description": "Exact closed origin union. Deployment feeds have no triggering delivery or authored element; empty/null handler fields are forbidden, not compatibility aliases.",
         "oneOf": [
@@ -20478,6 +20574,10 @@
       "FanOutListFilter": {
         "additionalProperties": false,
         "properties": {
+          "deployment_feed_id": {
+            "format": "uuid",
+            "type": "string"
+          },
           "flow_path": {
             "description": "Exact canonical authored flow path; the selected root is '.', never empty.",
             "maxLength": 4096,
@@ -20508,6 +20608,9 @@
       "FanOutListPage": {
         "additionalProperties": false,
         "properties": {
+          "deployment_outcomes": {
+            "$ref": "#/components/schemas/FanOutDeploymentOutcomePage"
+          },
           "intents": {
             "items": {
               "$ref": "#/components/schemas/FanOutIntentReadback"
