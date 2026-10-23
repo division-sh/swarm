@@ -132,7 +132,7 @@ func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 			Facts: events.EventFacts{
 				ID: uuid.NewString(), Type: eventType, Payload: []byte(`{}`), RoutingSource: source,
 				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
-				Envelope: events.EventEnvelope{EntityID: "timer-entity"},
+				Envelope: events.EventEnvelope{EntityID: "timer-entity"}, ExecutionMode: executionmode.Live,
 			}, RunID: uuid.NewString(),
 		})
 		if err != nil {
