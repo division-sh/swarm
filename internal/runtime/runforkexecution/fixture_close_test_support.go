@@ -61,7 +61,6 @@ func (o SelectedContractExecutionOwner) PublishSelectedFixtureCloseForTest(calle
 	released := false
 	defer func() {
 		if !released {
-			use.cancel()
 			finalErr = errors.Join(finalErr, use.lease.Done())
 		}
 	}()
