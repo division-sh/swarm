@@ -1,154 +1,149 @@
 package packartifact
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"testing/fstest"
 
-	basepacks "github.com/division-sh/swarm/internal/packmodel"
+	"github.com/division-sh/swarm/internal/packmodel"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
-func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []string, embedded *PlatformPackInventory) (*PlatformPackInventory, error) {
-	if embedded == nil || embedded.SelectionMode() != SelectionEmbedded {
-		return nil, fmt.Errorf("embedded platform pack inventory is required to validate a complete development override")
+func LoadDevelopmentPlatformPackInventory(runningVersion string, dirs []string, embedded *PlatformPackInventory) (*PlatformPackInventory, error) {
+	if embedded == nil || embedded.SelectionMode() != SelectionEmbedded || len(dirs) == 0 {
+		return nil, fmt.Errorf("complete development provider directories and embedded inventory are required")
 	}
-	if len(dirs) == 0 {
-		return nil, fmt.Errorf("development platform pack directories are required")
-	}
-	type candidatePack struct {
-		directory    string
-		envelope     Envelope
-		envelopeBody []byte
-		manifestBody []byte
-	}
-	candidates := make([]candidatePack, 0, len(dirs))
-	seenIDs := map[string]string{}
-	for index, raw := range dirs {
-		dir := filepath.Clean(strings.TrimSpace(raw))
-		if dir == "" || dir == "." {
-			return nil, fmt.Errorf("platform.packs.platform_dirs[%d] is empty", index)
+	files := map[string][]byte{}
+	providers := map[string]Entry{}
+	manifest := InventoryManifest{Version: 1}
+	resolved := make(map[string]string, len(dirs))
+	for _, raw := range dirs {
+		if raw == "" {
+			return nil, fmt.Errorf("development provider directory is required")
 		}
-		absoluteDir, err := filepath.Abs(dir)
+		dir, err := filepath.Abs(raw)
 		if err != nil {
-			return nil, fmt.Errorf("resolve development platform pack %q: %w", dir, err)
+			return nil, err
 		}
-		dir = absoluteDir
-		root, err := openAdmittedArtifactRoot(dir)
+		key := filepath.Base(dir)
+		if previous, duplicate := resolved[key]; duplicate {
+			return nil, fmt.Errorf("duplicate development provider %q from %q and %q", key, previous, dir)
+		}
+		root, err := openAdmittedArtifactRoot(filepath.Dir(dir))
 		if err != nil {
-			return nil, fmt.Errorf("development platform pack %q must be a real directory with no symlinked ancestors: %w", dir, err)
+			return nil, err
 		}
-		entries, err := root.readDir(".")
-		if err != nil {
-			_ = root.close()
-			return nil, fmt.Errorf("read development platform pack %q: %w", dir, err)
+		entries, readErr := root.readDir(".")
+		var selected fs.DirEntry
+		var captured *admittedArtifactRoot
+		if readErr == nil {
+			selected, readErr = selectProviderDirectory(entries, key)
 		}
-		if len(entries) != 2 {
-			_ = root.close()
-			return nil, fmt.Errorf("development platform pack %q must contain exactly pack.yaml and one body manifest", dir)
-		}
-		hasEnvelope := false
-		for _, entry := range entries {
-			hasEnvelope = hasEnvelope || entry.Name() == EnvelopeFileName
-		}
-		if !hasEnvelope {
-			_ = root.close()
-			return nil, fmt.Errorf("development platform pack %q must contain exactly pack.yaml and one body manifest", dir)
-		}
-		artifactBodies, err := readDevelopmentPackArtifacts(root, entries)
-		if err != nil {
-			_ = root.close()
-			return nil, fmt.Errorf("inspect development platform pack %q: %w", dir, err)
-		}
-		envelopeBody := artifactBodies[EnvelopeFileName]
-		envelope, err := basepacks.ParseEnvelopeAt(envelopeBody, filepath.Join(dir, EnvelopeFileName))
-		if err != nil {
-			_ = root.close()
-			return nil, fmt.Errorf("parse development platform pack envelope %q: %w", dir, err)
-		}
-		manifestFile := ManifestFileNameForType(envelope.Type)
-		if manifestFile == "" {
-			_ = root.close()
-			return nil, fmt.Errorf("development platform pack %q has unsupported type %q", envelope.ID, envelope.Type)
-		}
-		for _, entry := range entries {
-			if entry.Name() != EnvelopeFileName && entry.Name() != manifestFile {
-				_ = root.close()
-				return nil, fmt.Errorf("development platform pack %q contains unsupported entry %q", dir, entry.Name())
+		if readErr == nil {
+			captured, readErr = root.openCapturedDirectory(key)
+			if readErr == nil {
+				entries, readErr = captured.readDir(".")
 			}
 		}
-		if previous, duplicate := seenIDs[envelope.ID]; duplicate {
-			_ = root.close()
-			return nil, fmt.Errorf("duplicate development platform pack id %q from %q and %q", envelope.ID, previous, dir)
+		var bodies map[string][]byte
+		if readErr == nil {
+			bodies, readErr = readDevelopmentPackArtifacts(captured, ".", entries)
 		}
-		seenIDs[envelope.ID] = dir
-		body := artifactBodies[manifestFile]
-		if err := root.close(); err != nil {
-			return nil, fmt.Errorf("close development platform pack %q: %w", dir, err)
+		closeErr := root.close()
+		if captured != nil {
+			closeErr = errors.Join(closeErr, captured.close())
 		}
-		candidates = append(candidates, candidatePack{
-			directory: dir, envelope: envelope, envelopeBody: envelopeBody, manifestBody: body,
-		})
+		if readErr != nil {
+			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		provider, err := admitCapturedProvider(selected, dir, bodies, runningVersion)
+		if err != nil {
+			return nil, err
+		}
+		providers[provider.Key()] = Entry{provider: provider, directory: dir, selection: string(SelectionDevelopmentOverride)}
+		for name, body := range bodies {
+			files[key+"/"+name] = body
+		}
+		manifest.Packs = append(manifest.Packs, InventoryManifestPack{Path: key})
+		resolved[key] = dir
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].envelope.ID < candidates[j].envelope.ID })
-	files := fstest.MapFS{}
-	manifest := InventoryManifest{Version: 1}
-	resolvedDirs := make([]string, 0, len(candidates))
-	for index, candidate := range candidates {
-		inventoryPath := fmt.Sprintf("packs/%03d", index)
-		manifestFile := ManifestFileNameForType(candidate.envelope.Type)
-		files[inventoryPath+"/"+EnvelopeFileName] = &fstest.MapFile{Data: candidate.envelopeBody, Mode: 0o444}
-		files[inventoryPath+"/"+manifestFile] = &fstest.MapFile{Data: candidate.manifestBody, Mode: 0o444}
-		manifest.Packs = append(manifest.Packs, InventoryManifestPack{ID: candidate.envelope.ID, Type: candidate.envelope.Type, Path: inventoryPath})
-		resolvedDirs = append(resolvedDirs, candidate.directory)
-	}
-	manifestBody, err := yaml.Marshal(manifest)
-	if err != nil {
-		return nil, fmt.Errorf("marshal development platform pack inventory: %w", err)
-	}
-	files[InventoryManifestFileName] = &fstest.MapFile{Data: manifestBody, Mode: 0o444}
-	inventory, err := LoadPlatformPackInventoryFS(files, InventoryManifestFileName, runningPlatformVersion, SelectionDevelopmentOverride)
+	body, err := yaml.Marshal(manifest)
 	if err != nil {
 		return nil, err
 	}
-	for _, candidate := range candidates {
-		entry := inventory.entries[candidate.envelope.ID]
-		entry.directory = candidate.directory
-		entry.envelope = cloneEnvelope(candidate.envelope)
-		inventory.entries[candidate.envelope.ID] = entry
+	files[InventoryManifestFileName] = body
+	admitted, err := admitInventoryManifest(body, InventoryManifestFileName)
+	if err != nil {
+		return nil, err
+	}
+	inventory := &PlatformPackInventory{
+		source: admitted.source, mode: SelectionDevelopmentOverride,
+		digest: digestInventoryMembers(files), runningPlatformVersion: runningVersion, entries: providers,
 	}
 	if err := requireCompleteReplacement(embedded, inventory); err != nil {
 		return nil, err
 	}
-	inventory.embeddedImportOrigins = cloneImportOrigins(embedded.embeddedImportOrigins)
-	inventory.sourceDirectories = append([]string(nil), resolvedDirs...)
+	for _, entry := range inventory.Entries() {
+		entry.directory = resolved[entry.ID()]
+		inventory.entries[entry.ID()] = entry
+		inventory.sourceDirectories = append(inventory.sourceDirectories, entry.Directory())
+	}
 	return inventory, nil
 }
 
-func readDevelopmentPackArtifacts(root *admittedArtifactRoot, entries []fs.DirEntry) (map[string][]byte, error) {
+func readDevelopmentPackArtifacts(root *admittedArtifactRoot, directory string, entries []fs.DirEntry) (map[string][]byte, error) {
 	opened := make(map[string]*os.File, len(entries))
 	defer func() {
 		for _, file := range opened {
 			_ = file.Close()
 		}
 	}()
-	for _, entry := range entries {
-		file, err := root.openRegularFile(entry.Name())
+	var collect func(string, []fs.DirEntry) error
+	collect = func(parent string, entries []fs.DirEntry) error {
+		for _, entry := range entries {
+			label := filepath.Join(parent, entry.Name())
+			if entry.IsDir() {
+				children, err := root.readDir(label)
+				if err != nil {
+					return err
+				}
+				if err := collect(label, children); err != nil {
+					return err
+				}
+				continue
+			}
+			if len(opened) >= sourceartifact.MaxMembers {
+				return fmt.Errorf("provider directory exceeds source member limit")
+			}
+			file, err := root.openRegularFile(label)
+			if err != nil {
+				return err
+			}
+			opened[filepath.ToSlash(strings.TrimPrefix(label, directory+string(filepath.Separator)))] = file
+		}
+		return nil
+	}
+	if err := collect(directory, entries); err != nil {
+		return nil, err
+	}
+	bodies := make(map[string][]byte, len(opened))
+	total := 0
+	for name, file := range opened {
+		body, err := io.ReadAll(io.LimitReader(file, sourceartifact.MaxMemberBytes+1))
 		if err != nil {
 			return nil, err
 		}
-		opened[entry.Name()] = file
-	}
-	bodies := make(map[string][]byte, len(opened))
-	for name, file := range opened {
-		body, err := io.ReadAll(file)
-		if err != nil {
-			return nil, fmt.Errorf("read opened development pack artifact %q: %w", name, err)
+		total += len(body)
+		if len(body) > sourceartifact.MaxMemberBytes || total > sourceartifact.MaxArtifactBytes {
+			return nil, fmt.Errorf("provider directory exceeds source byte limits")
 		}
 		bodies[name] = body
 	}
@@ -164,30 +159,21 @@ func readRegularDevelopmentPackFile(dir, name string) ([]byte, error) {
 	return root.readRegularFile(name)
 }
 
-func cloneImportOrigins(origins map[string]ImportOrigin) map[string]ImportOrigin {
-	if origins == nil {
-		return nil
-	}
-	cloned := make(map[string]ImportOrigin, len(origins))
-	for id, origin := range origins {
-		cloned[id] = origin
-	}
-	return cloned
-}
-
 func requireCompleteReplacement(embedded, candidate *PlatformPackInventory) error {
-	embeddedEntries := embedded.Entries()
-	candidateEntries := candidate.Entries()
-	if len(embeddedEntries) != len(candidateEntries) {
-		return fmt.Errorf("development override replaces the embedded inventory and must provide all %d packs; got %d", len(embeddedEntries), len(candidateEntries))
+	if len(embedded.entries) != len(candidate.entries) {
+		return fmt.Errorf("development override must replace all %d embedded provider directories; got %d", len(embedded.entries), len(candidate.entries))
 	}
-	for _, expected := range embeddedEntries {
-		actual, ok := candidate.Lookup(expected.ID())
-		if !ok {
-			return fmt.Errorf("development override replaces the embedded inventory but is missing %q; add its directory or remove platform.packs.platform_dirs", expected.ID())
+	for _, expected := range embedded.Entries() {
+		actual, present := candidate.Lookup(expected.ID())
+		if !present {
+			return fmt.Errorf("development override is missing provider %q", expected.ID())
 		}
-		if actual.Type() != expected.Type() {
-			return fmt.Errorf("development override pack %q type %q contradicts embedded type %q", expected.ID(), actual.Type(), expected.Type())
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			_, wanted := expected.Provider().Body(role)
+			_, got := actual.Provider().Body(role)
+			if wanted != got {
+				return fmt.Errorf("development provider %q must preserve its %s BODY membership", expected.ID(), role)
+			}
 		}
 	}
 	return nil

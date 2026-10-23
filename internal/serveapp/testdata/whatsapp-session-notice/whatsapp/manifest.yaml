@@ -1,0 +1,11 @@
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+capabilities:
+  can:
+    receive_session_events: whatsapp
+    emit_events: [raw, edit, message, revoke]
+    persist_dedupe_markers: true
+    call_provider_actions: [send_text]
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot: [emit_undeclared_events, run_code_before_admission, touch_unbound_resources, bypass activity_attempts, retry non_idempotent_write automatically, expose credential values, inspect provider opaque references, select inbound targets]

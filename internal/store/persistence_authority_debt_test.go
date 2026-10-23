@@ -31,6 +31,7 @@ const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc
 const debtQuiescenceCollectorFrom = "65fe2e66c01eb0e19ce2b44d53f545cc76dd823f5f8b58562e139a362cc9c267"
 const debtRunFixtureCollectorFrom = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e4d80d904832757ae047"
 const debtDeploymentRegistrationCollectorFrom = "4a683b60cf5147aece5eabc4e8f044555f64a15623f9e7106ddb4d9726961f9a"
+const debtS1CollectorFrom = "f765afc073439ecaa3e031c497a8bee3f06af9d9a0b3a816e97ab28f366c4834"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
@@ -1003,6 +1004,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == debtG01CollectorFrom && trusted.Collector == debtG01CollectorFrom &&
 		current == debtG01CollectorTo && head.Collector == debtG01CollectorTo &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil
+	}
+	if base == debtS1CollectorFrom && trusted.Collector == base &&
+		current == debtS1CollectorTo && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil
 	}

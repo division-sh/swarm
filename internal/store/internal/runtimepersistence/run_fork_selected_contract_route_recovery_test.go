@@ -19,6 +19,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -305,7 +306,11 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	}, pg)
 
 	ctx = managedExecutionStoreTestContext(t, ctx)
-	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg))
+	rooted, err := pg.LoadRunRootedSource(ctx, forkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg), rooted)
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -359,7 +364,11 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	}, pg)
 
 	ctx = managedExecutionStoreTestContext(t, ctx)
-	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg))
+	rooted, err := pg.LoadRunRootedSource(ctx, forkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg), rooted)
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -411,8 +420,12 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 		return selectedRouteRecoveryAgent{id: cfg.ID}, nil
 	}, pg)
 
-	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg))
-	err := am.Recover(ctx)
+	rooted, err := pg.LoadRunRootedSource(ctx, forkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg), rooted)
+	err = am.Recover(ctx)
 	if err == nil || !strings.Contains(err.Error(), "recipient planning fingerprint mismatch") {
 		t.Fatalf("Recover error = %v, want recipient planning fingerprint mismatch", err)
 	}
@@ -423,10 +436,12 @@ func prepareSelectedRouteRecoveryStartup(
 	ctx context.Context,
 	manager *runtimemanager.AgentManager,
 	store runtimemanager.AgentLifecyclePersistence,
+	rooted sourceartifact.RootedSource,
 ) {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{
-		BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
 	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
@@ -443,7 +458,11 @@ func prepareSelectedRouteRecoveryStartup(
 	if err := manager.InstallStartupTopology(store, admission, plan); err != nil {
 		t.Fatalf("install route recovery startup topology: %v", err)
 	}
-	if err := manager.ReconcileStaticTopologyForStartup(ctx, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(runtimepipeline.WorkflowRepoRoot(), rooted, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatalf("compile retained route recovery source: %v", err)
+	}
+	if err := manager.ReconcileStaticTopologyForStartup(ctx, semanticview.Wrap(bundle)); err != nil {
 		t.Fatalf("reconcile route recovery startup topology: %v", err)
 	}
 }

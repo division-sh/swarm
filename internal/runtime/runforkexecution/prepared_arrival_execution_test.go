@@ -77,7 +77,7 @@ func prepareArmedArrivalSourceAtCut(t *testing.T, ctx context.Context, selected 
 	marker := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), initial.Type(), "source-runtime", "",
 		initial.Payload(), 0, sourceRun, events.EventEnvelope{}, events.NoRoutingSource(),
 		runlifecycle.CanonicalTimestamp(candidate.AdmittedAt), executionmode.Mock)
-	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, flowID)
+	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, flowID))
 	if err != nil {
 		t.Fatal(err)
 	}

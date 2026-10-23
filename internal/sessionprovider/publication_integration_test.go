@@ -49,6 +49,7 @@ import (
 
 type sessionPublicationStore interface {
 	sourceartifactfixture.Writer
+	sourceartifactfixture.RootedWriter
 	runtimeinbound.Runner
 	runtimepipeline.StandingServicePersistence
 	runtimebus.EventStore
@@ -73,7 +74,6 @@ type sessionPublicationFixture struct {
 	bus       *runtimebus.EventBus
 	manifest  providertriggers.Manifest
 	catalog   *providertriggers.CatalogSnapshot
-	identity  providertriggers.PackIdentity
 	candidate runtimepipeline.StandingServiceCandidate
 	standing  runtimepipeline.StandingServiceReconciliation
 	sequence  int64
@@ -97,6 +97,10 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
 	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
+	rooted, _ := sourceartifactfixture.Rooted(t, "session-business", sourceartifactfixture.Artifact())
+	if _, err := f.selected.EnsureRootedSource(context.Background(), rooted); err != nil {
+		t.Fatal(err)
+	}
 	runtimeID := uuid.NewString()
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: source.BundleHash()})
@@ -114,7 +118,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 			t.Error(err)
 		}
 	})
-	f.ctx = runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
+	f.ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(context.Background(), source), rooted.Admission())
 	f.ctx = runtimeauthoractivity.WithScope(f.ctx, runtimeauthoractivity.BundleScope(runtimeID, source.BundleHash()))
 	f.ctx = worklifetime.WithOccurrence(f.ctx, owner)
 	f.ctx = runtimecorrelation.WithRuntimeInstanceID(f.ctx, runtimeID)
@@ -126,15 +130,11 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256(f.manifest.SourceBytes())
-	f.identity = providertriggers.PackIdentity{ID: "provider.whatsapp.fixture", Version: "1.0.0",
-		ManifestHash: fmt.Sprintf("sha256:%x", digest), Provenance: "platform"}
-	f.catalog, err = providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-		Identity: f.identity, Manifest: f.manifest, Source: "isolated session publication fixture"})
+	f.catalog, err = providertriggers.NewCatalogSnapshotFromAdmittedBodies(f.manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptors := []runtimeauthoractivity.EventDescriptor{{EventType: "inbound.whatsapp", Disposition: runtimeauthoractivity.StoryAuthored}}
+	descriptors := []runtimeauthoractivity.EventDescriptor{{EventType: "inbound.whatsapp.raw", Disposition: runtimeauthoractivity.StoryAuthored}}
 	for _, kind := range []string{"message", "edit", "revoke"} {
 		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{EventType: "inbound.whatsapp." + kind, Disposition: runtimeauthoractivity.StoryAuthored})
 	}
@@ -146,8 +146,8 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	t.Cleanup(lease.Release)
 	// Payload-to-catalog binding is supplied by the existing event fixture owner;
 	// the pack normalizer and exact output authorization are not replaced.
-	payload := func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
-		return eventtest.PayloadAdmission(event, flow, string(event.Type()))
+	payload := func(_ context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, producer.FlowID(), string(event.Type()))
 	}
 	f.selected.SetEventPayloadAdmitter(payload)
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, runtimeID, 1)
@@ -159,7 +159,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 			return startupownership.WithProcessMutationAuthority(ctx, capability)
 		},
 		CarryMutationContext: startupownership.CarryMutationAuthority,
-		ContractBundle:       sessionBusinessSemanticFixture(t),
+		ContractBundle:       sessionBusinessSemanticFixture(t, rooted),
 		ExecutionPosture:     executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: runtimeID,
 		WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: f.selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
@@ -175,7 +175,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	}
 	flow := "."
 	f.candidate = runtimepipeline.StandingServiceCandidate{BindingEnabled: true, FlowPath: flow,
-		ServiceID: runtimeflowidentity.StandingServiceID(flow), Source: source}
+		ServiceID: runtimeflowidentity.StandingServiceID(flow), Source: source, RootAdmission: rooted.Admission()}
 	f.standing, err = f.selected.ReconcileStandingService(f.ctx, f.candidate)
 	if err != nil {
 		t.Fatal(err)

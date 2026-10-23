@@ -38,7 +38,10 @@ func newCompletion2270ReleaseFixture(t *testing.T, proof *completion2270Invocati
 	f := &completion2270ReleaseFixture{proof: proof}
 	f.root, f.args, f.attempt = completion2270ProtocolFixture(t, "")
 	sourceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("name: selected-witness\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(sourceRoot)
@@ -102,7 +105,10 @@ func newCompletion2270PublishedProof(t *testing.T) *completion2270InvocationProo
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: published-witness\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)

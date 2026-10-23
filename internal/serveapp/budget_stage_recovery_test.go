@@ -13,6 +13,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -28,6 +29,8 @@ type stageRecoverySelectedStore interface {
 	budgetspend.Store
 	sourceArtifactReader
 	sourceartifactfixture.Writer
+	EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
+	SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
 }
 
 type countedStageRecoveryStore struct {
@@ -52,18 +55,19 @@ type missingStageRecoveryReader struct {
 	hash string
 }
 
-func (r missingStageRecoveryReader) GetSourceArtifact(ctx context.Context, hash string) (sourceartifact.Persisted, error) {
-	if hash == r.hash {
-		return sourceartifact.Persisted{}, sourceartifact.ErrNotFound
+func (r missingStageRecoveryReader) GetRootedSource(ctx context.Context, ref sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error) {
+	if ref.BundleHash == r.hash {
+		return sourceartifact.RootedSource{}, sourceartifact.ErrNotFound
 	}
-	return r.sourceArtifactReader.GetSourceArtifact(ctx, hash)
+	return r.sourceArtifactReader.GetRootedSource(ctx, ref)
 }
 
-func (r corruptStageRecoveryReader) GetSourceArtifact(ctx context.Context, hash string) (sourceartifact.Persisted, error) {
-	if hash == r.hash {
-		return sourceartifact.Persisted{BundleHash: hash, SourceBlob: []byte("not a source artifact"), MemberCount: 1, TotalBytes: 21}, nil
+func (r corruptStageRecoveryReader) GetRootedSource(ctx context.Context, ref sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error) {
+	if ref.BundleHash == r.hash {
+		_, err := sourceartifact.DecodeLogical([]byte("not a source artifact"))
+		return sourceartifact.RootedSource{}, err
 	}
-	return r.sourceArtifactReader.GetSourceArtifact(ctx, hash)
+	return r.sourceArtifactReader.GetRootedSource(ctx, ref)
 }
 
 func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *testing.T) {
@@ -73,6 +77,10 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 		stageRecoveryArtifact(t, "ready: {}\n  Ready:\n    final: true"),
 		stageRecoveryArtifact(t, "open: {}\n  ready:\n    final: true"),
 		stageRecoveryArtifact(t, "[]"),
+	}
+	roots := make([]sourceartifact.RootedSource, len(artifacts))
+	for i, artifact := range artifacts {
+		roots[i] = sourceartifactfixture.CapturedRoot(t, artifact)
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -93,7 +101,10 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 			for i, artifact := range artifacts {
 				runs[i] = uuid.NewString()
 				sourceartifactfixture.RequireArtifact(t, runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), selected, artifact)
-				_, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifact.BundleHash())
+				if _, err := selected.EnsureRootedSource(ctx, roots[i]); err != nil {
+					t.Fatal(err)
+				}
+				_, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[i].Admission().Reference())
 				if err != nil {
 					t.Fatalf("load retained entity source %d: %v", i, err)
 				}
@@ -107,16 +118,26 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 					initial = "pending"
 				}
 				seedStageRecoveryFlowInstance(t, ctx, db, backend, runs[i], entityID, initial, i != 2)
+				createCtx := runtimecorrelation.WithRunID(runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), runs[i])
+				createCtx = runtimecorrelation.WithRootAdmission(createCtx, roots[i].Admission())
+				if _, err := selected.SetupScenarioEntities(createCtx, runtimepipeline.ScenarioSetupRequest{
+					RunID: runs[i], CreatedAt: time.Now().UTC(),
+					Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
+						Alias: "retained", EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: &initial,
+					}},
+				}); err != nil {
+					t.Fatalf("create retained entity %d: %v", i, err)
+				}
 			}
-			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifacts[0].BundleHash())
+			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[0].Admission().Reference())
 			if err != nil {
 				t.Fatalf("load current source: %v", err)
 			}
-			stateless, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifacts[2].BundleHash())
+			stateless, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[2].Admission().Reference())
 			if err != nil {
 				t.Fatalf("load stateless source: %v", err)
 			}
-			terminalSource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifacts[1].BundleHash())
+			terminalSource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[1].Admission().Reference())
 			if err != nil {
 				t.Fatalf("load terminal source: %v", err)
 			}
@@ -146,7 +167,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 						continue
 					}
 					found = true
-					if target.BundleHash != artifacts[i].BundleHash() || target.FlowTemplate != "child" || target.FlowInstance != "child" || target.Stage != wantStage {
+					if target.RootReference.BundleHash != artifacts[i].BundleHash() || target.FlowTemplate != "child" || target.FlowInstance != "child" || target.Stage != wantStage {
 						t.Fatalf("run %d target evidence = %#v", i, target)
 					}
 				}
@@ -155,14 +176,13 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				}
 			}
 			queries := &countedStageRecoveryStore{Store: selected, entityQueries: make(map[string]int)}
-			loads := make(map[string]int)
+			loads := make(map[sourceartifact.RootAdmissionReference]int)
 			tracker := runtimepkg.NewBudgetTracker(queries, &runtimebus.EventBus{}, &config.Config{Extensions: map[string]any{
 				"budget": map[string]any{"per_entity_monthly_cap": 10},
 			}}, nil, nil, current, executionposture.Live, runtimepkg.BudgetRecoveryStageSources{
-				CurrentBundleHash: artifacts[0].BundleHash(),
-				Load: func(ctx context.Context, hash string) (semanticview.Source, error) {
-					loads[hash]++
-					return loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, hash)
+				Load: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+					loads[reference]++
+					return loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, reference)
 				},
 			})
 			for pass := 1; pass <= 2; pass++ {
@@ -172,7 +192,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				if got := tracker.CurrentState(string(budgetspend.ScopeEntity), sharedEntity); got != "ok" {
 					t.Fatalf("shared nonterminal/stateless state = %q, want ok", got)
 				}
-				if queries.entityQueries[terminalEntity] != 0 || queries.entityQueries[sharedEntity] != pass || loads[artifacts[1].BundleHash()] != pass || loads[artifacts[2].BundleHash()] != pass {
+				if queries.entityQueries[terminalEntity] != 0 || queries.entityQueries[sharedEntity] != pass || loads[roots[1].Admission().Reference()] != pass || loads[roots[2].Admission().Reference()] != pass {
 					t.Fatalf("recovery pass %d: entity queries=%#v loads=%#v", pass, queries.entityQueries, loads)
 				}
 			}
@@ -187,9 +207,8 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 					badTracker := runtimepkg.NewBudgetTracker(selected, &runtimebus.EventBus{}, &config.Config{Extensions: map[string]any{
 						"budget": map[string]any{"per_entity_monthly_cap": 10},
 					}}, nil, nil, current, executionposture.Live, runtimepkg.BudgetRecoveryStageSources{
-						CurrentBundleHash: artifacts[0].BundleHash(),
-						Load: func(ctx context.Context, hash string) (semanticview.Source, error) {
-							return loadBudgetRecoveryStageSource(ctx, tc.reader, repo, packBases, hash)
+						Load: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+							return loadBudgetRecoveryStageSource(ctx, tc.reader, repo, packBases, reference)
 						},
 					})
 					if err := badTracker.ProjectRecoveryBudgetState(ctx); err == nil {
@@ -219,9 +238,9 @@ func stageRecoveryArtifact(t *testing.T, stages string) *sourceartifact.Admitted
 		childSchema = "name: child\nstages: []\n"
 	}
 	for path, contents := range map[string]string{
-		"schema.yaml":       "name: stage-recovery\n",
+		"schema.yaml":       "stages: []\n",
 		"child/schema.yaml": childSchema,
-		"policy.yaml":       "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
+		"policy.yaml":       "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		absolute := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {

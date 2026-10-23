@@ -31,6 +31,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -336,11 +338,11 @@ func (p *selectedRuntimeOutcomeProbe) DiscardMaterializedSelectedContractExecuti
 	return p.SelectedContractForkLifecycle.DiscardMaterializedSelectedContractExecutionFork(ctx, id)
 }
 
-func (p *selectedRuntimeOutcomeProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, source, fork string, ids []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+func (p *selectedRuntimeOutcomeProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, source, fork string, ids []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
 	p.mu.Lock()
 	p.loads++
 	p.mu.Unlock()
-	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, source, fork, ids, original)
+	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, source, fork, ids, original, originalRoot)
 	if err != nil {
 		p.t.Fatalf("real event preparation must succeed before outcome injection: %v", err)
 	}
@@ -480,7 +482,11 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					})
 					proof, activation, forkID, executed, err = result.ForkLocalRuntimeContainer, result.Activation, result.Materialization.ForkRunID, result.ExecutedEventCount, executeErr
 				} else {
-					materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, owner, loader, selection, sourceID, eventID)
+					materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, owner, SelectedContractExecutionRequest{
+						SourceRunID: sourceID, At: eventID, Owner: owner,
+						SourceLoader: loader, ContractSelection: selection,
+						AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
+					})
 					forkID = materialized.ForkRunID
 					result, activateErr := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 						ForkRunID: forkID, AllowSourceFreeze: true, Store: selected.(SelectedContractActivationStore), ExecutionOwner: owner, SourceLoader: loader,
@@ -700,7 +706,11 @@ func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend
 	}
 	envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", payload, 0, runID,
-		envelope, events.NoRoutingSource(), at, executionmode.Mock)
+		envelope, eventtest.RootRoutingSource(runID), at, executionmode.Mock)
+	event, err = eventtest.AdmitPayload(event, ".", "item.received")
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 	if backend == "postgres" {
@@ -714,13 +724,9 @@ func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend
 	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 }
 
-func materializeSelectedRuntimeOutcomeFork(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, loader SelectedContractSourceLoader, selection runfork.RunForkContractSelection, sourceID, eventID string) runfork.RunForkMaterialization {
+func materializeSelectedRuntimeOutcomeFork(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, request SelectedContractExecutionRequest) runfork.RunForkMaterialization {
 	t.Helper()
-	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceID, At: eventID, Owner: owner,
-		SourceLoader: loader, ContractSelection: selection,
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
-	})
+	prepared, err := owner.Prepare(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -755,18 +761,36 @@ func TestSelectedForkActivationGateRetainsDirectActivationOutcome(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			forkID := uuid.NewString()
 			binding := testSelectedContractBinding(forkID)
+			repo, targetRoot := runForkExecutionRepoRoot(t), t.TempDir()
+			writeSelectedContractFixtureFile(t, filepath.Join(targetRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeSelectedContractFixtureFile(t, filepath.Join(targetRoot, "schema.yaml"), "stages: []\n")
+			var sources [2]LoadedSelectedContractSource
+			for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {
+				loaded, err := (admittedFixtureSelectedContractSourceLoader{
+					RepoRoot: repo, SourceRoot: root,
+				}).LoadRunForkSelectedContractSource(context.Background(), binding.ContractSelection)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sources[i] = loaded
+			}
+			binding.TargetRootReference = sources[0].RootedSource.Admission().Reference()
+			availability := testSelectedContractBundleAvailability(forkID)
+			availability.BundleHash = sources[0].SourceArtifactFact.BundleHash()
+			availability.RootReference = binding.TargetRootReference
+			availability.RootAdmissionPresent = true
 			cause := errors.New("acknowledged activation cleanup")
 			activation := runfork.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkID, Activated: true, SourceFrozen: true}
 			store := &selectedActivationOutcomeStore{fakeSelectedContractActivationStore: fakeSelectedContractActivationStore{
 				originalRunID: activation.SourceRunID,
-				binding:       binding, bindingOK: selected, bundleAvailability: testSelectedContractBundleAvailability(forkID),
+				binding:       binding, bindingOK: selected, bundleAvailability: availability,
 				plan: testSelectedContractStateOnlyPlan(binding), activation: activation, activationErr: cause,
 			}}
 			owner := selectedContractGateOwnerForTest(t)
 			result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 				ForkRunID: forkID, Store: store, ExecutionOwner: owner,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability},
-				SourceLoader: &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)},
+				SourceLoader: &fakeSelectedContractSourceLoader{loaded: sources[0], original: &sources[1]},
 			})
 			if !errors.Is(err, cause) || store.calls != 1 || !reflect.DeepEqual(result.RunForkActivation, activation) {
 				t.Fatalf("activation result=%#v err=%v calls=%d", result, err, store.calls)

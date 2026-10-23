@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -25,6 +26,7 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 					startupownership.Store
 					destructivereset.QuiescenceStore
 					sourceartifactfixture.Writer
+					sourceartifactfixture.RootedWriter
 				}
 				var db *sql.DB
 				if backend == "sqlite" {
@@ -37,6 +39,11 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				artifact := sourceartifactfixture.Artifact()
 				sourceartifactfixture.RequireArtifact(t, ctx, selected, artifact)
+				rooted, _ := sourceartifactfixture.Rooted(t, "fixture", artifact)
+				ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+				if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+					t.Fatal(err)
+				}
 				request := testStartupAcquireRequest("reset-source-atomicity")
 				request.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 				cap, err := selected.AcquireProcessCapability(ctx, request)
@@ -52,7 +59,11 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 						t.Error(err)
 					}
 				})
-				initial, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: artifact.BundleHash()}}, nil)
+				coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
+				initial, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -60,7 +71,7 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				runID := uuid.NewString()
-				requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: runID, BundleHash: artifact.BundleHash(), Origin: semanticScenarioSetupRunOriginForTest()})
+				requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: runID, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(), Origin: semanticScenarioSetupRunOriginForTest()})
 				op, err := cap.AdmitResetOperation(ctx, destructivereset.Request{
 					OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "source-atomicity",
 					IncludeSourceArtifacts: include, IncludeSourceArtifactsSet: true, RequestedAt: time.Now().UTC(),
@@ -107,7 +118,7 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 					if err != nil || !exists || !reflect.DeepEqual(plan, wantPlan) {
 						t.Fatalf("source topology = %+v, %t, %v; want %+v", plan, exists, err, wantPlan)
 					}
-					for table, want := range map[string]int{"runs": wantRuns, "source_artifacts": wantArtifacts} {
+					for table, want := range map[string]int{"runs": wantRuns, "source_artifacts": wantArtifacts, "source_root_admissions": wantArtifacts} {
 						var count int
 						if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != want {
 							t.Fatalf("%s count=%d, %v; want %d", table, count, err, want)

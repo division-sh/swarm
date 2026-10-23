@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -29,7 +30,8 @@ func TestWorkflowJoinConstructedDescendantAdmissionOnBothStores(t *testing.T) {
 			selected := backend.open(t)
 			runID := uuid.NewString()
 			files := a2ActivationJoinFiles(1)
-			files["orders/child/schema.yaml"] = "name: child\nstages:\n  awaiting: {}\n"
+			files["orders/child/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
+			files["orders/child/schema.yaml"] = "stages:\n  awaiting: {}\n"
 			files["orders/child/entities.yaml"] = "child_state:\n  final_count: {type: integer, initial: -1}\n"
 			files["orders/child/events.yaml"] = "item.completed:\n  member_id: text\n  result: text\n"
 			files["orders/child/nodes.yaml"] = files["orders/nodes.yaml"]
@@ -48,7 +50,7 @@ func TestWorkflowJoinConstructedDescendantAdmissionOnBothStores(t *testing.T) {
 			if err := storetest.MaterializeRun(ctx, runOwner, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()}); err != nil {
 				t.Fatal(err)
 			}
-			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact)}, "platform.join_complete", "platform.join_timeout")
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: swarmruntime.NewRuntimePayloadAdmitter(nil, source, fact), WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact)}, "platform.join_complete", "platform.join_timeout")
 			if err != nil {
 				t.Fatal(err)
 			}

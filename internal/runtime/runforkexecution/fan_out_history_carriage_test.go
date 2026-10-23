@@ -24,7 +24,7 @@ func (l *fanOutHistoryFixtureLoader) LoadRunForkSelectedContractSourceForRequest
 	if err := ctx.Err(); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	if req.SourceRunID != "" || req.BundleHash != req.Selection.BundleHash || req.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash {
+	if req.Responsibility != FreshSelectedSource(req.BundleHash) || req.BundleHash != req.Selection.BundleHash || req.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash {
 		return LoadedSelectedContractSource{}, errors.New("history loader requires an exact immutable artifact, not a current run")
 	}
 	return l.loaded, l.err

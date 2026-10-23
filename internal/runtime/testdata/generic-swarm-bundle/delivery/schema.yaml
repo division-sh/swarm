@@ -1,4 +1,4 @@
-name: delivery
+# fixture: delivery
 instance: item_id
 stages:
   approved: {}

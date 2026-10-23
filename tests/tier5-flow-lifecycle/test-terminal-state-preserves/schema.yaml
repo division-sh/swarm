@@ -1,4 +1,4 @@
-name: test-terminal-state-preserves
+# fixture: test-terminal-state-preserves
 stages:
   pending: {}
   done: {final: true}

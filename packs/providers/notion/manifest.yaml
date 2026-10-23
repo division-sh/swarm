@@ -1,0 +1,8 @@
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+capabilities:
+  can:
+    call_provider_actions: [append_block_children]
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot: [bypass activity_attempts, retry non_idempotent_write automatically, expose credential values]

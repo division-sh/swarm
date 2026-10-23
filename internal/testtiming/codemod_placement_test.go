@@ -16,8 +16,7 @@ func reviewedCodemodRoot(name string, seconds float64) RootTime {
 
 func TestTestTimeReviewedCodemodPlacementIsFiniteAndFullyCharged(t *testing.T) {
 	roots := []string{
-		"TestNativeTimerSuccessorObserverRejectsRepublicationBothStores",
-		"TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores",
+		"TestReviewedSnapshotCandidateOverlayTypeChecks",
 		"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts",
 		"TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners",
 	}
@@ -51,7 +50,7 @@ func TestTestTimeReviewedCodemodPlacementIsFiniteAndFullyCharged(t *testing.T) {
 }
 
 func TestTestTimeReviewedCodemodPlacementRejectsForeignAndPromotedCells(t *testing.T) {
-	root := reviewedCodemodRoot("TestNativeTimerSuccessorObserverRejectsRepublicationBothStores", 40)
+	root := reviewedCodemodRoot("TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts", 40)
 	for name, change := range map[string]func(*TimingCell){
 		"foreign package":     func(c *TimingCell) { c.Package += "/foreign" },
 		"foreign name":        func(c *TimingCell) { c.Root += "Future" },

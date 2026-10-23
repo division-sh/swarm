@@ -43,6 +43,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -581,8 +582,8 @@ func fanOutMixedRouteSource(t *testing.T) (*sourceartifact.AdmittedSourceArtifac
 		t.Fatalf("admit mixed-route source: %v", err)
 	}
 	repoRoot := pipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(
-		repoRoot, artifact, runtimecontracts.DefaultPlatformSpecFile(repoRoot), runtimecontracts.WorkflowContractLoadOptions{},
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(
+		repoRoot, sourceartifactfixture.CapturedRoot(t, artifact), runtimecontracts.DefaultPlatformSpecFile(repoRoot), runtimecontracts.WorkflowContractLoadOptions{},
 	)
 	if err != nil {
 		t.Fatalf("compile mixed-route source: %v", err)
@@ -1448,7 +1449,11 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 			captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
 			forkPointEventID := historicalLineageCheckpoint(t, db, fixture.runID, postgres, createdAt.Add(2*time.Second))
 
-			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
+			rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
@@ -1571,7 +1576,11 @@ func TestRunForkFanOutMaterializationRetainsExactEntityRevisionSource(t *testing
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, "fork.entity", events.EventProducerPlatform, "fork-test", "", "", createdAt.Add(time.Second))
 	captureRunForkTestRevision(t, db, fixture.runID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
+	rooted, err := pg.LoadRunRootedSource(ctx, fixture.runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork entity source: %v", err)
 	}
@@ -2058,7 +2067,11 @@ func materializeFanOutForkAtCurrentRevision(t *testing.T, ctx context.Context, d
 	forkPointEventID := uuid.NewString()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, events.EventType(eventName), events.EventProducerPlatform, "fork-test", "", "", at)
 	captureRunForkTestRevision(t, db, fixture.runID)
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
+	rooted, err := pg.LoadRunRootedSource(ctx, fixture.runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 	if err != nil {
 		t.Fatalf("materialize %s fan-out fork: %v", eventName, err)
 	}
@@ -2068,7 +2081,10 @@ func materializeFanOutForkAtCurrentRevision(t *testing.T, ctx context.Context, d
 func seedFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, selected any, postgres bool, cardinality int, createdAt time.Time) fanOutOwnerFixture {
 	t.Helper()
 	artifactRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(artifactRoot, "schema.yaml"), []byte("name: fan-out-store-fixture\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(artifactRoot, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactRoot, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(artifactRoot)
@@ -2095,7 +2111,7 @@ func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *s
 	}
 	fixture := fanOutOwnerFixture{runID: uuid.NewString(), eventID: uuid.NewString(), deliveryID: uuid.NewString(), flowPath: ".", semanticPath: `nodes["fan-out-source"].handlers["items.ready"].fan_out`, createdAt: createdAt, artifact: artifact}
 	fixture.plan = fanOutOwnerTypedPlanFixture(t)
-	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, BundleHash: artifact.BundleHash(), StartedAt: createdAt})
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, BundleHash: artifact.BundleHash(), Artifact: artifact, StartedAt: createdAt})
 	if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.runID).Scan(&fixture.bundleHash); err != nil {
 		t.Fatalf("load fan-out fixture bundle hash: %v", err)
 	}

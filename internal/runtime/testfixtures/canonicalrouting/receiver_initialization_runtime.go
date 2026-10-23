@@ -6,7 +6,9 @@ func CopyTemplateInstanceEmpireStyle(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml": `name: test
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: test
 pins:
   outputs:
     - opco.spinup_created
@@ -36,7 +38,7 @@ opco.spinup_created:
           instance_id: payload.instance_id
           product_id: payload.product_id
 `,
-		"operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `# fixture: operating
 instance: instance_id
 pins:
   inputs:
@@ -76,7 +78,9 @@ func CopyTemplateInstanceActivationConfigSubscriber(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml": `name: test
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: test
 pins:
   outputs:
     - opco.spinup_created
@@ -106,7 +110,7 @@ opco.spinup_created:
           instance_id: payload.instance_id
           product_id: payload.product_id
 `,
-		"operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `# fixture: operating
 instance: instance_id
 pins:
   inputs:

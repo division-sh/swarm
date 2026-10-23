@@ -58,6 +58,7 @@ import (
 	tools "github.com/division-sh/swarm/internal/runtime/tools"
 	workflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	authority "github.com/division-sh/swarm/internal/sessionprovider/authority"
+	sourceartifact "github.com/division-sh/swarm/internal/sourceartifact"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
 
@@ -95,10 +96,6 @@ func (s *PostgresStore) ActivateDeliveryAuthority(ctx context.Context, authority
 
 func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (runfork.RunForkActivation, error) {
 	return s.runForkPostgresOwner.ActivateRunFork(ctx, req)
-}
-
-func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	return s.runForkPostgresOwner.ActivateRunForkForSelectedContractExecution(ctx, req)
 }
 
 func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error) {
@@ -801,8 +798,8 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEventModes(ctx context.
 	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original)
+func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original, originalRoot)
 }
 
 func (s *PostgresStore) LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error) {
@@ -1363,10 +1360,6 @@ func (s *SQLiteRuntimeStore) ActivateDeliveryAuthority(ctx context.Context, auth
 
 func (s *SQLiteRuntimeStore) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (runfork.RunForkActivation, error) {
 	return s.runForkSQLiteOwner.ActivateRunFork(ctx, req)
-}
-
-func (s *SQLiteRuntimeStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	return s.runForkSQLiteOwner.ActivateRunForkForSelectedContractExecution(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error) {
@@ -2041,8 +2034,8 @@ func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original)
+func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original, originalRoot)
 }
 
 func (s *SQLiteRuntimeStore) LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error) {

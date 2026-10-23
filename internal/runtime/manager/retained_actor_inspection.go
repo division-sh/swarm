@@ -94,7 +94,10 @@ func retainedActorDeclarationAdmission(options AgentManagerOptions, source seman
 	if err != nil {
 		return nil, agenttopology.Admission{}, err
 	}
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	coordinate, err := staticSourceCoordinate(source, fact.BundleHash())
+	if err != nil {
+		return nil, agenttopology.Admission{}, err
+	}
 	desired, err := desiredAgentsFromBlueprints(blueprints, coordinate)
 	if err != nil {
 		return nil, agenttopology.Admission{}, err

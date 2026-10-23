@@ -993,6 +993,10 @@ func sourceSetContains(plan runtimeagenttopology.SourceSetPlan, source runtimeag
 	return generationauthority.SourceSetContains(plan, source)
 }
 
+func sourceSetContainsBundle(plan runtimeagenttopology.SourceSetPlan, hash string) bool {
+	return generationauthority.SourceSetContainsBundle(plan, hash)
+}
+
 func nullText(value string) any {
 	if strings.TrimSpace(value) == "" {
 		return nil

@@ -35,6 +35,10 @@ func TestRuntimeLogForkHistoryExclusionBothStores(t *testing.T) {
 				if err := CaptureRunForkSnapshotForTest(ctx, fixture.store, root.RunID()); err != nil {
 					t.Fatal(err)
 				}
+				rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, root.RunID())
+				if err != nil {
+					t.Fatal(err)
+				}
 				before, err := ReadSemanticEventFixtureEvidenceForTest(ctx, fixture.store, root.RunID(), root.ID())
 				if err != nil {
 					t.Fatal(err)
@@ -116,7 +120,8 @@ func TestRuntimeLogForkHistoryExclusionBothStores(t *testing.T) {
 					t.Errorf("broad capture/refusal changed diagnostic evidence: got=%+v want=%+v err=%v", preserved, after, err)
 				}
 				child, err := store.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-					SourceRunID: root.RunID(),
+					SourceRunID:   root.RunID(),
+					RootAdmission: rooted.Admission(),
 				})
 				if err != nil || child.ForkRunID == "" || child.ForkPoint != original.ForkPoint {
 					t.Fatalf("business cut could not materialize after diagnostic append: child=%+v err=%v", child, err)

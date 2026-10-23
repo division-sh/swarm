@@ -16,6 +16,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -58,12 +59,20 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 					if tc.stage == "Ready" {
 						stages = "  Ready: {final: true}\n  ready: {}\n"
 					}
-					artifact := sourceartifactfixture.New("schema.yaml", []byte("name: exact-stage-completion\nstages:\n"+stages))
+					artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+						"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+						"schema.yaml":   []byte("stages:\n" + stages),
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					rooted, _ := sourceartifactfixture.Rooted(t, "stage-completion", artifact)
+					artifact = rooted.Artifact()
 					fact := sourceartifactfixture.FactFor(artifact)
 					ctx := testAuthorActivityContextForSource(context.Background(), fact)
 					ctx = originalAPIFixtureContext(t, ctx, selected)
 					repo := runCompletionRepoRoot(t)
-					bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+					bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 					if err != nil {
 						t.Fatal(err)
 					}

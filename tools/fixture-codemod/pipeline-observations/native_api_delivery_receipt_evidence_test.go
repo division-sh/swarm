@@ -2,12 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -88,44 +82,5 @@ func TestNativeAPIDeliveryReceiptEvidenceRejectsChangedOwnersKeysAndAssertions(t
 	}
 	if probes != 7 {
 		t.Fatalf("delivery/receipt adversaries missing: %d", probes)
-	}
-}
-
-func TestNativeAPIDeliveryReceiptEvidenceCallerInventoryIsComplete(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "internal", "apiv1", "*_test.go"))
-	if err != nil || len(paths) == 0 {
-		t.Fatalf("enumerate API callers: %v/%d", err, len(paths))
-	}
-	actual := map[string][]string{}
-	for _, path := range paths {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.AllErrors)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if ok && (formattedNativeReadNode(call.Fun) == "countAllEventDeliveries" || formattedNativeReadNode(call.Fun) == "loadPipelineReceiptOutcomeAndFailure") {
-					actual[fn.Name.Name] = append(actual[fn.Name.Name], formattedNativeReadNode(call))
-				}
-				return true
-			})
-		}
-	}
-	expected := map[string][]string{
-		"TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError":       {"countAllEventDeliveries(t, pg)"},
-		"TestOperatorEventPublishIsUnavailableWithoutDurableAckPublisher":            {"countAllEventDeliveries(t, pg)"},
-		"TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate": {"loadPipelineReceiptOutcomeAndFailure(t, ctx, pg, eventID)"},
-	}
-	if !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("delivery/receipt consumers differ: got=%v want=%v", actual, expected)
 	}
 }

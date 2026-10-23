@@ -203,11 +203,12 @@ func (o *sessionInputOwner) businessPublicationSequence(ctx context.Context, nat
 	})
 	source := native.OwnedSource
 	target, err := packs.ParseChannelRegistrationTarget(native.TargetSelector)
-	if !ok || source.Validate() != nil || err != nil || source.BundleHash() != native.SourceContext.Coordinate.BundleHash {
+	if !ok || source.Validate() != nil || err != nil || source.BundleHash() != native.SourceContext.Coordinate.BundleHash ||
+		native.OwnedRoot.Validate() != nil || native.OwnedRoot.BundleHash() != source.BundleHash() {
 		return 0, fmt.Errorf("native business input requires its exact owned source and standing owner")
 	}
 	standing, found, err := reader.LoadReconciledStandingService(ctx, pipeline.StandingServiceCandidate{
-		ServiceID: native.PublicationBinding.ServiceID, FlowPath: target.FlowPath, BindingEnabled: true, Source: source})
+		ServiceID: native.PublicationBinding.ServiceID, FlowPath: target.FlowPath, BindingEnabled: true, Source: source, RootAdmission: native.OwnedRoot})
 	if err != nil {
 		return 0, err
 	}

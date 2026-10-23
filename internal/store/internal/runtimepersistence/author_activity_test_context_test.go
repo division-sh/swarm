@@ -178,7 +178,8 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	}
 	if opts.ContractBundle == nil && opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
 		repo := runtimepipeline.WorkflowRepoRoot()
-		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -238,13 +239,18 @@ func testAuthorActivityContext() context.Context {
 	return testAuthorActivityContextForBundle(authorActivityTestBundleHash)
 }
 
-func requireDefaultSourceArtifactForTest(t testing.TB, ctx context.Context, selected any) {
+func requireDefaultSourceArtifactForTest(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	writer, ok := selected.(sourceartifactfixture.Writer)
+	writer, ok := selected.(sourceartifactfixture.RootedWriter)
 	if !ok {
-		t.Fatalf("default source artifact fixture requires source writer, got %T", selected)
+		t.Fatalf("default source artifact fixture requires rooted source writer, got %T", selected)
 	}
-	sourceartifactfixture.Require(t, ctx, writer)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	if _, err := writer.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func testAuthorActivityRuntimeContext() context.Context {
@@ -278,7 +284,14 @@ func mustStoreTestSourceArtifactFact(bundleHash string) runtimecorrelation.Sourc
 }
 
 func storeTestSourceArtifact(label string) *sourceartifact.AdmittedSourceArtifact {
-	return sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# "+label+"\n"))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents: {}\n# " + label + "\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
 }
 
 func requireStoreTestPersistedBundle(t *testing.T, db *sql.DB, bundleHash string) {
@@ -397,7 +410,8 @@ func admitTestPostgresStore(t testing.TB, db *sql.DB, inspection ...pq.Config) *
 	return pg
 }
 
-func storeTestPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func storeTestPayloadAdmitter(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	flowID := payloadProducer.FlowID()
 	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 

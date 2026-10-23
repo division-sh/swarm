@@ -39,7 +39,10 @@ func TestCatalogTypeNamespacePublicAdmissionBothStores(t *testing.T) {
 				source := filepath.Join(t.TempDir(), "contracts")
 				copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/tier8-boot-verification/test-boot-success"), source)
 				writeReleaseFile(t, filepath.Join(source, "types.yaml"), rootTypes)
-				writeReleaseFile(t, filepath.Join(source, "child/schema.yaml"), "name: child\nstages: {done: {final: true}}\n")
+				writeReleaseFile(t, filepath.Join(source, "child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeReleaseFile(t, filepath.Join(source, "child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeReleaseFile(t, filepath.Join(source, "child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeReleaseFile(t, filepath.Join(source, "child/schema.yaml"), "stages: {done: {final: true}}\n")
 				if flowTypes != "" {
 					writeReleaseFile(t, filepath.Join(source, "child/types.yaml"), flowTypes)
 				}

@@ -1,22 +1,7 @@
 package canonicalrouting
 
 // Closed parser fixtures exercise schema families, not a runnable topology.
-const SchemaAdmissionCompleteRoot = `name: Complete
-instance: work_id
-ingress:
-  alias: hooks
-  providers:
-    - provider: custom
-      signing_secret: TOKEN
-      admission:
-        kind: raw
-        authentication: {kind: token, header: X-Token, prefix: ''}
-        event: work.requested
-        delivery_id: {source: body_sha256}
-        payload: json
-imports:
-  connector_packs: [{provider: telegram, tool: telegram.send_message}]
-  provider_trigger_events: [{provider: telegram, event: inbound.telegram.text_message}]
+const SchemaAdmissionCompleteRoot = `instance: work_id
 connect: [{event: work.requested, from: source, to: worker, rename: work.received, resolution: create, key_from: event.id}]
 pins:
   inputs:
@@ -44,7 +29,7 @@ loops:
     escape: {advances_to: done, emit: work.expired}
 `
 
-const SchemaAdmissionAliasProvenance = `name: &label Example
+const SchemaAdmissionAliasProvenance = `auto_emit_on_create: {event: fixture.started, description: &label Example}
 stages:
   waiting:
     description: *label
@@ -61,3 +46,10 @@ const (
 	SchemaInputPinsParserEnvelope  = "pins:\n  inputs:"
 	SchemaOutputPinsParserEnvelope = "pins:\n  outputs:"
 )
+
+const SchemaProviderReferenceAdmission = `pins:
+  inputs: [inbound.telegram.message]
+  outputs: [inbound.telegram.message]
+connect:
+  - {event: inbound.telegram.message, from: ., to: child, resolution: select}
+`

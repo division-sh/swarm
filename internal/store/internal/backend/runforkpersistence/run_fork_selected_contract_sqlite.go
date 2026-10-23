@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"strings"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -64,7 +67,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return modes, err
 }
 
-func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) (out []runfork.RunForkSelectedContractSourceEvent, err error) {
+func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) (out []runfork.RunForkSelectedContractSourceEvent, err error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite store is required")
 	}
@@ -78,6 +81,13 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 		return nil, nil
 	}
 	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	if err := originalRoot.Validate(); err != nil {
+		return nil, fmt.Errorf("original source root admission: %w", err)
+	}
+	originalFact, err := runtimecorrelation.NewSourceArtifactFact(originalRoot.BundleHash())
+	if err != nil {
 		return nil, err
 	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected-contract source event preparation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
@@ -103,7 +113,8 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 			if stateAdmission.snapshot.RunID != sourceRunID {
 				return fmt.Errorf("source event preparation run disagrees with selected fork binding")
 			}
-			fact, err := s.RunLifecycleSQLiteOwner.RequirePresentSourceTx(txctx, tx, sourceRunID)
+			sourceCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(txctx, originalFact), originalRoot)
+			fact, err := s.RunLifecycleSQLiteOwner.RequirePresentSourceTx(sourceCtx, tx, sourceRunID)
 			if err != nil {
 				return err
 			}

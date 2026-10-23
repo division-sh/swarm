@@ -116,14 +116,15 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				repo := runtimepipeline.WorkflowRepoRoot()
-				revisedBundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+				revisedRoot := sourceartifactfixture.CapturedRoot(t, artifact)
+				revisedBundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, revisedRoot, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 				if err != nil {
 					t.Fatalf("compile exact revised source: %v", err)
 				}
 				source := sourceartifactfixture.FactFor(artifact)
 				sourceartifactfixture.RequireArtifact(t, f.ctx, f.selected, artifact)
 				revise := func() error {
-					_, err := f.selected.ReviseRunSource(f.ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: f.runID, Source: source})
+					_, err := f.selected.ReviseRunSource(f.ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: f.runID, Source: source, RootAdmission: revisedRoot.Admission()})
 					return err
 				}
 				var publicationErr, revisionErr error
@@ -151,9 +152,12 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				var staleSource *runtimepipeline.FlowInstanceSourceConflict
 				sourceRefused := errors.As(publicationErr, &staleSource) && staleSource.RunID == f.runID &&
 					staleSource.RequestedBundleHash == originalConstruction.BundleHash && staleSource.ActiveBundleHash == source.BundleHash()
+				// The captured root can fence this exact old source before the hash check.
+				rootRefused := publicationErr != nil && publicationErr.Error() == "rooted execution context does not match the exact run source root"
 				if publicationErr != nil &&
 					!generationRefused &&
 					!sourceRefused &&
+					!rootRefused &&
 					!strings.Contains(publicationErr.Error(), "readiness source does not match persisted run") &&
 					!strings.Contains(publicationErr.Error(), "mutation log bundle source fact does not match active run") {
 					t.Fatalf("publication lost for an unrelated reason: %v", publicationErr)
@@ -238,6 +242,7 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 					desired.CreationEvent = &creation
 				}
 				ctx := runtimecorrelation.WithSourceArtifactFact(f.ctx, source)
+				ctx = runtimecorrelation.WithRootAdmission(ctx, revisedRoot.Admission())
 				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope("11111111-1111-1111-1111-111111111111", source.BundleHash()))
 				reconcile := func(observed runtimepipeline.DynamicFlowRuntimeReadiness, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan) error {
 					_, err := f.workflow.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: observed, Expected: expected}}, time.Now().UTC())
@@ -289,7 +294,11 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if settled.Phase != replaced.Phase || settled.AttemptState != "retired" || settled.AttemptOrdinal != replaced.AttemptOrdinal {
 					t.Fatalf("retirement changed predecessor progress or failed to settle it: %+v", settled)
 				}
-				sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: source.BundleHash()}}, nil)
+				coordinate, err := runtimeagenttopology.NewSourceCoordinate(revisedRoot.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
+				sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

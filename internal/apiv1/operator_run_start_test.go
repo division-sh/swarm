@@ -16,16 +16,18 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-var runStartTestBundleHash = authorActivityTestSourceArtifact.BundleHash()
+var runStartTestBundleHash = runStartTestArtifact("scan.requested").BundleHash()
 
 func TestFeedOnlyRunStartRejectsIncompleteAdmissionBeforeSelectedStore(t *testing.T) {
 	data := map[string]any{"imports": []any{}, "pins": []any{map[string]any{
@@ -71,14 +73,14 @@ func runStartTestBundleHashForSource(source semanticview.Source) string {
 func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	handler := runStartTestHandler(t, pg, bus, source)
 	runID := uuid.NewString()
-	body := runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start")
+	body := runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-start")
 
 	started := rpcCall(t, handler, body)
 	if started.Error != nil {
@@ -107,7 +109,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
 
-	conflict := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"changed"}`, "idem-start"))
+	conflict := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"changed"}`, "idem-start"))
 	if conflict.Error == nil {
 		t.Fatal("run.start idempotency conflict error = nil")
 	}
@@ -126,7 +128,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 		t.Fatalf("run.start bundle-change conflict data = %#v", data)
 	}
 
-	conflictEvent := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.missing", `{"topic":"medicine"}`, "idem-start"))
+	conflictEvent := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.missing", `{"topic":"medicine"}`, "idem-start"))
 	if conflictEvent.Error == nil {
 		t.Fatal("run.start event-change idempotency conflict error = nil")
 	}
@@ -141,7 +143,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -162,7 +164,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 
 func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	handler := runStartTestHandler(t, pg, missingRunStartBundleScopePublisher{}, source)
 	runID := uuid.NewString()
 
@@ -176,7 +178,7 @@ func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActive
 	assertNoRunStartPersistence(t, pg, runID)
 
 	retiredRunID := uuid.NewString()
-	retired := rpcCall(t, handler, runStartBodyWithRetiredBundleInput(retiredRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start-retired-input"))
+	retired := rpcCall(t, handler, runStartBodyWithRetiredBundleInput(retiredRunID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-start-retired-input"))
 	assertInvalidRunStartParam(t, retired, retiredBundleInputName())
 	assertNoRunStartPersistence(t, pg, retiredRunID)
 }
@@ -184,7 +186,7 @@ func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActive
 func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -192,7 +194,7 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 	handler := runStartTestHandler(t, pg, bus, source)
 	runID := uuid.NewString()
 
-	resp := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start-hash"))
+	resp := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-start-hash"))
 	if resp.Error != nil {
 		t.Fatalf("run.start canonical bundle_hash error = %#v", resp.Error)
 	}
@@ -201,7 +203,7 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 
 func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
+	source := semanticview.Wrap(flowScopedEventPublishTestBundle(t))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -209,7 +211,7 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 	handler := runStartTestHandler(t, pg, bus, source)
 	runID := uuid.NewString()
 
-	resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "idem-start-flow-scoped"))
+	resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "idem-start-flow-scoped"))
 	if resp.Error == nil {
 		t.Fatal("run.start flow-scoped event error = nil")
 	}
@@ -227,7 +229,7 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("non-routable bundle hash", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -247,16 +249,16 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("existing run bundle mismatch", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
-		storetest.RequireRun(t, originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		storetest.RequireRun(t, admittedAPITestBusContext(t, context.Background(), bus), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 			RunID:      runID,
-			BundleHash: runStartTestBundleHash,
+			BundleHash: runStartTestBundleHashForSource(source),
 		})
 
 		resp := rpcCall(t, handler, runStartBody(runID, "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-existing-mismatch"))
@@ -276,7 +278,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -296,7 +298,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -316,7 +318,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("retired bundle input is rejected", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -324,14 +326,14 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBodyWithCanonicalAndRetiredInput(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-retired-bundle-input"))
+		resp := rpcCall(t, handler, runStartBodyWithCanonicalAndRetiredInput(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-retired-bundle-input"))
 		assertInvalidRunStartParam(t, resp, retiredBundleInputName())
 		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("undeclared event", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -339,7 +341,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.missing", `{"topic":"medicine"}`, "idem-missing-event"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.missing", `{"topic":"medicine"}`, "idem-missing-event"))
 		if resp.Error == nil {
 			t.Fatal("run.start undeclared event error = nil")
 		}
@@ -363,15 +365,20 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("declared but unroutable root input", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
 		const eventName = "scan.unroutable_requested"
-		bundle := runStartTestBundle(eventName)
-		bundle.Nodes, bundle.FlowTree.Root.Nodes = nil, nil
-		bundle.FlowTree.Root.Children[0].Events = map[string]runtimecontracts.EventCatalogEntry{"scan.other_requested": {}}
-		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
-			SubscribesTo: []string{"scan.other_requested"},
+		members := map[string][]byte{}
+		for _, entry := range runStartTestArtifact(eventName).Entries() {
+			members[entry.Label()] = entry.Bytes()
 		}
-		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-			t.Fatalf("compile declared but unroutable input fixture: %v", err)
+		delete(members, "nodes.yaml")
+		members["schema.yaml"] = []byte("stages: []\npins:\n  inputs: [scan.unroutable_requested, fixture.close.requested]\n  outputs: [scan.unroutable_requested]\n")
+		members["discovery/schema.yaml"] = []byte("stages: []\npins:\n  inputs: [scan.other_requested]\n")
+		members["discovery/events.yaml"] = []byte("scan.other_requested:\n")
+		members["discovery/nodes.yaml"] = []byte("scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.other_requested]\n")
+		artifact, err := sourceartifact.AdmitMembers(members)
+		if err != nil {
+			t.Fatal(err)
 		}
+		bundle := loadAPIAuthoredBundle(t, artifact)
 		source := semanticview.Wrap(bundle)
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -380,7 +387,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, eventName, `{"topic":"medicine"}`, "idem-unroutable-event"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), eventName, `{"topic":"medicine"}`, "idem-unroutable-event"))
 		if resp.Error == nil {
 			t.Fatal("run.start declared unroutable event error = nil")
 		}
@@ -403,11 +410,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("payload validation", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:     source,
-			SourceArtifactFact: runStartTestSourceArtifactFact(),
-			PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+			SourceArtifactFact: mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source)),
+			PayloadAdmitter: func(_ context.Context, event events.Event, _ events.PayloadProducer) (events.PayloadAdmission, error) {
 				if event.Type() != "scan.requested" {
 					return events.PayloadAdmission{}, fmt.Errorf("unexpected event type %q", event.Type())
 				}
@@ -420,7 +427,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-payload"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-invalid-payload"))
 		if resp.Error == nil {
 			t.Fatal("run.start payload validation error = nil")
 		}
@@ -432,14 +439,14 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid caller run id", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
 
-		resp := rpcCall(t, handler, runStartBody("abc", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-run-id"))
+		resp := rpcCall(t, handler, runStartBody("abc", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-invalid-run-id"))
 		if resp.Error == nil {
 			t.Fatal("run.start invalid run_id error = nil")
 		}
@@ -462,7 +469,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("payload entity id is not envelope authority", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -471,7 +478,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		runID := uuid.NewString()
 		payloadEntityID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"medicine"}`, payloadEntityID), "idem-payload-entity-id-not-authority"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"medicine"}`, payloadEntityID), "idem-payload-entity-id-not-authority"))
 		if resp.Error != nil {
 			t.Fatalf("run.start payload entity_id error = %#v", resp.Error)
 		}
@@ -505,11 +512,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("publish failure", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}}, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-publish-failure"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-publish-failure"))
 		if resp.Error == nil {
 			t.Fatal("run.start publish failure error = nil")
 		}
@@ -526,11 +533,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("post-validation invalid event type is a publish contradiction", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}}, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-event-after-validation"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-invalid-event-after-validation"))
 		if resp.Error == nil {
 			t.Fatal("run.start post-validation invalid event error = nil")
 		}
@@ -586,7 +593,7 @@ func TestInvalidEventTypeMappersSeparateRootInputFromCatalogFailures(t *testing.
 
 func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {
 	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -626,7 +633,7 @@ func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus EventPublish
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
-				BundleHash:      runStartTestBundleHash,
+				BundleHash:      runStartTestBundleHashForSource(source),
 			},
 		}),
 	})
@@ -885,64 +892,61 @@ func countAllRunRows(t *testing.T, selected any) int {
 	return count
 }
 
-func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBundle {
-	const closeEvent = "fixture.close.requested"
-	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
-		Path:  "discovery",
-		Schema: runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}, {ID: "done", Final: true}}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{eventName},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {AdvancesTo: "done"}},
-			},
-		},
+func runStartTestArtifact(eventName string) *sourceartifact.AdmittedSourceArtifact {
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml": []byte(fmt.Sprintf(`stages:
+  ready: {}
+  done: {final: true}
+pins:
+  inputs: [%s, fixture.close.requested]
+  outputs: [%s]
+connect:
+  - event: %s
+    from: .
+    to: discovery
+`, eventName, eventName, eventName)),
+		"events.yaml": []byte(fmt.Sprintf("%s:\n  topic: text\nfixture.close.requested:\n", eventName)),
+		"nodes.yaml": []byte(`run-owner:
+  execution_type: system_node
+  subscribes_to: [fixture.close.requested]
+  event_handlers:
+    fixture.close.requested:
+      advances_to: done
+`),
+		"discovery/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"discovery/schema.yaml": []byte(fmt.Sprintf(`stages:
+  ready: {}
+  done: {final: true}
+pins:
+  inputs: [%s]
+`, eventName)),
+		"discovery/nodes.yaml": []byte(fmt.Sprintf(`scan-orchestrator:
+  execution_type: system_node
+  subscribes_to: [%s]
+  event_handlers:
+    %s:
+      advances_to: done
+`, eventName, eventName)),
+	})
+	if err != nil {
+		panic(err)
 	}
-	root := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Path:  ".",
-		Schema: runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}, {ID: "done", Final: true}}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}, {Event: closeEvent}}},
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: eventName}}},
-			},
-			Connect: []runtimecontracts.FlowConnect{{Event: eventName, From: ".", To: "discovery", SourceFile: "schema.yaml", SourceLine: 1}},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName:  {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}}}},
-			closeEvent: {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"run-owner": {ExecutionType: "system_node", SubscribesTo: []string{closeEvent}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{closeEvent: {AdvancesTo: "done"}}},
-		},
-		Children: []runtimecontracts.FlowContractView{flow},
-	}
-	root.Children[0].Parent = &root
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		SourceArtifact: authorActivityTestSourceArtifact,
-		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
-		Events:         root.Events,
-		Nodes:          root.Nodes,
-		RootSchema:     &root.Schema,
-		FlowSchemas:    map[string]runtimecontracts.FlowSchemaDocument{"discovery": flow.Schema},
-		FlowSources: map[string]runtimecontracts.FlowSource{
-			".":         {FlowPath: ".", Schema: "schema.yaml", Events: "events.yaml"},
-			"discovery": {FlowPath: "discovery", Schema: "discovery/schema.yaml", Nodes: "discovery/nodes.yaml"},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "discovery": &root.Children[0]},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(fmt.Sprintf("compile run-start test bundle: %v", err))
+	return artifact
+}
+
+func runStartTestBundle(t *testing.T, eventName string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return loadAPIAuthoredBundle(t, runStartTestArtifact(eventName))
+}
+
+func loadAPIAuthoredBundle(t testing.TB, artifact *sourceartifact.AdmittedSourceArtifact) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "review", artifact)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatalf("compile run-start test bundle: %v", err)
 	}
 	return bundle
 }

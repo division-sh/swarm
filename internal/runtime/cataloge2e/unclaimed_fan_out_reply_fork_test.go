@@ -22,7 +22,7 @@ import (
 type unclaimedFanOutReplyStore interface {
 	runforkexecution.SelectedContractForkLifecycle
 	runforkexecution.SourceArtifactSelectedContractSourceStore
-	storetest.DurableDataCatalogStore
+	storetest.RootedDataCatalogStore
 	replycontext.Store
 	bus.PreparedPublishEventReader
 	deliverylifecycle.Store

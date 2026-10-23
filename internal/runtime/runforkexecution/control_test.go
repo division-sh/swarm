@@ -3,10 +3,12 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -69,6 +71,15 @@ func (s *selectedControlBindingFixture) LoadRunForkSelectedContractBinding(_ con
 func TestSelectedForkControlAdmissionUsesExactBinding(t *testing.T) {
 	runID := uuid.NewString()
 	binding := testSelectedContractBinding(runID)
+	artifact, err := sourceartifact.AdmitDirectory(filepath.Join(runForkExecutionRepoRoot(t), "tests/tier1-primitives/test-emits-multiple"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding.TargetRootReference = rooted.Admission().Reference()
 	binding.BindingID = uuid.NewString()
 	store := &selectedControlBindingFixture{binding: binding, exists: true}
 	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{fork: store}}

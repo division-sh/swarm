@@ -14,7 +14,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -66,7 +67,30 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 	for _, tc := range backends {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, postgres := tc.start(t)
-			ctx := testAuthorActivityContext(context.Background())
+			firstBundle := loadRuntimeTempBundle(t, map[string]string{
+				"manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":        "stages:\n  active: {}\n  done: {final: true}\n",
+				"flow/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"flow/schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
+				"policy.yaml":        "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
+			})
+			secondBundle := loadRuntimeTempBundle(t, map[string]string{
+				"manifest.yaml":      "version: 1.0.1\nplatform_version: '*'\n",
+				"schema.yaml":        "stages:\n  active: {}\n  done: {final: true}\n",
+				"flow/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"flow/schema.yaml":   "stages:\n  active: {}\n  done: {}\n  closed: {final: true}\n",
+			})
+			firstRoot, err := firstBundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondRoot, err := secondBundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstFact := sourceartifactfixture.FactFor(firstRoot.Artifact())
+			ctx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(context.Background(), firstFact), firstRoot.Admission())
+			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, firstFact.BundleHash()))
 			capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 				OwnerID: "budget-recovery-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 			})
@@ -80,9 +104,11 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			entityA, entityB, terminalEntity, crossSourceEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# budget-stage-second-source\n"))
-			seedBudgetRecoveryRun(t, ctx, selected, runA, now)
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: otherArtifact, StartedAt: now.Add(time.Second)})
+			otherArtifact := secondRoot.Artifact()
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runA, Artifact: firstRoot.Artifact(), RootAdmission: firstRoot.Admission(), StartedAt: now})
+			secondCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(otherArtifact)), secondRoot.Admission())
+			secondCtx = runtimeauthoractivity.WithScope(secondCtx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, otherArtifact.BundleHash()))
+			storetest.RequireRun(t, secondCtx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: otherArtifact, RootAdmission: secondRoot.Admission(), StartedAt: now.Add(time.Second)})
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, entityA, "active", now)
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runB, entityB, "active", now.Add(time.Second))
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, terminalEntity, "done", now.Add(2*time.Second))
@@ -103,6 +129,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					spendCtx = runtimecorrelation.WithRunID(spendCtx, seed.runID)
 					if seed.runID == runB {
 						spendCtx = runtimecorrelation.WithSourceArtifactFact(spendCtx, sourceartifactfixture.FactFor(otherArtifact))
+						spendCtx = runtimecorrelation.WithRootAdmission(spendCtx, secondRoot.Admission())
 						spendCtx = runtimeauthoractivity.WithScope(spendCtx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, otherArtifact.BundleHash()))
 					}
 				}
@@ -111,7 +138,9 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				}
 			}
 
-			bus, err := newRuntimeTestEventBusWithOptions(t, selected, runtimebus.EventBusOptions{
+			source := semanticview.Wrap(firstBundle)
+			otherSource := semanticview.Wrap(secondBundle)
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: firstFact,
 				MutationContext: func(input context.Context) (context.Context, error) {
 					if !runtimestartupownership.HasMutationAuthority(input) {
 						input = runtimestartupownership.CarryMutationAuthority(input, ctx)
@@ -123,32 +152,6 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				SourceArtifact: authorActivityTestSourceArtifact,
-				RootSchema: &runtimecontracts.FlowSchemaDocument{
-					StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-						{ID: "active"}, {ID: "done", Final: true},
-					}},
-				},
-				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"flow": {}},
-				Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-					".":    runtimecontracts.BuildWorkflowStageTopology(".", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
-					"flow": runtimecontracts.BuildWorkflowStageTopology("flow", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
-				}},
-				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-					"budget_warning_percent":   {Value: 50},
-					"budget_throttle_percent":  {Value: 75},
-					"budget_emergency_percent": {Value: 90},
-				}},
-			})
-			otherSource := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				SourceArtifact: otherArtifact,
-				FlowSchemas:    map[string]runtimecontracts.FlowSchemaDocument{"flow": {}},
-				Semantics: runtimecontracts.WorkflowSemanticView{Version: otherArtifact.BundleHash(), StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-					".":    runtimecontracts.BuildWorkflowStageTopology(".", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
-					"flow": runtimecontracts.BuildWorkflowStageTopology("flow", "active", []string{"active", "done", "closed"}, []string{"closed"}, nil, nil, nil),
-				}},
-			})
 			loads := 0
 			tracker := runtimepkg.NewBudgetTracker(selected, bus, &config.Config{Extensions: map[string]any{
 				"budget": map[string]any{
@@ -157,10 +160,9 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					"per_entity_monthly_cap": 10,
 				},
 			}}, selected, nil, source, executionposture.Live, runtimepkg.BudgetRecoveryStageSources{
-				CurrentBundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
-				Load: func(ctx context.Context, hash string) (semanticview.Source, error) {
+				Load: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 					loads++
-					persisted, err := selected.GetSourceArtifact(ctx, hash)
+					persisted, err := selected.GetSourceArtifact(ctx, reference.BundleHash)
 					if err != nil {
 						return nil, err
 					}
@@ -171,7 +173,10 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					return otherSource, nil
 				},
 			})
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(firstRoot.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatalf("construct budget recovery topology plan: %v", err)
@@ -260,11 +265,6 @@ func budgetRecoverySpend(t *testing.T, entityID, flowInstance string, cost float
 		UsageAccounting: "exact",
 		RecordedAt:      at,
 	}
-}
-
-func seedBudgetRecoveryRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID string, at time.Time) {
-	t.Helper()
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at})
 }
 
 func seedBudgetRecoveryEntity(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, state string, at time.Time) {

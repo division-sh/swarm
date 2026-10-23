@@ -9,8 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -27,7 +29,10 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutCredential(t *testing.T) {
 	processOwner := worklifetime.NewProcess()
 	t.Cleanup(processOwner.Retire)
 	store := storetest.StartSQLiteRuntimeStore(t)
-	rt, err := swarmruntime.NewRuntime(testAuthorActivityContext(context.Background()), swarmruntime.RuntimeDeps{
+	source := fullyMockedBootAgentMemorySource(t)
+	fact := runtimeTestSourceArtifactFact(t, source)
+	ctx := runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	rt, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
 		Config:                   cfg,
 		EffectsStore:             store,
 		CompletionStore:          store,
@@ -36,8 +41,8 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutCredential(t *testing.T) {
 		Options: swarmruntime.RuntimeOptions{
 			ExecutionPosture:   executionposture.MockOnly,
 			SelfCheck:          false,
-			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemorySource(t)),
-			SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			WorkflowModule:     newRuntimeTestWorkflowModule(t, source),
+			SourceArtifactFact: fact,
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			ProcessWorkOwner:   processOwner,
 		},
@@ -60,7 +65,10 @@ func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T
 	processOwner := worklifetime.NewProcess()
 	t.Cleanup(processOwner.Retire)
 	store := storetest.StartSQLiteRuntimeStore(t)
-	rt, err := swarmruntime.NewRuntime(testAuthorActivityContext(context.Background()), swarmruntime.RuntimeDeps{
+	source := fullyMockedBootAgentMemorySource(t)
+	fact := runtimeTestSourceArtifactFact(t, source)
+	ctx := runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	rt, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
 		Config:                   cfg,
 		EffectsStore:             store,
 		CompletionStore:          store,
@@ -69,8 +77,8 @@ func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T
 		Options: swarmruntime.RuntimeOptions{
 			ExecutionPosture:   executionposture.MockOnly,
 			SelfCheck:          false,
-			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemorySource(t)),
-			SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			WorkflowModule:     newRuntimeTestWorkflowModule(t, source),
+			SourceArtifactFact: fact,
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			ProcessWorkOwner:   processOwner,
 		},
@@ -93,7 +101,10 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutUnreachableConnectorCredential(
 	processOwner := worklifetime.NewProcess()
 	t.Cleanup(processOwner.Retire)
 	store := storetest.StartSQLiteRuntimeStore(t)
-	rt, err := swarmruntime.NewRuntime(testAuthorActivityContext(context.Background()), swarmruntime.RuntimeDeps{
+	source := fullyMockedBootAgentMemoryWithConnectorSource(t)
+	fact := runtimeTestSourceArtifactFact(t, source)
+	ctx := runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	rt, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
 		Config:                   cfg,
 		EffectsStore:             store,
 		CompletionStore:          store,
@@ -102,9 +113,9 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutUnreachableConnectorCredential(
 		Options: swarmruntime.RuntimeOptions{
 			ExecutionPosture:   executionposture.MockOnly,
 			SelfCheck:          false,
-			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemoryWithConnectorSource(t)),
+			WorkflowModule:     newRuntimeTestWorkflowModule(t, source),
 			Credentials:        credentialStore,
-			SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			SourceArtifactFact: fact,
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			ProcessWorkOwner:   processOwner,
 		},

@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type SelectedContractExecutionRequest struct {
@@ -176,6 +177,7 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 		OriginalLoopCarriage:  prepared.originalLoopCarriage,
+		OriginalRootAdmission: prepared.originalSource.RootedSource.Admission(),
 		Prepared:              prepared,
 		Operation:             operation,
 		Owner:                 req.Owner,
@@ -235,18 +237,24 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 	}
 	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
-	activation, err := container.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		InheritedSchedules:    prepared.readiness,
-		ForkOperation:         forkOperation,
-		DataPins:              materialization.DataPins,
-		ExecutionSource:       loadedSource.Source,
-		ForkRunID:             materialization.ForkRunID,
-		AllowSourceFreeze:     req.AllowSourceFreeze,
-		AllowedSourceEventIDs: sourceEventIDs,
-		FrontierAdmission:     frontier,
-		RouteTopology:         routeTopology,
-		RecipientPlanning:     *model.RecipientPlanning,
-	})
+	process, err := prepared.agentRuntime.Options.ProcessCapability.Evidence()
+	var activation runfork.RunForkActivation
+	if err == nil {
+		activation, err = container.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+			InheritedSchedules:    prepared.readiness,
+			OriginalRootAdmission: prepared.originalSource.RootedSource.Admission(),
+			Process:               process.LeaseStamp(),
+			ForkOperation:         forkOperation,
+			DataPins:              materialization.DataPins,
+			ExecutionSource:       loadedSource.Source,
+			ForkRunID:             materialization.ForkRunID,
+			AllowSourceFreeze:     req.AllowSourceFreeze,
+			AllowedSourceEventIDs: sourceEventIDs,
+			FrontierAdmission:     frontier,
+			RouteTopology:         routeTopology,
+			RecipientPlanning:     *model.RecipientPlanning,
+		})
+	}
 	result.Activation = activation
 	if !activation.Activated {
 		if err == nil {
@@ -385,6 +393,7 @@ func (p *PreparedSelectedFork) cleanupExecutionFailure(ctx context.Context, stor
 
 type publishSelectedContractForkEventsRequest struct {
 	OriginalLoopCarriage  semanticview.OriginalLoopCarriage
+	OriginalRootAdmission sourceartifact.RootAdmission
 	Prepared              *PreparedSelectedFork
 	Operation             *selectedContractOperation
 	Owner                 SelectedContractExecutionOwner

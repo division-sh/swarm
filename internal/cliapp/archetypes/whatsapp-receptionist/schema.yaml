@@ -1,16 +1,4 @@
-name: whatsapp-receptionist
-imports:
-  connector_packs:
-    - provider: whatsapp
-      tool: whatsapp.send_text
-  provider_trigger_events:
-    - provider: whatsapp
-      event: inbound.whatsapp.message
 stages: []
 pins:
-  inputs: [inbound.whatsapp]
+  inputs: [inbound.whatsapp.message]
   outputs: [inbound.whatsapp.message]
-ingress:
-  alias: reception
-  providers:
-    - provider: whatsapp

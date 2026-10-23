@@ -66,7 +66,7 @@ import (
 
 type notifyAllChildrenStore interface {
 	conformanceDurableEventBusStore
-	storetest.DurableDataCatalogStore
+	storetest.RootedDataCatalogStore
 	runtimepipeline.WorkflowPersistenceOwner
 	runtimerunlifecycle.OperationOwner
 	runtimemanager.ManagerPersistence
@@ -232,6 +232,19 @@ func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, sele
 	}
 }
 
+func notifyAllChildrenRootedSource(t testing.TB, source semanticview.Source) sourceartifact.RootedSource {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		t.Fatal("notify-all-children source requires its compiled rooted bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rooted
+}
+
 func (p *notifyAllChildrenProcessTopology) install(
 	t testing.TB,
 	ctx context.Context,
@@ -246,7 +259,13 @@ func (p *notifyAllChildrenProcessTopology) install(
 		t.Fatal("notify-all-children process topology capability is required")
 	}
 	bundleHash := sourceArtifactFact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(notifyAllChildrenRootedSource(t, source).Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coordinate.BundleHash != bundleHash {
+		t.Fatal("notify-all-children source coordinate does not match its admitted content fact")
+	}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatalf("compile notify-all-children static topology: %v", err)
@@ -259,8 +278,10 @@ func (p *notifyAllChildrenProcessTopology) install(
 		var sources []runtimeagenttopology.SourceCoordinate
 		var agents []runtimeagenttopology.DesiredAgent
 		for _, admittedSource := range p.completeSources {
-			fact := conformanceSourceArtifactFact(t, admittedSource)
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(notifyAllChildrenRootedSource(t, admittedSource).Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			desired, err := manager.CompileStaticTopologyDesiredAgents(admittedSource, coordinate)
 			if err != nil {
 				t.Fatalf("compile complete notify-all-children source set: %v", err)
@@ -1249,6 +1270,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	sourceV1Fact := conformanceSourceArtifactFact(t, sourceV1)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceV1Fact), runID)
 	ctx = originalConformanceFixtureContext(t, ctx, selected)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, notifyAllChildrenRootedSource(t, sourceV1).Admission())
 	processTopology := newNotifyAllChildrenProcessTopology(t, ctx, selected)
 	scopeV1, ok := semanticview.FlowScopeByID(sourceV1, notifyallchildren.ChildFlowID)
 	if !ok || len(scopeV1.Agents) != 2 {
@@ -1304,11 +1326,17 @@ func proveDynamicFlowSourceRevisionConvergence(
 	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology, deferContinuationStart: true,
 	})
+	if runtimeV2.sourceArtifactFact.Matches(runtimeV1.sourceArtifactFact) {
+		t.Fatal("source revision proof requires distinct captured v1 and v2 artifacts")
+	}
 	ctxV2 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV2.sourceArtifactFact), runID)
+	rootV2 := notifyAllChildrenRootedSource(t, sourceV2)
+	ctxV2 = runtimecorrelation.WithRootAdmission(ctxV2, rootV2.Admission())
 	ctxV2 = originalConformanceFixtureContext(t, ctxV2, selected)
 	if _, err := selected.ReviseRunSource(ctxV2, runtimerunlifecycle.SourceRevisionRequest{
-		RunID:  runID,
-		Source: runtimeV2.sourceArtifactFact,
+		RunID:         runID,
+		Source:        runtimeV2.sourceArtifactFact,
+		RootAdmission: rootV2.Admission(),
 	}); err != nil {
 		t.Fatalf("revise run to v2 source artifact: %v", err)
 	}
@@ -1401,11 +1429,17 @@ func proveDynamicFlowSourceRevisionConvergence(
 	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology, deferContinuationStart: true,
 	})
+	if runtimeV4.sourceArtifactFact.Matches(runtimeV1.sourceArtifactFact) || runtimeV4.sourceArtifactFact.Matches(runtimeV2.sourceArtifactFact) {
+		t.Fatal("source revision proof requires a captured v3 artifact distinct from both predecessors")
+	}
 	ctxV3 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV4.sourceArtifactFact), runID)
+	rootV3 := notifyAllChildrenRootedSource(t, sourceV3)
+	ctxV3 = runtimecorrelation.WithRootAdmission(ctxV3, rootV3.Admission())
 	ctxV3 = originalConformanceFixtureContext(t, ctxV3, selected)
 	if _, err := selected.ReviseRunSource(ctxV3, runtimerunlifecycle.SourceRevisionRequest{
-		RunID:  runID,
-		Source: runtimeV4.sourceArtifactFact,
+		RunID:         runID,
+		Source:        runtimeV4.sourceArtifactFact,
+		RootAdmission: rootV3.Admission(),
 	}); err != nil {
 		t.Fatalf("revise run to v3 source artifact: %v", err)
 	}

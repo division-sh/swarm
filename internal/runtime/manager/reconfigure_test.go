@@ -9,12 +9,18 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type reconfigureTestAgent struct{ id string }
@@ -33,7 +39,7 @@ func reconfigureMemoryIdentity(t testing.TB, am *AgentManager, agentID, flowInst
 
 func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions.InMemoryRegistry, cfg models.AgentConfig) *sessions.Lease {
 	t.Helper()
-	ctx := effects.WithDifferentOwner(models.WithActor(testAuthorActivityContext(context.Background()), cfg), effects.OwnerBuildTestInfrastructure)
+	ctx := effects.WithDifferentOwner(models.WithActor(am.runtimeContext(), cfg), effects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(ctx, reconfigureMemoryIdentity(t, am, cfg.ID, cfg.CanonicalFlowPath()), "reconfigure-test")
 	if err != nil {
 		t.Fatalf("Acquire memory: %v", err)
@@ -42,15 +48,19 @@ func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions
 }
 
 func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) {
-	probe := newLifecyclePersistenceProbe()
+	source := loadRootAndFlowStaticAgentSource(t)
+	ctx, _, probe := newLifecycleCacheFixtureForSource(t, source)
+	options, _, _ := sourceSetFixtureAdmission(t, source)
+	options.BaseContext, options.LifecycleStore = ctx, probe
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{LifecycleStore: probe})
+	}, options)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker",
 		Identity:      managerRuntimeAgentIdentityForFlowPath("worker", "review/inst-1"),
 		FlowPath:      "review/inst-1",
+		FlowID:        semanticview.RootExecutionFlowID(source),
 		Tools:         []string{"tool-old"},
 	})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
@@ -82,21 +92,28 @@ func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) 
 func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInvocation(t *testing.T) {
 	builds := 0
 	registry := sessions.NewInMemoryRegistry(0)
+	source := loadRootAndFlowStaticAgentSource(t)
+	ctx, _, probe := newLifecycleCacheFixtureForSource(t, source)
+	options, _, _ := sourceSetFixtureAdmission(t, source)
+	options.BaseContext, options.LifecycleStore, options.Sessions = ctx, &ephemeralLifecyclePersistenceProbe{probe}, registry
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		builds++
 		return &reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{Sessions: registry})
+	}, options)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "same-current-agent", Tools: []string{"tool-a"},
+		FlowID: semanticview.RootExecutionFlowID(source),
 		Memory: agentmemory.Plan{Enabled: true}, FlowPath: "same-current/instance",
 	})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	am.Run(managedExecutionTestContext(t, runCtx))
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, runCtx)); err != nil {
+		t.Fatal(err)
+	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 	beforeExecution, ok := testExecutionSnapshot(t, am, cfg.ID, cfg.FlowPath)
 	if !ok {
@@ -130,19 +147,26 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 
 func TestReconfigureAgent_TopologyOnlyRebindPreservesMemory(t *testing.T) {
 	registry := sessions.NewInMemoryRegistry(0)
+	source := loadRootAndFlowStaticAgentSource(t)
+	ctx, _, probe := newLifecycleCacheFixtureForSource(t, source)
+	options, _, _ := sourceSetFixtureAdmission(t, source)
+	options.BaseContext, options.LifecycleStore, options.Sessions = ctx, &ephemeralLifecyclePersistenceProbe{probe}, registry
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{Sessions: registry})
+	}, options)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live", ID: "topology-memory-agent",
+		FlowID: semanticview.RootExecutionFlowID(source),
 		Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/instance-1",
 	})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	am.Run(managedExecutionTestContext(t, runCtx))
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, runCtx)); err != nil {
+		t.Fatal(err)
+	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 	currentConfig, err := am.ResolveAgentConfig(managerIdentityTestRunID, cfg.ID, cfg.FlowPath)
 	if err != nil {
@@ -179,12 +203,13 @@ type ReconfigureMemoryNativeTestStore interface {
 	AgentLifecycleStateReader
 	sessions.Registry
 	LoadActiveConversation(context.Context, agentmemory.Identity) (llm.ConversationRecord, bool, error)
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }
 
 func ReconfigureMemoryNativeFixture(t testing.TB, enabled bool) PersistedAgent {
 	t.Helper()
 	rec := lifecycleTestPersistedAgent(t)
-	rec.Config.FlowID, rec.Config.FlowPath = "review", "review/inst-1"
+	rec.Config.FlowID, rec.Config.FlowPath = ".", "review/inst-1"
 	rec.Config.Identity = managerRuntimeAgentIdentityForFlowPath(rec.Config.ID, rec.Config.FlowPath)
 	rec.Config.Memory.Enabled = enabled
 	rec.Config.LLMBackend = "anthropic"
@@ -197,14 +222,25 @@ func ReconfigureMemoryNativeFixture(t testing.TB, enabled bool) PersistedAgent {
 
 func newReconfigureMemoryNativeManager(t *testing.T, ctx context.Context, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, rec PersistedAgent) *AgentManager {
 	t.Helper()
+	rooted, err := selected.LoadRunRootedSource(context.Background(), rec.Config.Identity.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := correlation.WithRootAdmission(testAuthorActivityContext(context.Background()), rooted.Admission())
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{LLMBackend: "anthropic", LifecycleStore: persistence, Sessions: selected, PersistenceRoles: PersistenceRoles{LifecycleState: selected}})
-	ctx = testAuthorActivityContext(ctx)
+	}, AgentManagerOptions{
+		BaseContext: ctx, SemanticSource: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+		LLMBackend: "anthropic", LifecycleStore: persistence, Sessions: selected, PersistenceRoles: PersistenceRoles{LifecycleState: selected},
+	})
 	if err := am.lifecycle.registerExecution(ctx, rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatal(err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, ctx)); err != nil {
 		t.Fatal(err)
 	}
 	return am

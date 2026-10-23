@@ -785,7 +785,8 @@ func newClaudeAttemptProofEventBus(
 		ReceiverExecution:    eventreceiver.NormalExecution(),
 		PipelineObligations:  backend.store.PipelineObligations(),
 		DeliveryAuthority:    authority,
-		PayloadAdmitter: func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		},
 		Durable: runtimebus.DurableDependencies{

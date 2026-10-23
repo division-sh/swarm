@@ -20,7 +20,7 @@ func TestActivitySettlementKeepsOriginalNativeIdentityBothStores(t *testing.T) {
 				t.Run(operation, func(t *testing.T) {
 					// A retained row is evidence, not permission to assign a new role on a callback.
 					original := seedActivityStoryAttempt(t, fixture, executionmode.Live, "started", false)
-					journal := activityNativeJournalForFixture(t, fixture)
+					journal := activityNativeJournalForFixture(t, fixture, original.RunID)
 					ctx := fixture.activityJournal.original
 					status := "succeeded"
 					if operation == "uncertain" {

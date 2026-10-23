@@ -36,7 +36,6 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
 	"github.com/google/uuid"
@@ -102,8 +101,7 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	}
 	ctx, now := context.Background(), time.Now().UTC()
 	source := sourceartifactfixture.Require(t, ctx, selected)
-	catalog := sessionDiscoveryCatalog(t)
-	plan := packfixture.WhatsAppSessionChannel(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), catalog)
+	catalog, plan := sessionDiscoveryProvider(t)
 	identity, err := plan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -439,7 +437,8 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 						t.Error(err)
 					}
 				})
-				trigger, err := sessionDiscoveryCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: f.candidate.Target.Alias, Provider: f.candidate.Provider})
+				catalog, _ := sessionDiscoveryProvider(t)
+				trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: f.candidate.Target.Alias, Provider: f.candidate.Provider})
 				if err != nil {
 					t.Fatal(err)
 				}

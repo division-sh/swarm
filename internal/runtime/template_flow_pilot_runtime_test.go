@@ -297,7 +297,15 @@ func (s *templateFlowPilotMemoryStore) addObservation(t testing.TB, source seman
 	if entity, declared := entityruntime.ResolveForFlow(source, identity.TemplateID); declared {
 		header.EntityType = entity.EntityType
 	}
-	run := runtimerunlifecycle.Snapshot{RunID: owner.RunID, State: runtimerunlifecycle.StateRunning, Origin: runtimerunlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("pilot observation requires its captured source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := runtimerunlifecycle.Snapshot{RunID: owner.RunID, State: runtimerunlifecycle.StateRunning, Origin: runtimerunlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := runtimepipeline.DynamicFlowRuntimeReadiness{
 		Plan:            runtimepipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: owner.RunID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},

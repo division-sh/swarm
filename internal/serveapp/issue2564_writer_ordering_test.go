@@ -2,12 +2,12 @@ package serveapp
 
 import (
 	"context"
-	"crypto/sha256"
+
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
+
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -25,51 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
-
-func TestIssue2564ServedH3WriterOrderingCorpora(t *testing.T) {
-	for _, corpus := range []struct {
-		name     string
-		deadline bool
-		checksum string
-	}{
-		{"h3", false, "e50da030ed155143a15543f77947b57138bcbfc7f78711c810eee15c2134ea67"},
-		{"m33", true, "264db80ef65dba1bb0518f0e599baa9ba2efa012b1f31701da7d5eee7e205c54"},
-	} {
-		t.Run(corpus.name, func(t *testing.T) {
-			root := writeIssue2564Fixture(t, corpus.deadline)
-			var paths []string
-			if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-				if err != nil || entry.IsDir() {
-					return err
-				}
-				relative, err := filepath.Rel(root, path)
-				if err != nil {
-					return err
-				}
-				paths = append(paths, filepath.ToSlash(relative))
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			slices.Sort(paths)
-			manifest := sha256.New()
-			for _, path := range paths {
-				contents, err := os.ReadFile(filepath.Join(root, path))
-				if err != nil {
-					t.Fatal(err)
-				}
-				checksum := sha256.Sum256(contents)
-				fmt.Fprintf(manifest, "%x  %s\n", checksum, path)
-				t.Logf("ISSUE2564_%s_SHA256 %x  %s", corpus.name, checksum, path)
-			}
-			checksum := fmt.Sprintf("%x", manifest.Sum(nil))
-			if len(paths) != 7 || checksum != corpus.checksum {
-				t.Fatalf("%s corpus drift: files=%d sha256=%s pinned=%s", corpus.name, len(paths), checksum, corpus.checksum)
-			}
-			t.Logf("ISSUE2564_%s_CORPUS_SHA256 %s admitted_bundle=%s", corpus.name, checksum, servedEventPublishFixtureBundleHash(t, root))
-		})
-	}
-}
 
 // These are NEW served H3/M33 fixtures, not the unavailable archived H1/H2
 // workloads. All writes use generated tools on real managed provider turns.

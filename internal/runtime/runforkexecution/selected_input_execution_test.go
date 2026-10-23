@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -39,8 +40,8 @@ func (p selectedInputClaimProbe) ClaimRunForkSelectedContractRuntimeExecution(ct
 	return authority, err
 }
 
-func (p selectedInputExecutionProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRun, forkRun string, ids []string, carriage semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, forkRun, ids, carriage)
+func (p selectedInputExecutionProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRun, forkRun string, ids []string, carriage semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, forkRun, ids, carriage, originalRoot)
 	if err == nil {
 		p.mutate(ctx, events)
 	}
@@ -85,7 +86,7 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, run, eventID, input)
+				seedSelectedOperationSource(t, ctx, selected, loaded, run, eventID, input)
 				claimed := false
 				var claimedAuthority effects.Authority
 				if fault == "missing_authority" || fault == "foreign_authority" || fault == "retired_execution" {
@@ -144,8 +145,9 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				}}
 				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 					SourceRunID: run, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 				})
 				if !observed && !claimed {
 					t.Fatalf("did not reach evidence consumer: %v", err)

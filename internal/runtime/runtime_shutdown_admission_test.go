@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -166,7 +167,8 @@ func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthorityOutcome(ctx cont
 
 func newRuntimeShutdownDeliveryStore(t *testing.T, open RuntimeLogNativeOpenerForTest) (*runtimeShutdownDeliveryStore, RuntimeLogNativeFixtureForTest) {
 	t.Helper()
-	fixture := open(t, sourceartifactfixture.Artifact())
+	rooted, _ := sourceartifactfixture.Rooted(t, "shutdown", sourceartifactfixture.Artifact())
+	fixture := open(t, rooted.Artifact())
 	if err := fixture.RequireRun(fixture.Context, agentidentitytest.DefaultRunID); err != nil {
 		t.Fatal(err)
 	}
@@ -928,17 +930,27 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 	}
 	hash := bundle.SourceArtifact.BundleHash()
 	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner, ContractBundle: source}, target)
+	bus, catalog, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner, ContractBundle: source}, target)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	gateway := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, publicationStore)
+	gateway.catalog = catalog
+	bus.SetProviderOutputAuthorizationVerifier(catalog)
 	gateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 	rt.InboundGateway = gateway.InboundGateway
-	contextDef := testBundleContext(t, hash, "inbound.telegram")
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef := rootedContextForSource(t, source, rooted)
+	contextDef.ProviderTriggerCatalog = catalog
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	contextDef.Runtime = rt
 	contextDef.WorkOwner = rt.WorkOccurrence()
+	rt.Options = RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog, SourceArtifactFact: contextDef.SourceArtifactFact}
+	rt.Options.TriggerEntries = map[string]config.TriggerConfig{"chat/custom/trigger.yaml": {Acknowledge: "unsigned_webhook"}}
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)

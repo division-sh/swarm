@@ -140,7 +140,21 @@ func installSelectedStoreTestProcessTopology(
 	if stores == nil || rt == nil || rt.Manager == nil {
 		t.Fatal("selected-store topology test requires an owner and runtime manager")
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		t.Fatal("selected-store source set requires its compiled rooted source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rooted.Admission().BundleHash() != fact.BundleHash() {
+		t.Fatal("selected-store source set contradicts its source fact")
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatalf("compile selected-store test source set: %v", err)

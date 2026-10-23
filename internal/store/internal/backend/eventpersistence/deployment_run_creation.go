@@ -97,12 +97,19 @@ func commitDeploymentRunCreationTx(
 			// recovered by its durable readiness attempt, never a fresh plan.
 			return runtimedata.ValidateRunCreationReceiptForCommand(result.Record, command)
 		}
+		rootAdmission, ok, rootErr := runtimecorrelation.RootAdmissionFromContext(ctx)
+		if rootErr != nil {
+			return rootErr
+		}
+		if !ok {
+			return fmt.Errorf("deployment run creation requires exact rooted source admission")
+		}
 		if err := storedurabledata.CommitRunCreationImportsTx(owner, ctx, tx, &plan); err != nil {
 			return err
 		}
 		startedAt := runtimerunlifecycle.CanonicalTimestamp(root.Plan.OccurredAt)
 		disposition, err := writer.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
-			RunID: command.RunID, Origin: runtimerunlifecycle.DeploymentRunOrigin(), Source: fact, StartedAt: startedAt,
+			RunID: command.RunID, Origin: runtimerunlifecycle.DeploymentRunOrigin(), Source: fact, RootAdmission: rootAdmission, StartedAt: startedAt,
 		})
 		if err != nil {
 			return err

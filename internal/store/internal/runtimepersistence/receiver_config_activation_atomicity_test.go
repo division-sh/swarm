@@ -69,17 +69,17 @@ func newReceiverConfigActivationFixtureWithTimer(t *testing.T, backend string, w
 func newReceiverConfigActivationFixtureWithTimerAndCommitter(t *testing.T, backend string, withAgents, autoEmit, withTimer, recurring bool, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter) receiverConfigActivationFixture {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml": "name: receiver-config-atomicity\n",
-		"review/schema.yaml": `name: review
-instance: request_id
+		"schema.yaml": "stages: []\n",
+		"review/schema.yaml": `instance: request_id
 stages:
   pending: {}
 pins:
   inputs:
     - task.create
 `,
+
 		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
-		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n",
+		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if autoEmit {
 		files["events.yaml"] = "request.started:\n  request_id: string\n  label: string\n  nested: json\n"
@@ -120,10 +120,19 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash(), RootAdmission: rooted.Admission()})
 	bus := &sqliteFlowActivationBus{}
 	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle, configureLifecycle)
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)

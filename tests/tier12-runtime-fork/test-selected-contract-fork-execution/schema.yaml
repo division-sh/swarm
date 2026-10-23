@@ -1,4 +1,4 @@
-name: test-selected-contract-fork-execution
+# fixture: test-selected-contract-fork-execution
 stages: []
 pins:
   inputs:

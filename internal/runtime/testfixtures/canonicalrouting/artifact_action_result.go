@@ -34,8 +34,10 @@ func CopyArtifactActionResultDelivery(t testing.TB, mode string, childRequest bo
 
 func artifactActionResultDeliveryFixtureFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml": "name: artifact-action-result-delivery\n",
-		"repo-scaffold/schema.yaml": `name: repo-scaffold
+		"manifest.yaml":               "version: 1.0.0\nplatform_version: '*'\n",
+		"repo-scaffold/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                 "stages: []\n# fixture: artifact-action-result-delivery\n",
+		"repo-scaffold/schema.yaml": `# fixture: repo-scaffold
 instance: request_id
 stages:
   ready: {}
@@ -93,6 +95,7 @@ func artifactActionResultStaticDeliveryFixtureFiles() map[string]string {
 }
 
 func addArtifactActionResultChildRequest(files map[string]string) {
+	files["repo-scaffold/child-1/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 	files["schema.yaml"] += "pins:\n  inputs:\n    - start.requested\n  outputs:\n    - start.requested\nconnect:\n  - {event: start.requested, from: ., to: repo-scaffold/child-1}\n"
 	files["events.yaml"] = "start.requested:\n  request_id: text\n  mvp_yaml: text\n"
 	files["repo-scaffold/events.yaml"] = strings.TrimPrefix(files["repo-scaffold/events.yaml"], "repo_scaffold.repo_commit_requested:\n  request_id: string\n  mvp_yaml: string\n")
@@ -102,7 +105,7 @@ func addArtifactActionResultChildRequest(files map[string]string) {
 connect:
   - {event: repo_scaffold.repo_commit_requested, from: child-1, to: .}
 `
-	files["repo-scaffold/child-1/schema.yaml"] = `name: child-requester
+	files["repo-scaffold/child-1/schema.yaml"] = `# fixture: child-requester
 pins:
   inputs:
     - start.requested

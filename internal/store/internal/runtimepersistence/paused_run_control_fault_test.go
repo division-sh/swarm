@@ -8,8 +8,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -23,6 +25,9 @@ func TestPausedRunControlFaultPreservesRunDeliveryRevisionsAndOriginalWriterBoth
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+				rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+				sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				run, sibling := uuid.NewString(), uuid.NewString()
 				for _, id := range []string{run, sibling} {
 					event := eventtest.RunCreatingRootIngress(uuid.NewString(), "control.fault", "runtime", "", []byte(`{}`), 0, id, "", events.EventEnvelope{}, time.Now().UTC())

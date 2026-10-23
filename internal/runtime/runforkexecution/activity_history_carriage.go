@@ -23,7 +23,7 @@ func retainOriginalActivityHistory(ctx context.Context, loader SelectedContractS
 		if !seen[key] {
 			var loaded LoadedSelectedContractSource
 			_, err := loadRunForkSelectedContractSource(ctx, loader, SelectedContractSourceLoadRequest{
-				SourceRunID: origin.Request.RunID(), SourceArtifactFact: fact, BundleHash: fact.BundleHash(),
+				Responsibility: OriginalRunSource(origin.Request.RunID()), SourceArtifactFact: fact, BundleHash: fact.BundleHash(),
 				Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: fact.BundleHash()},
 			}, &loaded)
 			if err == nil && !loaded.SourceArtifactFact.Matches(fact) {

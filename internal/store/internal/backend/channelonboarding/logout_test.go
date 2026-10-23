@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -90,7 +91,12 @@ func (f callbackLockFixture) logoutBinding(t *testing.T, op domain.Operation) pr
 			t.Error(err)
 		}
 	})
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: op.Coordinate.BundleHash}}, nil)
+	rooted, _ := sourceartifactfixture.Rooted(t, "logout", sourceartifactfixture.Artifact())
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil || coordinate.BundleHash != op.Coordinate.BundleHash {
+		t.Fatalf("logout source differs from its captured operation source: %v", err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -269,9 +270,59 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 			if err := ValidateStampedDeliveryTargetOwnership(source, tc.event, recipient, handler, resolution.Handler, owner); err != nil {
 				t.Fatalf("valid stamped join occurrence: %v", err)
 			}
+			admission, found, err := ResolveWorkflowJoinOccurrencePayloadAdmission(source, tc.event, bundle.SourceArtifact.BundleHash())
+			if err != nil || !found {
+				t.Fatalf("join payload admission: found=%v err=%v", found, err)
+			}
+			binding := admission.Binding()
+			bindingInput := events.PayloadSchemaBindingInput{
+				BundleHash: binding.BundleHash(), FlowID: binding.FlowID(), EventKey: binding.EventKey(),
+				SchemaDigest: binding.SchemaDigest(), SchemaClass: binding.SchemaClass(),
+			}
+			restored, err := events.RestoreEventPayloadSchemaBinding(bindingInput, tc.event.AdmissionClass(), tc.event.Type(), tc.event.Producer())
+			if err != nil || !restored.Equal(binding) || binding.Reference() != events.JoinOccurrencePayloadReference {
+				t.Fatalf("restored join binding = %#v err=%v", restored, err)
+			}
+			restoredAdmission, err := events.NewPayloadAdmission(admission.Payload(), restored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := events.ApplyPayloadAdmission(tc.event, restoredAdmission); err != nil {
+				t.Fatalf("apply restored join binding: %v", err)
+			}
+			wrongProducer, err := events.NewProducerIdentity(events.EventProducerPlatform, "runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := events.RestoreEventPayloadSchemaBinding(bindingInput, tc.event.AdmissionClass(), tc.event.Type(), wrongProducer); err == nil {
+				t.Fatal("restored join binding accepted a foreign producer")
+			}
+			if _, err := events.RestoreEventPayloadSchemaBinding(bindingInput, events.EventAdmissionChild, tc.event.Type(), tc.event.Producer()); err == nil {
+				t.Fatal("restored join binding accepted a foreign event class")
+			}
+			var spaced bytes.Buffer
+			if err := json.Indent(&spaced, admission.Payload(), "", "  "); err != nil {
+				t.Fatal(err)
+			}
+			readback := eventtest.RuntimeControlWithRoutingSource(tc.event.ID(), tc.event.Type(), tc.event.Producer().ID(), tc.event.TaskID(),
+				spaced.Bytes(), tc.event.ChainDepth(), tc.event.RunID(), tc.event.ParentEventID(), tc.event.NormalizedEnvelope(), tc.event.RoutingSource(), tc.event.CreatedAt())
+			readback, err = events.ResolveEnvelope(readback, events.EnvelopeForTargetRoute(readback.NormalizedEnvelope(), target))
+			if err != nil {
+				t.Fatal(err)
+			}
+			readbackAdmission, err := events.NewPayloadAdmission(spaced.Bytes(), restored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := events.ApplyPayloadAdmission(readback, readbackAdmission); err != nil {
+				t.Fatalf("join binding depends on durable JSON formatting: %v", err)
+			}
 			wrongEntity := target
 			wrongEntity.EntityID = eventtest.UUID("wrong-stamped-join-entity")
 			wrongTask := exactJoinOccurrenceEventWithFacts(t, "wrong-stamped-task", string(tc.event.Type()), "runtime.generic_schedule", resolution.Handle.TaskID()+"-hostile", resolution.Handle, tc.event.RoutingSource(), tc.event.NormalizedEnvelope())
+			if _, err := events.ApplyPayloadAdmission(wrongTask, restoredAdmission); err == nil {
+				t.Fatal("restored join binding accepted a different task")
+			}
 			for _, bad := range []struct {
 				name    string
 				event   events.Event
@@ -303,6 +354,9 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 		{name: "same leaf unrelated flow", event: exactJoinOccurrenceEvent(t, "other-flow", otherFlowHandle, otherFlowSource, otherFlowEnvelope)},
 	} {
 		t.Run(hostile.name, func(t *testing.T) {
+			if _, found, err := ResolveWorkflowJoinOccurrencePayloadAdmission(source, hostile.event, bundle.SourceArtifact.BundleHash()); err == nil || found {
+				t.Fatalf("hostile payload occurrence admitted: found=%v err=%v", found, err)
+			}
 			if resolution, ok, err := resolveWorkflowJoinOccurrence(source, hostile.event); err == nil || ok {
 				t.Fatalf("hostile occurrence resolved: %#v ok=%v err=%v", resolution, ok, err)
 			}
@@ -430,9 +484,9 @@ func VerifyNativeSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothSt
 					files[name] = strings.Replace(files[name], expectedField,
 						"  expected: {type: '[text]', initial: ['a', 'b']}\n", 1)
 				}
-				for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
+				for _, name := range []string{"manifest.yaml", "schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 					for _, flowID := range []string{"a", "b"} {
-						files[flowID+"/"+name] = strings.Replace(files["orders/"+name], "name: orders", "name: "+flowID, 1)
+						files[flowID+"/"+name] = files["orders/"+name]
 					}
 					delete(files, "orders/"+name)
 				}

@@ -31,7 +31,7 @@ func TestIssue642PublishedFanOutReturnsOwnChildReplyBothStores(t *testing.T) {
 			var selected interface {
 				runforkexecution.SelectedContractForkLifecycle
 				runforkexecution.SourceArtifactSelectedContractSourceStore
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				replycontext.Store
 				bus.PreparedPublishEventReader
 				ListFanOutIntents(context.Context, fanoutobligation.ListQuery) (fanoutobligation.ListPage, error)

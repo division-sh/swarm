@@ -10,7 +10,8 @@ import (
 func TestDurableDataImportShapeUsesCompiledStructuralFields(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-shape\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: import-shape\n")
 	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  ResumeText: text\n  CandidateUUID: uuid\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 candidate.created:
@@ -61,7 +62,8 @@ candidate.created:
 func TestDurableDataImportShapeFieldlessEventUsesEmptyArray(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: fieldless-import-shape\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: fieldless-import-shape\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "empty.ping:\n")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {

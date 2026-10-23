@@ -404,7 +404,16 @@ func activityReplayContext(t *testing.T, selected gateRecoveryStoreCase, source 
 	}
 	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
 	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(context.Background(), runID), fact))
-	return originalPipelineFixtureContext(t, ctx, selected.events)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	ctx = originalPipelineFixtureContext(t, ctx, selected.events)
+	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
+	})
+	return ctx
 }
 
 func loadActivityResultForProof(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, eventID string) runtimebus.PreparedPublishEvent {

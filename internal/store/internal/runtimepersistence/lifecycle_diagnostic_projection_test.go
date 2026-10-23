@@ -24,11 +24,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type diagnosticProjectionTestStore interface {
 	agentfixture.Store
+	rootedRunStore
 	runtimemanager.AgentLifecycleDiagnosticPersistence
 	runtimepkg.RuntimeLogPersistence
 	ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]diaglog.LifecycleDiagnostic, error)
@@ -188,9 +190,14 @@ func TestLifecycleDiagnosticBatchCardinality(t *testing.T) {
 				}
 				if size > 0 {
 					first := enqueueDiagnosticTestAgent(t, selected, "batch-worker")
+					rooted, err := selected.LoadRunRootedSource(context.Background(), first.Identity.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContext(), rooted.Admission())
 					for i := 1; i < size; i++ {
 						op := uuid.NewString()
-						_, err := agentfixture.CommitStatic(t, testAuthorActivityContext(), selected, runtimemanager.AgentLifecycleTransition{
+						_, err := agentfixture.CommitStatic(t, ctx, selected, runtimemanager.AgentLifecycleTransition{
 							OperationID: op, OperationKind: "restart", RequestHash: op, Identity: first.Identity, AgentID: first.AgentID, Trigger: "restart",
 							ExpectedEpoch: 11, ExpectedGeneration: uint64(i), ExpectedPhase: runtimemanager.AgentLifecycleRegistered,
 							TargetEpoch: 11, TargetGeneration: uint64(i + 1), TargetPhase: runtimemanager.AgentLifecycleRegistered,
@@ -243,7 +250,11 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 					selected = admitTestPostgresStore(t, db)
 				}
 				first := enqueueDiagnosticTestAgent(t, selected, "causal-worker")
-				ctx := testAuthorActivityContext()
+				rooted, err := selected.LoadRunRootedSource(context.Background(), first.Identity.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContext(), rooted.Admission())
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				parent, runID := uuid.NewString(), first.Identity.RunID
 				if scenario == "foreign_parent" {
@@ -303,7 +314,12 @@ func enqueueDiagnosticTestAgent(t *testing.T, selected diagnosticProjectionTestS
 func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTestStore, identity agentidentity.Identity, origin runtimemanager.LifecycleDiagnosticOrigin, mode executionmode.Mode) diaglog.LifecycleDiagnostic {
 	t.Helper()
 	req := diagnosticTestTransition(t, identity, origin, mode)
-	if _, err := agentfixture.CommitStatic(t, testAuthorActivityContext(), selected, req); err != nil {
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContext(), rooted.Admission())
+	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentfixture.CommitStatic(t, ctx, selected, req); err != nil {
 		t.Fatal(err)
 	}
 	return diagnosticTestOperation(t, selected, req.OperationID)

@@ -153,8 +153,10 @@ func TestPolicySheetFallbackRequiresDefaultKind(t *testing.T) {
 
 func TestBundleAdmissionRejectsAuthoredDefaultMarker(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: rule-sentinel-proof\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: rule-sentinel-proof\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - else: true\n          emit: proof.requested\n")
 	repoRoot := contractRepoRoot(t)
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
@@ -192,7 +194,8 @@ func TestRulePredicateContextsRemainDistinct(t *testing.T) {
 
 func TestBundleAdmissionRejectsRetiredRulePredicateAndCompilesWhen(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: rule-predicate-proof\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: rule-predicate-proof\n")
 	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), "proof: {}\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n")
 	nodes := filepath.Join(root, "nodes.yaml")

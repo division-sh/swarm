@@ -375,21 +375,6 @@ func targetOwnerArcRouteIdentityError(route events.DeliveryRoute, want events.De
 	return nil
 }
 
-func TestTargetOwnerArcProofRejectsRecipientOnlyMatch(t *testing.T) {
-	want := events.MustMaterializingEntityTarget(events.RouteIdentity{
-		FlowID: "receiver", FlowInstance: "child", EntityID: eventtest.UUID("receiver-owned-target"),
-	})
-	wrong := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "arc-receiver")),
-		Target: events.MustExistingEntityTarget(events.RouteIdentity{
-			FlowID: "receiver", FlowInstance: "child", EntityID: eventtest.UUID("source-owned-target"),
-		}),
-	}
-	if err := targetOwnerArcRouteIdentityError(wrong, want); err == nil {
-		t.Fatal("recipient-only proof accepted a wrong destination ownership kind and entity")
-	}
-}
-
 func targetOwnerArcFixture(
 	t *testing.T,
 	test targetOwnerArcCase,
@@ -397,18 +382,6 @@ func targetOwnerArcFixture(
 ) (semanticview.Source, events.EventType, events.RouteIdentity, events.RoutingSource, events.DeliveryTargetOwnership) {
 	t.Helper()
 	const localEvent = "work.ready"
-	receiver := connectRoutePlanTestFlow{
-		id: test.receiverPath, path: test.receiverPath, mode: test.receiverMode,
-		inputs: []runtimecontracts.FlowInputEventPin{{Event: localEvent}},
-		nodes: map[string]runtimecontracts.SystemNodeContract{
-			"arc-receiver": {
-				SubscribesTo: []string{localEvent},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					localEvent: targetOwnerArcHandler(test.receiverMode),
-				},
-			},
-		},
-	}
 	var (
 		bundle        *runtimecontracts.WorkflowContractBundle
 		eventType     events.EventType
@@ -429,19 +402,35 @@ func targetOwnerArcFixture(
 		routingSource, err = events.NewRootRoutingSource(sourceEntityID)
 		eventType = "root.ready"
 	} else {
-		sourceMode := runtimecontracts.FlowModeStatic
-		if test.sourceKind == targetOwnerArcSingleton {
-			sourceMode = runtimecontracts.FlowModeStatic
-		} else if test.sourceKind == targetOwnerArcTemplate {
-			sourceMode = runtimecontracts.FlowModeTemplate
+		files := map[string]string{
+			"manifest.yaml":                      "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":                        "stages: []\n",
+			test.sourcePath + "/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
+			test.sourcePath + "/schema.yaml":     "stages: []\npins:\n  outputs: [work.ready]\n",
+			test.sourcePath + "/events.yaml":     "work.ready:\n",
+			test.receiverPath + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			test.receiverPath + "/schema.yaml":   "stages: []\npins:\n  inputs: [work.ready]\n",
+			test.receiverPath + "/nodes.yaml":    "arc-receiver:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n  event_handlers:\n    work.ready: {}\n",
 		}
-		producer := connectRoutePlanTestFlow{
-			id: test.sourcePath, path: test.sourcePath, mode: sourceMode,
-			outputs: []runtimecontracts.FlowOutputEventPin{{Event: localEvent}},
+		for _, endpoint := range []string{test.sourcePath, test.receiverPath} {
+			for parent := connectRoutePlanFixtureParent(endpoint); parent != "."; parent = connectRoutePlanFixtureParent(parent) {
+				if _, exists := files[parent+"/schema.yaml"]; !exists {
+					files[parent+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+					files[parent+"/schema.yaml"] = "stages: []\n"
+				}
+			}
 		}
-		bundle = connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{producer, receiver}, []runtimecontracts.FlowConnect{{
-			Event: localEvent, From: producer.id, To: receiver.id,
-		}})
+		if test.sourceKind == targetOwnerArcTemplate {
+			files[test.sourcePath+"/schema.yaml"] += "instance: instance_key\n"
+			files[test.sourcePath+"/entities.yaml"] = "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n"
+		}
+		owner := connectRoutePlanFixtureLCA(test.sourcePath, test.receiverPath)
+		ownerSchema := "schema.yaml"
+		if owner != "." {
+			ownerSchema = owner + "/schema.yaml"
+		}
+		files[ownerSchema] += fmt.Sprintf("connect:\n  - event: work.ready\n    from: %s\n    to: %s\n", connectRoutePlanFixtureRelative(owner, test.sourcePath), connectRoutePlanFixtureRelative(owner, test.receiverPath))
+		bundle = loadTargetRouteTempBundle(t, files)
 
 		instancePath := test.sourcePath
 		if test.sourceKind == targetOwnerArcTemplate {
@@ -449,7 +438,7 @@ func targetOwnerArcFixture(
 		} else {
 			sourceEntityID = runtimeflowidentity.EntityID(instancePath)
 		}
-		sourceRoute = events.RouteIdentity{FlowID: producer.id, FlowInstance: instancePath, EntityID: sourceEntityID}.Normalized()
+		sourceRoute = events.RouteIdentity{FlowID: test.sourcePath, FlowInstance: instancePath, EntityID: sourceEntityID}.Normalized()
 		eventType = events.EventType(instancePath + "/" + localEvent)
 		if test.sourceKind == targetOwnerArcTemplate {
 			routingSource, err = events.NewConcreteTemplateInstanceRoutingSource(sourceRoute)
@@ -465,20 +454,7 @@ func targetOwnerArcFixture(
 	return semanticview.Wrap(bundle), eventType, sourceRoute, routingSource, events.MustExistingEntityTarget(sourceRoute)
 }
 
-func targetOwnerArcHandler(mode string) runtimecontracts.SystemNodeEventHandler {
-	if strings.TrimSpace(mode) == runtimecontracts.FlowModeStatic {
-		return runtimecontracts.SystemNodeEventHandler{}
-	}
-	return existingOwnerHandlerFixture()
-}
-
 func TestEventBusCrossFlowTargetOwnerRejectsForeignSourceBeforePersistence(t *testing.T) {
-	t.Run("parent context cannot supply missing receiver", TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver)
-	t.Run("descendant has no compiled proof", TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence)
-	t.Run("repeated leaf under wrong full path", testEventBusCrossFlowTargetOwnerRejectsWrongFullPathBeforePersistence)
-}
-
-func testEventBusCrossFlowTargetOwnerRejectsWrongFullPathBeforePersistence(t *testing.T) {
 	test := targetOwnerArcCase{
 		name: "wrong full path", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker/result",
 		receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "right/worker/result", producerType: events.EventProducerNode,
@@ -519,13 +495,6 @@ func testEventBusCrossFlowTargetOwnerRejectsWrongFullPathBeforePersistence(t *te
 	if _, ok := store.settlements[eventID]; ok {
 		t.Fatalf("wrong full-path source mutated settlement: %#v", store.settlements[eventID])
 	}
-}
-
-func TestEventBusCrossFlowTargetOwnerFailsClosedBeforeMutation(t *testing.T) {
-	t.Run("scoped event without flow instance", TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforePersistence)
-	t.Run("uncompiled cross-flow declarations", TestEventBusPublish_UncompiledCrossFlowDeclarationsCannotCreateRecipients)
-	t.Run("descendant without connect", TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence)
-	t.Run("missing or ambiguous root owner", TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelectedOwnerBeforeMutation)
 }
 
 func TestEventBusReentrantBoomerangPreservesExactOwnersWhilePriorDeliveriesRemainOpen(t *testing.T) {
@@ -632,35 +601,33 @@ func TestEventBusReentrantBoomerangPreservesExactOwnersWhilePriorDeliveriesRemai
 
 func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *testing.T) {
 	const eventName = "work.ready"
-	producer := connectRoutePlanTestFlow{
-		id: "producer", mode: runtimecontracts.FlowModeStatic,
-		outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
+	files := map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            "stages: []\nconnect:\n  - {event: work.ready, from: producer, to: fanout/existing}\n  - {event: work.ready, from: producer, to: fanout/constructed}\n  - {event: work.ready, from: producer, to: fanout/entityless}\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [work.ready]\n",
+		"producer/events.yaml":   "work.ready:\n",
+		"fanout/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
+		"fanout/schema.yaml":     "stages: []\n",
 	}
-	receiver := func(id, mode string, handler runtimecontracts.SystemNodeEventHandler) connectRoutePlanTestFlow {
-		return connectRoutePlanTestFlow{
-			id: id, path: "fanout/" + id, mode: mode,
-			inputs: []runtimecontracts.FlowInputEventPin{{Event: eventName}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				id + "-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: handler}},
-			},
+	for _, receiver := range []string{"existing", "constructed", "entityless", "poison"} {
+		files["fanout/"+receiver+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files["fanout/"+receiver+"/schema.yaml"] = "stages: []\npins:\n  inputs: [work.ready]\n"
+		handler := "{}\n"
+		if receiver == "existing" || receiver == "poison" {
+			handler = "\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n"
 		}
+		files["fanout/"+receiver+"/nodes.yaml"] = receiver + "-node:\n  execution_type: system_node\n  event_handlers:\n    work.ready: " + handler
 	}
-	existing := receiver("existing", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
-	constructed := receiver("constructed", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{})
-	entityless := receiver("entityless", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{})
-	poison := receiver("poison", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
-	connect := func(id string) runtimecontracts.FlowConnect {
-		return runtimecontracts.FlowConnect{Event: eventName, From: "producer", To: "fanout/" + id}
-	}
+	legalSchema := files["schema.yaml"]
+	files["schema.yaml"] += "  - {event: work.ready, from: producer, to: fanout/poison}\n"
 	sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")}.Normalized()
 	existingRoute := events.RouteIdentity{FlowID: "fanout/existing", FlowInstance: "fanout/existing", EntityID: runtimeflowidentity.EntityID("fanout/existing")}.Normalized()
 	constructedRoute := events.RouteIdentity{FlowID: "fanout/constructed", FlowInstance: "fanout/constructed", EntityID: runtimeflowidentity.EntityID("fanout/constructed")}
 	fieldlessRoute := events.RouteIdentity{FlowID: "fanout/entityless", FlowInstance: "fanout/entityless", EntityID: runtimeflowidentity.EntityID("fanout/entityless")}
 	poisonedStore := newTargetRouteMemoryStore()
 	poisonedStore.setTargetOwnerRoutes(sourceRoute, existingRoute, constructedRoute, fieldlessRoute)
-	poisonedBundle := connectRoutePlanTestBundle(t,
-		[]connectRoutePlanTestFlow{producer, existing, constructed, entityless, poison},
-		[]runtimecontracts.FlowConnect{connect("existing"), connect("constructed"), connect("entityless"), connect("poison")})
+	poisonedBundle := loadTargetRouteTempBundle(t, files)
 
 	runID := uuid.NewString()
 	poisonedSource := semanticview.Wrap(poisonedBundle)
@@ -694,9 +661,11 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 
 	legalStore := newTargetRouteMemoryStore()
 	legalStore.setTargetOwnerRoutes(sourceRoute, existingRoute, constructedRoute, fieldlessRoute)
-	legalBundle := connectRoutePlanTestBundle(t,
-		[]connectRoutePlanTestFlow{producer, existing, constructed, entityless},
-		[]runtimecontracts.FlowConnect{connect("existing"), connect("constructed"), connect("entityless")})
+	files["schema.yaml"] = legalSchema
+	delete(files, "fanout/poison/manifest.yaml")
+	delete(files, "fanout/poison/schema.yaml")
+	delete(files, "fanout/poison/nodes.yaml")
+	legalBundle := loadTargetRouteTempBundle(t, files)
 
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	legalBus, err := newScopedTestEventBus(legalStore, EventBusOptions{

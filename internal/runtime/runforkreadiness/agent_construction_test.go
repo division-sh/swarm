@@ -33,9 +33,10 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 			t.Fatal(err)
 		}
 		for name, body := range map[string]string{
-			"schema.yaml": "name: child\npins:\n  inputs:\n    - work.ready\n",
-			"events.yaml": "work.ready:\n",
-			"agents.yaml": "worker:\n  model: regular\n  intent:\n    inline: Consume the exact selected input.\n  subscriptions: [work.ready]\n",
+			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":   "stages: []\npins:\n  inputs:\n    - work.ready\n",
+			"events.yaml":   "work.ready:\n",
+			"agents.yaml":   "worker:\n  model: regular\n  intent:\n    inline: Consume the exact selected input.\n  subscriptions: [work.ready]\n",
 		} {
 			if err := os.WriteFile(filepath.Join(root, flow, name), []byte(body), 0600); err != nil {
 				t.Fatal(err)

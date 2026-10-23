@@ -100,8 +100,12 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 				selected = backend.open(t)
 			}
 			ctx = originalPipelineFixtureContext(t, ctx, selected.events)
-			storetest.RequireBundleDataCatalog(t, ctx, selected.events.(storetest.DurableDataCatalogStore), bundle)
-			if _, err := selected.events.CreateRun(ctx, runlifecycle.CreateRequest{RunID: runID, Origin: runlifecycle.ScenarioSetupRunOrigin(), Source: fact, StartedAt: time.Now().UTC()}); err != nil {
+			storetest.RequireBundleDataCatalog(t, ctx, selected.events.(storetest.RootedDataCatalogStore), bundle)
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := selected.events.CreateRun(ctx, runlifecycle.CreateRequest{RunID: runID, Origin: runlifecycle.ScenarioSetupRunOrigin(), Source: fact, RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC()}); err != nil {
 				t.Fatal(err)
 			}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
@@ -353,7 +357,8 @@ func issue2564M25Bundle(t *testing.T, serverURL, success string, ruleActivity bo
 		activity = "rules:\n        - when: payload.url != ''\n          activity:\n            id: scanner_source_requested_source_scrape\n            tool: source_scrape\n            input: {url: payload.url}"
 	}
 	return loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":   "name: issue2564-m25\nstages: {pending: {}}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: {pending: {}}\n",
 		"entities.yaml": "test_entity:\n  local: {type: integer, initial: 0}\n  folded: {type: integer, initial: 0}\n  received: {type: integer, initial: 0}\n  title: text\n",
 		"events.yaml":   "source.requested: {url: text}\n",
 		"nodes.yaml": fmt.Sprintf(`scanner:

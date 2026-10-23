@@ -84,7 +84,19 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			return SelectedContractActivationGateResult{}, err
 		}
+		if req.AgentRuntime.ProcessCapability == nil {
+			return SelectedContractActivationGateResult{}, errors.New("selected-contract activation requires process capability before state-only mutation")
+		}
+		if err := req.AgentRuntime.ProcessCapability.ProveCurrent(ctx); err != nil {
+			return SelectedContractActivationGateResult{}, fmt.Errorf("prove selected-contract state-only process: %w", err)
+		}
+		process, err := req.AgentRuntime.ProcessCapability.Evidence()
+		if err != nil {
+			return SelectedContractActivationGateResult{}, err
+		}
 		activation, err := req.Store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
+			OriginalRootAdmission:             resources.originalSource.RootedSource.Admission(),
+			Process:                           process.LeaseStamp(),
 			OriginalLoopCarriage:              original,
 			ForkRunID:                         forkRunID,
 			AllowSourceFreeze:                 req.AllowSourceFreeze,
@@ -114,7 +126,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, expectedSourceFact)
 
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:        binding.SourceRunID,
+		Responsibility:     RetainedForkSource(forkRunID),
 		BundleHash:         expectedBundleHash,
 		SourceArtifactFact: expectedSourceFact,
 		Selection:          binding.ContractSelection,
@@ -137,6 +149,8 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	operation.preparing = ctx
 	operation.owned = runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(operation.owned, loadedSource.SourceArtifactFact), scope)
+	operation.owned = runtimecorrelation.WithRootAdmission(operation.owned, loadedSource.RootedSource.Admission())
+	operation.preparing = runtimecorrelation.WithRootAdmission(operation.preparing, loadedSource.RootedSource.Admission())
 	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("project selected-contract activation descriptors: %w", err)
@@ -379,6 +393,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		ctx = operation.Context()
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 			OriginalLoopCarriage:  original,
+			OriginalRootAdmission: preparation.originalSource.RootedSource.Admission(),
 			Prepared:              preparation,
 			Operation:             operation,
 			Owner:                 req.ExecutionOwner,
@@ -415,16 +430,22 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			return result, err
 		}
 		ctx = runtimeeffects.WithAuthority(ctx, container.authority)
-		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-			InheritedSchedules:    readiness,
-			ExecutionSource:       loadedSource.Source,
-			ForkRunID:             forkRunID,
-			AllowSourceFreeze:     req.AllowSourceFreeze,
-			AllowedSourceEventIDs: sourceEventIDs,
-			FrontierAdmission:     frontier,
-			RouteTopology:         routeTopology,
-			RecipientPlanning:     *model.RecipientPlanning,
-		})
+		process, err := preparation.agentRuntime.Options.ProcessCapability.Evidence()
+		var activation runfork.RunForkActivation
+		if err == nil {
+			activation, err = container.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+				InheritedSchedules:    readiness,
+				OriginalRootAdmission: preparation.originalSource.RootedSource.Admission(),
+				Process:               process.LeaseStamp(),
+				ExecutionSource:       loadedSource.Source,
+				ForkRunID:             forkRunID,
+				AllowSourceFreeze:     req.AllowSourceFreeze,
+				AllowedSourceEventIDs: sourceEventIDs,
+				FrontierAdmission:     frontier,
+				RouteTopology:         routeTopology,
+				RecipientPlanning:     *model.RecipientPlanning,
+			})
+		}
 		result.RunForkActivation = activation
 		if activation.Activated {
 			container.RetainActivated(resources, err)
@@ -452,7 +473,13 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err := req.AgentRuntime.ProcessCapability.ProveCurrent(ctx); err != nil {
 		return result, fmt.Errorf("prove selected-contract state-only process: %w", err)
 	}
+	process, err := req.AgentRuntime.ProcessCapability.Evidence()
+	if err != nil {
+		return result, err
+	}
 	activation, err := req.Store.ActivateRunFork(operation.Context(), runfork.RunForkActivateRequest{
+		OriginalRootAdmission:             resources.originalSource.RootedSource.Admission(),
+		Process:                           process.LeaseStamp(),
 		OriginalLoopCarriage:              original,
 		ForkRunID:                         forkRunID,
 		AllowSourceFreeze:                 req.AllowSourceFreeze,

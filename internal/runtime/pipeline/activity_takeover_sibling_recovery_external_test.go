@@ -104,9 +104,19 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 			if cells[0].fact.BundleHash() == cells[1].fact.BundleHash() {
 				t.Fatal("sibling recovery witness requires two distinct real artifacts")
 			}
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{
-				{BundleHash: cells[0].fact.BundleHash()}, {BundleHash: cells[1].fact.BundleHash()},
-			}, nil)
+			var coordinates []agenttopology.SourceCoordinate
+			for _, cell := range cells {
+				root, present, err := correlation.RootAdmissionFromContext(cell.ctx)
+				if err != nil || !present {
+					t.Fatalf("sibling activity source root is unavailable: present=%t error=%v", present, err)
+				}
+				coordinate, err := agenttopology.NewSourceCoordinate(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				coordinates = append(coordinates, coordinate)
+			}
+			plan, err := agenttopology.NewSourceSetPlan(coordinates, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

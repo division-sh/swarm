@@ -50,7 +50,11 @@ func TestRunForkHistoricalIdentityGenericExecutionBothStores(t *testing.T) {
 					t.Fatalf("fault injection rows=%d err=%v", n, err)
 				}
 			}
-			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
+			rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()}
 			write(corrupt)
 			before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
 			_, err = f.store.MaterializeRunFork(f.ctx, request)

@@ -14,6 +14,26 @@ type toolCredentialKey struct {
 	value string
 }
 
+func lookupToolCredentialPath(root any, segments []toolPathSegment) (any, bool) {
+	environment, ok := root.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	credentials, ok := environment["credentials"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	parts := make([]string, len(segments))
+	for i, segment := range segments {
+		if segment.kind != toolPathProperty {
+			return nil, false
+		}
+		parts[i] = segment.name
+	}
+	value, present := credentials[strings.Join(parts, ".")]
+	return value, present
+}
+
 func admitToolCredentialKeys(raw []string) ([]toolCredentialKey, error) {
 	out := make([]toolCredentialKey, 0, len(raw))
 	seen := make(map[string]struct{}, len(raw))

@@ -64,7 +64,7 @@ func writeCompositionConnectFixture(t testing.TB, opts compositionConnectFixture
 	if opts.omitRename {
 		rename = ""
 	}
-	rootSchema := "name: composition-connect\nconnect:\n  - event: " + valueOr(opts.connectEvent, "deploy.done") + "\n    from: " + valueOr(opts.connectFrom, "producer") + "\n    to: " + valueOr(opts.connectTo, "consumer") + "\n" + rename
+	rootSchema := "# fixture: composition-connect\nconnect:\n  - event: " + valueOr(opts.connectEvent, "deploy.done") + "\n    from: " + valueOr(opts.connectFrom, "producer") + "\n    to: " + valueOr(opts.connectTo, "consumer") + "\n" + rename
 	if opts.consumerTemplateInstance {
 		rootSchema += "    resolution: select\n"
 	}
@@ -77,7 +77,7 @@ func writeCompositionConnectFixture(t testing.TB, opts compositionConnectFixture
 `)
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
-	writeLegacyInstanceFlow(t, root, "producer", `name: producer
+	writeLegacyInstanceFlow(t, root, "producer", `# fixture: producer
 pins:
   outputs:
     - deploy.done
@@ -103,7 +103,7 @@ deploy.done:
 		instance = "instance: vertical_id\n"
 		entities = "deployment:\n  vertical_id:\n    type: string\n    _unused_reason: composition connect route-key proof field\n"
 	}
-	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
+	writeLegacyInstanceFlow(t, root, "consumer", `# fixture: consumer
 `+instance+`stages:
   idle: {}
   done: {final: true}
@@ -128,14 +128,14 @@ func CopyCompositionConnectAmbiguity(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: composition-connect-ambiguity\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: composition-connect-ambiguity\n")
 	removeClosedVariantFiles(t, root,
 		"consumer/agents.yaml", "consumer/entities.yaml", "consumer/events.yaml", "consumer/nodes.yaml",
 	)
 	for _, flowID := range []string{"producer_a", "producer_b"} {
-		writeLegacyInstanceFlow(t, root, flowID, "name: "+flowID+"\npins:\n  outputs:\n    - ticket.ready\n", "ticket.ready:\n  key: entity_id\n  entity_id: string\n", "", "")
+		writeLegacyInstanceFlow(t, root, flowID, "# fixture: "+flowID+"\npins:\n  outputs:\n    - ticket.ready\n", "ticket.ready:\n  key: entity_id\n  entity_id: string\n", "", "")
 	}
-	writeLegacyInstanceFlow(t, root, "consumer", "name: consumer\npins:\n  inputs:\n    - ticket.ready\n", "", "", "")
+	writeLegacyInstanceFlow(t, root, "consumer", "# fixture: consumer\npins:\n  inputs:\n    - ticket.ready\n", "", "", "")
 	return root
 }
 
@@ -153,7 +153,7 @@ func CopyCompositionConnectReceiverFanout(t testing.TB, variant CompositionConne
 		t.Fatalf("unsupported composition-connect receiver fanout variant %d", variant)
 	}
 	root := CopyExample(t, ParentConnect)
-	rootSchema := `name: composition-connect-receiver-fanout
+	rootSchema := `# fixture: composition-connect-receiver-fanout
 pins:
   inputs:
     - work.ready
@@ -184,15 +184,15 @@ connect:
   subscriptions: [work.ready]
 `)
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.requested:\n  work_id: text?\nwork.ready:\n  key: work_id\n  work_id: text\n")
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\npins:\n  outputs:\n    - work.ready\n")
-	writeLegacyInstanceFlow(t, root, "consumer", "name: consumer\npins:\n  inputs:\n    - consumer.work.ready\n", "", "", `consumer-node:
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\npins:\n  outputs:\n    - work.ready\n")
+	writeLegacyInstanceFlow(t, root, "consumer", "# fixture: consumer\npins:\n  inputs:\n    - consumer.work.ready\n", "", "", `consumer-node:
   execution_type: system_node
   subscribes_to: [consumer.work.ready]
   event_handlers:
     consumer.work.ready: {}
 `)
 	if includeDynamic {
-		writeLegacyInstanceFlow(t, root, "dynamic", "name: dynamic\ninstance: work_id\npins:\n  inputs:\n    - dynamic.work.ready\n", "", "dynamic_state:\n  work_id: string\n", `dynamic-node:
+		writeLegacyInstanceFlow(t, root, "dynamic", "# fixture: dynamic\ninstance: work_id\npins:\n  inputs:\n    - dynamic.work.ready\n", "", "dynamic_state:\n  work_id: string\n", `dynamic-node:
   execution_type: system_node
   subscribes_to: [dynamic.work.ready]
   event_handlers:

@@ -1,4 +1,4 @@
-name: intake
+# fixture: intake
 stages:
   queued: {}
   collecting: {}

@@ -69,19 +69,10 @@ func runForkRootGateBundleForTest(t *testing.T) *runtimecontracts.WorkflowContra
 	t.Helper()
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"schema.yaml": `name: root
-stages:
-  awaiting_review:
-    gate:
-      decision: root_review
-      outcomes:
-        approve:
-          advances_to: done
-          emit: run_fork.compiled_root_gate_approved
-  done: {final: true}
-`,
+		"schema.yaml": "stages:\n  awaiting_review:\n    gate:\n      decision: root_review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: run_fork.compiled_root_gate_approved\n  done: {final: true}\n",
+
 		"entities.yaml": "default: {}\n",
-		"events.yaml":   "run_fork.compiled_root_gate_approved:\n",
+		"events.yaml":   "run_fork.compiled_root_gate_approved:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
 			t.Fatal(err)
@@ -693,7 +684,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 		for _, fields := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/fields_%t", backend.name, fields), func(t *testing.T) {
 				opened := backend.open(t)
-				files := map[string]string{"schema.yaml": "name: proposed-effect-remint\nstages:\n  operating: {}\n"}
+				files := map[string]string{"schema.yaml": "stages:\n  operating: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 				if fields {
 					files["entities.yaml"] = "item:\n  label: text?\n"
 				}
@@ -963,7 +954,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				if err != nil {
 					t.Fatal(err)
 				}
-				admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, request, continuation.FlowID)
+				admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, request, events.EventPayloadProducer(request, continuation.FlowID))
 				if err != nil {
 					t.Fatalf("admit exact approved activity request: %v", err)
 				}
@@ -1060,7 +1051,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					before := historicalContextDatabaseRows(t, db, backend.name == "postgres")
 					// The loader processes these by committed time: the reusable
 					// first attempt is inserted before the later input refuses.
-					loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{request.ID(), late.ID()}, materializationRequest.OriginalLoopCarriage)
+					loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{request.ID(), late.ID()}, materializationRequest.OriginalLoopCarriage, originalRootAdmissionForRun(t, cards, sourceRunID))
 					if err == nil || !strings.Contains(err.Error(), "outside the bound fork revision") || len(loaded) != 0 {
 						t.Fatalf("late input did not roll back the earlier approved copy: loaded=%d error=%v", len(loaded), err)
 					}
@@ -1075,7 +1066,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				beforePrepare := historicalContextDatabaseRows(t, db, backend.name == "postgres")
 				// An unrelated caller reply must not fill an empty original binding.
 				loadCtx := events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "foreign-caller-reply"}})
-				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(loadCtx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, materializationRequest.OriginalLoopCarriage)
+				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(loadCtx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, materializationRequest.OriginalLoopCarriage, originalRootAdmissionForRun(t, cards, sourceRunID))
 				if err == nil {
 					if len(loaded) != 1 {
 						t.Fatalf("prepared count=%d", len(loaded))

@@ -23,13 +23,25 @@ import (
 	"github.com/google/uuid"
 )
 
-var dataRunAmendedSourceArtifact = mustAPITestSourceArtifactNamed("data-run-schema-amended")
+var dataRunAmendedSourceArtifact = func() *sourceartifact.AdmittedSourceArtifact {
+	members := map[string][]byte{}
+	for _, entry := range runStartTestArtifact("scan.requested").Entries() {
+		members[entry.Label()] = entry.Bytes()
+	}
+	members["schema.yaml"] = append([]byte("# data-run-schema-amended\n"), members["schema.yaml"]...)
+	artifact, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
+		panic(err)
+	}
+	return artifact
+}()
 var dataRunMissingSourceArtifact = mustAPITestSourceArtifactNamed("data-run-missing")
 var dataRunAmendedBundleHash = dataRunAmendedSourceArtifact.BundleHash()
 var dataRunMissingBundleHash = dataRunMissingSourceArtifact.BundleHash()
 
 type dataRunLifecycleStore interface {
 	runtimebus.EventStore
+	storetest.RootedDataCatalogStore
 	RunReadStore
 	ObservabilityReadStore
 	APIIdempotencyStore
@@ -85,7 +97,7 @@ func TestRunCreationRequestBindingAcrossSelectedStores(t *testing.T) {
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -204,12 +216,13 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatalf("register data run catalog: %v", err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+		ctx = admittedAPITestBusContext(t, ctx, bus)
 
 		t.Run("duplicate fused child invocation IDs fail before success or rejection persistence", func(t *testing.T) {
 			for _, test := range []struct {
@@ -618,7 +631,8 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("register target catalog without source pin declaration: %v", err)
 			}
 			missingTarget := uuid.NewString()
-			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
+			missingContext := admittedAPICompiledSourceContext(t, context.Background(), fixture.primary, semanticview.Wrap(loadAPIAuthoredBundle(t, dataRunMissingSourceArtifact)))
+			storetest.RequireRun(t, missingContext, fixture.primary, storetest.RunFixture{
 				RunID: missingTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
 				BundleHash: dataRunMissingBundleHash,
 			})
@@ -671,8 +685,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		})
 
 		t.Run("same declaration schema amendment is not comparable", func(t *testing.T) {
-			amendedBundle := runStartTestBundle("scan.requested")
-			amendedBundle.SourceArtifact = dataRunAmendedSourceArtifact
+			amendedBundle := loadAPIAuthoredBundle(t, dataRunAmendedSourceArtifact)
 			amendedBundleHash := dataRunAmendedBundleHash
 			amended, _, _ := dataRunLifecycleCatalog(t, amendedBundleHash, true)
 			if _, err := fixture.primary.EnsureSourceArtifactWithData(ctx, amendedBundle.SourceArtifact, amended); err != nil {
@@ -723,7 +736,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("schema amendment history = %#v, %v", snapshot, err)
 			}
 
-			ctx := startupownership.CarryMutationAuthority(testAuthorActivityContext(context.Background()), ctx)
+			ctx := admittedAPITestBusContext(t, context.Background(), amendedBus)
 			incompatibleTarget := uuid.NewString()
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: incompatibleTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
@@ -810,7 +823,7 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -893,7 +906,7 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -933,7 +946,7 @@ func TestFailedFusedRunRejectsTypedRevisionAndCoordinatedContextCorruptionAcross
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -1057,7 +1070,7 @@ func TestSuccessfulFusedRunRequiresExactSourceCommitAggregateAcrossSelectedStore
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -1115,7 +1128,7 @@ func TestDataShowPinCursorSurvivesConcurrentRunCreationAcrossSelectedStores(t *t
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -1244,7 +1257,7 @@ func TestFusedRunBindingRejectsCorruptCanonicalSourceEvaluationAcrossSelectedSto
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -1453,7 +1466,9 @@ func dataRunLifecycleCatalog(t *testing.T, bundleHash string, amended bool) (dur
 
 func registerDataRunLifecycleCatalog(ctx context.Context, selected dataRunLifecycleStore, catalog durabledata.Catalog) error {
 	artifact := authorActivityTestSourceArtifact
-	if catalog.BundleHash == dataRunAmendedBundleHash {
+	if catalog.BundleHash == runStartTestBundleHash {
+		artifact = runStartTestArtifact("scan.requested")
+	} else if catalog.BundleHash == dataRunAmendedBundleHash {
 		artifact = dataRunAmendedSourceArtifact
 	} else if catalog.BundleHash == dataRunMissingBundleHash {
 		artifact = dataRunMissingSourceArtifact

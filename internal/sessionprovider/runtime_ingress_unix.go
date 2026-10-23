@@ -244,9 +244,20 @@ func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, capt
 	if err != nil || target.Provider != op.Provider {
 		return scope, source, errCaptureScopeChanged
 	}
+	ctx, err = i.handoff.bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		return scope, source, err
+	}
 	ownedSource, _ := correlation.SourceArtifactFactFromContext(ctx)
+	ownedRoot, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil {
+		return scope, source, err
+	}
+	if !present {
+		return scope, source, errCaptureScopeChanged
+	}
 	standing, found, err := i.store.LoadReconciledStandingService(ctx, pipeline.StandingServiceCandidate{
-		ServiceID: flowidentity.StandingServiceID(target.FlowPath), FlowPath: target.FlowPath, BindingEnabled: true, Source: ownedSource})
+		ServiceID: flowidentity.StandingServiceID(target.FlowPath), FlowPath: target.FlowPath, BindingEnabled: true, Source: ownedSource, RootAdmission: ownedRoot})
 	if err != nil {
 		return scope, source, err
 	}

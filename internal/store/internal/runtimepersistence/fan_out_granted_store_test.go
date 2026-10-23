@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -66,7 +66,14 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	})
 	sources := make([]agenttopology.SourceCoordinate, len(fixtures))
 	for i, fixture := range fixtures {
-		sources[i] = agenttopology.SourceCoordinate{BundleHash: fixture.bundleHash}
+		rooted, err := fixture.artifact.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[i], err = agenttopology.NewSourceCoordinate(rooted.Admission())
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	plan, err := agenttopology.NewSourceSetPlan(sources, nil)
 	if err != nil {
@@ -206,7 +213,16 @@ func TestFanOutGrantedStoreAdmissionBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				case "source-head":
-					next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fixture.bundleHash}, {BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64)}}, nil)
+					extra, _ := sourceartifactfixture.Rooted(t, "extra", storeTestSourceArtifact("source-head-replacement-extra-source"))
+					sourceartifactfixture.RequireArtifact(t, ctx, raw.(sourceartifactfixture.Writer), extra.Artifact())
+					if extra.Admission().BundleHash() == fixture.bundleHash {
+						t.Fatal("source-head replacement requires a distinct second source")
+					}
+					extraCoordinate, err := agenttopology.NewSourceCoordinate(extra.Admission())
+					if err != nil {
+						t.Fatal(err)
+					}
+					next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{plan.Sources[0], extraCoordinate}, nil)
 					if err != nil {
 						t.Fatal(err)
 					}

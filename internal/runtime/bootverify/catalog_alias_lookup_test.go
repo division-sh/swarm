@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	c "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
@@ -25,7 +26,7 @@ func TestPolicySheetLookupAdmittedAliasDomains(t *testing.T) {
 				Events:    map[string]c.EventCatalogEntry{"requested": {Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"key": {Type: "Alias"}}}}},
 			}
 			source := compileBootverifyRootSource(bundle)
-			ref := policySheetLookupRef{EventType: "requested"}
+			ref := policySheetLookupRef{Node: identitytest.RootNode(t, "lookup"), EventType: "requested"}
 			spec := &c.ComputeLookupSpec{On: []string{"payload.key"}, OnPaths: []paths.Path{paths.Parse("payload.key")}, Entries: []c.ComputeLookupEntry{{Key: []c.ComputeLookupLiteral{tc.literal}}}}
 			if got := validatePolicySheetLookupKeyTypes(source, ref, spec); len(got) != 0 {
 				t.Fatalf("correct aliased literal refused: %#v", got)
@@ -54,7 +55,7 @@ func TestPolicySheetLookupAdmittedAliasDomains(t *testing.T) {
 		bundle := &c.WorkflowContractBundle{Events: map[string]c.EventCatalogEntry{"requested": {Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"key": {Type: refType}}}}}}
 		source := compileBootverifyRootSource(bundle)
 		spec := &c.ComputeLookupSpec{On: []string{"payload.key"}, OnPaths: []paths.Path{paths.Parse("payload.key")}, DefaultDeclared: true, DefaultFail: true, Entries: []c.ComputeLookupEntry{{Key: []c.ComputeLookupLiteral{{Kind: "string", Canonical: "string:x"}}}}}
-		if got := validatePolicySheetLookupKeyTypes(source, policySheetLookupRef{EventType: "requested"}, spec); len(got) != 0 {
+		if got := validatePolicySheetLookupKeyTypes(source, policySheetLookupRef{Node: identitytest.RootNode(t, "lookup"), EventType: "requested"}, spec); len(got) != 0 {
 			t.Fatalf("admitted open lookup domain %q with default refused: %#v", refType, got)
 		}
 	}

@@ -23,6 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -596,7 +597,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	}
 	lateRun := uuid.NewString()
 	lateEvent := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: lateRun})
+	ctx = requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: lateRun})
 	lateSemanticEvent := eventtest.PersistedProjectionForProducer(
 		lateEvent, events.EventType("late.event"), eventtest.Producer(events.EventProducerExternal, "cleanup-late-ingress"), "",
 		[]byte(`{}`), 0, lateRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -752,9 +753,14 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
 	captureRunForkTestRevision(t, pg.backend.ConstructionHandle(), runID)
+	rooted, err := pg.LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-		SourceRunID: runID,
-		At:          eventID,
+		SourceRunID:   runID,
+		At:            eventID,
+		RootAdmission: rooted.Admission(),
 	})
 	if err != nil {
 		t.Fatalf("materialize dependent fork: %v", err)
@@ -902,7 +908,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	preservedSourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	for _, runID := range []string{cleanupRunID, preservedSourceRunID, preservedForkRunID} {
-		requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		ctx = requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 	seededAt := time.Date(2026, 5, 16, 19, 0, 0, 0, time.UTC)
 	entityEnvelope := events.EventEnvelope{EntityID: entityID, FlowInstance: "flow/a", Scope: events.EventScopeEntity}
@@ -1126,7 +1132,16 @@ type destructiveResetCleanupSeed struct {
 }
 
 var destructiveResetCleanupArtifactA = sourceartifactfixture.Artifact()
-var destructiveResetCleanupArtifactB = sourceartifactfixture.New("agents.yaml", []byte("agents:\n  cleanup_b: {}\n"))
+var destructiveResetCleanupArtifactB = func() *sourceartifact.AdmittedSourceArtifact {
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents:\n  cleanup_b: {}\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
+}()
 var destructiveResetCleanupBundleHashA = destructiveResetCleanupArtifactA.BundleHash()
 var destructiveResetCleanupBundleHashB = destructiveResetCleanupArtifactB.BundleHash()
 
@@ -1237,11 +1252,11 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	sourceartifactfixture.RequireArtifact(t, ctx, pg, destructiveResetCleanupArtifactA)
 	sourceartifactfixture.RequireArtifact(t, ctx, pg, destructiveResetCleanupArtifactB)
-	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+	ctx = requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 		RunID: runA, Origin: semanticEventRunOriginForTest(t, sourceEvent, "source.event"),
 		BundleHash: destructiveResetCleanupBundleHashA, StartedAt: seededAt.Add(-time.Hour),
 	})
-	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+	ctx = requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 		RunID: runB, Origin: semanticEventRunOriginForTest(t, forkEvent, "source.event"),
 		BundleHash: destructiveResetCleanupBundleHashB, StartedAt: seededAt.Add(-time.Hour),
 	})

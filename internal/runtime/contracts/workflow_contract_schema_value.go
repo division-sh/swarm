@@ -12,19 +12,30 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return FlowSchemaDocument{}, err
 	}
+	if members, err := root.Mapping(); err == nil {
+		for _, member := range members {
+			var teaching string
+			switch member.Name {
+			case "name":
+				teaching = "name is not a schema key; the directory is the flow name; remove this key"
+			case "imports":
+				teaching = "imports is not a schema key; use provider directories in this or an enclosing flow, tools <provider>.<tool>, and events inbound.<provider>.<event>"
+			case "ingress":
+				teaching = "ingress is not a schema key; list provider events in pins.inputs on the flow holding the provider directory and raw policy in trigger.yaml; the webhook alias is the flow path, or the root folder for the root flow"
+			}
+			if teaching != "" {
+				return FlowSchemaDocument{}, nodeValueError(member.Value, fmt.Errorf("%s", teaching))
+			}
+		}
+	}
 	fields, err := schemaValueFields(root, "schema", flowSchemaDocumentFields, true)
 	if err != nil {
 		return FlowSchemaDocument{}, err
 	}
 	var out FlowSchemaDocument
-	if err := schemaValueTexts(fields, map[string]*string{"name": &out.Name}, false); err != nil {
-		return out, err
-	}
 	for _, name := range sortedContractKeys(fields) {
 		value := fields[name]
 		switch name {
-		case "name":
-			continue
 		case "instance":
 			var text string
 			text, err = schemaValueText(value, true)
@@ -34,10 +45,6 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 			if err != nil {
 				err = fmt.Errorf("instance must use instance: <field>: %w", err)
 			}
-		case "ingress":
-			out.Ingress, err = projectSchemaIngressValue(value)
-		case "imports":
-			out.Imports, err = projectSchemaImportsValue(value)
 		case "connect":
 			out.Connect, err = projectSchemaConnectValue(value)
 		case "pins":

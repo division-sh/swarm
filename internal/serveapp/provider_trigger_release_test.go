@@ -38,9 +38,9 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 		t.Fatalf("release pack inventory = %#v\n%s", inventory, output)
 	}
 	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform", "whatsapp"} {
-		entry, ok := inventory.Packs["provider."+provider]
+		entry, ok := inventory.Packs[provider]
 		if !ok || entry.Source != "embedded" || entry.ManifestHash == "" {
-			t.Fatalf("release pack inventory provider.%s = %#v, present=%t", provider, entry, ok)
+			t.Fatalf("release pack inventory %s = %#v, present=%t", provider, entry, ok)
 		}
 	}
 	expected := inventory
@@ -69,13 +69,13 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 	if inventory.BaseMode != "embedded" || !strings.HasPrefix(inventory.EffectiveDigest, "sha256:") {
 		t.Fatalf("relocated release pack inventory = %#v", inventory)
 	}
-	for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel", "provider.whatsapp", "provider.whatsapp.connector", "provider.whatsapp.hitl_channel"} {
+	for _, id := range []string{"telegram", "whatsapp"} {
 		entry, ok := inventory.Packs[id]
 		if !ok || entry.Source != "embedded" || !strings.HasPrefix(entry.ManifestHash, "sha256:") {
 			t.Fatalf("relocated release pack inventory %s = %#v, present=%t", id, entry, ok)
 		}
 	}
-	for _, command := range [][]string{{"packs", "show", "provider.telegram", sourceRoot, "--json"}} {
+	for _, command := range [][]string{{"packs", "show", "telegram", sourceRoot, "--json"}} {
 		cmd := exec.Command(relocatedBinary, command...)
 		cmd.Dir = relocatedRoot
 		cmd.Env = releaseProviderTriggerProcessEnv()
@@ -85,14 +85,14 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 		}
 		var show struct {
 			Pack         releasePackInventoryEntry `json:"pack"`
-			EnvelopeYAML string                    `json:"envelope_yaml"`
 			ManifestYAML string                    `json:"manifest_yaml"`
+			Bodies       map[string]string         `json:"bodies"`
 		}
 		if err := json.Unmarshal(body, &show); err != nil {
 			t.Fatalf("decode relocated bare-binary packs show: %v\n%s", err, body)
 		}
-		if show.Pack.ID != "provider.telegram" || show.Pack.Source != "embedded" || !strings.HasPrefix(show.Pack.ManifestHash, "sha256:") ||
-			!strings.Contains(show.EnvelopeYAML, "id: provider.telegram") || !strings.Contains(show.ManifestYAML, "provider: telegram") {
+		if show.Pack.ID != "telegram" || show.Pack.Source != "embedded" || !strings.HasPrefix(show.Pack.ManifestHash, "sha256:") ||
+			!strings.Contains(show.ManifestYAML, "version: 0.1.0") || !strings.Contains(show.Bodies["trigger.yaml"], "event_name:\n  literal: raw") || show.Bodies["connector.yaml"] == "" || show.Bodies["channel.yaml"] == "" {
 			t.Fatalf("relocated bare-binary packs show = %#v", show)
 		}
 	}

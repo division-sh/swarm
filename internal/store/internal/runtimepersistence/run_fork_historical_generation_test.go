@@ -131,7 +131,11 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					if err != nil || !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 						t.Fatalf("historical agent policy not admitted: %+v %v", plan.UnsupportedBlockers, err)
 					}
-					child, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: event.ID()})
+					rooted, err := bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					child, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: event.ID(), RootAdmission: rooted.Admission()})
 					if err != nil {
 						t.Fatal(err)
 					}

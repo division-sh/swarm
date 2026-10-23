@@ -1,4 +1,4 @@
-name: test-terminal-state-rejects
+# fixture: test-terminal-state-rejects
 stages:
   pending: {}
   processing: {}

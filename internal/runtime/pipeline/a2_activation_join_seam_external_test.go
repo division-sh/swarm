@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -79,7 +80,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				}}
 				probe, logger := lifecycleprobe.New(), &exactJoinRuntimeLogger{}
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-					ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger,
+					ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: swarmruntime.NewRuntimePayloadAdmitter(nil, source, fact), WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger,
 				}, "platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatal(err)
@@ -262,7 +263,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					bus, err = newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-						ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger,
+						ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: swarmruntime.NewRuntimePayloadAdmitter(nil, source, fact), WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger,
 					}, "platform.join_complete", "platform.join_timeout")
 					if err != nil {
 						t.Fatal(err)
@@ -419,12 +420,30 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 	if !found {
 		t.Fatal("activation fixture requires its admitted source")
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("activation fixture requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil || rooted.Admission().BundleHash() != fact.BundleHash() {
+		t.Fatalf("activation fixture root disagrees with its source: %v", err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := correlation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "a2-activation-join", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = process.Release(context.Background()) })
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,8 +513,10 @@ func a2ActivationJoinScheduleFault(t *testing.T, ctx context.Context, selected g
 
 func a2ActivationJoinFiles(count int) map[string]string {
 	return map[string]string{
-		"schema.yaml":          "name: a2-activation-join\nstages:\n  active: {}\n",
-		"orders/schema.yaml":   "name: orders\ninstance: order_id\npins:\n  inputs:\n    - order.created\nstages:\n  awaiting: {}\n",
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":          "stages:\n  active: {}\n",
+		"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"orders/schema.yaml":   "instance: order_id\npins:\n  inputs:\n    - order.created\nstages:\n  awaiting: {}\n",
 		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  final_count: {type: integer, initial: -1}\n",
 		"orders/events.yaml":   "order.created:\n  order_id: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: text\n",
 		"orders/nodes.yaml": fmt.Sprintf(`collector:

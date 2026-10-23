@@ -110,7 +110,7 @@ func TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically(t *testing
 	store := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	requireDefaultSourceArtifactForTest(t, ctx, store)
+	ctx = requireDefaultSourceArtifactForTest(t, ctx, store)
 	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		t.Fatal("test context bundle source fact is missing")

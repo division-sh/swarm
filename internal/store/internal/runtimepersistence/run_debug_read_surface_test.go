@@ -23,6 +23,7 @@ import (
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -62,6 +63,7 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	ctx = originalStoreFixtureContext(t, ctx, pg)
+	rooted, _ := sourceartifactfixture.Rooted(t, "debug-history", storeTestSourceArtifact("run-debug-history"))
 
 	olderRunID := uuid.NewString()
 	newerRunID := uuid.NewString()
@@ -74,8 +76,8 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 
 	RequireCorruptRunSnapshotForTest(t, ctx, pg, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: olderRunID, State: "completed",
-		BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		StartedAt:  now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
+		BundleHash: rooted.Admission().BundleHash(), RootDirectory: rooted.Admission().RootDirectory(),
+		StartedAt: now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
 	})
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: newerRunID, StartedAt: now.Add(-time.Hour),
@@ -118,6 +120,7 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	ctx = originalStoreFixtureContext(t, ctx, pg)
+	rooted, _ := sourceartifactfixture.Rooted(t, "debug-history", storeTestSourceArtifact("run-debug-history"))
 
 	targetRunID := uuid.NewString()
 	olderRunID := uuid.NewString()
@@ -128,8 +131,8 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 	})
 	RequireCorruptRunSnapshotForTest(t, ctx, pg, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: olderRunID, State: "completed",
-		BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		StartedAt:  now.Add(-time.Hour),
+		BundleHash: rooted.Admission().BundleHash(), RootDirectory: rooted.Admission().RootDirectory(),
+		StartedAt: now.Add(-time.Hour),
 	})
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: emptyRunID, StartedAt: now.Add(time.Hour),

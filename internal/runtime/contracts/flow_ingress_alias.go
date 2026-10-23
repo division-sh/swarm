@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
@@ -35,20 +36,30 @@ func ValidateIngressAlias(alias string) error {
 
 func compileFlowIngressAliases(bundle *WorkflowContractBundle) (map[string]compiledFlowIngressAlias, error) {
 	out := map[string]compiledFlowIngressAlias{}
+	if bundle.SourceArtifact == nil {
+		return out, nil
+	}
+	holders := map[string]bool{}
+	for _, provider := range bundle.SourceArtifact.ProviderDirectories() {
+		if _, trigger := provider.Body(packmodel.BodyTrigger); trigger {
+			holders[provider.FlowPath()] = true
+		}
+	}
+	if len(holders) == 0 {
+		return out, nil
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
 	for _, view := range bundle.FlowViews() {
-		if view.Schema.Ingress == nil {
+		flowID := view.Paths.FlowPath
+		if !holders[flowID] {
 			continue
 		}
-		flowID := view.Paths.FlowPath
-		var alias string
-		if view.Schema.Ingress.Alias == nil {
-			var err error
-			alias, err = deriveRootedIngressAlias(bundle.RootSchema, flowID)
-			if err != nil {
-				return nil, fmt.Errorf("%s ingress.alias: %w", view.Paths.SchemaFile, err)
-			}
-		} else {
-			alias = *view.Schema.Ingress.Alias
+		alias, err := deriveRootedIngressAlias(rooted.Admission(), flowID)
+		if err != nil {
+			return nil, fmt.Errorf("%s webhook alias: %w", view.Paths.SchemaFile, err)
 		}
 		if err := ValidateIngressAlias(alias); err != nil {
 			return nil, fmt.Errorf("%s: %w", view.Paths.SchemaFile, err)
@@ -58,23 +69,17 @@ func compileFlowIngressAliases(bundle *WorkflowContractBundle) (map[string]compi
 	return out, nil
 }
 
-func deriveRootedIngressAlias(root *FlowSchemaDocument, flowID string) (string, error) {
-	if root == nil || root.Name == "" {
-		return "", fmt.Errorf("default ingress alias requires the selected root's flow name")
-	}
-	if err := ValidateIngressAlias(root.Name); err != nil {
+func deriveRootedIngressAlias(root sourceartifact.RootAdmission, flowID string) (string, error) {
+	if err := root.Validate(); err != nil {
 		return "", err
 	}
-	if strings.Contains(root.Name, ".") {
-		return "", fmt.Errorf("default ingress alias requires a single-segment root flow name, got %q", root.Name)
-	}
 	if flowID == "." {
-		return root.Name, nil
+		return root.RootDirectory(), nil
 	}
 	for _, segment := range strings.Split(flowID, "/") {
 		if err := sourceartifact.ValidateFlowSegment(segment); err != nil {
 			return "", err
 		}
 	}
-	return root.Name + "." + strings.ReplaceAll(flowID, "/", "."), nil
+	return root.RootDirectory() + "." + strings.ReplaceAll(flowID, "/", "."), nil
 }

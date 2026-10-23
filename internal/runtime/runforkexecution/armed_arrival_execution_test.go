@@ -76,7 +76,7 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 		[]byte(`{"member_id":"cut","result":{"value":"cut"}}`), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at.Add(time.Second), executionmode.Mock)
 	flowID := os.Getenv(publishedJoinFlowEnv)
 	if flowID != "orders" {
-		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, ".")
+		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, "."))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -207,7 +207,7 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 		// distinct admitted event; source immutability includes both history rows.
 		marker = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), marker.Type(), "source-runtime", "",
 			marker.Payload(), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), marker.CreatedAt().Add(time.Second), executionmode.Mock)
-		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, "orders")
+		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, "orders"))
 		if err != nil {
 			t.Fatal(err)
 		}

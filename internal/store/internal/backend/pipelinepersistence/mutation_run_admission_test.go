@@ -24,6 +24,7 @@ func VerifyMissingMutationRunForTest(t *testing.T, initial bool, prepare Stateme
 	db, location := openFanOutReadbackTestDB(t, "sqlite")
 	_, original := materializeSQLiteStatementRuns(t, db, location, false, prepare)
 	for _, ddl := range []string{
+		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL, bundle_hash TEXT, source_root_directory TEXT)`,
 		`CREATE TABLE entity_mutations (mutation_id TEXT PRIMARY KEY)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {

@@ -144,7 +144,7 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	trigger := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "source.prepare", eventtest.Producer(events.EventProducerNode, identitytest.FlowNode(t, ".", "prepare").Key()), "", []byte(`{"worker_id":"worker-001"}`), 0,
 		events.EventLineage{RunID: catalogRuntimeRunID, ParentEventID: recorded.ID(), ExecutionMode: executionmode.Live}, events.EventEnvelope{}, rootSource, time.Now().UTC())
 	admit := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(h.bundle), catalogSourceArtifactFact(t, h.bundle))
-	admission, err := admit(ctx, trigger, "")
+	admission, err := admit(ctx, trigger, events.EventPayloadProducer(trigger, rootSource.Route().FlowID))
 	if err != nil {
 		t.Fatal(err)
 	}
