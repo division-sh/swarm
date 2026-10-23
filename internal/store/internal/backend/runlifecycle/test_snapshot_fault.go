@@ -3,6 +3,7 @@ package runlifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -20,27 +21,33 @@ func AttemptCorruptPostgresSnapshotForTest(
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, `
+	return snapshotFaultTransaction(ctx, db, func(tx *sql.Tx) error {
+		_, err = tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, continued_as_run_id,
-			event_count, failure, started_at, ended_at
+			failure, started_at, ended_at
 		)
 		VALUES (
 			$1::uuid, $2, $3, $4,
 			NULLIF($5, '')::uuid, NULLIF($6, ''), NULLIF($7, '')::uuid, NULLIF($8, 0),
 			NULLIF($9, '')::uuid, NULLIF($10, ''), NULLIF($11, 0), NULLIF($12, '')::uuid, NULLIF($13, '')::uuid,
-			$14, NULLIF($15, '')::jsonb, $16, $17
+			NULLIF($14, '')::jsonb, $15, $16
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
-		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
-		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
-		strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
-		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
-		strings.TrimSpace(snapshot.ContinuedAsRunID),
-		snapshot.EventCount, failure, snapshot.StartedAt.UTC(), endedAt)
-	return err
+			strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
+			strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
+			strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
+			strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
+			strings.TrimSpace(snapshot.ContinuedAsRunID),
+			failure, snapshot.StartedAt.UTC(), endedAt)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO run_event_counts (run_id, event_count) VALUES ($1::uuid, $2)`, snapshot.RunID, snapshot.EventCount)
+		return err
+	})
 }
 
 // AttemptCorruptSQLiteSnapshotForTest is the SQLite form of the same exact
@@ -54,25 +61,47 @@ func AttemptCorruptSQLiteSnapshotForTest(
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, `
+	return snapshotFaultTransaction(ctx, db, func(tx *sql.Tx) error {
+		_, err = tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, continued_as_run_id,
-			event_count, failure, started_at, ended_at
+			failure, started_at, ended_at
 		)
 		VALUES (
 			?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0),
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''),
-			?, NULLIF(?, ''), ?, ?
+			NULLIF(?, ''), ?, ?
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
-		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
-		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
-		strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
-		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
-		strings.TrimSpace(snapshot.ContinuedAsRunID),
-		snapshot.EventCount, failure, snapshot.StartedAt.UTC(), endedAt)
-	return err
+			strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
+			strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
+			strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
+			strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
+			strings.TrimSpace(snapshot.ContinuedAsRunID),
+			failure, snapshot.StartedAt.UTC(), endedAt)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO run_event_counts (run_id, event_count) VALUES (?, ?)`, snapshot.RunID, snapshot.EventCount)
+		return err
+	})
+}
+
+func snapshotFaultTransaction(ctx context.Context, db *sql.DB, write func(*sql.Tx) error) (err error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			err = errors.Join(err, rollbackErr)
+		}
+	}()
+	if err := write(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
