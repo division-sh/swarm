@@ -308,7 +308,7 @@ func TestD1HistoricalReforkExactRequireKeepsFixedCutBothStores(t *testing.T) {
 				t.Fatalf("exact child followed the later source head for an omitted selector: %+v err=%v", current, err)
 			}
 			changed := request
-			changed.At = latest.ForkPoint.EventID
+			changed.At, changed.AtStart = "", true
 			if current, err := forks.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, changed); err == nil || !reflect.DeepEqual(current, runfork.RunForkMaterialization{}) {
 				t.Fatalf("exact child accepted a different source cut: %+v err=%v", current, err)
 			}

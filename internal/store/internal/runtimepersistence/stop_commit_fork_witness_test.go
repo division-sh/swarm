@@ -105,9 +105,19 @@ func (w *stopCommitForkWitness) decode(query string, args []driver.NamedValue) (
 	if source != w.expected.SourceRunID {
 		return stopCommitForkInsert{}, false, nil
 	}
-	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash ) values ("
-	if !strings.HasPrefix(query, columns) || len(args) != 9 {
+	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash, flow_path ) select "
+	wantArgs := 9
+	if strings.HasSuffix(query, "from runs where run_id=?") {
+		wantArgs = 10
+	}
+	if !strings.HasPrefix(query, columns) || len(args) != wantArgs {
 		return stopCommitForkInsert{}, true, errors.New("fork witness INSERT binding shape changed")
+	}
+	if wantArgs == 10 {
+		readSource, ok := stopCommitBoundText(args[9].Value)
+		if !ok || readSource != source {
+			return stopCommitForkInsert{}, true, errors.New("fork witness INSERT read source changed")
+		}
 	}
 	for index, arg := range args {
 		if arg.Ordinal != index+1 {
@@ -183,8 +193,8 @@ func (c *stopCommitWitnessNativeConn) ExecContext(_ context.Context, query strin
 func TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction(t *testing.T) {
 	const query = `INSERT INTO runs (
 		run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-		event_count, started_at, bundle_hash
-	) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?)`
+		event_count, started_at, bundle_hash, flow_path
+	) SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, flow_path FROM runs WHERE run_id=?`
 	source, child, event := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 7, EventID: event}
 	const bundle = "witness-bundle"
@@ -204,7 +214,7 @@ func TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction(t *testing.
 			if name == "unarmed" {
 				tx.fork = nil
 			}
-			values := []driver.Value{child, "paused", "fork_materialization", source, string(point.Kind), point.Revision, event, time.Now().UTC(), bundle}
+			values := []driver.Value{child, "paused", "fork_materialization", source, string(point.Kind), point.Revision, event, time.Now().UTC(), bundle, source}
 			args := make([]driver.NamedValue, len(values))
 			for index, value := range values {
 				args[index] = driver.NamedValue{Ordinal: index + 1, Value: value}

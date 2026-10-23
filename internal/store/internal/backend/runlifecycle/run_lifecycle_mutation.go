@@ -447,21 +447,21 @@ func (m postgresRunLifecycleMutation) Create(
 			trigger_event_id, trigger_event_type,
 			origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			started_at, deployment, flow_path
+			started_at, flow_path
 		)
 		VALUES (
 			$1::uuid, $13, $2, $3,
 			NULLIF($4, '')::uuid, NULLIF($5, ''),
 			NULLIF($6, '')::uuid, NULLIF($7, 0),
 			NULLIF($8, '')::uuid, NULLIF($9, ''), NULLIF($10, 0), NULLIF($11, '')::uuid,
-			$12, NULLIF($14, ''), NULLIF($15, '')
+			$12, NULLIF($14, '')
 		)
 		ON CONFLICT (run_id) DO NOTHING
 		RETURNING TRUE
 	`, request.RunID, bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
 		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC(),
-		string(status), request.LiveScope.Deployment, request.LiveScope.FlowPath).Scan(&inserted)
+		string(status), request.LiveScope.FlowPath).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m.classifyCreateExisting(ctx, request)
 	}
@@ -503,20 +503,20 @@ func (m sqliteRunLifecycleMutation) Create(
 			trigger_event_id, trigger_event_type,
 			origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			started_at, deployment, flow_path
+			started_at, flow_path
 		)
 		VALUES (
 			?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
 			NULLIF(?, ''), NULLIF(?, 0),
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
-			?, NULLIF(?, ''), NULLIF(?, '')
+			?, NULLIF(?, '')
 		)
 		ON CONFLICT (run_id) DO NOTHING
 	`, request.RunID, string(status), bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
 		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC(),
-		request.LiveScope.Deployment, request.LiveScope.FlowPath)
+		request.LiveScope.FlowPath)
 	if err != nil {
 		return "", fmt.Errorf("create SQLite run lifecycle: %w", err)
 	}
@@ -568,9 +568,9 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		result, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash, deployment, flow_path
+			event_count, started_at, bundle_hash, flow_path
 		)
-		SELECT $1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9, deployment, flow_path
+		SELECT $1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9, flow_path
 		FROM runs WHERE run_id=$4::uuid
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 			startedAt.UTC(), bundleHash)
@@ -626,9 +626,9 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		result, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash, deployment, flow_path
+			event_count, started_at, bundle_hash, flow_path
 		)
-		SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, deployment, flow_path
+		SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, flow_path
 		FROM runs WHERE run_id=?
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 			startedAt.UTC(), bundleHash, sourceRunID)

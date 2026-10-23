@@ -88,7 +88,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	if plan.ForkPoint.Kind != runfork.RunForkPointEvent {
+	if plan.ForkPoint.Kind != runfork.RunForkPointEvent && plan.ForkPoint.Kind != runfork.RunForkPointStateRevision {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("deployment revision materialization requires selected fork operation authority")
 	}
 	forkRunID := uuid.NewString()
@@ -254,7 +254,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	if plan.ForkPoint.Kind != runfork.RunForkPointEvent {
+	if plan.ForkPoint.Kind != runfork.RunForkPointEvent && plan.ForkPoint.Kind != runfork.RunForkPointStateRevision {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("deployment revision materialization requires selected fork operation authority")
 	}
 	forkRunID := uuid.NewString()

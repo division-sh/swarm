@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -40,6 +41,14 @@ func historicalSnapshotDatabase(t *testing.T, backend string) *sql.DB {
 	if _, err := db.Exec(`CREATE TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
+	for _, ddl := range []string{
+		`CREATE TABLE run_fork_revision_heads (run_id TEXT PRIMARY KEY, last_revision BIGINT NOT NULL)`,
+		`CREATE TABLE run_fork_revisions (run_id TEXT, revision BIGINT, PRIMARY KEY(run_id,revision))`,
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return db
 }
 
@@ -48,6 +57,12 @@ func historicalSnapshotDatabase(t *testing.T, backend string) *sql.DB {
 func requireHistoricalSnapshotRun(t *testing.T, db *sql.DB, runID string) {
 	t.Helper()
 	if _, err := db.Exec(`INSERT INTO runs VALUES($1,'event')`, runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO run_fork_revision_heads VALUES($1,1)`, runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO run_fork_revisions VALUES($1,1)`, runID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -66,6 +81,12 @@ func TestRunForkHistoricalEventCursorContextBothStores(t *testing.T) {
 			if _, err := db.Exec(insert, runID, eventID, 2, `{"event_id":"`+eventID+`","event_name":"later","payload_base64":"e30="}`); err != nil {
 				t.Fatal(err)
 			}
+			if _, err := db.Exec(`INSERT INTO run_fork_revisions VALUES($1,2)`, runID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`UPDATE run_fork_revision_heads SET last_revision=2 WHERE run_id=$1`, runID); err != nil {
+				t.Fatal(err)
+			}
 			resolve := func(at string) (runForkEventCursor, error) {
 				t.Helper()
 				tx, err := db.BeginTx(context.Background(), nil)
@@ -78,21 +99,19 @@ func TestRunForkHistoricalEventCursorContextBothStores(t *testing.T) {
 				}
 				return resolveRunForkRevisionPoint(context.Background(), tx, runID, at)
 			}
-			for _, selector := range []string{"", eventID} {
-				got, err := resolve(selector)
-				if err != nil || got.EventID != eventID || got.Revision != 1 || got.EventName != "at-R" {
-					t.Fatalf("first-revision cursor=%#v err=%v", got, err)
-				}
+			if got, err := resolve(eventID); err != nil || got.EventID != eventID || got.Revision != 1 || got.EventName != "at-R" {
+				t.Fatalf("first-revision cursor=%#v err=%v", got, err)
+			}
+			if got, err := resolve(""); err != nil || got.Kind != runfork.RunForkPointStateRevision || got.EventID != "" || got.Revision != 2 {
+				t.Fatalf("latest is not the committed state head: %#v err=%v", got, err)
 			}
 			for _, bad := range []string{`{"event_id":"` + uuid.NewString() + `","payload_base64":"e30="}`, `{"payload_base64":"e30="}`, `{"event_id":"invalid","payload_base64":"e30="}`} {
 				if _, err := db.Exec(`UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND revision=1`, bad, runID); err != nil {
 					t.Fatal(err)
 				}
-				for _, selector := range []string{"", eventID} {
-					got, err := resolve(selector)
-					if err == nil || got != (runForkEventCursor{}) {
-						t.Fatalf("corrupt cursor=%#v err=%v", got, err)
-					}
+				got, err := resolve(eventID)
+				if err == nil || got != (runForkEventCursor{}) {
+					t.Fatalf("corrupt cursor=%#v err=%v", got, err)
 				}
 			}
 			if _, err := db.Exec(`UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND revision=1`, body, runID); err != nil {
@@ -147,6 +166,12 @@ func TestRunForkHistoricalSnapshotCommitBarrierBothStores(t *testing.T) {
 			if _, err := writer.ExecContext(ctx, insert, runID, eventID, 2, body(eventID, "updated")); err != nil {
 				t.Fatal(err)
 			}
+			if _, err := writer.ExecContext(ctx, `INSERT INTO run_fork_revisions VALUES($1,2)`, runID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.ExecContext(ctx, `UPDATE run_fork_revision_heads SET last_revision=2 WHERE run_id=$1`, runID); err != nil {
+				t.Fatal(err)
+			}
 			assertOld := func() {
 				t.Helper()
 				got, err := loadRunForkRevisionSnapshot(ctx, reader, runID, 2)
@@ -157,7 +182,7 @@ func TestRunForkHistoricalSnapshotCommitBarrierBothStores(t *testing.T) {
 					t.Fatalf("reader mixed transaction generations: before=%#v after=%#v", before.Events, got.Events)
 				}
 				cursor, err := resolveRunForkRevisionPoint(ctx, reader, runID, "")
-				if err != nil || cursor.EventID != eventID || cursor.Revision != 1 {
+				if err != nil || cursor.Kind != runfork.RunForkPointStateRevision || cursor.EventID != "" || cursor.Revision != 1 {
 					t.Fatalf("snapshot cursor=%#v err=%v", cursor, err)
 				}
 			}
@@ -181,6 +206,9 @@ func TestRunForkHistoricalSnapshotCommitBarrierBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer fresh.Rollback()
+			if cursor, err := resolveRunForkRevisionPoint(ctx, fresh, runID, ""); err != nil || cursor.Kind != runfork.RunForkPointStateRevision || cursor.Revision != 2 || cursor.EventID != "" {
+				t.Fatalf("committed state head moved outside its snapshot: %+v err=%v", cursor, err)
+			}
 			fixed, err := loadRunForkRevisionSnapshot(ctx, fresh, runID, 1)
 			if err != nil || !reflect.DeepEqual(fixed.Events, before.Events) {
 				t.Fatalf("fixed cut moved after commit: %#v %v", fixed, err)

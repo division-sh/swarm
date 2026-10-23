@@ -33,7 +33,7 @@ func TestSelectedOperationReplayRetainsOriginalLatestCutBothStores(t *testing.T)
 				[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 			storetest.CaptureRunForkSnapshot(t, ctx, selected, request.SourceRunID)
 			latest, err := request.Owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: request.SourceRunID})
-			if err != nil || latest.ForkPoint.EventID != advanced.ID() || latest.ForkPoint.SameIdentity(materialized.ForkPoint) {
+			if err != nil || latest.ForkPoint.Kind != runfork.RunForkPointStateRevision || latest.ForkPoint.EventID != "" || latest.ForkPoint.Revision <= materialized.ForkPoint.Revision {
 				t.Fatalf("source advancement precondition failed: point=%+v err=%v", latest.ForkPoint, err)
 			}
 			replay := *request.ForkOperation

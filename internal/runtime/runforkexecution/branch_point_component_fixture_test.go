@@ -383,6 +383,14 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	state.Accumulator = json.RawMessage(`{"source_advanced":{"count":1}}`)
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:branch-point-proof",
 		SourceRunID: runID, TargetBundleHash: catalog.BundleHash, ContractSelection: testContractSelection(), AllowSourceFreeze: true}
+	latest, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, err = operation.BindResolvedPoint(runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: latest.ForkPoint.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, ForkOperation: &operation, AllowSourceFreeze: true,
 		SourceLoader: loader, ContractSelection: testContractSelection(), AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
 	return ctx, request, func() {

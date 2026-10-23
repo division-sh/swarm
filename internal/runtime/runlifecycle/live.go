@@ -3,27 +3,21 @@ package runlifecycle
 import (
 	"context"
 	"fmt"
-	"path"
-	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
-// LiveRunScope is the deployment coordinate, not a bundle or execution identity.
+// LiveRunScope is relative to the selected store, which owns the deployment.
 type LiveRunScope struct {
-	Deployment string `json:"deployment"`
-	FlowPath   string `json:"flow_path"`
+	FlowPath string `json:"flow_path"`
 }
 
 func (s LiveRunScope) Empty() bool { return s == (LiveRunScope{}) }
 
 func (s LiveRunScope) Validate() error {
-	if s.Deployment == "" || strings.TrimSpace(s.Deployment) != s.Deployment {
-		return fmt.Errorf("live selection requires a canonical deployment")
-	}
-	if s.FlowPath == "" || path.Clean(s.FlowPath) != s.FlowPath || strings.HasPrefix(s.FlowPath, "/") ||
-		s.FlowPath == ".." || strings.HasPrefix(s.FlowPath, "../") {
-		return fmt.Errorf("live selection requires a canonical deployment-relative flow path")
+	if _, err := identity.AdmitFlowIdentity(s.FlowPath); err != nil {
+		return fmt.Errorf("live selection flow: %w", err)
 	}
 	return nil
 }

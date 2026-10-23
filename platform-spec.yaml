@@ -19099,14 +19099,14 @@ platform_tables:
             binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id      UUID NOT NULL REFERENCES runs(run_id),
             source_run_id    UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             fork_revision   BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id    UUID REFERENCES events(event_id),
             mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),
             bundle_hash      TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_bindings_event (source_run_id, fork_event_id) WHERE fork_event_id IS NOT NULL
@@ -19130,7 +19130,7 @@ platform_tables:
             semantic_hash TEXT NOT NULL,
             request_json JSONB NOT NULL,
             source_run_id UUID NOT NULL,
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id UUID,
             fork_run_id UUID NOT NULL,
@@ -19142,7 +19142,7 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK (NULLIF(TRIM(actor), '') IS NOT NULL),
             CHECK (idempotency_key IS NULL OR NULLIF(TRIM(idempotency_key), '') IS NOT NULL),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND fork_event_id IS NULL)),
             CHECK ((state = 'activated' AND result_json IS NOT NULL AND failure_json IS NULL) OR (state = 'materialized' AND result_json IS NULL AND failure_json IS NULL) OR (state IN ('failed', 'uncertain') AND result_json IS NULL AND failure_json IS NOT NULL)),
             UNIQUE (fork_run_id),
             UNIQUE (selected_binding_id),
@@ -19167,7 +19167,7 @@ platform_tables:
             fork_run_id                    UUID NOT NULL,
             source_run_id                  UUID NOT NULL,
             binding_id                     UUID NOT NULL,
-            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             fork_revision                  BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                  UUID,
             generation                     BIGINT NOT NULL CHECK (generation > 0),
@@ -19190,7 +19190,7 @@ platform_tables:
             updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             terminal_at                     TIMESTAMPTZ,
             CHECK ((state IN ('prepared', 'running') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND terminal_at IS NULL) OR (state = 'quiesced' AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'closed') AND terminal_at IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND fork_event_id IS NULL)),
             UNIQUE (execution_id, fork_run_id),
             UNIQUE (execution_id, fork_run_id, generation),
             UNIQUE (execution_id, fork_run_id, generation, state),
@@ -19217,7 +19217,7 @@ platform_tables:
             binding_id UUID NOT NULL,
             fork_run_id UUID NOT NULL,
             source_run_id UUID NOT NULL,
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
             generation BIGINT NOT NULL CHECK (generation > 0),
             fork_event_id UUID,
@@ -19228,7 +19228,7 @@ platform_tables:
             execution_fingerprint TEXT NOT NULL CHECK (execution_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
             manifest_fingerprint TEXT NOT NULL CHECK (manifest_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
             manifest JSONB NOT NULL,
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND fork_event_id IS NULL)),
             UNIQUE (execution_id, fork_run_id),
             FOREIGN KEY (execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation),
             FOREIGN KEY (execution_id, fork_event_id) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_event_id),
@@ -19285,11 +19285,11 @@ platform_tables:
             binding_id UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
             fork_run_id UUID NOT NULL REFERENCES runs(run_id),
             source_run_id UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
             generation BIGINT NOT NULL CHECK (generation > 0),
             fork_event_id UUID REFERENCES events(event_id),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND fork_event_id IS NULL)),
             FOREIGN KEY (execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation),
             FOREIGN KEY (execution_id, fork_event_id) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_event_id),
             FOREIGN KEY (fork_event_id, source_run_id) REFERENCES events(event_id, run_id)
@@ -19306,10 +19306,10 @@ platform_tables:
             selected_binding_id UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
             fork_run_id UUID NOT NULL REFERENCES runs(run_id),
             source_run_id UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id UUID REFERENCES events(event_id),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND fork_event_id IS NULL)),
             FOREIGN KEY (operation_id, selected_binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision) REFERENCES run_fork_operations(operation_id, selected_binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision),
             FOREIGN KEY (operation_id, fork_event_id) REFERENCES run_fork_operations(operation_id, fork_event_id),
             FOREIGN KEY (fork_event_id, source_run_id) REFERENCES events(event_id, run_id)
@@ -19360,7 +19360,7 @@ platform_tables:
             divergence_id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id                     UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                   UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind                 TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_point_kind                 TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             fork_revision                   BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                   UUID REFERENCES events(event_id),
             owner                           TEXT NOT NULL,
@@ -19370,7 +19370,7 @@ platform_tables:
             source_frozen                   BOOLEAN NOT NULL DEFAULT FALSE,
             source_advanced_facts           TEXT[] NOT NULL DEFAULT '{}',
             created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_branch_divergences_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_branch_divergences_event (source_run_id, fork_event_id) WHERE fork_event_id IS NOT NULL
@@ -19391,7 +19391,7 @@ platform_tables:
             recovery_id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                  UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             fork_revision                  BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                  UUID REFERENCES events(event_id),
             owner                          TEXT NOT NULL,
@@ -19411,7 +19411,7 @@ platform_tables:
             recipient_planning             JSONB NOT NULL,
             created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_route_recoveries_owner (owner, runtime_recovery_owner)
@@ -20936,7 +20936,7 @@ platform_tables:
             CHECK ((owner_kind = 'instance' AND (routing_source->>'kind') = 'static_flow') OR (owner_kind <> 'instance' AND (routing_source->>'kind') IN ('root', 'flow_owned_control', 'platform_control'))),
             CHECK (task_type <> 'workflow_timer' OR (SUBSTR(CAST(fire_payload AS TEXT), 1, 1) = '{' AND SUBSTR(CAST(fire_payload AS TEXT), LENGTH(CAST(fire_payload AS TEXT)), 1) = '}')),
             CHECK (task_type <> 'workflow_timer' OR fire_at >= COALESCE(source_armed_at, created_at)),
-            CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_point_revision IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL AND source_armed_at IS NULL) OR (source_timer_id IS NOT NULL AND source_timer_id <> timer_id AND forked_from_run_id IS NOT NULL AND forked_from_run_id <> run_id AND forked_from_point_kind IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start') AND forked_from_point_revision IS NOT NULL AND forked_from_point_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start') AND forked_from_event_id IS NULL)) AND reconstruction_owner IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL AND source_armed_at IS NOT NULL AND source_armed_at <= created_at))),
+            CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_point_revision IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL AND source_armed_at IS NULL) OR (source_timer_id IS NOT NULL AND source_timer_id <> timer_id AND forked_from_run_id IS NOT NULL AND forked_from_run_id <> run_id AND forked_from_point_kind IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision') AND forked_from_point_revision IS NOT NULL AND forked_from_point_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND forked_from_event_id IS NULL)) AND reconstruction_owner IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL AND source_armed_at IS NOT NULL AND source_armed_at <= created_at))),
             CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND recurrence_interval IS NULL) OR (recurring = TRUE AND recurrence_interval = TRIM(recurrence_interval) AND NULLIF(recurrence_interval, '') IS NOT NULL))),
             CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND ((status IN ('active', 'cancelled') AND fired_at IS NULL) OR (status = 'fired' AND fired_at IS NOT NULL AND fired_at >= fire_at))) OR (recurring = TRUE AND status IN ('active', 'cancelled') AND (fired_at IS NULL OR fired_at >= COALESCE(source_armed_at, created_at))))),
             CHECK (task_type <> 'workflow_timer' OR ((status IN ('active', 'fired') AND cancel_cause IS NULL AND cancelled_at IS NULL) OR (status = 'cancelled' AND ((cancel_cause IS NULL AND cancelled_at IS NULL) OR (cancel_cause IS NOT NULL AND cancel_cause = 'rule_removed' AND cancelled_at IS NOT NULL AND cancelled_at >= created_at AND (fired_at IS NULL OR cancelled_at >= fired_at) AND source_timer_id IS NOT NULL))))),
@@ -21019,7 +21019,6 @@ platform_tables:
         CREATE TABLE runs (
             run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'live', 'paused', 'completed', 'failed', 'cancelled', 'forked')),
-            deployment        TEXT,
             flow_path         TEXT,
             bundle_hash        TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             origin_kind        TEXT NOT NULL CHECK (origin_kind IN ('event', 'deployment', 'scenario_setup', 'standing_generation', 'fork_materialization')),
@@ -21030,7 +21029,7 @@ platform_tables:
             completion_due_at TIMESTAMPTZ,
             completion_revision BIGINT NOT NULL DEFAULT 0 CHECK (completion_revision >= 0),
             forked_from_run_id UUID REFERENCES runs(run_id),
-            forked_from_point_kind TEXT CHECK (forked_from_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            forked_from_point_kind TEXT CHECK (forked_from_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             forked_from_revision BIGINT CHECK (forked_from_revision > 0),
             forked_from_event_id UUID,
             continued_as_run_id UUID REFERENCES runs(run_id),
@@ -21038,14 +21037,14 @@ platform_tables:
             failure           JSONB,
             started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             ended_at          TIMESTAMPTZ,
-            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start') AND forked_from_event_id IS NULL)))),
+            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND forked_from_event_id IS NULL)))),
             CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),
             CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),
             CHECK (completion_due_at IS NULL OR completion_revision > 0),
             CHECK (status = 'running' OR completion_due_at IS NULL),
-            CHECK ((deployment IS NULL AND flow_path IS NULL) OR (NULLIF(TRIM(deployment), '') IS NOT NULL AND NULLIF(TRIM(flow_path), '') IS NOT NULL)),
-            CHECK (status <> 'live' OR (deployment IS NOT NULL AND flow_path IS NOT NULL)),
-            UNIQUE INDEX idx_runs_live_flow (deployment, flow_path) WHERE status = 'live',
+            CHECK (flow_path IS NULL OR NULLIF(TRIM(flow_path), '') IS NOT NULL),
+            CHECK (status <> 'live' OR flow_path IS NOT NULL),
+            UNIQUE INDEX idx_runs_live_flow (flow_path) WHERE status = 'live',
             INDEX idx_runs_status (status, started_at),
             INDEX idx_runs_completion_candidates (bundle_hash, completion_due_at, run_id) WHERE completion_due_at IS NOT NULL,
             INDEX idx_runs_standing_origin (origin_service_id, origin_generation) WHERE origin_kind = 'standing_generation',
@@ -21060,7 +21059,7 @@ platform_tables:
           readback use UTC microsecond precision admitted by the typed run-lifecycle owner before validation,
           persistence, or exact replay comparison. PostgreSQL statement time and the selected SQLite store clock are
           the backend time authorities; backend timestamp coercion is never semantic policy.
-        live: The sole live run for its durable deployment and flow_path. The partial unique index is the claim fence.
+        live: The sole live run for its flow_path within the selected store, which is the deployment. The partial unique index is the claim fence.
           Only the run-lifecycle transaction creates or changes live selection. Ingress, timers and schedules consume
           that row through their existing context and scheduling owners; bundle hashes, process pointers and standing
           service current-run fields are not selectors. A fork fences outgoing admissions and settles or parks accepted
@@ -33978,7 +33977,7 @@ api_specification:
               $ref: '#/components/schemas/OpaqueId'
             fork_point_kind:
               type: string
-              const: deployment_revision
+              enum: [deployment_revision, run_start, state_revision]
             fork_revision:
               type: integer
               minimum: 1
@@ -35113,7 +35112,7 @@ api_specification:
               type: boolean
               description: True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.
             fork_run_id: {$ref: '#/components/schemas/OpaqueId'}
-            fork_point_kind: {type: string, enum: [deployment_revision, run_start]}
+            fork_point_kind: {type: string, enum: [deployment_revision, run_start, state_revision]}
             fork_revision: {type: integer, minimum: 1}
             fork_run_status: {$ref: '#/components/schemas/RunStatus'}
             bundle_hash: {$ref: '#/components/schemas/BundleHash'}
@@ -39316,11 +39315,10 @@ api_specification:
       RUN_FLOW_ALREADY_LIVE:
         type: object
         additionalProperties: false
-        required: [run_id, live_run_id, deployment, flow_path]
+        required: [run_id, live_run_id, flow_path]
         properties:
           run_id: {$ref: '#/components/schemas/OpaqueId'}
           live_run_id: {$ref: '#/components/schemas/OpaqueId'}
-          deployment: {type: string}
           flow_path: {type: string}
         description: Pause the named live sibling before continuing this run. The partial unique index owns refusal; no second claim check is performed.
       RUN_NOT_PAUSED:
@@ -40255,7 +40253,7 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: fork_event_id
         required: false
-        description: Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves the latest event or deployment revision once; retries reuse the permanent resolved point.
+        description: Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves state_revision at the committed run_fork_revision_heads head for every source origin; retries reuse the permanent resolved point. No event is synthesized for this cut.
         schema:
           $ref: '#/components/schemas/OpaqueId'
       - name: at_start

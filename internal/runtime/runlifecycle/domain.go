@@ -37,6 +37,7 @@ const (
 	ForkOriginPointEvent              ForkOriginPointKind = forkpoint.Event
 	ForkOriginPointDeploymentRevision ForkOriginPointKind = forkpoint.DeploymentRevision
 	ForkOriginPointRunStart           ForkOriginPointKind = forkpoint.RunStart
+	ForkOriginPointStateRevision      ForkOriginPointKind = forkpoint.StateRevision
 )
 
 const (

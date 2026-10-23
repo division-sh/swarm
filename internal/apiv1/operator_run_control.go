@@ -164,7 +164,7 @@ func runControlError(runID string, err error) error {
 	var live *runtimerunlifecycle.LiveRunConflictError
 	if errors.As(err, &live) {
 		return NewApplicationError(RunFlowAlreadyLiveCode, false, map[string]any{
-			"run_id": runID, "live_run_id": live.LiveRunID, "deployment": live.Scope.Deployment, "flow_path": live.Scope.FlowPath,
+			"run_id": runID, "live_run_id": live.LiveRunID, "flow_path": live.Scope.FlowPath,
 		})
 	}
 	var conflict *apiidempotency.ConflictError

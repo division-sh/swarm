@@ -1034,60 +1034,78 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 	}
 }
 
-// This is the canonical event-cut fork writer, not selected start-cut execution
+// This is the canonical event/state-cut fork writer, not selected start-cut execution
 // and not a rollback/crash receipt for the fork owner.
 func TestC4F35EventForkStartNativeRetryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
-			runID := uuid.NewString()
-			initial := eventtest.RunCreatingRootIngress(uuid.NewString(), "c4.fork.source", "ingress", "", []byte(`{}`), 0,
-				runID, "", events.EventEnvelope{}, time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC))
-			admitted := c4AdmitCreatingInput(t, initial, runLifecycleCandidateParityBundleHash)
-			processed := pipelineobligation.Acknowledged("pipeline_persisted")
-			if _, err := commitAdmittedSemanticEventFixtureOutcomeWithDisposition(ctx, fixture.store, admitted, nil, pipelineobligation.ScopeDirect, &processed); err != nil {
-				t.Fatal(err)
-			}
-			c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, initial.ID())
-			selected := fixture.store.(c4ForkCreationOwner)
-			request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: initial.ID()}
-			created, err := selected.MaterializeRunFork(ctx, request)
-			if err != nil || created.ForkRunID == "" || created.ForkPoint.Kind != runfork.RunForkPointEvent || created.ForkPoint.EventID != initial.ID() ||
-				created.ForkPoint.Revision != 1 || created.ForkRunStatus != runfork.RunForkMaterializedStatus || !created.ExecutionReady || created.MaterializedEntityCount != 0 {
-				t.Fatalf("canonical event-cut fork creation: %+v err=%v", created, err)
-			}
-			origin, err := created.ForkPoint.MaterializationRunOrigin(runID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			requireRunOriginHeader(t, ctx, fixture.store.(runOriginReadStore), created.ForkRunID, origin, 0)
-			before := c4RequireExclusiveStart(t, ctx, fixture.store, created.ForkRunID, runLifecycleCandidateParityBundleHash, "")
-			for i := 0; i < 2; i++ {
+		for _, kind := range []runfork.RunForkPointKind{runfork.RunForkPointEvent, runfork.RunForkPointStateRevision} {
+			t.Run(backend+"/"+string(kind), func(t *testing.T) {
+				fixture := openRunLifecycleCandidateParityFixture(t, backend)
+				ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+				runID := uuid.NewString()
+				initial := eventtest.RunCreatingRootIngress(uuid.NewString(), "c4.fork.source", "ingress", "", []byte(`{}`), 0,
+					runID, "", events.EventEnvelope{}, time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC))
+				admitted := c4AdmitCreatingInput(t, initial, runLifecycleCandidateParityBundleHash)
+				processed := pipelineobligation.Acknowledged("pipeline_persisted")
+				if _, err := commitAdmittedSemanticEventFixtureOutcomeWithDisposition(ctx, fixture.store, admitted, nil, pipelineobligation.ScopeDirect, &processed); err != nil {
+					t.Fatal(err)
+				}
+				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, initial.ID())
+				selected := fixture.store.(c4ForkCreationOwner)
+				request := runfork.RunForkMaterializeRequest{SourceRunID: runID}
+				if kind == runfork.RunForkPointEvent {
+					request.At = initial.ID()
+				}
+				created, err := selected.MaterializeRunFork(ctx, request)
+				if err != nil || created.ForkRunID == "" || created.ForkPoint.Kind != kind || created.ForkPoint.EventID != request.At ||
+					created.ForkPoint.Revision != 1 || created.ForkRunStatus != runfork.RunForkMaterializedStatus || !created.ExecutionReady || created.MaterializedEntityCount != 0 {
+					t.Fatalf("canonical event-cut fork creation: %+v err=%v", created, err)
+				}
+				origin, err := created.ForkPoint.MaterializationRunOrigin(runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				requireRunOriginHeader(t, ctx, fixture.store.(runOriginReadStore), created.ForkRunID, origin, 0)
+				before := c4RequireExclusiveStart(t, ctx, fixture.store, created.ForkRunID, runLifecycleCandidateParityBundleHash, "")
+				for i := 0; i < 2; i++ {
+					c4RequireRevisionCount(t, ctx, fixture.store, created.ForkRunID, 1)
+					replayed := c4ReadExactForkWithoutMutation(t, ctx, fixture.store, backend, created.ForkRunID, request, true, nil)
+					if !reflect.DeepEqual(replayed, created) {
+						t.Fatalf("exact fork read changed its original creation: got=%+v want=%+v", replayed, created)
+					}
+					after := c4RequireExclusiveStart(t, ctx, fixture.store, created.ForkRunID, runLifecycleCandidateParityBundleHash, "")
+					if !reflect.DeepEqual(after, before) {
+						t.Fatal("fork retry changed child original start")
+					}
+				}
 				c4RequireRevisionCount(t, ctx, fixture.store, created.ForkRunID, 1)
-				replayed := c4ReadExactForkWithoutMutation(t, ctx, fixture.store, backend, created.ForkRunID, request, true, nil)
-				if !reflect.DeepEqual(replayed, created) {
-					t.Fatalf("exact fork read changed its original creation: got=%+v want=%+v", replayed, created)
+				second, err := selected.MaterializeRunFork(ctx, request)
+				if err != nil || second.ForkRunID == "" || second.ForkRunID == created.ForkRunID || second.ForkPoint != created.ForkPoint {
+					t.Fatalf("distinct fresh event-cut invocation reused a child or changed the cut: first=%+v second=%+v err=%v", created, second, err)
 				}
-				after := c4RequireExclusiveStart(t, ctx, fixture.store, created.ForkRunID, runLifecycleCandidateParityBundleHash, "")
-				if !reflect.DeepEqual(after, before) {
-					t.Fatal("fork retry changed child original start")
+				c4RequireExclusiveStart(t, ctx, fixture.store, second.ForkRunID, runLifecycleCandidateParityBundleHash, "")
+				c4RequireRevisionCount(t, ctx, fixture.store, second.ForkRunID, 1)
+				requireRunOriginHeader(t, ctx, fixture.store.(runOriginReadStore), second.ForkRunID, origin, 0)
+				sourceOrigin, err := runlifecycle.EventRunOrigin(initial.ID(), string(initial.Type()))
+				if err != nil {
+					t.Fatal(err)
 				}
-			}
-			c4RequireRevisionCount(t, ctx, fixture.store, created.ForkRunID, 1)
-			second, err := selected.MaterializeRunFork(ctx, request)
-			if err != nil || second.ForkRunID == "" || second.ForkRunID == created.ForkRunID || second.ForkPoint != created.ForkPoint {
-				t.Fatalf("distinct fresh event-cut invocation reused a child or changed the cut: first=%+v second=%+v err=%v", created, second, err)
-			}
-			c4RequireExclusiveStart(t, ctx, fixture.store, second.ForkRunID, runLifecycleCandidateParityBundleHash, "")
-			c4RequireRevisionCount(t, ctx, fixture.store, second.ForkRunID, 1)
-			requireRunOriginHeader(t, ctx, fixture.store.(runOriginReadStore), second.ForkRunID, origin, 0)
-			sourceOrigin, err := runlifecycle.EventRunOrigin(initial.ID(), string(initial.Type()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			requireRunOriginHeader(t, ctx, fixture.store.(runOriginReadStore), runID, sourceOrigin, 1)
-		})
+				requireRunOriginHeader(t, ctx, fixture.store.(runOriginReadStore), runID, sourceOrigin, 1)
+				later := eventtest.ExistingRunRootIngress(uuid.NewString(), "c4.fork.after", "ingress", "", []byte(`{}`), 0,
+					runID, events.EventEnvelope{}, time.Now().UTC())
+				if err := insertCanonicalEventRecordFixture(ctx, fixture.store, later); err != nil {
+					t.Fatal(err)
+				}
+				captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, backend == "postgres")
+				latest, err := fixture.store.(c4StartPlanner).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
+				if err != nil || latest.ForkPoint.Kind != runfork.RunForkPointStateRevision || latest.ForkPoint.Revision <= created.ForkPoint.Revision {
+					t.Fatalf("source failed to advance its committed head: %+v err=%v", latest.ForkPoint, err)
+				}
+				if replayed := c4ReadExactForkWithoutMutation(t, ctx, fixture.store, backend, created.ForkRunID, request, true, nil); !reflect.DeepEqual(replayed, created) {
+					t.Fatalf("exact read followed today's source head: got=%+v want=%+v", replayed, created)
+				}
+			})
+		}
 	}
 }
 

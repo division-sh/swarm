@@ -252,52 +252,37 @@ func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at stri
 	}
 	at = strings.TrimSpace(at)
 	if at == "" {
-		var originKind string
-		if err := tx.QueryRowContext(ctx, `SELECT origin_kind FROM runs WHERE run_id=$1`, runID).Scan(&originKind); err != nil {
-			return runForkEventCursor{}, fmt.Errorf("resolve fork source origin: %w", err)
+		var revision int64
+		err := tx.QueryRowContext(ctx, `
+			SELECT h.last_revision FROM run_fork_revision_heads h
+			JOIN run_fork_revisions r ON r.run_id=h.run_id AND r.revision=h.last_revision
+			WHERE h.run_id=$1 AND h.last_revision>0`, runID).Scan(&revision)
+		if err != nil {
+			return runForkEventCursor{}, fmt.Errorf("source has no committed fork head: %w", err)
 		}
-		if originKind == "deployment" {
-			var revision int64
-			err := tx.QueryRowContext(ctx, `
-				SELECT h.last_revision FROM run_fork_revision_heads h
-				JOIN run_fork_revisions r ON r.run_id=h.run_id AND r.revision=h.last_revision
-				WHERE h.run_id=$1 AND h.last_revision>0`, runID).Scan(&revision)
-			if err != nil {
-				return runForkEventCursor{}, fmt.Errorf("deployment source has no committed fork revision: %w", err)
-			}
-			return runForkEventCursor{Kind: runfork.RunForkPointDeploymentRevision, Revision: revision}, nil
-		}
+		return runForkEventCursor{Kind: runfork.RunForkPointStateRevision, Revision: revision}, nil
 	}
-	where := ""
-	args := []any{runID}
-	if at != "" {
-		if _, err := uuid.Parse(at); err != nil {
-			return runForkEventCursor{}, fmt.Errorf("run fork selector must be an event UUID: %w", err)
-		}
-		where = "AND fact_key = $2"
-		args = append(args, at)
+	if _, err := uuid.Parse(at); err != nil {
+		return runForkEventCursor{}, fmt.Errorf("run fork selector must be an event UUID: %w", err)
 	}
 	row := tx.QueryRowContext(ctx, `
 		WITH ranked_events AS (
 			SELECT run_id, fact_key, revision, fact, present,
 			       ROW_NUMBER() OVER (PARTITION BY fact_key ORDER BY revision ASC) AS first_rank
 			FROM run_fork_fact_revisions
-			WHERE run_id = $1 AND family = 'events' `+where+`
+			WHERE run_id = $1 AND family = 'events' AND fact_key = $2
 		)
 		SELECT run_id, fact_key, revision, fact, present
 		FROM ranked_events
 		WHERE first_rank = 1
 		ORDER BY revision DESC, fact_key DESC
 		LIMIT 1
-	`, args...)
+	`, runID, at)
 	var fact runForkHistoricalFactContext
 	var raw []byte
 	var present bool
 	if err := row.Scan(&fact.RunID, &fact.Key, &fact.Revision, &raw, &present); err != nil {
 		if err == sql.ErrNoRows {
-			if at == "" {
-				return runForkEventCursor{}, fmt.Errorf("no revisioned source-run event exists for fork source run %s", runID)
-			}
 			return runForkEventCursor{}, fmt.Errorf("fork point event %s not found in revisioned source run %s", at, runID)
 		}
 		return runForkEventCursor{}, fmt.Errorf("resolve fork event revision: %w", err)
