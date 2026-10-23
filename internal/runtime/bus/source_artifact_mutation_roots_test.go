@@ -393,7 +393,7 @@ func VerifyDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMu
 	claim := store.claim(t, eventID, runID, route)
 	sessionID := fixture.Session(t, route.AgentIdentity)
 
-	foreignCtx := runtimedelivery.WithClaim(context.Background(), claim)
+	foreignCtx := runtimedelivery.WithClaim(fixture.Context, claim)
 	foreignCtx = runtimecorrelation.WithSourceArtifactFact(foreignCtx, foreign)
 	if _, err := bus.MarkDeliveryInProgress(foreignCtx, "agent-a", sessionID); err == nil ||
 		!strings.Contains(err.Error(), "bundle source fact conflicts") {
@@ -406,7 +406,7 @@ func VerifyDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMu
 		t.Fatalf("foreign session binding mutated store %d times", binds)
 	}
 
-	ownerCtx := runtimedelivery.WithClaim(context.Background(), claim)
+	ownerCtx := runtimedelivery.WithClaim(fixture.Context, claim)
 	bound, err := bus.MarkDeliveryInProgress(ownerCtx, "agent-a", sessionID)
 	if err != nil {
 		t.Fatalf("owner-bound session binding: %v", err)

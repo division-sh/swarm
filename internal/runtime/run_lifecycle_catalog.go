@@ -5,31 +5,8 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
-
-func runLifecycleRequiresGenericSchedules(source semanticview.Source) bool {
-	if source == nil {
-		return false
-	}
-	for _, join := range source.WorkflowJoins() {
-		if join.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
-			return true
-		}
-	}
-	return false
-}
-
-// RunLifecycleTerminalCatalog supplies the same compiled, flow-scoped stage
-// classification to ordinary and selected execution.
-func RunLifecycleTerminalCatalog(source semanticview.Source) (runtimerunlifecycle.FinalCatalog, error) {
-	classifier, err := selectedWorkflowStageClassifier(source)
-	if err != nil {
-		return runtimerunlifecycle.FinalCatalog{}, err
-	}
-	return runtimerunlifecycle.NewCompiledFinalCatalog(classifier)
-}
 
 func selectedWorkflowStageClassifier(source semanticview.Source) (runtimecontracts.WorkflowStageClassifier, error) {
 	if source == nil {
