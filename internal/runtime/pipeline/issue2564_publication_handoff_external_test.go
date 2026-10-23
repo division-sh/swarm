@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -119,10 +120,6 @@ child:
 	f := &issue2564PublicationFixture{store: selected, reopen: reopen, backend: backend, runID: uuid.NewString(),
 		source: semanticview.Wrap(bundle), fact: mustAuthorActivityTestSourceArtifactFactForHash(bundle.SourceArtifact.BundleHash()),
 		observer: observer, failures: make(chan error, 16)}
-	seedCtx := correlation.WithSourceArtifactFact(context.Background(), f.fact)
-	storetest.RequireRun(t, seedCtx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-		RunID: f.runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
-	})
 	f.start(t, 1, dispatchGate)
 	commitKeylessConstructorComponent(t, f.ctx, f.selected(), f.pc, f.source)
 	return f
@@ -139,11 +136,24 @@ func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gat
 	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(context.Background(), f.runID), f.fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, f.fact.BundleHash()))
 	process := worklifetime.NewProcess()
+	capability, err := f.store.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "issue2564-publication-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = nativeOriginalProcessContextFixture(t, worklifetime.WithProcess(ctx, process), capability)
 	work, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: f.fact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.ctx = withLiveGateExecution(worklifetime.WithOccurrence(ctx, work))
+	if generation == 1 {
+		bundle, _ := semanticview.Bundle(f.source)
+		storetest.RequireRun(t, f.ctx, f.store.(storetest.RunFixtureStore), storetest.RunFixture{
+			RunID: f.runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+		})
+	}
 	admitter := swarmruntime.NewRuntimePayloadAdmitter(nil, f.source, f.fact)
 	f.store.(swarmruntime.EventPayloadAdmissionBinder).SetEventPayloadAdmitter(admitter)
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(f.fact, runtimeID, generation)
@@ -200,6 +210,9 @@ func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gat
 			}
 			process.Retire()
 			if _, err := process.Join(ctx); err != nil {
+				t.Error(err)
+			}
+			if err := capability.Release(ctx); err != nil {
 				t.Error(err)
 			}
 		})

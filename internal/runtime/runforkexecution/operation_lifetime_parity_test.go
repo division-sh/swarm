@@ -333,6 +333,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 
 func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, loaded LoadedSelectedContractSource, runID, eventID string, input ...events.Event) {
 	t.Helper()
+	ctx = nativeRunForkTestContext(t, ctx, selected)
 	at := time.Unix(1700002200, 0).UTC()
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,

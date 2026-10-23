@@ -40,6 +40,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -762,11 +763,11 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("retired process refusal = %v", err)
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
-	request.AgentRuntime.ProcessCapability = selectedContractTestProcessCapability(t, ctx, pg)
+	var successorProcess *worklifetime.Process
+	ctx, successorProcess, request.AgentRuntime.ProcessCapability = successorRunForkProcessForTest(t, ctx, pg)
 	// A successor process gets a new owner; a retired owner's binding is immutable.
 	request.Owner = newSelectedContractExecutionOwnerForTest(t, pg)
-	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
-	if err := request.Owner.BindSelectedProcess(ctx, fixtureValue.(*runForkTestWorkFixture).process, request.AgentRuntime.ProcessCapability); err != nil {
+	if err := request.Owner.BindSelectedProcess(ctx, successorProcess, request.AgentRuntime.ProcessCapability); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := request.Owner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{}); err != nil {
@@ -5125,7 +5126,7 @@ func runForkExecutionRepoRoot(t *testing.T) string {
 
 func captureSelectedExecutionSourceRevision(t testing.TB, selected any, runID string, families ...runforkrevision.Family) int64 {
 	t.Helper()
-	return storetest.CaptureSelectedRunForkRevision(t, context.Background(), selected, runID, families...)
+	return storetest.CaptureSelectedRunForkRevision(t, runForkTestContext(t), selected, runID, families...)
 }
 
 func materializeSelectedExecutionForkForTest(
@@ -5448,8 +5449,10 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 
 func admitSelectedExecutionSourceArtifact(t testing.TB, ctx context.Context, db *sql.DB, bundleHash string) {
 	t.Helper()
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx = nativeRunForkTestContext(t, ctx, selected)
 	if artifact := selectedExecutionSourceArtifactIfKnown(t, bundleHash); artifact != nil {
-		if _, err := storetest.AdmitPostgresRuntimeStore(t, db).EnsureSourceArtifact(ctx, artifact); err != nil {
+		if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
 			t.Fatalf("admit selected-execution source artifact: %v", err)
 		}
 		return
@@ -5694,6 +5697,11 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, identity.RunID), loaded.SourceArtifactFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runForkOriginalContextForTest(t, ctx, capability)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID, StartedAt: at.Add(-time.Minute),
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
@@ -5710,10 +5718,6 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 		Config: resolved.Actor, Status: "active", HiredBy: "test", StartedAt: at,
 	}, loaded.SourceArtifactFact); err != nil {
 		t.Fatalf("seed selected-execution test agent: %v", err)
-	}
-	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
-	if err != nil {
-		t.Fatal(err)
 	}
 	plan, found, err := capability.CurrentSourceSet(ctx)
 	if err != nil || !found {

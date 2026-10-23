@@ -355,6 +355,12 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	} else {
 		if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
+			diagnostics, diagnosticErr := selected.(manager.AgentLifecycleDiagnosticPersistence).ListPendingAgentLifecycleDiagnostics(ctx, 100)
+			t.Logf("selected child failure diagnostics: records=%+v err=%v", diagnostics, diagnosticErr)
+			for identity := range agents {
+				state, found, stateErr := selected.(manager.AgentLifecycleStateReader).LoadAgentLifecycleState(ctx, identity)
+				t.Logf("selected child agent state: state=%+v found=%t err=%v", state, found, stateErr)
+			}
 			t.Fatalf("actual selected constructed-input execution: result=%#v err=%v", result, err)
 		}
 		wantActors := 1

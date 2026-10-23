@@ -42,6 +42,7 @@ func TestCommittedTargetRefusalDirectAndEngineBothStores(t *testing.T) {
 				} else {
 					selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				}
+				ctx = nativeBusProcessContext(t, ctx, selected)
 				at := time.Now().UTC()
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at})
 				for _, flowID := range []string{".", "consumer"} {
@@ -52,7 +53,7 @@ func TestCommittedTargetRefusalDirectAndEngineBothStores(t *testing.T) {
 						WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), CreatedAt: at, EnteredStageAt: at,
 					})
 				}
-				bus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+				bus, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {
 					t.Fatal(err)
 				}
