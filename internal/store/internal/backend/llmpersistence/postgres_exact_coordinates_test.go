@@ -2,6 +2,7 @@ package llmpersistence
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -11,8 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	runstore "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
@@ -50,6 +53,32 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(ctx, backend, "swarm:runtime:shared-store-owner")
+	if err != nil || !acquired {
+		t.Fatalf("acquire original coordinate session: acquired=%v err=%v", acquired, err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	identity := processbinding.LeaseIdentity{
+		LeaseID: uuid.NewString(), OwnerID: "llm-coordinate-fixture", BootID: uuid.NewString(),
+		RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend,
+	}
+	var original processbinding.LeaseStamp
+	acknowledged, err := lease.RunProcessAcquisitionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, identity, false)
+		return err
+	})
+	if err != nil || !acknowledged {
+		t.Fatalf("admit original coordinate session: acknowledged=%v err=%v", acknowledged, err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	lifecycle, err := runstore.NewPostgres(backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +87,7 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	setupCtx := authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
+	setupCtx := authoractivity.WithScope(ctx, authoractivity.BundleScope(identity.RuntimeInstanceID, sourceartifactfixture.BundleHash))
 	if _, err := artifacts.EnsureSourceArtifact(setupCtx, sourceartifactfixture.Artifact()); err != nil {
 		t.Fatal(err)
 	}
