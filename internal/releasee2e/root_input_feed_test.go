@@ -33,8 +33,8 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 			localID := uuid.NewString()
 			local := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 				"run", "start", source, "--config", config, "--data", "company.registered=rows.jsonl", "--run-id", localID, "--mcp-port", fmt.Sprint(freeReleaseTCPPort(t)))
-			if local.err != nil || !strings.Contains(local.output, "status=completed") {
-				t.Fatalf("input-only local feed run: %v\n%s", local.err, local.output)
+			if local.err == nil || !strings.Contains(local.output, "No serve running") {
+				t.Fatalf("input-only feed without serve must refuse: %v\n%s", local.err, local.output)
 			}
 			process := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
 				ConfigPath: config, Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env})
@@ -57,8 +57,6 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 				waitForFullLifecycleRunStatus(t, process.rpc, id, "completed")
 				assertRootInputFeedBinaryRows(t, process, id, binary, root, config, env)
 			}
-			waitForFullLifecycleRunStatus(t, process.rpc, localID, "completed")
-			assertRootInputFeedBinaryRows(t, process, localID, binary, root, config, env)
 			if err := process.stopAndWait(goldenShutdownGrace); err != nil {
 				t.Fatalf("input-only feed shutdown: %v\n%s", err, process.output.String())
 			}

@@ -84,6 +84,14 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	env = append(env, fakeDockerMCPEmitGateEnv+"="+emitGate)
 	runCtx, cancelRun := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancelRun()
+	process := startReleaseServe(t, releaseProcessSpec{
+		BinaryPath: binaryPath, WorkingDir: releaseRoot, Source: contracts,
+		APIPort: apiPort, MCPListenPort: 8082, TokenFile: apiTokenFile, Token: apiToken,
+		Env: env, DefaultExecutionSelection: true, ShutdownGrace: goldenShutdownGrace,
+	})
+	if err := process.waitReady(runCtx); err != nil {
+		t.Fatal(err)
+	}
 	runOutputPath := filepath.Join(releaseRoot, "run-output.log")
 	runOutput, err := os.Create(runOutputPath)
 	if err != nil {
@@ -167,6 +175,9 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 		t.Fatalf("fake Docker evidence leaked credential value:\n%s", log)
 	}
 	assertReleaseDockerEvidence(t, records)
+	if err := process.stopAndWait(goldenShutdownGrace); err != nil {
+		t.Fatalf("release serve shutdown: %v\n%s", err, process.output.String())
+	}
 	assertReleaseExternalProcessesExited(t, fakeRoot)
 	assertReleaseProjectionWorkspacesReleased(t, fakeRoot, records)
 }
