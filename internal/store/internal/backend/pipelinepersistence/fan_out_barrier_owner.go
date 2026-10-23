@@ -997,30 +997,35 @@ func advanceAdmittedFanOutBarriers(ctx context.Context, attempt *mutationprotoco
 		if _, err := advanceFanOutDeliveryBarriersTx(ctx, tx, attempt, postgres, schedules, runID, at); err != nil {
 			return err
 		}
-		pending, err := loadFanOutBarriersByStatus(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending)
-		if err != nil {
-			return err
-		}
-		for _, barrier := range pending {
-			activation, found, err := schedules.LoadActivationTx(ctx, attempt, barrier.ScheduleActivationID)
-			if err != nil {
-				return err
-			}
-			if !found {
-				return fmt.Errorf("pending fan-out barrier activation %s is missing", barrier.ScheduleActivationID)
-			}
-			if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(barrier, activation); err != nil {
-				return err
-			}
-			committed, err := runtimerunlifecycle.NewCommittedGenericScheduleActivation(activation.ID)
-			if err != nil {
-				return err
-			}
-			activations = append(activations, committed)
-		}
-		return nil
+		activations, err = retainedFanOutBarrierActivations(ctx, tx, attempt, postgres, schedules, runID)
+		return err
 	})
 	return activations, err
+}
+
+func retainedFanOutBarrierActivations(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, schedules GenericScheduleTxOwner, runID string) (activations []runtimerunlifecycle.CommittedGenericScheduleActivation, err error) {
+	pending, err := loadFanOutBarriersByStatus(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending)
+	if err != nil {
+		return activations, err
+	}
+	for _, barrier := range pending {
+		activation, found, err := schedules.LoadActivationTx(ctx, attempt, barrier.ScheduleActivationID)
+		if err != nil {
+			return activations, err
+		}
+		if !found {
+			return activations, fmt.Errorf("pending fan-out barrier activation %s is missing", barrier.ScheduleActivationID)
+		}
+		if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(barrier, activation); err != nil {
+			return activations, err
+		}
+		committed, err := runtimerunlifecycle.NewCommittedGenericScheduleActivation(activation.ID)
+		if err != nil {
+			return activations, err
+		}
+		activations = append(activations, committed)
+	}
+	return activations, nil
 }
 
 func (s *PipelinePostgresOwner) SummarizeFanOutDeliveryBarriersRunTx(ctx context.Context, tx *sql.Tx, runID string) (fanoutbarrier.RunSummary, error) {
