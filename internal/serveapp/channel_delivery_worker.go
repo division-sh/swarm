@@ -278,7 +278,7 @@ func (d *serveChannelDeliveryDispatcher) processCurrentCardAction(ctx context.Co
 
 func (d *serveChannelDeliveryDispatcher) processInputSkip(ctx context.Context, intent runtimechanneldelivery.PendingAction,
 	expected runtimechanneldelivery.ResolvedAction) (finalErr error) {
-	ctx, use, err := d.acquireChannelCardInput(ctx, expected.Action.CardID)
+	ctx, use, err := d.acquireChannelCardInput(ctx, expected.TargetCardID())
 	if err != nil {
 		return err
 	}
