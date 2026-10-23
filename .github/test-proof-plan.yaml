@@ -1246,8 +1246,6 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     # Positive RE2 complement of Process; the complete crash proof runs separately.
     run: '^TestFanOut($|[^P].*|P($|[^r].*|r($|[^o].*|o($|[^c].*|c($|[^e].*|e($|[^s].*|s($|[^s].*)))))))$'
-    required_children:
-      TestFanOutBarrierConsumesConstructedHeaderBothStores: [postgres/fieldless/current, postgres/fieldless/malformed_bucket, postgres/fieldless/missing_header, postgres/fieldless/stale, postgres/fieldless/wrong_header_flow, postgres/fieldless/wrong_path, postgres/fieldless/wrong_scope, postgres/fields/current, postgres/fields/malformed_bucket, postgres/fields/missing_fields, postgres/fields/missing_header, postgres/fields/stale, postgres/fields/wrong_header_flow, postgres/fields/wrong_path, postgres/fields/wrong_scope, sqlite/fieldless/current, sqlite/fieldless/malformed_bucket, sqlite/fieldless/missing_header, sqlite/fieldless/stale, sqlite/fieldless/wrong_header_flow, sqlite/fieldless/wrong_path, sqlite/fieldless/wrong_scope, sqlite/fields/current, sqlite/fields/malformed_bucket, sqlite/fields/missing_fields, sqlite/fields/missing_header, sqlite/fields/stale, sqlite/fields/wrong_header_flow, sqlite/fields/wrong_path, sqlite/fields/wrong_scope]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
