@@ -1099,6 +1099,15 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
+	processEvidence, err := processCapability.Evidence()
+	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
+	if err := processWorkOwner.BindOriginalProcess(processEvidence.LeaseStamp()); err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
 	ownershipWatchCtx, watchCancel := context.WithCancel(ctx)
 	cancelOwnershipWatch = watchCancel
 	ownershipLoss, err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, cancelServe)
