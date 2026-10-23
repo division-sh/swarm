@@ -332,12 +332,6 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
 		SaveProof: input.SaveProof, ClientLanguage: input.ClientLanguage, CredentialReservations: reservations, RequestedAt: s.now().UTC(),
 	}
-	if s.deployment {
-		for index := range start.CredentialReservations {
-			reservation := &start.CredentialReservations[index]
-			reservation.StoreKey = "channel." + candidate.Provider + "." + operatorchannel.Hash("deployment-channel-credential-v1", principal.ID, start.OperationID) + "." + reservation.Role
-		}
-	}
 	if existing, found, err := findOperationByRequestKey(ctx, s.store, requestKey); err != nil {
 		return Result{}, err
 	} else if found {
@@ -1798,6 +1792,10 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 			continue
 		}
 		if strings.TrimSpace(value) == "" {
+			if op.DeploymentRegistration {
+				missingErr = errors.Join(missingErr, &CredentialRequiredError{OperationID: op.OperationID, Role: reservation.Role, StoreKey: operationKey})
+				continue
+			}
 			storeKey := reservation.StoreKey
 			if current, ok := currentByRole[reservation.Role]; ok {
 				storeKey = current.StoreKey
