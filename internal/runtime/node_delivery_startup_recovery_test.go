@@ -37,6 +37,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -170,13 +171,9 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-					BundleHash: persistedBundleHash,
-				})
 				return ctx, db, db, selected
 			},
 		},
@@ -184,19 +181,20 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			name: "sqlite",
 			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-					BundleHash: persistedBundleHash,
-				})
 				return ctx, nil, storetest.Database(selected), selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, _, _, selected := backend.setup(t)
+			prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+			storetest.RequireRun(t, externalRuntimeProcessContext(t, ctx, prepared), selected, storetest.RunFixture{
+				Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
+				BundleHash: persistedBundleHash,
+			})
 			activationCleanupErr := errors.New("injected delivery authority postcommit cleanup failure")
 			activationProbe := &startupRecoveryActivationProbe{Store: selected, cleanupErr: activationCleanupErr}
 			const agentID = "startup-order-agent"
@@ -248,7 +246,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			// readiness owner; recovery must not infer construction from agent rows.
 			predecessorProcess := worklifetime.NewProcess()
 			predecessor := newRuntime(predecessorProcess, selected)
-			predecessorCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, predecessor)
+			predecessorCapability, predecessorGrant := installExternalRuntimeTestGeneration(t, ctx, selected, predecessor, prepared)
 			t.Cleanup(func() {
 				if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
 					t.Errorf("close startup predecessor: %v", err)
@@ -257,7 +255,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err := predecessor.Start(ctx); err != nil {
 				t.Fatalf("start constructor predecessor: %v", err)
 			}
-			constructionCtx := testLiveExecutionContext(worklifetime.WithOccurrence(ctx, predecessor.WorkOccurrence()))
+			constructionCtx := externalRuntimeGenerationContext(t, testLiveExecutionContext(worklifetime.WithOccurrence(ctx, predecessor.WorkOccurrence())), predecessorGrant)
 			if err := predecessor.Manager.ActivateFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
 				Instance:       runtimeflowidentity.Stored(source, ".", templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, ""),
@@ -268,6 +266,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
 				t.Fatalf("retire startup predecessor: %v", err)
 			}
+			preparedSuccessor := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+			handoffCtx := externalRuntimeProcessContext(t, ctx, preparedSuccessor)
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
 			nodeRoute := startupRecoveryNodeRoute(t, "complete-task")
@@ -278,7 +278,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				eventID, "task.requested", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, nodeRoute.Target.Route()), time.Now().UTC(),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, handoffCtx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			agentEventID := eventtest.UUID("startup-order-agent-event-" + backend.name)
 			agentRoute := startupRecoveryAgentRoute(t, templateInstanceDeliveryRunID, agentID)
@@ -286,7 +286,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				agentEventID, "task.completed", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EventEnvelope{}, time.Now().UTC(),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, agentEvent, []events.DeliveryRoute{agentRoute}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, handoffCtx, selected, agentEvent, []events.DeliveryRoute{agentRoute}, runtimepipelineobligation.ScopeSubscribed)
 			agentProof, err := selected.ProveHandoff(ctx, agentEventID, agentRoute)
 			if err != nil {
 				t.Fatalf("prove startup agent handoff: %v", err)
@@ -301,10 +301,10 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err != nil {
 				t.Fatalf("construct startup predecessor authority: %v", err)
 			}
-			if err := selected.ActivateDeliveryAuthority(ctx, predecessorAuthority); err != nil {
+			if err := selected.ActivateDeliveryAuthority(handoffCtx, predecessorAuthority); err != nil {
 				t.Fatalf("activate startup predecessor authority: %v", err)
 			}
-			if result, err := selected.ClaimDelivery(ctx, predecessorAuthority, agentEvent, agentRoute); err != nil {
+			if result, err := selected.ClaimDelivery(handoffCtx, predecessorAuthority, agentEvent, agentRoute); err != nil {
 				t.Fatalf("claim startup predecessor agent delivery: %v", err)
 			} else if _, ok := result.Acquired(); !ok {
 				t.Fatalf("startup predecessor claim = %#v, want acquired", result)
@@ -312,7 +312,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 
 			processOwner := worklifetime.NewProcess()
 			runtime := newRuntime(processOwner, activationProbe)
-			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, runtime)
+			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, runtime, preparedSuccessor)
 			t.Cleanup(func() {
 				if err := closeExternalRuntimeTestGeneration(runtime, processOwner, capability); err != nil {
 					t.Errorf("close startup-order generation: %v", err)
@@ -404,6 +404,11 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 
 					currentRunID := eventtest.UUID("recovery-disabled-current-" + backend + "-" + mode.name + "-" + test.name)
 					currentCtx := startupRecoverySourceContext(currentSource, currentRunID)
+					preparedProcess := prepareExternalRuntimeFixtureProcess(t, currentCtx, selected)
+					currentCtx, err = startupownership.WithProcessMutationAuthority(currentCtx, preparedProcess)
+					if err != nil {
+						t.Fatal(err)
+					}
 					seedStartupRecoverySourceRun(t, currentCtx, selected, currentSource, currentArtifact, currentRunID)
 
 					var (
@@ -419,6 +424,10 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							eventSource = foreignSource
 							eventRunID = eventtest.UUID("recovery-disabled-foreign-" + backend + "-" + mode.name)
 							eventCtx = startupRecoverySourceContext(eventSource, eventRunID)
+							eventCtx, err = startupownership.WithProcessMutationAuthority(eventCtx, preparedProcess)
+							if err != nil {
+								t.Fatal(err)
+							}
 							seedStartupRecoverySourceRun(t, eventCtx, selected, eventSource, foreignArtifact, eventRunID)
 						}
 						var route events.DeliveryRoute
@@ -520,7 +529,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 					if runtimeErr != nil {
 						t.Fatalf("NewRuntime: %v", runtimeErr)
 					}
-					capability, _ := installExternalRuntimeTestGeneration(t, currentCtx, selected, runtime)
+					capability, _ := installExternalRuntimeTestGeneration(t, currentCtx, selected, runtime, preparedProcess)
 					t.Cleanup(func() {
 						if closeErr := closeExternalRuntimeTestGeneration(runtime, processOwner, capability); closeErr != nil {
 							t.Errorf("close startup-decision generation: %v", closeErr)
@@ -578,6 +587,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			}
 			runID := eventtest.UUID("pipeline-handoff-cleanup-run-" + backend)
 			ctx := startupRecoverySourceContext(source, runID)
+			ctx = originalRuntimeFixtureContext(t, ctx, selected)
 			seedStartupRecoverySourceRun(t, ctx, selected, source, authorActivityTestSourceArtifact, runID)
 			route := startupRecoveryNodeRoute(t, "complete-task")
 			event := eventtest.ExistingRunRootIngress(
@@ -853,6 +863,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
 				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 				bundle, _ := semanticview.Bundle(source)
+				ctx = originalRuntimeFixtureContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact})
 				return ctx, selected
 			},
@@ -948,6 +959,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
 				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 				bundle, _ := semanticview.Bundle(source)
+				ctx = originalRuntimeFixtureContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact})
 				return ctx, selected
 			},
@@ -1097,6 +1109,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
 				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 				bundle, _ := semanticview.Bundle(source)
+				ctx = originalRuntimeFixtureContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact})
 				return ctx, selected
 			},

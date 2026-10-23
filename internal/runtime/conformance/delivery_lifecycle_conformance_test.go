@@ -34,6 +34,7 @@ import (
 )
 
 type deliveryLifecycleConformanceBackend struct {
+	owner    testing.TB
 	name     string
 	store    runtimedelivery.Store
 	restart  runtimedelivery.Store
@@ -91,7 +92,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 	for _, backend := range deliveryLifecycleConformanceBackends(t) {
 		backend := backend
 		t.Run(backend.name, func(t *testing.T) {
+			backend.owner = t
 			ctx := testAuthorActivityContext(context.Background())
+			ctx = originalConformanceFixtureContext(t, ctx, backend.selected)
 			t.Run("exact_route_claim_settlement_and_outcome", func(t *testing.T) {
 				event := deliveryLifecycleEvent("exact-" + backend.name)
 				agent := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "agent-a")
@@ -1685,7 +1688,7 @@ func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliver
 	if !ok {
 		t.Fatalf("delivery lifecycle selected store %T lacks canonical agent fixture admission", backend.selected)
 	}
-	storetest.RequireStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+	storetest.RequireStaticAgentFixture(backend.owner, ctx, selected, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "delivery-test", Type: "stub", Model: "regular", ExecutionMode: "live",
 			ResolvedLLMBackend: "anthropic", Intent: deliveryLifecycleAgentIntent(t, agentID),

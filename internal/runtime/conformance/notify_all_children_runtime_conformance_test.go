@@ -58,6 +58,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
@@ -94,6 +95,7 @@ type notifyAllChildrenRuntime struct {
 	genericSchedules   *runtimegenericschedule.Lifecycle
 	posture            executionposture.Posture
 	fanOutServing      *runtimestartupownership.FanOutServingRegistration
+	contextRuntime     *runtimepkg.Runtime
 }
 
 type notifyAllChildrenRuntimeOptions struct {
@@ -117,11 +119,14 @@ func retireNotifyAllChildrenRuntimeForReplacement(t *testing.T, runtime notifyAl
 	if runtime.fanOutServing != nil {
 		runtime.fanOutServing.Close()
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := runtime.bus.DeliveryContinuationOwner().(*runtimedeliverycontinuation.Coordinator).Retire(ctx); err != nil {
+		t.Fatalf("retire predecessor notify-all-children delivery continuations: %v", err)
+	}
 	if err := runtime.manager.Shutdown(); err != nil {
 		t.Fatalf("shutdown predecessor notify-all-children manager: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
 		t.Fatalf("join predecessor notify-all-children work: %v", err)
 	}
@@ -174,6 +179,14 @@ func (o *notifyAllChildrenLifecycleOwner) current() (runtimestartupownership.Gen
 	return o.grant, nil
 }
 
+func (o *notifyAllChildrenLifecycleOwner) mutationContext(ctx context.Context) (context.Context, error) {
+	grant, err := o.current()
+	if err != nil {
+		return ctx, err
+	}
+	return runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+}
+
 func (o *notifyAllChildrenLifecycleOwner) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
 	grant, err := o.current()
 	if err != nil {
@@ -193,12 +206,18 @@ func (o *notifyAllChildrenLifecycleOwner) CommitAgentLifecycleTransition(
 	return grant.CommitAgentLifecycleTransition(ctx, req)
 }
 
+func runNotifyAllChildrenManager(ctx context.Context, eventBus *runtimebus.EventBus, manager *runtimemanager.AgentManager) error {
+	original, err := eventBus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		return err
+	}
+	return manager.Run(original)
+}
+
 func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, selected notifyAllChildrenStore, sources ...semanticview.Source) *notifyAllChildrenProcessTopology {
 	t.Helper()
 	runtimeInstanceID := authorActivityTestRuntimeInstanceID
-	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "notify-all-children-conformance", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-	})
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatalf("acquire notify-all-children process topology capability: %v", err)
 	}
@@ -216,12 +235,13 @@ func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, sele
 func (p *notifyAllChildrenProcessTopology) install(
 	t testing.TB,
 	ctx context.Context,
-	manager *runtimemanager.AgentManager,
+	contextRuntime *runtimepkg.Runtime,
 	source semanticview.Source,
 	sourceArtifactFact runtimecorrelation.SourceArtifactFact,
 	lifecycle *notifyAllChildrenLifecycleOwner,
 ) runtimestartupownership.LiveGenerationGrant {
 	t.Helper()
+	manager := contextRuntime.Manager
 	if p == nil || p.capability == nil {
 		t.Fatal("notify-all-children process topology capability is required")
 	}
@@ -288,11 +308,11 @@ func (p *notifyAllChildrenProcessTopology) install(
 	if err := lifecycle.bind(grant); err != nil {
 		t.Fatalf("bind notify-all-children lifecycle generation grant: %v", err)
 	}
-	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, bundleHash, runtimeagenttopology.LifetimeDurableManaged)
+	ctx, err = runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
 	if err != nil {
-		t.Fatalf("construct notify-all-children static admission: %v", err)
+		t.Fatal(err)
 	}
-	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
+	if err := contextRuntime.InstallStartupGrant(grant); err != nil {
 		t.Fatalf("install notify-all-children startup topology: %v", err)
 	}
 	if err := manager.RebindLifecycleExecutionForStartup(ctx); err != nil {
@@ -447,7 +467,8 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 				time.Now,
 				notifyAllChildrenRuntimeOptions{enableGenericSchedules: true},
 			)
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-delivery-barrier", runtime.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-delivery-barrier", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
 
@@ -632,9 +653,11 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 
 			validRunID := uuid.NewString()
 			validCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), validRunID)
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, validCtx, "numeric-fan-out-reporter", runtime.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, validCtx, "numeric-fan-out-reporter", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
+
 			publishNotifyAllChildrenRunCreatingEvent(t, validCtx, runtime, source, validRunID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-numeric-valid",
 				"threshold":    75,
@@ -894,9 +917,11 @@ func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testi
 			})
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-internal-settlement", runtime.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-internal-settlement", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
+
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-numeric-internal",
 				"threshold":    75,
@@ -965,9 +990,11 @@ func TestNumericFanOutTemplateSelectOrCreateMaterializesOnBothBackends(t *testin
 			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{maintenanceInterval: 10 * time.Millisecond})
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-template-materialization", runtime.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-template-materialization", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
+
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-numeric-template", "threshold": 75})
 			rows := []map[string]any{
 				{"account_id": "template-zero", "eng_roles": 0, "gem_score": 0.25},
@@ -1218,6 +1245,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	})
 	sourceV1Fact := conformanceSourceArtifactFact(t, sourceV1)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceV1Fact), runID)
+	ctx = originalConformanceFixtureContext(t, ctx, selected)
 	processTopology := newNotifyAllChildrenProcessTopology(t, ctx, selected)
 	scopeV1, ok := semanticview.FlowScopeByID(sourceV1, notifyallchildren.ChildFlowID)
 	if !ok || len(scopeV1.Agents) != 2 {
@@ -1226,7 +1254,8 @@ func proveDynamicFlowSourceRevisionConvergence(
 	runtimeV1 := newNotifyAllChildrenRuntime(t, selected, db, sourceV1, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
-	if err := runtimeV1.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "dynamic-flow-source-v1", runtimeV1.sourceArtifactFact)); err != nil {
+
+	if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "dynamic-flow-source-v1", runtimeV1.sourceArtifactFact), runtimeV1.bus, runtimeV1.manager); err != nil {
 		t.Fatalf("run v1 manager: %v", err)
 	}
 
@@ -1270,9 +1299,10 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("v2 account contract retained removed agent: %#v", scopeV2.Agents)
 	}
 	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
-		processTopology: processTopology,
+		processTopology: processTopology, deferContinuationStart: true,
 	})
 	ctxV2 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV2.sourceArtifactFact), runID)
+	ctxV2 = originalConformanceFixtureContext(t, ctxV2, selected)
 	if _, err := selected.ReviseRunSource(ctxV2, runtimerunlifecycle.SourceRevisionRequest{
 		RunID:  runID,
 		Source: runtimeV2.sourceArtifactFact,
@@ -1283,12 +1313,15 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if err != nil {
 		t.Fatalf("canonicalize revised source topology: %v", err)
 	}
-	if err := runtimeV2.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV2, "dynamic-flow-source-v2", runtimeV2.sourceArtifactFact)); err != nil {
+
+	if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctxV2, "dynamic-flow-source-v2", runtimeV2.sourceArtifactFact), runtimeV2.bus, runtimeV2.manager); err != nil {
 		t.Fatalf("run v2 manager: %v", err)
 	}
+
 	if err := runtimeV2.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV2, startupV2); err != nil {
 		t.Fatalf("attach revised source topology: %v", err)
 	}
+	startNotifyAllChildrenHydratedContinuations(t, ctxV2, runtimeV2)
 	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctxV2, runtimeV2.pipeline, runID, descriptor.InstancePath)
 
 	v2Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
@@ -1330,21 +1363,24 @@ func proveDynamicFlowSourceRevisionConvergence(
 
 	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV2)
 	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
-		processTopology: processTopology,
+		processTopology: processTopology, deferContinuationStart: true,
 	})
 	startupV3, err := runtimeV3.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctxV2, runtimeV3.sourceArtifactFact, true)
 	if err != nil {
 		t.Fatalf("canonicalize v2 restart topology: %v", err)
 	}
-	if err := runtimeV3.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV2, "dynamic-flow-source-v2-restart", runtimeV3.sourceArtifactFact)); err != nil {
+
+	if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctxV2, "dynamic-flow-source-v2-restart", runtimeV3.sourceArtifactFact), runtimeV3.bus, runtimeV3.manager); err != nil {
 		t.Fatalf("run v2 restart manager: %v", err)
 	}
+
 	if err := runtimeV3.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV2, startupV3); err != nil {
 		t.Fatalf("reconstruct v2 restart topology: %v", err)
 	}
 	if _, err := runtimeV3.manager.HydrateForStartup(ctxV2); err != nil {
 		t.Fatalf("restart hydration: %v", err)
 	}
+	startNotifyAllChildrenHydratedContinuations(t, ctxV2, runtimeV3)
 	for _, agentID := range []string{readerID, writerID} {
 		if _, err := runtimeV3.manager.ResolveAgentConfig(runID, agentID, descriptor.InstancePath); err != nil {
 			t.Fatalf("restart omitted exact active agent %s", agentID)
@@ -1360,9 +1396,10 @@ func proveDynamicFlowSourceRevisionConvergence(
 	})
 	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV3)
 	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
-		processTopology: processTopology,
+		processTopology: processTopology, deferContinuationStart: true,
 	})
 	ctxV3 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV4.sourceArtifactFact), runID)
+	ctxV3 = originalConformanceFixtureContext(t, ctxV3, selected)
 	if _, err := selected.ReviseRunSource(ctxV3, runtimerunlifecycle.SourceRevisionRequest{
 		RunID:  runID,
 		Source: runtimeV4.sourceArtifactFact,
@@ -1373,12 +1410,15 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if err != nil {
 		t.Fatalf("canonicalize reintroduced source topology: %v", err)
 	}
-	if err := runtimeV4.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV3, "dynamic-flow-source-v3", runtimeV4.sourceArtifactFact)); err != nil {
+
+	if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctxV3, "dynamic-flow-source-v3", runtimeV4.sourceArtifactFact), runtimeV4.bus, runtimeV4.manager); err != nil {
 		t.Fatalf("run v3 manager: %v", err)
 	}
+
 	if err := runtimeV4.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV3, startupV4); err != nil {
 		t.Fatalf("attach reintroduced source topology: %v", err)
 	}
+	startNotifyAllChildrenHydratedContinuations(t, ctxV3, runtimeV4)
 	waitNotifyAllChildrenRuntimeReadiness(t, ctxV3, runtimeV4.pipeline, runID, descriptor.InstancePath)
 	v3Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
 	reintroduced := v3Agents[retiredID]
@@ -1397,21 +1437,24 @@ func proveDynamicFlowSourceRevisionConvergence(
 
 	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV4)
 	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
-		processTopology: processTopology,
+		processTopology: processTopology, deferContinuationStart: true,
 	})
 	startupV5, err := runtimeV5.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctxV3, runtimeV5.sourceArtifactFact, true)
 	if err != nil {
 		t.Fatalf("canonicalize v3 restart topology: %v", err)
 	}
-	if err := runtimeV5.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV3, "dynamic-flow-source-v3-restart", runtimeV5.sourceArtifactFact)); err != nil {
+
+	if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctxV3, "dynamic-flow-source-v3-restart", runtimeV5.sourceArtifactFact), runtimeV5.bus, runtimeV5.manager); err != nil {
 		t.Fatalf("run v3 restart manager: %v", err)
 	}
+
 	if err := runtimeV5.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV3, startupV5); err != nil {
 		t.Fatalf("reconstruct v3 restart topology: %v", err)
 	}
 	if _, err := runtimeV5.manager.HydrateForStartup(ctxV3); err != nil {
 		t.Fatalf("reintroduced restart hydration: %v", err)
 	}
+	startNotifyAllChildrenHydratedContinuations(t, ctxV3, runtimeV5)
 	for _, agentID := range []string{readerID, writerID, retiredID} {
 		if _, err := runtimeV5.manager.ResolveAgentConfig(runID, agentID, descriptor.InstancePath); err != nil {
 			t.Fatalf("reintroduced restart omitted active agent %s", agentID)
@@ -1528,6 +1571,7 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 			}
 
 			failReplacement()
+			ctx = originalConformanceFixtureContext(t, ctx, selected)
 			err = runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 				ContractBundle: source,
 				Instance:       before.Identity(),
@@ -1609,7 +1653,8 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 						}
 					})
 					runCtx := runtimeeffects.WithExecutionMode(managedConformanceExecutionContextForBundle(t, ctx, "notify-all-children-fixed-slug", runtime.sourceArtifactFact), runtime.posture.RootMode())
-					if err := runtime.manager.Run(runCtx); err != nil {
+
+					if err := runNotifyAllChildrenManager(runCtx, runtime.bus, runtime.manager); err != nil {
 						t.Fatalf("run manager: %v", err)
 					}
 
@@ -1670,7 +1715,11 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 						// Ordinary final entry produces no retirement diagnostic. Exercise
 						// the existing two-consumer outbox proof through explicit cleanup.
 						removed := descriptors[accountIDs[0]]
-						if err := runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
+						deactivationCtx, err := runtime.bus.AdmitSourceArtifactFact(testAuthorActivityContextForBundle(ctx, runtime.sourceArtifactFact))
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := runtime.manager.DeactivateFlowInstanceModel(deactivationCtx, runtimepipeline.FlowInstanceDeactivationRequest{
 							ContractBundle: source,
 							Instance:       removed,
 							FinalState:     "completed",
@@ -1766,7 +1815,8 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				backend,
 			)
 			runtime := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "notify-all-children-stale-route", runtime.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "notify-all-children-stale-route", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
 
@@ -1825,6 +1875,10 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			assertNotifyAllChildrenMetadata(t, ctx, backend, "portfolio", "account_ids", []any{"acct-a", "acct-b", "acct-stale"})
 
 			stale := descriptors["acct-stale"]
+			ctx, err := runtime.bus.AdmitSourceArtifactFact(testAuthorActivityContextForBundle(ctx, runtime.sourceArtifactFact))
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 				ContractBundle: source,
 				Instance:       stale,
@@ -2006,21 +2060,27 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{
 				processTopology: processTopology, deferContinuationStart: true,
 			})
-			restartCtx := testAuthorActivityContextForBundle(ctx, restarted.sourceArtifactFact)
+			restartCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), restarted.sourceArtifactFact), runID)
+			restartCtx, err = restarted.bus.AdmitSourceArtifactFact(restartCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
 			startup, err := restarted.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(restartCtx, restarted.sourceArtifactFact, true)
 			if err != nil {
 				t.Fatalf("canonicalize restarted dynamic topology: %v", err)
 			}
-			if err := restarted.manager.Run(managedConformanceExecutionContextForBundle(t, restartCtx, "notify-all-children-stale-route-restart", restarted.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, restartCtx, "notify-all-children-stale-route-restart", restarted.sourceArtifactFact), restarted.bus, restarted.manager); err != nil {
 				t.Fatalf("run restarted manager: %v", err)
 			}
+
 			if err := restarted.manager.CompleteDynamicFlowRuntimeStartupTopology(restartCtx, startup); err != nil {
 				t.Fatalf("complete restarted dynamic topology: %v", err)
 			}
 			if _, err := restarted.manager.HydrateForStartup(restartCtx); err != nil {
 				t.Fatalf("hydrate restarted manager: %v", err)
 			}
-			startNotifyAllChildrenDeliveryContinuations(t, ctx, backend, restarted, recoveryEvent.ID(), routes[0])
+			startNotifyAllChildrenDeliveryContinuations(t, restartCtx, backend, restarted, recoveryEvent.ID(), routes[0])
 			waitNotifyAllChildrenRuntime(t, restarted, runID)
 			assertNotifyAllChildrenMetadata(t, ctx, backend, descriptors["acct-a"].InstancePath, "last_command", "refresh")
 			if got := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID); got != eventCountBefore {
@@ -2065,6 +2125,17 @@ func assertNotifyAllChildrenExactRoutes(
 	}
 	if !nodeFound || !agentFound {
 		t.Fatalf("persisted routes = %#v, want account-node and exact account-worker", routes)
+	}
+}
+
+func startNotifyAllChildrenHydratedContinuations(t *testing.T, ctx context.Context, runtime notifyAllChildrenRuntime) {
+	t.Helper()
+	ctx, err := runtime.bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.bus.DeliveryContinuationOwner().(*runtimedeliverycontinuation.Coordinator).Start(ctx); err != nil {
+		t.Fatalf("start delivery continuation after startup hydration: %v", err)
 	}
 }
 
@@ -2159,6 +2230,7 @@ func newNotifyAllChildrenRuntime(
 	}
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
+	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
 	workOwner := conformanceTestRuntimeOccurrence(t, sourceArtifactFact.BundleHash())
 	var runtimeControlEvents []string
 	if opts.enableGenericSchedules {
@@ -2169,11 +2241,13 @@ func newNotifyAllChildrenRuntime(
 		deliveryLifecycle = opts.deliveryLifecycle
 	}
 	busOptions := durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
-		ExecutionPosture:   posture,
-		ContractBundle:     source,
-		SourceArtifactFact: sourceArtifactFact,
-		WorkOwner:          workOwner,
-		TestLifecycleProbe: opts.testLifecycleProbe,
+		MutationContext:      generationLifecycle.mutationContext,
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		ExecutionPosture:     posture,
+		ContractBundle:       source,
+		SourceArtifactFact:   sourceArtifactFact,
+		WorkOwner:            workOwner,
+		TestLifecycleProbe:   opts.testLifecycleProbe,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -2372,27 +2446,31 @@ func newNotifyAllChildrenRuntime(
 	}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(coordinatorBus, coordinatorOptions)
 
-	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
 	var lifecycleStore runtimemanager.AgentLifecyclePersistence = generationLifecycle
 	roles := conformanceManagerPersistenceRoles(backend, eventBus, coordinator)
 	if opts.diagnosticOverlap {
 		roles = gateLifecycleDiagnosticOverlap(t, db, roles)
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:   posture,
-		BaseContext:        runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()),
-		SourceArtifactFact: sourceArtifactFact,
-		WorkflowInstances:  coordinator,
-		WorkOwner:          workOwner,
-		DeliveryStore:      deliveryLifecycle,
-		LifecycleStore:     lifecycleStore,
-		SemanticSource:     source,
-		Sessions:           sessionStore,
-		LLMBackend:         llmBackend,
-		PersistenceRoles:   roles, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:     posture,
+		BaseContext:          originalConformanceFixtureContext(t, runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), backend),
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		SourceArtifactFact:   sourceArtifactFact,
+		WorkflowInstances:    coordinator,
+		WorkOwner:            workOwner,
+		DeliveryStore:        deliveryLifecycle,
+		LifecycleStore:       lifecycleStore,
+		SemanticSource:       source,
+		Sessions:             sessionStore,
+		LLMBackend:           llmBackend,
+		PersistenceRoles:     roles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
-	grant := opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), manager, source, sourceArtifactFact, generationLifecycle)
+	contextRuntime := &runtimepkg.Runtime{Bus: eventBus, Manager: manager, ExecutionPosture: posture}
+	contextRuntime.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	contextRuntime.Options.SourceArtifactFact = sourceArtifactFact
+	contextRuntime.Options.ProcessWorkOwner = conformanceTestProcessOwner(t)
+	grant := opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), contextRuntime, source, sourceArtifactFact, generationLifecycle)
 	binding, err := grant.ProcessExecutionBinding()
 	if err != nil {
 		t.Fatalf("load notify-all-children admitted process binding: %v", err)
@@ -2405,6 +2483,10 @@ func newNotifyAllChildrenRuntime(
 		t.Fatalf("bind notify-all-children delivery authority: %v", err)
 	}
 	continuationCtx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	continuationCtx, err = runtimestartupownership.WithRuntimeMutationAuthority(continuationCtx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := backend.ActivateDeliveryAuthority(continuationCtx, authority); err != nil {
 		t.Fatalf("activate notify-all-children delivery authority: %v", err)
 	}
@@ -2434,7 +2516,7 @@ func newNotifyAllChildrenRuntime(
 		fanOutExecutor = opts.fanOutExecutor(coordinator)
 	}
 	fanOutRegistration, err := runtimestartupownership.StartFanOutServing(
-		runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), grant, workOwner, opts.fanOutWorkers, fanOutExecutor,
+		runtimeeffects.WithExecutionMode(continuationCtx, posture.RootMode()), grant, workOwner, opts.fanOutWorkers, fanOutExecutor,
 	)
 	if err != nil {
 		t.Fatalf("start notify-all-children shared fan-out serving: %v", err)
@@ -2456,7 +2538,7 @@ func newNotifyAllChildrenRuntime(
 		if err != nil {
 			t.Fatalf("construct notify-all-children completion executor: %v", err)
 		}
-		runtimeCtx := worklifetime.WithRuntimeOccurrence(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), workOwner)
+		runtimeCtx := worklifetime.WithRuntimeOccurrence(continuationCtx, workOwner)
 		registration, err := candidateOwner.RegisterCompletionCandidateSink(
 			runtimeCtx,
 			runtimerunlifecycle.CandidateScope{BundleHash: sourceArtifactFact.BundleHash()},
@@ -2482,7 +2564,7 @@ func newNotifyAllChildrenRuntime(
 	if opts.maintenanceInterval > 0 {
 		coordinator.SetTestMaintenanceInterval(opts.maintenanceInterval)
 	}
-	maintenanceCtx, stopMaintenance := context.WithCancel(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact))
+	maintenanceCtx, stopMaintenance := context.WithCancel(continuationCtx)
 	maintenanceCtx = runtimeeffects.WithExecutionMode(maintenanceCtx, posture.RootMode())
 	maintenanceDone := make(chan struct{})
 	go func() {
@@ -2498,7 +2580,7 @@ func newNotifyAllChildrenRuntime(
 		posture: posture,
 		bus:     eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
 		workOwner: workOwner, selected: backend, sourceArtifactFact: sourceArtifactFact, genericSchedules: genericSchedules,
-		fanOutServing: fanOutRegistration,
+		fanOutServing: fanOutRegistration, contextRuntime: contextRuntime,
 	}
 }
 

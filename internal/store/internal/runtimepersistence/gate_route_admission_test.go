@@ -33,6 +33,7 @@ func TestGateRouteAdmissionPrivateAdapterParity(t *testing.T) {
 			default:
 				t.Fatalf("unknown backend %q", backend)
 			}
+			ctx = originalStoreFixtureContext(t, ctx, fixtureStore)
 
 			runningRunID := uuid.NewString()
 			pausedRunID := uuid.NewString()

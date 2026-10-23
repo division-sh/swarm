@@ -64,7 +64,7 @@ func TestClockScheduleOccurrenceAtomicReplayOnBothStores(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, _, seedCtx := tc.open(t)
 			runID := runtimecorrelation.RunIDFromContext(seedCtx)
-			ctx := authorGenericScheduleConsumerContext(runID)
+			ctx := originalStoreFixtureContext(t, authorGenericScheduleConsumerContext(runID), store)
 			registerTestAuthorActivityCatalogForContext(t, store.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
 			selected := store.(storeTestDurableEventBusStore)
 			publisher, err := newStoreTestEventBus(t, selected)

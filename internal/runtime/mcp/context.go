@@ -24,6 +24,7 @@ import (
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)
 
 type TurnContext struct {
+	original               context.Context
 	Presentation           *channelactivation.PresentationBinding
 	presentationExpiry     *time.Timer
 	RunID                  string
@@ -128,6 +129,7 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 	logicalIdentity, hasLogicalIdentity := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
 	outputCall, hasOutputCall := llm.ToolOutputCallFromContext(ctx)
 	r.put(token, TurnContext{
+		original:               ctx,
 		Presentation:           channelactivation.BindPresentation(ctx, now.Add(ttl)),
 		RunID:                  runtimecorrelation.RunIDFromContext(ctx),
 		Actor:                  actor,
@@ -196,6 +198,7 @@ func (r *TurnContextRegistry) RegisterConversationForkSandboxTurnContext(ctx con
 	inbound, hasInbound := runtimebus.InboundEventFromContext(ctx)
 	outputCall, hasOutputCall := llm.ToolOutputCallFromContext(ctx)
 	r.put(token, TurnContext{
+		original:     ctx,
 		Presentation: channelactivation.BindPresentation(ctx, now.Add(ttl)), RunID: runtimecorrelation.RunIDFromContext(ctx),
 		SourceArtifactFact: source, HasSourceArtifactFact: hasSource, Inbound: inbound, HasInbound: hasInbound,
 		Actor: actor, EffectController: controller, EffectAuthority: authority, HasEffectAuthority: true,

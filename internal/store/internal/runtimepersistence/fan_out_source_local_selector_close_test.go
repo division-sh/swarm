@@ -27,6 +27,7 @@ func TestFanOutClosingSourceFailedRetirementPreservesHealthyProgressBothStores(t
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			idle := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 0, time.Now().UTC())
 			healthy := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), storeTestSourceArtifact("closing-source-retirement-healthy-source"))
 			process, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{idle, healthy})

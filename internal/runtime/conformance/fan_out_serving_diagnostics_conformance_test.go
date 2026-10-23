@@ -351,6 +351,9 @@ func TestIssue2394D3EvidenceControlsBothStores(t *testing.T) {
 						turn.release()
 						f.assertSettled(t, 0, runID, 1)
 					case "retired_preclaim":
+						if err := f.runtimes[0].manager.Shutdown(); err != nil {
+							t.Fatal(err)
+						}
 						grant := f.topology.grants[f.runtimes[0].sourceArtifactFact.BundleHash()]
 						if err := grant.Retire(ctx); err != nil {
 							t.Fatal(err)

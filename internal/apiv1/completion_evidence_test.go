@@ -71,6 +71,7 @@ func TestCompletion2270PublicReadbackBothStores(t *testing.T) {
 			} else {
 				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
+			ctx = originalAPIFixtureContext(t, ctx, selected)
 			runID, sessionID := uuid.NewString(), uuid.NewString()
 			identity := sqliteAgentUsageIdentityForRun(t, runID, "completion-2270")
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})

@@ -132,6 +132,10 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 			store, db := tc.store(t)
 			capability, grant, startup := admitRegistrationTestGeneration(t, ctx, store, "registration-owner-a")
 			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+			ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			authority := testServeRegistrationAuthority(startup)
 			if current, err := store.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || !current {
 				t.Fatalf("initial registration authority current=%v err=%v", current, err)
@@ -1001,6 +1005,10 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 			evidence.SelectedGrant = selectedGrantForAbandonedProcess(t, selected, selected.backend.ConstructionHandle(), true, capability)
 		}
 		if os.Getenv("SWARM_TEST_FORCED_DEATH_OBLIGATIONS") == "1" {
+			ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			evidence.Obligations = admitPredecessorObligations(t, ctx, selected, grantEvidence)
 		}
 		raw, err := json.Marshal(evidence)
@@ -1500,6 +1508,10 @@ func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string
 		evidence.SelectedGrant = selectedGrantForAbandonedProcess(t, first.(selectedCompletionAuthorityStore), db, false, capability)
 	}
 	if len(obligations) == 1 && obligations[0] {
+		ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+		if err != nil {
+			t.Fatal(err)
+		}
 		evidence.Obligations = admitPredecessorObligations(t, ctx, selected, grant)
 	}
 	terminatePostgresRetainedProcessSession(t, ctx, db)

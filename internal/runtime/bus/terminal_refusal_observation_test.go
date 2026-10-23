@@ -31,6 +31,7 @@ func TestEventBusTerminalRefusalObservationSeesPresentEvidenceBothStores(t *test
 				t.Fatal(err)
 			}
 			ctx, runID := testAuthorActivityContext(context.Background()), uuid.NewString()
+			ctx = originalEventBusFixtureContext(t, ctx, selected)
 			if err := storetest.EnsureEphemeralRun(ctx, selected, runID, time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}

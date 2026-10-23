@@ -31,6 +31,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			fact := sourceArtifactFactForTestBundle(t, bundle)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			cardStore, humanStore, idempotency, mailbox, workflowStore := newHumanTaskAckLossOwners(t, ctx, backend)
+			ctx = originalAPIFixtureContext(t, ctx, cardStore)
 			principal, err := cardStore.(interface {
 				EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 			}).EnsureOperatorPrincipal(ctx, time.Now())
@@ -46,7 +47,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			}
 
 			authority := &humanTaskAckLossAuthority{delegate: workflowStore}
-			handler := testHandler(t, Options{
+			handler := testHandlerWithOriginalContext(t, Options{
 				OperatorPrincipalID: principal.ID,
 				AuthTokens:          []string{testToken},
 				Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -58,7 +59,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 						fact:                     fact,
 					},
 				}),
-			})
+			}, ctx)
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"ack-loss"}}`, card.CardID, card.CardContentHash)
 			first := rpcCall(t, handler, body)
 			if first.Error == nil {

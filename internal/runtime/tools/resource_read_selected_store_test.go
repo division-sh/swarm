@@ -84,6 +84,7 @@ func TestResourceReadSelectedStore(t *testing.T) {
 					selected, db = original, storetest.Database(original)
 					reopen = func() resourceReadSelectedStore { return storetest.AdmitSQLiteRuntimeStore(t, db) }
 				}
+				ctx = toolFixtureProcessContext(t, ctx, selected)
 				if _, err := selected.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
 					t.Fatal(err)
 				}

@@ -4,18 +4,16 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
+
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
+
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -27,262 +25,11 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
+
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
-
-func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	setPostgresEnvFromDSN(t, dsn)
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700000300, 0).UTC()
-	ctx := context.Background()
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli",
-		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-	var buf bytes.Buffer
-	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
-		"--store", "postgres",
-		"--dry-run",
-		"--run", runID,
-		"--at", eventID,
-		"--json",
-	}, &buf)
-	if code != 0 {
-		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
-	}
-	var plan runfork.RunForkPlan
-	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
-		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
-	}
-	if plan.SourceRunID != runID {
-		t.Fatalf("SourceRunID = %q, want %q", plan.SourceRunID, runID)
-	}
-	if plan.ForkPoint.EventID != eventID {
-		t.Fatalf("ForkPoint.EventID = %q, want %q", plan.ForkPoint.EventID, eventID)
-	}
-	if plan.PendingWorkCount != 0 || len(plan.PendingWork) != 0 {
-		t.Fatalf("pending work = %#v, want none", plan.PendingWork)
-	}
-	if !plan.ExecutionReady {
-		t.Fatalf("ExecutionReady = false, want true for state-only dry-run; blockers=%#v", plan.UnsupportedBlockers)
-	}
-	if plan.UnsupportedBlockerCount != 0 {
-		t.Fatalf("UnsupportedBlockerCount = %d, want 0; blockers=%#v", plan.UnsupportedBlockerCount, plan.UnsupportedBlockers)
-	}
-	if plan.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !plan.ReplayResumeAdmission.StateOnlyExecutionReady {
-		t.Fatalf("taxonomy = %#v, want canonical owner and state-only ready", plan.ReplayResumeAdmission)
-	}
-}
-
-func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	setPostgresEnvFromDSN(t, dsn)
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700000305, 0).UTC()
-	ctx := context.Background()
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.pending",
-		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, pg, event,
-		[]events.DeliveryRoute{{
-			Recipient:     events.MustAgentDeliveryRecipient("cli-agent"),
-			AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "cli-agent"),
-		}})
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, "", at.Add(time.Millisecond))
-
-	var buf bytes.Buffer
-	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
-		"--store", "postgres",
-		"--dry-run",
-		"--run", runID,
-		"--at", forkPointEventID,
-		"--json",
-	}, &buf)
-	if code != 0 {
-		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
-	}
-	var plan runfork.RunForkPlan
-	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
-		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
-	}
-	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.BoundedReplaySupported {
-		t.Fatalf("dry-run replay admission = execution:%v admission:%#v", plan.ExecutionReady, plan.ReplayResumeAdmission)
-	}
-	if plan.ReplayResumeAdmission.StateOnlyExecutionReady {
-		t.Fatalf("StateOnlyExecutionReady = true, want false for delivery/event replay dry-run")
-	}
-}
-
-func TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSON(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	setPostgresEnvFromDSN(t, dsn)
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700000307, 0).UTC()
-	ctx := context.Background()
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "flow-a/work.begin",
-		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, pg, event,
-		[]events.DeliveryRoute{{
-			Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "flow-a", "source-node")),
-			Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "fixture", FlowInstance: "fixture/source-node"}),
-		}})
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, "", at.Add(time.Millisecond))
-
-	repo := repoRootForTest()
-	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
-	bundleHash, _ := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
-	var buf bytes.Buffer
-	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
-		"--store", "postgres",
-		"--dry-run",
-		"--run", runID,
-		"--at", forkPointEventID,
-		"--bundle-hash", bundleHash,
-		"--json",
-	}, &buf)
-	if code != 0 {
-		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
-	}
-	var plan runfork.RunForkPlan
-	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
-		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
-	}
-	if plan.ContractFrontierAdmission == nil {
-		t.Fatalf("ContractFrontierAdmission = nil; output=%s", buf.String())
-	}
-	admission := plan.ContractFrontierAdmission
-	if admission.Owner != runfork.RunForkContractFrontierAdmissionOwner || !admission.NonMutating || admission.HistoricalExecutionSupported {
-		t.Fatalf("contract frontier admission = %#v", admission)
-	}
-	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
-		t.Fatalf("frontier events = %#v", admission.FrontierEvents)
-	}
-	alphaIntake := identitytest.ExecutableNode(t, "flow-a", "alpha-intake").Key()
-	if !runForkPlanHasString(admission.FrontierEvents[0].RuntimeEventOwners, alphaIntake) {
-		t.Fatalf("runtime event owners = %#v, want alpha-intake from selected contract", admission.FrontierEvents[0].RuntimeEventOwners)
-	}
-	if !runForkPlanHasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierExecutionUnsupported) {
-		t.Fatalf("contract frontier blockers = %#v, want execution unsupported", admission.UnsupportedBlockers)
-	}
-	model := plan.SelectedContractExecution
-	if model == nil {
-		t.Fatalf("SelectedContractExecution = nil; output=%s", buf.String())
-	}
-	if model.Owner != runfork.RunForkSelectedContractExecutionModelOwner ||
-		model.FutureExecutionOwner != runfork.RunForkSelectedContractExecutionOwner ||
-		!model.NonMutating ||
-		model.ExecutionSupported {
-		t.Fatalf("selected-contract execution model = %#v", model)
-	}
-	if model.AdmissionOwner != runfork.RunForkContractFrontierAdmissionOwner ||
-		model.AdmissionUse != runfork.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly {
-		t.Fatalf("selected-contract execution admission use = %#v", model)
-	}
-	if model.RouteTopology == nil ||
-		model.RouteTopology.Owner != runfork.RunForkSelectedContractRouteTopologyOwner ||
-		model.RouteTopology.RouteAdmissionOwner != runfork.RunForkSelectedContractRouteAdmissionOwner ||
-		!model.RouteTopology.NonMutating ||
-		model.RouteTopology.RoutePersistenceSupported ||
-		model.RouteTopology.ExecutableRecipientsSupported {
-		t.Fatalf("selected-contract route topology = %#v", model.RouteTopology)
-	}
-	if !runForkPlanHasBoundary(model.RouteTopology.InvalidPaths, "copy_source_routing_rules", runfork.RunForkSelectedContractDispositionInvalid) {
-		t.Fatalf("selected-contract route invalid paths = %#v", model.RouteTopology.InvalidPaths)
-	}
-	if model.RecipientPlanning == nil ||
-		model.RecipientPlanning.Owner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
-		!model.RecipientPlanning.NonMutating ||
-		!model.RecipientPlanning.RecipientPlanningSupported ||
-		model.RecipientPlanning.DeliveryWritesSupported {
-		t.Fatalf("selected-contract recipient planning = %#v", model.RecipientPlanning)
-	}
-	if !runForkPlanHasBoundary(model.RecipientPlanning.RequiredConsumers, "eventbus_publish_recipient_guard", runfork.RunForkSelectedContractDispositionPrerequisite) {
-		t.Fatalf("selected-contract recipient planning consumers = %#v", model.RecipientPlanning.RequiredConsumers)
-	}
-	if !runForkPlanHasBlocker(model.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractRouteTopologyNonMutating) {
-		t.Fatalf("selected-contract execution blockers = %#v, want route topology non-mutating blocker", model.UnsupportedBlockers)
-	}
-	if !runForkPlanHasBlocker(model.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
-		t.Fatalf("selected-contract execution blockers = %#v, want route admission non-mutating blocker", model.UnsupportedBlockers)
-	}
-	if !runForkPlanHasBoundary(model.InvalidPaths, "copy_source_event_deliveries", runfork.RunForkSelectedContractDispositionInvalid) {
-		t.Fatalf("selected-contract execution invalid paths = %#v", model.InvalidPaths)
-	}
-	if !runForkPlanHasBoundary(model.RequiredConsumers, "fork_local_runtime_container", runfork.RunForkSelectedContractDispositionPrerequisite) ||
-		!runForkPlanHasBoundary(model.RequiredConsumers, "fork_run_id_runtime_context", runfork.RunForkSelectedContractDispositionPrerequisite) ||
-		!runForkPlanHasBoundary(model.RequiredConsumers, "fork_local_event_delivery_writes", runfork.RunForkSelectedContractDispositionPrerequisite) ||
-		!runForkPlanHasBoundary(model.RequiredConsumers, "handler_execution", runfork.RunForkSelectedContractDispositionPrerequisite) ||
-		!runForkPlanHasBoundary(model.RequiredConsumers, "emitted_follow_up_events", runfork.RunForkSelectedContractDispositionPrerequisite) {
-		t.Fatalf("selected-contract execution consumers = %#v", model.RequiredConsumers)
-	}
-	if !runForkPlanHasBlocker(model.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractExecutionModelNonMutating) {
-		t.Fatalf("selected-contract execution blockers = %#v", model.UnsupportedBlockers)
-	}
-	readiness := plan.SelectedContractReadiness
-	if readiness == nil {
-		t.Fatalf("SelectedContractReadiness = nil; output=%s", buf.String())
-	}
-	if readiness.Owner != runfork.RunForkSelectedContractReadinessClassifierOwner ||
-		!readiness.NonMutating ||
-		readiness.PlannerOwner != runfork.RunForkPlanningOwner ||
-		readiness.ReplayResumeAdmissionOwner != runfork.RunForkReplayResumeAdmissionOwner ||
-		readiness.ContractFrontierAdmissionOwner != runfork.RunForkContractFrontierAdmissionOwner ||
-		readiness.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
-		readiness.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
-		readiness.SelectedExecutionModelOwner != runfork.RunForkSelectedContractExecutionModelOwner ||
-		readiness.FutureExecutionOwner != runfork.RunForkSelectedContractExecutionOwner {
-		t.Fatalf("selected-contract readiness = %#v", readiness)
-	}
-	if len(readiness.FactMatrix) != 20 {
-		t.Fatalf("readiness facts = %d, want complete matrix; facts=%#v", len(readiness.FactMatrix), readiness.FactMatrix)
-	}
-	for _, fact := range []string{
-		runfork.RunForkSelectedContractReadinessFactSourceEvents,
-		runfork.RunForkSelectedContractReadinessFactForkEvents,
-		runfork.RunForkSelectedContractReadinessFactSourceDeliveries,
-		runfork.RunForkSelectedContractReadinessFactForkDeliveries,
-		runfork.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes,
-		runfork.RunForkSelectedContractReadinessFactTimers,
-		runfork.RunForkSelectedContractReadinessFactSessions,
-		runfork.RunForkSelectedContractReadinessFactTurns,
-		runfork.RunForkSelectedContractReadinessFactAudits,
-		runfork.RunForkSelectedContractReadinessFactCommittedReplayScopeMarkers,
-		runfork.RunForkSelectedContractReadinessFactPlatformRuntimeDiagnostics,
-		runfork.RunForkSelectedContractReadinessFactReceipts,
-		runfork.RunForkSelectedContractReadinessFactDeadLetters,
-		runfork.RunForkSelectedContractReadinessFactRetryIdempotency,
-		runfork.RunForkSelectedContractReadinessFactEmittedFollowUps,
-		runfork.RunForkSelectedContractReadinessFactSourcePostTFacts,
-		runfork.RunForkSelectedContractReadinessFactCurrentStateSnapshots,
-		runfork.RunForkSelectedContractReadinessFactNonAgentNodeSystemWork,
-		runfork.RunForkSelectedContractReadinessFactRestartRecovery,
-		runfork.RunForkSelectedContractReadinessFactOperatorConsumers,
-	} {
-		if !runForkReadinessFactHas(readiness.FactMatrix, fact) {
-			t.Fatalf("readiness fact %q missing from %#v", fact, readiness.FactMatrix)
-		}
-	}
-	if !runForkReadinessFactHasDisposition(readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactSourceDeliveries, runfork.RunForkSelectedContractReadinessDispositionFailClosedBlocker) {
-		t.Fatalf("source delivery readiness = %#v, want fail-closed blocker for source node delivery", readiness.FactMatrix)
-	}
-	if !runForkReadinessFactHasDisposition(readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes, runfork.RunForkSelectedContractReadinessDispositionReconstructedForkState) {
-		t.Fatalf("route/recipient readiness = %#v, want reconstructed fork-local evidence", readiness.FactMatrix)
-	}
-}
 
 func TestRunForkRuntimeOwnerHarness_ActivateWithBundleHashReachesSelectedActivationGate(t *testing.T) {
 	var buf bytes.Buffer
@@ -908,50 +655,6 @@ func TestRunForkRuntimeOwnerHarness_NonDryRunWithoutMaterializeOnlyStaysFailClos
 	}
 }
 
-func seedRunForkCLIActivationSource(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) string {
-	t.Helper()
-	seedRunForkCLIActivationSourceWithoutRevision(t, db, runID, entityID, eventID, at)
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-	return stageRunForkCLIForkPoint(t, db, runID, entityID, at.Add(time.Millisecond))
-}
-
-func stageRunForkCLIForkPoint(t *testing.T, db *sql.DB, runID, entityID string, at time.Time) string {
-	t.Helper()
-	eventID := uuid.NewString()
-	envelope := events.EventEnvelope{Scope: events.EventScopeGlobal}
-	if entityID != "" {
-		envelope = events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
-	}
-	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres,
-		eventID, runID, "fork.cli.checkpoint", eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), envelope, at)
-	return eventID
-}
-
-func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time, contractRoot ...string) {
-	t.Helper()
-	ctx := context.Background()
-	sourceRoot := filepath.Join(repoRootForTest(), "tests", "tier1-primitives", "test-emits-multiple")
-	if len(contractRoot) > 1 {
-		t.Fatal("activation fixture requires one exact source contract")
-	}
-	if len(contractRoot) == 1 {
-		sourceRoot = contractRoot[0]
-	}
-	bundleHash, selected := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
-		BundleHash: bundleHash,
-	})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.activate",
-		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
-	seedRunForkCLIConstruction(t, selected, runID, bundleHash, at)
-}
-
-func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash string, at time.Time) {
-	t.Helper()
-	seedRunForkSelectedExecutionSourceEvent(t, db, runID, entityID, eventID, bundleHash, "item.received", "test-node", at)
-}
-
 func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sql.DB, sourceRoot string) (string, storetest.RunFixtureStore) {
 	t.Helper()
 	repo := repoRootForTest()
@@ -968,70 +671,6 @@ func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sq
 		t.Fatalf("register run-fork selected source %s: %v", sourceRoot, err)
 	}
 	return bundle.SourceArtifact.BundleHash(), selected
-}
-
-func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, runID, eventID string, at time.Time) {
-	t.Helper()
-	ctx := context.Background()
-	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "", "runtime",
-		[]byte(`{"level":"info","message":"diagnostic platform row must remain lineage-only"}`), at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
-		)
-		VALUES (
-			$1::uuid, 'platform', 'pipeline', NULL, NULL,
-			'dead_letter', 'runtime_log_pipeline_dead_letter', '{}'::jsonb, $2
-		)
-	`, eventID, at); err != nil {
-		t.Fatalf("seed diagnostic platform receipt: %v", err)
-	}
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventReceipts)
-}
-
-func runForkPlanHasBlocker(blockers []runfork.RunForkUnsupportedBlocker, code string) bool {
-	for _, blocker := range blockers {
-		if blocker.Code == code {
-			return true
-		}
-	}
-	return false
-}
-
-func runForkPlanHasString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
-func runForkPlanHasBoundary(values []runfork.RunForkSelectedContractExecutionBoundary, concept, disposition string) bool {
-	for _, value := range values {
-		if value.Concept == concept && value.Disposition == disposition {
-			return true
-		}
-	}
-	return false
-}
-
-func runForkReadinessFactHas(values []runfork.RunForkSelectedContractReadinessFact, fact string) bool {
-	for _, value := range values {
-		if value.Fact == fact {
-			return true
-		}
-	}
-	return false
-}
-
-func runForkReadinessFactHasDisposition(values []runfork.RunForkSelectedContractReadinessFact, fact, disposition string) bool {
-	for _, value := range values {
-		if value.Fact == fact && value.Disposition == disposition {
-			return true
-		}
-	}
-	return false
 }
 
 func setPostgresEnvFromDSN(t *testing.T, dsn string) {

@@ -32,6 +32,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -49,6 +50,25 @@ func mustAuthorActivityTestSourceArtifactFact() runtimecorrelation.SourceArtifac
 }
 
 var conformanceTestProcessOwners sync.Map
+
+func originalConformanceFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if runtimestartupownership.HasMutationAuthority(ctx) {
+		if _, err := runtimestartupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
 
 func conformanceTestProcessOwner(t testing.TB) *worklifetime.Process {
 	t.Helper()
@@ -219,9 +239,7 @@ func installConformanceRuntimeStartupGeneration(
 	if err != nil {
 		t.Fatalf("compile conformance runtime source set: %v", err)
 	}
-	capability, err := store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "conformance-runtime-test", BootID: uuid.NewString(), RuntimeInstanceID: rt.Options.RuntimeInstanceID,
-	})
+	capability, err := agentfixture.ProcessCapability(t, ctx, store.(agentfixture.Store))
 	if err != nil {
 		t.Fatalf("acquire conformance process capability: %v", err)
 	}
@@ -376,6 +394,19 @@ func registerDifferentTestAuthorActivityCatalog(t *testing.T, target testAuthorA
 
 func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if opts.CarryMutationContext == nil {
+		opts.CarryMutationContext = runtimestartupownership.CarryMutationAuthority
+	}
+	if selected, ok := eventStore.(agentfixture.Store); ok && opts.MutationContext == nil {
+		original := originalConformanceFixtureContext(t, testAuthorActivityContext(context.Background()), selected)
+		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+			if !runtimestartupownership.HasMutationAuthority(ctx) {
+				ctx = runtimestartupownership.CarryMutationAuthority(ctx, original)
+			}
+			_, err := runtimestartupownership.CaptureMutationAuthority(ctx)
+			return ctx, err
+		}
+	}
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}

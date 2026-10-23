@@ -23,11 +23,13 @@ func TestSelectedStoreRunReadHandlersExecuteAcrossBackends(t *testing.T) {
 		open func(*testing.T, context.Context) (RunReadStore, string)
 	}{{name: "sqlite", open: func(t *testing.T, ctx context.Context) (RunReadStore, string) {
 		selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+		ctx = originalAPIFixtureContext(t, ctx, selected)
 		runID := uuid.NewString()
 		storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
 		return selected, runID
 	}}, {name: "postgres", open: func(t *testing.T, ctx context.Context) (RunReadStore, string) {
 		selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		ctx = originalAPIFixtureContext(t, ctx, selected)
 		runID := uuid.NewString()
 		storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
 		return selected, runID
@@ -54,6 +56,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx = originalAPIFixtureContext(t, ctx, selected)
 	agentID := "agent-operator-read"
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()

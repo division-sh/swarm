@@ -113,6 +113,7 @@ func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
 				owner = store
 			}
 
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 10, time.Now().UTC().Truncate(time.Microsecond))
 			claimAt := fixture.createdAt.Add(time.Second)
 			intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "worker-a", BundleHash: fixture.bundleHash, Now: claimAt, Lease: time.Minute})
@@ -206,6 +207,7 @@ func TestFanOutChunkRejectsNonEmitSemanticEvidenceBeforeMutationOnBothStores(t *
 		t.Run(backend, func(t *testing.T) {
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, now)
@@ -275,6 +277,7 @@ func TestFanOutEnumEvidenceSurvivesBothStoresAndReadback(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			first, second, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, first)
 			for _, test := range []struct {
 				name   string
 				value  any
@@ -291,6 +294,7 @@ func TestFanOutEnumEvidenceSurvivesBothStoresAndReadback(t *testing.T) {
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					now := time.Now().UTC().Truncate(time.Microsecond)
+					ctx = originalStoreFixtureContext(t, ctx, first)
 					fixture := seedFanOutOwnerFixture(t, ctx, db, first, postgres, 1, now)
 					_, claim, found, err := first.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 						Owner: "enum-evidence", BundleHash: fixture.bundleHash, Now: now.Add(time.Second), Lease: time.Minute,
@@ -371,9 +375,10 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 				summaryOwner = store.pipelineSQLiteOwner
 			}
 
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, owner, postgres, 4, time.Now().UTC().Truncate(time.Microsecond), artifact)
 			ctx = runtimeauthoractivity.WithScope(
-				testAuthorActivityContextForBundle(fixture.bundleHash),
+				ctx,
 				runtimeauthoractivity.BundleScope(runtimeInstanceID, fixture.bundleHash),
 			)
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(fixture.bundleHash))
@@ -604,6 +609,7 @@ func TestFanOutCardinalityMatrixIsConstantAtTriggerAndExactAfterPumpOnBothStores
 			}
 
 			// Claims use store time, so every ordered fixture must precede admission.
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-8 * time.Minute).Truncate(time.Microsecond)
 			for caseIndex, cardinality := range []int{0, 1, 10, 25, 32, 33, 500, 1000} {
 				t.Run(fmt.Sprintf("n_%d", cardinality), func(t *testing.T) {
@@ -687,6 +693,7 @@ func TestFanOutRepresentativeStoreSizeDoesNotChangeN25OrN500ProgressOnBothStores
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db, owner = store.backend.ConstructionHandle(), store
 			}
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
 			for caseIndex, cardinality := range []int{25, 500} {
 				t.Run(fmt.Sprintf("n_%d", cardinality), func(t *testing.T) {
@@ -780,6 +787,7 @@ func TestFanOutSchemaRejectsImpossibleStateAndDuplicateOutcomeOnBothStores(t *te
 				db, owner = store.backend.ConstructionHandle(), store
 			}
 			base := time.Now().UTC().Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 2, base)
 			invalid := []struct {
 				name string
@@ -846,6 +854,7 @@ func TestFanOutDiagnosticsAndTestQuiescenceUseDurableOwnerOnBothStores(t *testin
 			}
 
 			now := time.Now().UTC().Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 10, now.Add(-time.Second))
 			if err := acknowledgePipelineEventFixture(ctx, owner, fixture.eventID); err != nil {
 				t.Fatalf("settle trigger pipeline obligation: %v", err)
@@ -1005,8 +1014,9 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 			}
 
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			completing := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
-			ctx = testAuthorActivityContextForBundle(completing.bundleHash)
+			ctx = originalStoreFixtureContext(t, testAuthorActivityContextForBundle(completing.bundleHash), owner)
 			if err := materializeCompletedRunEntityForTest(ctx, selected, completing.runID); err != nil {
 				t.Fatalf("seed terminal fan-out entity: %v", err)
 			}
@@ -1078,6 +1088,7 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 			retireRunLifecycleProcess(t, process)
 			assertPortableRunStatus(t, ctx, db, completing.runID, "completed", true)
 
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			stopping := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, base.Add(10*time.Second))
 			_, staleClaim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "stopped-worker", BundleHash: stopping.bundleHash, Now: base.Add(11 * time.Second), Lease: time.Minute,
@@ -1150,6 +1161,7 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 			}
 
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, firstOwner)
 			slow := seedFanOutOwnerFixture(t, ctx, db, firstOwner, postgres, 3, base)
 			fast := seedFanOutOwnerIntent(t, ctx, db, slow, 3, base.Add(time.Second))
 			newer := seedFanOutOwnerIntent(t, ctx, db, slow, 3, base.Add(2*time.Second))
@@ -1217,6 +1229,7 @@ func TestFanOutTwoLevelRestartResumesParentPrefixAndNestedPendingOnBothStores(t 
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			firstOwner, restartedOwner, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, firstOwner)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			parent := seedFanOutOwnerFixture(t, ctx, db, firstOwner, postgres, 9, base)
 			nested := seedFanOutOwnerChildFixture(t, ctx, db, firstOwner, postgres, parent, 3, base.Add(time.Second))
@@ -1268,6 +1281,7 @@ func TestFanOutCancellationPreservesParentPrefixAndCancelsClaimedNestedSuffixOnB
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, secondOwner, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-2 * time.Second).Truncate(time.Microsecond)
 			parent := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 9, base)
 			nested := seedFanOutOwnerChildFixture(t, ctx, db, owner, postgres, parent, 3, base.Add(time.Second))
@@ -1319,6 +1333,7 @@ func TestFanOutRetryableReleaseHalvesWithoutSemanticProgressOnBothStores(t *test
 				db = store.backend.ConstructionHandle()
 				owner = store
 			}
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 10, time.Now().UTC().Truncate(time.Microsecond))
 			claimAt := fixture.createdAt.Add(time.Second)
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "retryable-worker", BundleHash: fixture.bundleHash, Now: claimAt, Lease: time.Minute})
@@ -1368,6 +1383,7 @@ func TestFanOutClaimIsScopedToExactAdmittedBundleOnBothStores(t *testing.T) {
 				owner = store
 			}
 			createdAt := time.Now().UTC().Add(-2 * time.Second).Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			foreign := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 2, createdAt)
 			local := seedFanOutOwnerIntent(t, ctx, db, foreign, 2, createdAt.Add(time.Second))
 			foreignHash := "bundle-v2:sha256:" + strings.Repeat("f", 64)
@@ -1661,6 +1677,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			}
 
 			createdAt := time.Now().UTC().Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, createdAt)
 			fixture.plan.CollectionType = runtimecontracts.CatalogTypeReference{Type: "[EntityItem]", Catalog: runtimecontracts.TypeCatalogDocument{
 				Types: map[string]runtimecontracts.NamedTypeDecl{"EntityItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
@@ -1742,6 +1759,7 @@ func TestFanOutTriggerRejectsUnrelatedRunWithoutProgressOnBothStores(t *testing.
 			}
 
 			createdAt := time.Now().UTC().Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, createdAt)
 			unrelatedRunID := uuid.NewString()
 			requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID, StartedAt: createdAt})
@@ -2062,6 +2080,10 @@ func seedFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, selec
 
 func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *sql.DB, selected any, postgres bool, cardinality int, createdAt time.Time, artifact *sourceartifact.AdmittedSourceArtifact) fanOutOwnerFixture {
 	t.Helper()
+	if runtimeID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); runtimeID == "" {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	}
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	artifactOwner, ok := selected.(interface {
 		EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 	})

@@ -15,6 +15,7 @@ func TestExactAgentDeliveryStatusPreservesPhysicalStateAndOriginalReadBothStores
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			claimed := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 			if err != nil {

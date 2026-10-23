@@ -252,6 +252,16 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	runID := uuid.NewString()
 	ctx := runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(context.Background(), sourceFact), runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
 	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
+	acquire := runtimestartupownership.AcquireRequest{OwnerID: "dynamic-creation-atomicity", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID}
+	process, err := selected.AcquireProcessCapability(ctx, acquire)
+	if err != nil {
+		t.Fatalf("acquire creation process: %v", err)
+	}
+	t.Cleanup(func() { _ = process.Release(context.Background()) })
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundleHash := sourceFact.BundleHash()
 	fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, Artifact: bundle.SourceArtifact}
 	if sqlite {
@@ -282,6 +292,9 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		RuntimeInstanceID:  "11111111-1111-1111-1111-111111111111",
 		ContractBundle:     semanticview.Wrap(bundle),
 		SourceArtifactFact: sourceFact,
+		MutationContext: func(work context.Context) (context.Context, error) {
+			return runtimestartupownership.FreezeMutationAuthority(runtimestartupownership.CarryMutationAuthority(work, ctx))
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -354,12 +367,6 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil || !found {
 		t.Fatalf("load initial flow readiness: found=%v err=%v", found, err)
 	}
-	acquire := runtimestartupownership.AcquireRequest{OwnerID: "dynamic-creation-atomicity", BootID: uuid.NewString(), RuntimeInstanceID: "11111111-1111-1111-1111-111111111111"}
-	process, err := selected.AcquireProcessCapability(ctx, acquire)
-	if err != nil {
-		t.Fatalf("acquire creation process: %v", err)
-	}
-	t.Cleanup(func() { _ = process.Release(context.Background()) })
 	sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
 	if err != nil {
 		t.Fatal(err)

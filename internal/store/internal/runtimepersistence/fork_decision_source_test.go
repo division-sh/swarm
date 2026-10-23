@@ -30,10 +30,10 @@ func Test2376ForkDecisionExecutionSourceBothStores(t *testing.T) {
 					_, db, _ = testutil.StartPostgres(t)
 					selected = admitTestPostgresStore(t, db)
 				}
-				sourceCtx := testAuthorActivityContext()
+				sourceCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 				targetBundle := runForkRootGateBundleForTest(t)
 				targetHash := targetBundle.SourceArtifact.BundleHash()
-				targetCtx := testAuthorActivityContextForBundle(targetHash)
+				targetCtx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(targetHash), selected)
 				registerTestAuthorActivityCatalogForContext(t, selected, targetCtx)
 				now := time.Date(2026, 10, 2, 22, 0, 0, 0, time.UTC)
 				sourceRun, childRun, entity := uuid.NewString(), uuid.NewString(), uuid.NewString()

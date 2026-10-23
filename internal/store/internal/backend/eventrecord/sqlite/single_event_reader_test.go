@@ -2,7 +2,6 @@ package sqlite_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -16,32 +15,84 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	runstore "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
-	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
-func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord.Record) {
+func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord.Record, context.Context, startupownership.ProcessCapability) {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "reader.db"))
+	selected, db, err := construction.OpenSQLiteRuntime(filepath.Join(t.TempDir(), "reader.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := selected.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	b, err := sqlitebackend.New(db)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.Close() })
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "record.valid", "gateway", "task-1", []byte(`{"n":1}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond))
-	requireSingleReaderRun(t, b, event.RunID())
+	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := schemastore.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runPlans []schemastore.SchemaTableDDL
+	for _, plan := range plans {
+		switch plan.TableName {
+		case "runtime_store_metadata", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences",
+			"run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions", "runtime_process_generation", "runtime_generation_grants":
+			runPlans = append(runPlans, plan)
+		}
+	}
+	if len(runPlans) != 10 {
+		t.Fatalf("native reader run plans=%d, want 10", len(runPlans))
+	}
+	runtimeID := uuid.NewString()
+	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
+	if err := selected.BootstrapSchema(ctx, schemastore.SchemaBootstrapRequest{
+		PlatformPlans: runPlans, Origin: schemastore.RuntimeStoreOrigin{SwarmVersion: "native-reader-run-proof", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "single-event-reader-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := process.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selected.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selected.CreateRun(ctx, runlifecycle.CreateRequest{
+		RunID: event.RunID(), Source: sourceartifactfixture.Fact(), Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	columns := []string{}
 	for _, name := range strings.Fields("event_class event_id run_id event_name task_id entity_id flow_instance scope payload payload_schema_bundle_hash payload_schema_flow_id payload_schema_event_key payload_schema_digest payload_schema_class execution_mode produced_by produced_by_type source_event_id routing_source_kind routing_source_authority source_route target_route target_set route_settlement operator_reference_event_id inherited_fan_out_origin run_owner_key") {
 		columns = append(columns, name+" TEXT")
@@ -87,63 +138,11 @@ func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord
 	if err != nil {
 		t.Fatal(err)
 	}
-	return b, record
-}
-
-// The decoder's independent event/lineage corruption tables stay local. Valid
-// run setup uses the original backend, canonical schema, source and journal.
-func requireSingleReaderRun(t *testing.T, backend *sqlitebackend.Backend, runID string) {
-	t.Helper()
-	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "..", "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	plans, err := schemastore.GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var runPlans []schemastore.SchemaTableDDL
-	for _, plan := range plans {
-		switch plan.TableName {
-		case "runtime_store_metadata", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences",
-			"run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
-			runPlans = append(runPlans, plan)
-		}
-	}
-	if len(runPlans) != 8 {
-		t.Fatalf("native reader run plans=%d, want 8", len(runPlans))
-	}
-	schema, err := schemastore.NewSQLiteWithBackend(backend, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
-	if err := schema.BootstrapSchema(ctx, schemastore.SchemaBootstrapRequest{
-		PlatformPlans: runPlans, Origin: schemastore.RuntimeStoreOrigin{SwarmVersion: "native-reader-run-proof", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := artifactstore.NewSQLite(backend, schema.RequireCurrent, time.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := artifact.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
-		t.Fatal(err)
-	}
-	runs, err := runstore.NewSQLite(backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator(), time.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runs.CreateRun(ctx, runlifecycle.CreateRequest{
-		RunID: runID, Source: sourceartifactfixture.Fact(), Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatal(err)
-	}
+	return b, record, ctx, process
 }
 
 func TestSingleEventReaderCanonicalFreshnessAndCorruption(t *testing.T) {
-	b, record := singleEventReaderFixture(t)
-	ctx := context.Background()
+	b, record, ctx, process := singleEventReaderFixture(t)
 	var reader eventsqlite.SingleEventReader
 	compare := func(wantFound, wantError bool) {
 		t.Helper()
@@ -221,6 +220,9 @@ func TestSingleEventReaderCanonicalFreshnessAndCorruption(t *testing.T) {
 		t.Fatalf("canceled read: %v", err)
 	}
 	compare(false, false)
+	if err := process.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if err := b.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -233,8 +235,7 @@ func TestSingleEventReaderAbsentEventStillValidatesLineageSchema(t *testing.T) {
 	for _, table := range []string{"run_fork_selected_contract_executions", "run_fork_delivery_event_replays"} {
 		for _, corruption := range []string{"missing_table", "missing_column"} {
 			t.Run(table+"/"+corruption, func(t *testing.T) {
-				b, record := singleEventReaderFixture(t)
-				ctx := context.Background()
+				b, record, ctx, _ := singleEventReaderFixture(t)
 				var warm eventsqlite.SingleEventReader
 				if _, _, found, err := warm.LoadAdmitted(ctx, b, record.EventID); err != nil || found {
 					t.Fatalf("initial absence found=%v: %v", found, err)

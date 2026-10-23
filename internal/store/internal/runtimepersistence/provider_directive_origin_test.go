@@ -42,11 +42,11 @@ func TestProviderDirectiveOriginCurrentSuccessParity(t *testing.T) {
 			t.Fatalf("current directive settlement=%+v", result)
 		}
 		requireDirectiveOperationState(t, store, operation.OperationID, runtimeagentcontrol.DirectiveOperationExecuting, "")
-		executed, err := store.RecordDirectiveExecuted(testAuthorActivityContext(), operation.OperationID, origin.ExecutionOwnerID, directiveOperationResponseForTest(operation), time.Now().UTC())
+		executed, err := store.RecordDirectiveExecuted(fixture.original, operation.OperationID, origin.ExecutionOwnerID, directiveOperationResponseForTest(operation), time.Now().UTC())
 		if err != nil || executed.State != runtimeagentcontrol.DirectiveOperationExecuted {
 			t.Fatalf("record current directive result: state=%q err=%v", executed.State, err)
 		}
-		finalized, err := store.FinalizeDirectiveSuccess(testAuthorActivityContext(), operation.OperationID, time.Now().UTC(), time.Hour)
+		finalized, err := store.FinalizeDirectiveSuccess(fixture.original, operation.OperationID, time.Now().UTC(), time.Hour)
 		if err != nil || finalized.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 			t.Fatalf("finalize current directive: state=%q err=%v", finalized.State, err)
 		}
@@ -179,7 +179,7 @@ func TestProviderDirectiveOriginRecoveryParity(t *testing.T) {
 				handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", candidate.name)
 				transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
 				if candidate.terminalRun {
-					result, err := store.ApplyActiveRunQuiescence(testAuthorActivityContext(), runtimerunquiescence.Request{
+					result, err := store.ApplyActiveRunQuiescence(fixture.original, runtimerunquiescence.Request{
 						OperationName: "provider_directive_terminal_run_recovery", RequestedAt: time.Now().UTC(),
 						RunIDs: []string{fixture.authority.Target.RunID}, ReasonCode: runtimerunquiescence.ServeAbandonReasonCode,
 						ControlledBy: "provider-directive-test", DeliveryNote: "terminal provider directive recovery proof",
@@ -189,7 +189,7 @@ func TestProviderDirectiveOriginRecoveryParity(t *testing.T) {
 					}
 				}
 				now := time.Now().UTC()
-				summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+				summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
 				if err != nil || summary.OutcomeUncertain != 1 {
 					t.Fatalf("recover directive drain: summary=%+v err=%v", summary, err)
 				}
@@ -197,7 +197,7 @@ func TestProviderDirectiveOriginRecoveryParity(t *testing.T) {
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
 				requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
-				again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+				again, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now.Add(time.Second)))
 				if err != nil || again != (runtimeeffects.RecoverySummary{}) {
 					t.Fatalf("repeat directive recovery: summary=%+v err=%v", again, err)
 				}
@@ -214,7 +214,7 @@ func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixt
 	if fixture.authority.ExecutionMode == runtimeeffects.ExecutionModeMock {
 		posture = executionposture.MockOnly
 	}
-	admission, err := store.AdmitDirectiveExecution(testAuthorActivityContext(), runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
+	admission, err := store.AdmitDirectiveExecution(fixture.original, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
 		OperationID: op.OperationID, OwnerID: uuid.NewString(), Now: time.Now().UTC(), Lease: time.Minute,
 		ExecutionPosture: posture,
 	})
@@ -251,7 +251,7 @@ func reserveProviderDirectiveOperation(t *testing.T, fixture completionSettlemen
 	if err != nil {
 		t.Fatalf("admit directive event: %v", err)
 	}
-	reservation, err := store.ReserveDirectiveOperation(testAuthorActivityContext(), runtimeagentcontrol.ReserveDirectiveOperationRequest{
+	reservation, err := store.ReserveDirectiveOperation(fixture.original, runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		Operation: runtimeagentcontrol.DirectiveOperation{
 			OperationID: operationID, Method: runtimeagentcontrol.DirectiveOperationMethod,
 			ActorTokenID: "provider-directive-test", IdempotencyKey: "provider-directive-" + label + "-" + operationID,
@@ -275,7 +275,7 @@ func providerDirectiveContext(t *testing.T, fixture completionSettlementFixture,
 
 func providerDirectiveBaseContext(t *testing.T, fixture completionSettlementFixture, event events.Event, operation string) context.Context {
 	t.Helper()
-	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), fixture.authority.ExecutionMode)
+	ctx := runtimeeffects.WithExecutionMode(fixture.original, fixture.authority.ExecutionMode)
 	controller := runtimeeffects.NewCompletionController(fixture.store, fixture.store, fixture.store, nil).WithExecutionPosture(executionposture.Live)
 	ctx = runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, fixture.authority), controller)
 	if fixture.authority.Target.Memory.Enabled {

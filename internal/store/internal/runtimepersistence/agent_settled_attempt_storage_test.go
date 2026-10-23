@@ -17,6 +17,7 @@ func TestAgentSettledAttemptStoragePreservesEventRoleSubscriberAndOriginalReadBo
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "attempt.storage", "gateway", "", nil, 0, run, events.EventEnvelope{}, time.Now().UTC())

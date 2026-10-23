@@ -153,7 +153,7 @@ func TestPipelineGracefulClaimReadCancellation(t *testing.T) {
 	for _, phase := range []string{"entry", "parent_fence", "eligibility", "event_hydration", "receipt", "scope", "native_notice"} {
 		t.Run(phase, func(t *testing.T) {
 			fixture, store, probe := openPipelineGracefulFixture(t)
-			base := testAuthorActivityContext()
+			base := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, base, runID)
 			eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
@@ -215,11 +215,11 @@ func TestPipelineGracefulClaimReadCancellation(t *testing.T) {
 
 func TestPipelineGracefulParentFenceDrainsCanceledWait(t *testing.T) {
 	fixture, store, probe := openPipelineGracefulFixture(t)
-	base := testAuthorActivityContext()
+	fixture.db.SetMaxOpenConns(2)
+	base := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, fixture, base, runID)
 	eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
-	fixture.db.SetMaxOpenConns(2)
 	holder, err := fixture.db.Conn(base)
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +309,7 @@ func TestPipelineGracefulWriteOutcome(t *testing.T) {
 			}
 			t.Run(method+"/"+phase, func(t *testing.T) {
 				fixture, store, probe := openPipelineGracefulFixture(t)
-				base := testAuthorActivityContext()
+				base := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, base, runID)
 				eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
@@ -468,7 +468,7 @@ func TestPipelineGracefulCanceledAdmissionBothStores(t *testing.T) {
 				fixture = openPostgresAuthorActivityReceiptFixture(t)
 			}
 			store := fixture.store.(pipelineObligationParityStore)
-			base := testAuthorActivityContext()
+			base := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, base, runID)
 			eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())

@@ -19,8 +19,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -34,7 +36,7 @@ type recoveryActivityCell struct {
 	started     runtimepipeline.ActivityAttemptRecord
 }
 
-func newRecoveryActivityCell(t *testing.T, selected gateRecoveryStoreCase, destination, runtimeID string) recoveryActivityCell {
+func newRecoveryActivityCell(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, destination, runtimeID string) recoveryActivityCell {
 	t.Helper()
 	tool := runtimecontracts.MustToolSchemaEntry(
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
@@ -43,15 +45,20 @@ func newRecoveryActivityCell(t *testing.T, selected gateRecoveryStoreCase, desti
 	)
 	source := activityJournalProofSource(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": tool})
 	runID := uuid.NewString()
-	ctx := requireActivityReplayRun(t, selected, source, runID)
-	fact, present := correlation.SourceArtifactFactFromContext(ctx)
-	if !present {
-		t.Fatal("activity recovery cell has no admitted artifact")
-	}
+	bundle, _ := semanticview.Bundle(source)
+	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
 	ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
-	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
+	ctx = withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(ctx, runID), fact))
+	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
+	})
 	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID,
+		MutationContext: func(work context.Context) (context.Context, error) {
+			work = startupownership.CarryMutationAuthority(work, ctx)
+			_, err := startupownership.CaptureMutationAuthority(work)
+			return work, err
+		},
 	}, "research/entity-1/research.scanner_provider_write.succeeded", "research/entity-1/research.scanner_provider_write.failed")
 	if err != nil {
 		t.Fatal(err)
@@ -79,13 +86,6 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 			t.Cleanup(server.Close)
 			t.Cleanup(finish)
 			originalRequest := startupownership.AcquireRequest{OwnerID: "sibling-activity-original", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
-			cells := []recoveryActivityCell{
-				newRecoveryActivityCell(t, selected, server.URL+"/first", originalRequest.RuntimeInstanceID),
-				newRecoveryActivityCell(t, selected, server.URL+"/sibling", originalRequest.RuntimeInstanceID),
-			}
-			if cells[0].fact.BundleHash() == cells[1].fact.BundleHash() {
-				t.Fatal("sibling recovery witness requires two distinct real artifacts")
-			}
 			store := selected.events.(startupownership.Store)
 			ctx := authoractivity.WithScope(context.Background(), authoractivity.RuntimeScope(originalRequest.RuntimeInstanceID))
 			original, err := store.AcquireProcessCapability(ctx, originalRequest)
@@ -93,6 +93,17 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = original.Release(context.Background()) })
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cells := []recoveryActivityCell{
+				newRecoveryActivityCell(t, ctx, selected, server.URL+"/first", originalRequest.RuntimeInstanceID),
+				newRecoveryActivityCell(t, ctx, selected, server.URL+"/sibling", originalRequest.RuntimeInstanceID),
+			}
+			if cells[0].fact.BundleHash() == cells[1].fact.BundleHash() {
+				t.Fatal("sibling recovery witness requires two distinct real artifacts")
+			}
 			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{
 				{BundleHash: cells[0].fact.BundleHash()}, {BundleHash: cells[1].fact.BundleHash()},
 			}, nil)
@@ -169,12 +180,17 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 				t.Fatal(err)
 			}
 			successorRequest := startupownership.AcquireRequest{OwnerID: "sibling-activity-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+			ctx = authoractivity.WithScope(context.Background(), authoractivity.RuntimeScope(successorRequest.RuntimeInstanceID))
 			successor, err := store.AcquireProcessCapability(ctx, successorRequest)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = successor.Release(context.Background()) })
 			ctx = authoractivity.WithScope(context.Background(), authoractivity.RuntimeScope(successorRequest.RuntimeInstanceID))
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, successor)
+			if err != nil {
+				t.Fatal(err)
+			}
 			before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected.events)
 			if err != nil {
 				t.Fatal(err)
@@ -198,7 +214,7 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 				t.Fatalf("runtime-scoped sibling recovery lost once-only results: count=%d calls=%d err=%v", len(summary.Results), calls.Load(), err)
 			}
 			for _, recovered := range summary.Results {
-				proveRecoveredActivitySibling(t, selected, cells, successorRequest.RuntimeInstanceID, recovered)
+				proveRecoveredActivitySibling(t, selected, cells, successorRequest.RuntimeInstanceID, recovered, successor)
 			}
 			if repeated, err := startupownership.ReconcileDisplacedHTTPActivities(ctx, successor); err != nil || len(repeated.Results) != 0 || calls.Load() != 2 {
 				t.Fatalf("published sibling results retained work or repeated HTTP: %v", err)
@@ -208,7 +224,7 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 	}
 }
 
-func proveRecoveredActivitySibling(t *testing.T, selected gateRecoveryStoreCase, cells []recoveryActivityCell, runtimeID string, recovered runtimepipeline.RecoveredHTTPActivity) {
+func proveRecoveredActivitySibling(t *testing.T, selected gateRecoveryStoreCase, cells []recoveryActivityCell, runtimeID string, recovered runtimepipeline.RecoveredHTTPActivity, successor startupownership.ProcessCapability) {
 	t.Helper()
 	var cell *recoveryActivityCell
 	for i := range cells {
@@ -220,7 +236,7 @@ func proveRecoveredActivitySibling(t *testing.T, selected gateRecoveryStoreCase,
 		recovered.ExecutionBinding != cell.started.ExecutionBinding || recovered.CompletedAt == nil {
 		t.Fatal("recovered sibling differs from its original source/execution")
 	}
-	ctx := authoractivity.WithScope(cell.ctx, authoractivity.BundleScope(runtimeID, cell.fact.BundleHash()))
+	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(runtimeID, cell.fact.BundleHash()))
 	ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
 	page, err := selected.events.(authoractivity.Reader).ListAuthorActivity(ctx, authoractivity.ListOptions{RunID: cell.intent.SourceRunID, Limit: 500})
 	if err != nil {
@@ -241,6 +257,9 @@ func proveRecoveredActivitySibling(t *testing.T, selected gateRecoveryStoreCase,
 	source := cell.coordinator.SemanticSource()
 	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: cell.fact, RuntimeInstanceID: runtimeID,
+		MutationContext: func(work context.Context) (context.Context, error) {
+			return startupownership.WithProcessMutationAuthority(work, successor)
+		},
 	}, recovered.ResultEventType)
 	if err != nil {
 		t.Fatal(err)

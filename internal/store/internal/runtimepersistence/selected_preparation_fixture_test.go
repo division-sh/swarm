@@ -10,24 +10,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
 func selectedPreparationProcessForTest(t testing.TB, store any) startupownership.ProcessCapability {
 	t.Helper()
-	owner, ok := store.(startupownership.Store)
+	owner, ok := store.(agentfixture.Store)
 	if !ok {
 		t.Fatal("selected preparation fixture requires process ownership store")
 	}
-	capability, err := owner.AcquireProcessCapability(context.Background(), testStartupAcquireRequest("selected-preparation-test"))
+	capability, err := agentfixture.ProcessCapability(t, testAuthorActivityContext(), owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := capability.Release(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
 	return capability
 }
 
@@ -36,10 +32,14 @@ func selectedMaterializationProcessForTest(t testing.TB, work *storeTestWorkFixt
 	work.capabilitiesMu.Lock()
 	defer work.capabilitiesMu.Unlock()
 	if capability := work.capabilities[selected]; capability != nil {
-		if err := capability.ProveCurrent(context.Background()); err != nil {
-			t.Fatal(err)
+		select {
+		case <-capability.Done():
+		default:
+			if err := capability.ProveCurrent(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			return capability
 		}
-		return capability
 	}
 	capability := selectedPreparationProcessForTest(t, selected)
 	if work.capabilities == nil {

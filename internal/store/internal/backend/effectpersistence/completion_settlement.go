@@ -40,7 +40,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 		disposition     runtimeeffects.CompletionSettlementDisposition
 		continuation    *runtimeeffects.Attempt
 	}
-	commit := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (settlementOutcome, error) {
+	commit := mutationprotocol.RunPostgresExternalEffectResult(ctx, s.backend, settlement.Settlement, mutationprotocol.Story, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (settlementOutcome, error) {
 		var outcome settlementOutcome
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			attemptSettlement := settlement
@@ -191,7 +191,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 		disposition     runtimeeffects.CompletionSettlementDisposition
 		continuation    *runtimeeffects.Attempt
 	}
-	commit := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite settle completion", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (settlementOutcome, error) {
+	commit := mutationprotocol.RunSQLiteExternalEffectResult(ctx, s.backend, "sqlite settle completion", settlement.Settlement, mutationprotocol.Story, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (settlementOutcome, error) {
 		var outcome settlementOutcome
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			attemptSettlement := settlement

@@ -28,7 +28,9 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -36,6 +38,42 @@ const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-11111111111
 
 var authorActivityTestSourceArtifact = sourceartifactfixture.Artifact()
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
+
+func originalAPIFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	owner, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("native API fixture lacks its original process owner: %T", selected)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
+func testHandlerWithOriginalContext(t *testing.T, opts Options, original context.Context) *Handler {
+	t.Helper()
+	for name, handler := range opts.Handlers {
+		opts.Handlers[name] = func(ctx context.Context, req Request) (any, error) {
+			if startupownership.HasMutationAuthority(ctx) {
+				return handler(ctx, req)
+			}
+			return handler(startupownership.CarryMutationAuthority(ctx, original), req)
+		}
+	}
+	return testHandler(t, opts)
+}
 
 func mustAPITestSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
 	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
@@ -137,6 +175,28 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	if opts.SourceArtifactFact.BundleHash() == "" {
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
+	registrationContext := context.Background()
+	if _, native := eventStore.(agentfixture.Store); native {
+		registrationContext = testAuthorActivityContextForRuntime(registrationContext, opts.RuntimeInstanceID, opts.SourceArtifactFact)
+		if opts.MutationContext == nil {
+			registrationContext = originalAPIFixtureContext(t, registrationContext, eventStore)
+			opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+				if startupownership.HasMutationAuthority(ctx) {
+					return startupownership.FreezeMutationAuthority(ctx)
+				}
+				return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(ctx, registrationContext))
+			}
+		} else {
+			var err error
+			registrationContext, err = opts.MutationContext(registrationContext)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if opts.CarryMutationContext == nil {
+		opts.CarryMutationContext = startupownership.CarryMutationAuthority
+	}
 	if opts.PayloadAdmitter == nil && opts.ContractBundle != nil {
 		opts.PayloadAdmitter = runtimepkg.NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.SourceArtifactFact)
 	}
@@ -183,7 +243,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			register = len(existing) == 0
 		}
 		if register {
-			if _, err := registrar.EnsureSourceArtifactWithData(context.Background(), artifact, catalog); err != nil {
+			if _, err := registrar.EnsureSourceArtifactWithData(registrationContext, artifact, catalog); err != nil {
 				return nil, fmt.Errorf("ensure API test source artifact/data catalog: %w", err)
 			}
 		}
@@ -232,7 +292,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			return nil, err
 		}
 		if err := deliveryStore.ActivateDeliveryAuthority(
-			testAuthorActivityContextForRuntime(context.Background(), opts.RuntimeInstanceID, opts.SourceArtifactFact),
+			registrationContext,
 			authority,
 		); err != nil {
 			return nil, err
@@ -315,11 +375,11 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		if err := bus.SetDeliveryContinuationOwner(coordinator); err != nil {
 			return nil, err
 		}
-		if err := coordinator.Start(testAuthorActivityContextForRuntime(context.Background(), opts.RuntimeInstanceID, opts.SourceArtifactFact)); err != nil {
+		if err := coordinator.Start(registrationContext); err != nil {
 			return nil, err
 		}
 		t.Cleanup(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(registrationContext), 5*time.Second)
 			defer cancel()
 			if err := coordinator.Retire(ctx); err != nil {
 				t.Errorf("retire API test delivery continuation: %v", err)
@@ -341,6 +401,7 @@ func newAPITestFlowConstructor(t *testing.T, selected runtimebus.EventStore, bus
 	}))
 	return manager.NewAgentManagerWithOptions(bus, nil, manager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
+		MutationContext: opts.MutationContext, CarryMutationContext: opts.CarryMutationContext,
 		SemanticSource: opts.ContractBundle, SourceArtifactFact: opts.SourceArtifactFact, WorkflowInstances: coordinator,
 	}), nil
 }

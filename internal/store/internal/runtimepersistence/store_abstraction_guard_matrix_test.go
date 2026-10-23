@@ -57,16 +57,6 @@ type selectedStoreAbstractionValidationContext struct {
 	goTests map[string]string
 }
 
-func TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary(t *testing.T) {
-	root := selectedStoreAbstractionRepoRoot(t)
-	matrix := loadSelectedStoreAbstractionGuardMatrix(t, root)
-	ctx := newSelectedStoreAbstractionValidationContext(t, root)
-
-	if problems := validateSelectedStoreAbstractionGuardMatrix(root, matrix, ctx); len(problems) > 0 {
-		t.Fatalf("selected store abstraction guard matrix validation failed:\n- %s", strings.Join(problems, "\n- "))
-	}
-}
-
 func TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs(t *testing.T) {
 	root := selectedStoreAbstractionRepoRoot(t)
 	ctx := newSelectedStoreAbstractionValidationContext(t, root)

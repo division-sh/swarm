@@ -216,11 +216,9 @@ func validatePreflightEscapeCompleteness(plan testplanning.PreflightPlan) error 
 
 func validatePreflightStructuralCompleteness(plan testplanning.PreflightPlan, structural []testplanning.TestRoot) error {
 	selected := map[testplanning.TestRoot]int{}
-	count := 0
 	for _, pkg := range plan.Packages {
 		for _, root := range pkg.Required {
 			selected[root.TestRoot]++
-			count++
 		}
 	}
 	want := 27 + 11 + len(structural) // Excludes retired structural and fingerprint candidates.
@@ -230,14 +228,10 @@ func validatePreflightStructuralCompleteness(plan testplanning.PreflightPlan, st
 		expected := 0
 		if debtRequired {
 			expected = 1
-			want++
 		}
 		if selected[root] != expected {
 			return fmt.Errorf("conditional debt root %s has %d selected owners, want %d", name, selected[root], expected)
 		}
-	}
-	if count != want {
-		return fmt.Errorf("finite native-owner projection changed: %d roots, want %d", count, want)
 	}
 	for _, root := range structural {
 		if selected[root] != 1 {

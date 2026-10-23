@@ -37,7 +37,7 @@ func terminalizeNeutralEffectRun(t *testing.T, fixture neutralEffectParityFixtur
 		t.Fatalf("selected store %T lacks run quiescence", fixture.store)
 	}
 	runID := fixture.authority.Normal.Identity.RunID
-	quiesced, err := selected.ApplyActiveRunQuiescence(testAuthorActivityContext(), runtimerunquiescence.Request{
+	quiesced, err := selected.ApplyActiveRunQuiescence(fixture.ctx, runtimerunquiescence.Request{
 		OperationName: "effect_terminal_prelaunch_recovery", RequestedAt: time.Now().UTC(),
 		RunIDs: []string{runID}, ReasonCode: runtimerunquiescence.ServeAbandonReasonCode,
 		ControlledBy: "external-effect-recovery-test", DeliveryNote: "terminal prelaunch recovery proof",
@@ -55,7 +55,7 @@ func TestExternalEffectTerminalRunRecoversOnlyPrelaunchNonProvider(t *testing.T)
 		for i, attempt := range attempts {
 			before[i] = readExternalEffectRecoverySnapshot(t, fixture.db, fixture.sqlite, attempt)
 		}
-		summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
+		summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.ctx, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
 		if err != nil || summary.PrelaunchTerminal != 1 || summary.OutcomeUncertain != 0 {
 			t.Fatalf("terminal generic recovery = %#v err=%v, want 1/0", summary, err)
 		}
@@ -72,7 +72,7 @@ func TestExternalEffectTerminalRunRecoversOnlyPrelaunchNonProvider(t *testing.T)
 				t.Fatalf("terminal %s attempt was broadened into recovery: before=%#v after=%#v", attempt.Initial, before[i], after)
 			}
 		}
-		summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(2*time.Minute)))
+		summary, err = fixture.store.ReconcileExternalEffectAttempts(fixture.ctx, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(2*time.Minute)))
 		if err != nil || summary != (runtimeeffects.RecoverySummary{}) {
 			t.Fatalf("repeat terminal recovery = %#v err=%v, want no-op", summary, err)
 		}
@@ -92,7 +92,7 @@ func TestExternalEffectTerminalRunDirectSettlementDoesNotRequestCompletion(t *te
 			t.Fatal("construct settlement failure")
 		}
 		// Recovery settlement has no live execution authority after run quiescence.
-		err := fixture.store.SettleExternalAttempt(testAuthorActivityContext(), runtimeeffects.Settlement{
+		err := fixture.store.SettleExternalAttempt(fixture.ctx, runtimeeffects.Settlement{
 			OperationID: attempt.OperationID, AttemptID: attempt.AttemptID,
 			State: runtimeeffects.StateTerminalFailure, Failure: &failure, Now: time.Now().UTC(),
 		})
@@ -126,7 +126,7 @@ func TestExternalEffectTerminalPrelaunchSelectorParksStillCurrentStandingOwner(t
 
 			Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
 		}
-		standing, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)
+		standing, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate)
 		if err != nil {
 			t.Fatalf("create standing recovery owner: %v", err)
 		}
@@ -135,7 +135,7 @@ func TestExternalEffectTerminalPrelaunchSelectorParksStillCurrentStandingOwner(t
 		setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "suspended", "suspended")
 		attempt := recoveryPostureAttempt{AttemptID: handle.Attempt().AttemptID, RunID: standing.RunID, Initial: runtimeeffects.StateAuthorized}
 		before := readExternalEffectRecoverySnapshot(t, fixture.db, fixture.sqlite, attempt)
-		summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
+		summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.ctx, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
 		if err != nil || summary != (runtimeeffects.RecoverySummary{}) {
 			t.Fatalf("still-current owner recovery = %#v err=%v, want no-op", summary, err)
 		}

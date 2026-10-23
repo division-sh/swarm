@@ -17,9 +17,11 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -1688,6 +1690,14 @@ func TestDurableDataPruneValidatesCurrentAggregateBeforeHeadConflict(t *testing.
 func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
 		ctx := context.Background()
+		process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+		if err != nil {
+			t.Fatal(err)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)

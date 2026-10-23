@@ -107,6 +107,7 @@ func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route st
 	}
 	fact := conformanceSourceArtifactFact(t, f.source)
 	f.ctx = testAuthorActivityContextForBundle(context.Background(), fact)
+	f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
 	f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 	if probe == nil && wrapDelivery == nil && wrapExecutor == nil {
 		f.boot(t)
@@ -125,9 +126,11 @@ func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route st
 				return executor
 			},
 		})
-		if err := f.runtime.manager.Run(managedConformanceExecutionContextForBundle(t, f.ctx, fmt.Sprintf("deployment-resource-%d", time.Now().UnixNano()), f.runtime.sourceArtifactFact)); err != nil {
+
+		if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, f.ctx, fmt.Sprintf("deployment-resource-%d", time.Now().UnixNano()), f.runtime.sourceArtifactFact), f.runtime.bus, f.runtime.manager); err != nil {
 			t.Fatalf("normal deployment resource boot: %v", err)
 		}
+
 	}
 	return f
 }

@@ -24,8 +24,8 @@ func TestRunForkHistoricalContextNestedAgentOwningRunBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, geometry := range []string{"root_agent", "nested_agent"} {
 				t.Run(geometry, func(t *testing.T) {
-					ctx := testAuthorActivityContext()
 					opened := backend.open(t)
+					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), opened.store)
 					runID, foreignID := uuid.NewString(), uuid.NewString()
 					seedAuthorActivityReceiptRun(t, opened, ctx, runID)
 					seedAuthorActivityReceiptRun(t, opened, ctx, foreignID)

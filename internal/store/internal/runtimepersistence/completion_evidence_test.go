@@ -72,7 +72,7 @@ func TestCompletion2270ForkChatReadbackBothStores(t *testing.T) {
 					t.Fatalf("forkchat native target/spend identity: %+v", row)
 				}
 			}
-			result, err := fixture.store.RecordOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatRecordRequest{
+			result, err := fixture.store.RecordOperatorConversationForkChat(fixture.context, runfork.ConversationForkChatRecordRequest{
 				ForkID: fixture.fork.ForkID, Prepared: prepared, Message: "inspect independent model evidence", ActorTokenID: prepared.ActorTokenID,
 				Execution: runfork.ConversationForkChatExecution{AssistantMessage: "completed", ExecutionOwner: prepared.ExecutionOwner, FenceGeneration: prepared.FenceGeneration}, Now: fixture.now.Add(4 * time.Second),
 			})

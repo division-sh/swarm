@@ -23,9 +23,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
@@ -97,6 +99,15 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 		t.Fatal(err)
 	}
 	f.ctx = worklifetime.WithOccurrence(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.owner)
+	f.ctx = correlation.WithRuntimeInstanceID(f.ctx, runtimeID)
+	native, err := agentfixture.ProcessCapability(t, f.ctx, f.store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ctx, err = startupownership.WithProcessMutationAuthority(f.ctx, native)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

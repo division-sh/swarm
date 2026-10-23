@@ -419,12 +419,14 @@ func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcqui
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	if backend == "sqlite" {
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+		ctx = originalStoreFixtureContext(t, ctx, selected)
 		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(selected.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 		return selected, selected.backend.ConstructionHandle(), ctx, runID
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := newTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	return selected, db, ctx, runID
 }
@@ -441,12 +443,14 @@ func openStateOnlyAcquisitionStoreWithSource(t *testing.T, backend string, sourc
 	if backend == "sqlite" {
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		db := selected.backend.ConstructionHandle()
+		ctx = originalStoreFixtureContext(t, ctx, selected)
 		requireRunFixtureForTest(t, ctx, selected, fixture)
 		return selected, db, ctx, runID
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := newTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, fixture)
 	return selected, db, ctx, runID
 }

@@ -47,14 +47,12 @@ type runCompletionOwnerSummaries = storerunlifecycle.RunCompletionOwnerSummaries
 type terminalRunMutation = storerunlifecycle.TerminalRunMutation
 type standaloneRuntimePlatformRunRecord = storerunlifecycle.StandaloneRuntimePlatformRunRecord
 type conversationForkTimeValue = storerunfork.ConversationForkTimeValue
-type externalEffectStorySource = storeeffect.ExternalEffectStorySource
 type completionRecoveryAttempt = storeeffect.CompletionRecoveryAttempt
 type completionRecoveryAuthorityEvidence = storeeffect.CompletionRecoveryAuthorityEvidence
 
 var insertRunForkReplayDelivery = storerunfork.InsertRunForkReplayDelivery
 var deterministicRunForkReplayEventID = storerunfork.DeterministicRunForkReplayEventID
 var decisionCardAuthorActivityIdentity = storedecision.DecisionCardAuthorActivityIdentity
-var recordExternalEffectStory = storeeffect.RecordExternalEffectStory
 var externalEffectStoryDispositions = storeeffect.ExternalEffectStoryDispositionKeys()
 var jsonSemanticallyEqual = storeevent.JSONSemanticallyEqual
 

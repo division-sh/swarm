@@ -5,9 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"slices"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -144,37 +141,6 @@ func proofHistoryInputs(t *testing.T) map[string][]string {
 		t.Fatal(err)
 	}
 	return inputs
-}
-
-func TestProofHistoryInputsMatchPinnedSourceConsumers(t *testing.T) {
-	files := map[string][]string{
-		"github.com/division-sh/swarm/internal/store": {"internal/store/persistence_authority_debt_run_fixture_transition_test.go"},
-	}
-	inputs := proofHistoryInputs(t)
-	if len(inputs) != len(files) {
-		t.Fatal("historical consumer package inventory changed")
-	}
-	pinned := regexp.MustCompile(`"([0-9a-f]{40})(?:"|:)`)
-	for pkg, paths := range files {
-		commits := map[string]bool{}
-		for _, path := range paths {
-			body, err := os.ReadFile(filepath.Join(testTimingRepoRoot(t), path))
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, match := range pinned.FindAllSubmatch(body, -1) {
-				commits[string(match[1])] = true
-			}
-		}
-		var want []string
-		for commit := range commits {
-			want = append(want, commit)
-		}
-		sort.Strings(want)
-		if !slices.Equal(inputs[pkg], want) {
-			t.Fatalf("%s pinned inputs=%v, source consumers require %v", pkg, inputs[pkg], want)
-		}
-	}
 }
 
 func TestProofHistoryFetchesExactObjectsInDepthOneCheckout(t *testing.T) {

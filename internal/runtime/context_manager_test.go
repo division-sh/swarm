@@ -667,12 +667,16 @@ func testBundleContextWithAgentEntries(t *testing.T, bundleHash, eventName strin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	_, grant, err := newRuntimeTestProcessCapability(t, nil, nil, testSourceArtifactFact(t, bundleHash), authorActivityTestRuntimeInstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return BundleContext{
 		SourceArtifactFact: testSourceArtifactFact(t, bundleHash),
 		BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 		Source:             source,
 		WorkOwner:          workOwner,
-		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner},
+		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner, startupGrant: grant},
 	}
 }
 

@@ -157,6 +157,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 					runID := uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 					selected := newScalarTemplateInstanceParityStore(t, backend, ctx)
+					ctx = originalEventBusFixtureContext(t, ctx, selected)
 					storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: sourceFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC().Add(-time.Minute)})
 					entityID := runtimeflowidentity.EntityID("account/one")
 					constructor, err := runtimepipeline.CompileFlowConstructor(source, "account", "account.ready")
@@ -321,6 +322,7 @@ func TestParentLocalReturnPersistsExactNativeReceiverBothStores(t *testing.T) {
 			} else {
 				selected = &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)}
 			}
+			ctx = originalEventBusFixtureContext(t, ctx, selected)
 			at := time.Now().UTC()
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 			for _, flowID := range []string{".", "child", "child/grandchild"} {

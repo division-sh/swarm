@@ -17,6 +17,7 @@ func TestServedDeliveryStatusCountPreservesExactPhysicalPredicatesBothStores(t *
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			first, sibling := seedDeliveryRecoveryClaim(t, fixture, ctx), seedDeliveryRecoveryClaim(t, fixture, ctx)
 			if _, err := fixture.store.SettleSuccess(ctx, first.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatal(err)
@@ -84,6 +85,7 @@ func TestServedDeliveryStatusCountRefusesRawCancelledClosedAndUnavailableOwnersB
 		for _, cut := range []string{"cancelled", "closed", "unavailable"} {
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				first := seedDeliveryRecoveryClaim(t, fixture, ctx)
 				switch cut {
 				case "cancelled":

@@ -121,7 +121,6 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
-	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	bus := &sqliteFlowActivationBus{}
 	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle, configureLifecycle)
 	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -139,6 +138,11 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 	}
 	ctx = correlation.WithRuntimeInstanceID(ctx, evidence.RuntimeInstanceID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(evidence.RuntimeInstanceID, fact.BundleHash()))
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	var committer manager.FlowInstanceActivationCommitter = agentFixtureFlowActivationCommitter{store: selected}
 	if decorate != nil {
 		committer = decorate(committer)
@@ -205,6 +209,11 @@ func (f receiverConfigActivationFixture) newRuntimeEventBus(t *testing.T, option
 	options.ContractBundle = semanticview.Wrap(f.bundle)
 	options.SourceArtifactFact = mustStoreTestSourceArtifactFact(f.bundle.SourceArtifact.BundleHash())
 	options.RuntimeInstanceID = evidence.RuntimeInstanceID
+	if options.MutationContext == nil {
+		options.MutationContext = func(ctx context.Context) (context.Context, error) {
+			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(ctx, f.ctx))
+		}
+	}
 	options.DeliveryAuthority, err = deliverylifecycle.NewNormalExecutionAuthority(options.SourceArtifactFact, evidence.GrantID, evidence.RuntimeGeneration)
 	if err != nil {
 		t.Fatal(err)

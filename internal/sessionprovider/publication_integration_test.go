@@ -34,8 +34,10 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -115,6 +117,15 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	f.ctx = runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
 	f.ctx = runtimeauthoractivity.WithScope(f.ctx, runtimeauthoractivity.BundleScope(runtimeID, source.BundleHash()))
 	f.ctx = worklifetime.WithOccurrence(f.ctx, owner)
+	f.ctx = runtimecorrelation.WithRuntimeInstanceID(f.ctx, runtimeID)
+	capability, err := agentfixture.ProcessCapability(t, f.ctx, f.selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ctx, err = startupownership.WithProcessMutationAuthority(f.ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	digest := sha256.Sum256(f.manifest.SourceBytes())
 	f.identity = providertriggers.PackIdentity{ID: "provider.whatsapp.fixture", Version: "1.0.0",
 		ManifestHash: fmt.Sprintf("sha256:%x", digest), Provenance: "platform"}
@@ -144,8 +155,12 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		t.Fatal(err)
 	}
 	f.bus, err = runtimebus.NewEventBusWithOptions(f.selected, runtimebus.EventBusOptions{
-		ContractBundle:   sessionBusinessSemanticFixture(t),
-		ExecutionPosture: executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: runtimeID,
+		MutationContext: func(ctx context.Context) (context.Context, error) {
+			return startupownership.WithProcessMutationAuthority(ctx, capability)
+		},
+		CarryMutationContext: startupownership.CarryMutationAuthority,
+		ContractBundle:       sessionBusinessSemanticFixture(t),
+		ExecutionPosture:     executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: runtimeID,
 		WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: f.selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
 		Durable: runtimebus.DurableDependencies{ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: f.selected,

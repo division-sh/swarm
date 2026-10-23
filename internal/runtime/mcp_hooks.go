@@ -14,6 +14,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 const (
@@ -37,6 +38,7 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingres
 		return runtimeIngress.RequestResponseIngressPaused(ctx)
 	}
 	return runtimemcp.GatewayHooks{
+		CarryMutationContext:           startupownership.CarryMutationAuthority,
 		RuntimeIngressRequestPaused:    runtimeIngressRequestPaused,
 		RuntimeShutdownAdmissionClosed: runtimeShutdownAdmissionClosed,
 		WithActor:                      runtimeactors.WithActor,

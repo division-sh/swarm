@@ -16,6 +16,7 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	t.Cleanup(cleanup)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
@@ -110,6 +111,7 @@ func TestPostgresStore_RunControlContinueRequiresOperatorPauseOwner(t *testing.T
 	t.Cleanup(cleanup)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	requirePausedRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	if outcome, err := pg.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID}); !errors.Is(err, runtimeruncontrol.ErrNotPaused) || outcome.Acknowledged {

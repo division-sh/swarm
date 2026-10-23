@@ -1379,10 +1379,13 @@ func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, pos
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
 	ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
+	ctx, err := rt.Bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := runtimerunlifecycle.TerminalRequest{
 		RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 	}
-	var err error
 	if postgresStore != nil {
 		_, _, err = postgresStore.MarkTerminalRun(ctx, request)
 	} else if sqliteStore != nil {

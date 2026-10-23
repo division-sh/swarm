@@ -133,6 +133,7 @@ func requireProspectiveMissingHeaderRefusal(t *testing.T, backend servedparity.B
 	runID := uuid.NewString()
 	ctx := worklifetime.WithOccurrence(effects.WithExecutionMode(correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID), executionmode.Live), work)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(work.Identity().RuntimeInstanceID, fact.BundleHash()))
+	ctx = serveFixtureProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
 	flow := semanticview.RootExecutionFlowID(source)
 	constructor, err := pipeline.CompileFlowConstructor(source, flow, "")

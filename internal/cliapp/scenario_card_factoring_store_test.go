@@ -47,10 +47,12 @@ func TestScenarioCardFactoringActualContinuationBothStores(t *testing.T) {
 				var selected factoringMailboxStore
 				if backend == "sqlite" {
 					s := storetest.StartSQLiteRuntimeStore(t)
+					ctx = cliFixtureProcessContext(t, ctx, s)
 					storetest.RequireRun(t, ctx, s, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 					selected = s
 				} else {
 					s := storetest.StartPostgresRuntimeStore(t)
+					ctx = cliFixtureProcessContext(t, ctx, s)
 					storetest.RequireRun(t, ctx, s, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 					selected = s
 				}

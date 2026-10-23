@@ -87,6 +87,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
 			}
 			ctx := context.Background()
+			ctx = serveFixtureProcessContext(t, ctx, selected)
 			sharedEntity, terminalEntity := uuid.NewString(), uuid.NewString()
 			runs := make([]string, len(artifacts))
 			for i, artifact := range artifacts {

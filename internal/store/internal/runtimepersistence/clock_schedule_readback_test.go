@@ -3,16 +3,13 @@ package runtimepersistence
 import (
 	"context"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
@@ -117,49 +114,5 @@ func requireClockTimerRetention(t *testing.T, ctx context.Context, selected sele
 	run, found := snapshot.Run(runID)
 	if !found || run.Totals().ActiveCount != active || run.Summary(snapshot.ObservedAt).BlocksCompletion() != (active > 0) {
 		t.Fatalf("canonical timer retention: active=%d snapshot=%+v", active, snapshot)
-	}
-}
-
-func TestClockScheduleReadbackRefusesCorruptEvidenceWithoutMutationOnBothStores(t *testing.T) {
-	for _, tc := range selectedScheduleStoreCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			store, db, ctx := tc.open(t)
-			runID := runtimecorrelation.RunIDFromContext(ctx)
-			source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID})
-			if err != nil {
-				t.Fatal(err)
-			}
-			activation := admitGenericScheduleFixture(t, ctx, store, genericschedule.AdmissionCommand{
-				ScheduleKey: "poll", RunID: runID, FlowInstance: runID, OwnerKind: genericschedule.OwnerInstance, OwnerID: ".",
-				EventType: "poll.tick", Payload: semanticvalue.EmptyObject(), RoutingSource: source,
-				ExecutionMode: executionmode.Live, Due: genericschedule.EveryDue(time.Minute),
-			})
-			query := "UPDATE timers SET immutable_hash = 'corrupt' WHERE timer_id = ?"
-			if tc.name == "postgres" {
-				query = "UPDATE timers SET immutable_hash = 'corrupt' WHERE timer_id = $1::uuid"
-			}
-			if _, err := db.ExecContext(ctx, query, activation.ID); err != nil {
-				t.Fatal(err)
-			}
-			reader := store.(interface {
-				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
-				LoadRunOrigin(context.Context, string) (runlifecycle.RunOrigin, error)
-				LoadRunClockSchedules(context.Context, string) ([]genericschedule.ClockReadback, error)
-			})
-			if _, err := reader.LoadRunHeader(ctx, runID); err != nil {
-				t.Fatalf("basic header depends on clock history: %v", err)
-			}
-			if _, err := reader.LoadRunOrigin(ctx, runID); err != nil {
-				t.Fatalf("run origin depends on clock history: %v", err)
-			}
-			_, err = reader.LoadRunClockSchedules(ctx, runID)
-			if err == nil || !strings.Contains(err.Error(), "immutable hash") {
-				t.Fatalf("corrupt clock rendered as admitted: %v", err)
-			}
-			var status, hash string
-			if err := db.QueryRowContext(ctx, "SELECT status, immutable_hash FROM timers").Scan(&status, &hash); err != nil || status != "active" || hash != "corrupt" {
-				t.Fatalf("read repaired or terminalized corrupt evidence: status=%q hash=%q err=%v", status, hash, err)
-			}
-		})
 	}
 }

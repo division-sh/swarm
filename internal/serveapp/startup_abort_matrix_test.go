@@ -87,6 +87,10 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	manager, err := runtime.NewRuntimeContextManager(stores.RunBundleAvailability())
 	if err != nil {
 		t.Fatal(err)

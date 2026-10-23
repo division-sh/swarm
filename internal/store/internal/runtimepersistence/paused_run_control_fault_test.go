@@ -22,6 +22,7 @@ func TestPausedRunControlFaultPreservesRunDeliveryRevisionsAndOriginalWriterBoth
 			}
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				run, sibling := uuid.NewString(), uuid.NewString()
 				for _, id := range []string{run, sibling} {
 					event := eventtest.RunCreatingRootIngress(uuid.NewString(), "control.fault", "runtime", "", []byte(`{}`), 0, id, "", events.EventEnvelope{}, time.Now().UTC())

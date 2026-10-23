@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -45,34 +46,36 @@ type activeInputStore interface {
 }
 
 type activeInputFixture struct {
-	ctx        context.Context
-	claimEvent capturedEvent
-	claim      operatorchannel.InboundClaim
-	selected   activeInputStore
-	state      *sessionState
-	sender     *waStore.Device
-	occurrence *clientOccurrence
-	peer       *sdkPeer
-	spool      *captureStore
-	owner      *sessionInputOwner
-	authority  *sessionAuthorityOwner
-	identities *operatorchannel.Service
-	proofs     operatorchannel.ProofStore
-	channel    packs.SatisfactionPlan
-	trigger    providertriggers.InboundAdmissionPlan
-	catalog    *providertriggers.CatalogSnapshot
-	workOwner  *worklifetime.RuntimeOccurrence
-	operation  channelonboarding.Operation
-	activation channelonboarding.ConnectedChannelActivation
-	binding    operatorchannel.Binding
-	standing   pipeline.StandingServiceReconciliation
-	source     captureSource
-	mu         sync.Mutex
-	scope      captureScope
-	handled    chan capturedEvent
-	basePath   string
-	location   string
-	senderJID  types.JID
+	nativeProcess startupownership.ProcessCapability
+	nativeContext context.Context
+	ctx           context.Context
+	claimEvent    capturedEvent
+	claim         operatorchannel.InboundClaim
+	selected      activeInputStore
+	state         *sessionState
+	sender        *waStore.Device
+	occurrence    *clientOccurrence
+	peer          *sdkPeer
+	spool         *captureStore
+	owner         *sessionInputOwner
+	authority     *sessionAuthorityOwner
+	identities    *operatorchannel.Service
+	proofs        operatorchannel.ProofStore
+	channel       packs.SatisfactionPlan
+	trigger       providertriggers.InboundAdmissionPlan
+	catalog       *providertriggers.CatalogSnapshot
+	workOwner     *worklifetime.RuntimeOccurrence
+	operation     channelonboarding.Operation
+	activation    channelonboarding.ConnectedChannelActivation
+	binding       operatorchannel.Binding
+	standing      pipeline.StandingServiceReconciliation
+	source        captureSource
+	mu            sync.Mutex
+	scope         captureScope
+	handled       chan capturedEvent
+	basePath      string
+	location      string
+	senderJID     types.JID
 }
 
 // The peer supplies encrypted network frames; SDK decryption/capture, selected
@@ -174,6 +177,8 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		t.Fatal(err)
 	}
 	f.ctx = worklifetime.WithOccurrence(f.ctx, f.workOwner)
+	f.nativeContext = f.ctx
+	acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
 	initialWorkOwner := f.workOwner
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

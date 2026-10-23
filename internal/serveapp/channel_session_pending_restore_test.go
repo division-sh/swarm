@@ -13,14 +13,14 @@ import (
 	"github.com/google/uuid"
 )
 
-func startPendingSessionFixture(t *testing.T, backend, key string) (*channelonboarding.Service, *serveSessionBootstrap, channelonboarding.Operation, func()) {
+func startPendingSessionFixture(t *testing.T, backend, key string) (*channelonboarding.Service, *serveSessionBootstrap, channelonboarding.Operation, func(), context.Context) {
 	t.Helper()
-	service, sessions := installedSessionBootstrapFixture(t, backend)
+	service, sessions, ctx := installedSessionBootstrapFixture(t, backend)
 	adapter := sessions.(*serveSessionBootstrap)
 	cut, _, release := installSessionConstructionCut(t, adapter)
-	op, cancel := startHeldSessionRequest(t, service, adapter, cut, key)
+	op, cancel := startHeldSessionRequest(t, ctx, service, adapter, cut, key)
 	cancel()
-	return service, adapter, op, release
+	return service, adapter, op, release, ctx
 }
 
 func TestServeSessionStartupAwaitsOriginalPendingPreparationBothStores(t *testing.T) {
@@ -39,8 +39,8 @@ func TestServeSessionStartupAwaitsOriginalPendingPreparationBothStores(t *testin
 
 func requireStartupPendingSession(t *testing.T, backend string, canceled bool) {
 	t.Helper()
-	service, adapter, op, release := startPendingSessionFixture(t, backend, "startup-pending")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	service, adapter, op, release, original := startPendingSessionFixture(t, backend, "startup-pending")
+	ctx, cancel := context.WithTimeout(original, 30*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- service.RestoreSessions(ctx) }()
@@ -93,8 +93,7 @@ func requireStartupPendingSession(t *testing.T, backend string, canceled bool) {
 func TestServeSessionContextRetirementJoinsPendingPreparationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			_, adapter, op, release := startPendingSessionFixture(t, backend, "context-retirement-pending")
-			ctx := context.Background()
+			_, adapter, op, release, ctx := startPendingSessionFixture(t, backend, "context-retirement-pending")
 			store := adapter.store.(channelonboarding.TeardownStore)
 			now := time.Now().UTC()
 			teardown, err := store.ReserveChannelTeardown(ctx, channelonboarding.ReserveTeardownRequest{

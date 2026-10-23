@@ -99,6 +99,7 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				selected = reopen()
+				ctx = activityReplayContext(t, selected, source, intent.SourceRunID)
 				replayBus := newActivityJournalProofBus(t, selected, source)
 				unavailableCredentials := &activityReplayCredentialProbe{}
 				unavailableManaged := &activityReplayManagedCredentialProbe{Store: managedcredentials.NewMemoryStore()}
