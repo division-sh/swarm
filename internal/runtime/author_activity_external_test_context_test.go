@@ -581,6 +581,12 @@ func testAuthorActivityContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if _, present := worklifetime.ProcessFromContext(ctx); !present {
+		ctx = worklifetime.WithProcess(ctx, worklifetime.NewProcess())
+	}
+	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
@@ -653,6 +659,12 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	if opts.WorkOwner == nil {
 		process := worklifetime.NewProcess()
+		if native, ok := store.(agentfixture.Store); ok {
+			ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), opts.RuntimeInstanceID)
+			if _, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, process), native); err != nil {
+				return nil, err
+			}
+		}
 		owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 			RuntimeInstanceID: opts.RuntimeInstanceID,
 			BundleHash:        opts.SourceArtifactFact.BundleHash(),
