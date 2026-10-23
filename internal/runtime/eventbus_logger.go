@@ -86,7 +86,11 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			}
 			return events.PayloadAdmission{}, err
 		}
-		admission, found, err := runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(source, event, bundleHash)
+		admission, found, err := runtimepipeline.ResolveWorkflowStageTimerPayloadAdmission(source, event, bundleHash)
+		if err != nil || found {
+			return admission, err
+		}
+		admission, found, err = runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(source, event, bundleHash)
 		if err != nil || found {
 			return admission, err
 		}

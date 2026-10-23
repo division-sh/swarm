@@ -108,7 +108,7 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
-	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
+	gateway := newCapturedProviderGateway(t, bus, source, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "223456789", "append first block")
@@ -323,7 +323,7 @@ func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackMa
 	source := backend.source
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
 	backend.activityAttempts = pc
-	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
+	gateway := newCapturedProviderGateway(t, bus, source, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "223456792", "missing credential")
 	inboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "223456792")

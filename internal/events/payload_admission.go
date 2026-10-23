@@ -83,6 +83,9 @@ func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class Eve
 	if joinOccurrenceEventType(eventType) && !joinOccurrencePayloadIdentity(p) {
 		return PayloadSchemaBinding{}, fmt.Errorf("join occurrence payload contradicts its persisted producer or class")
 	}
+	if eventType == "platform.stage_timer" && !stageTimerPayloadIdentity(p) {
+		return PayloadSchemaBinding{}, fmt.Errorf("stage timer payload contradicts its persisted producer or class")
+	}
 	binding, err := RestorePayloadSchemaBinding(input)
 	if err != nil {
 		return PayloadSchemaBinding{}, err
@@ -93,6 +96,8 @@ func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class Eve
 			reference = RuntimeLogSchemaReference
 		} else if joinOccurrencePayloadIdentity(p) {
 			reference = JoinOccurrencePayloadReference
+		} else if stageTimerPayloadIdentity(p) {
+			reference = StageTimerPayloadReference
 		}
 		return NewPlatformPayloadSchemaBinding(input, p, reference)
 	}
@@ -144,6 +149,10 @@ func (b PayloadSchemaBinding) Validate() error {
 		} else if joinOccurrencePayloadIdentity(p) {
 			if b.reference != JoinOccurrencePayloadReference {
 				return fmt.Errorf("join occurrence payload requires typed declaration authority")
+			}
+		} else if stageTimerPayloadIdentity(p) {
+			if b.reference != StageTimerPayloadReference {
+				return fmt.Errorf("stage timer payload requires typed declaration authority")
 			}
 		} else if b.reference != "" {
 			return fmt.Errorf("platform payload subtype reference is unsupported")
@@ -212,24 +221,44 @@ func joinOccurrenceEventType(eventType EventType) bool {
 	return eventType == "platform.join_complete" || eventType == "platform.join_timeout"
 }
 
+func stageTimerPayloadIdentity(producer PayloadProducer) bool {
+	return producer.IsPlatform() && producer.class == EventAdmissionRuntimeControl &&
+		producer.producer.Type() == EventProducerPlatform && producer.producer.ID() == "runtime.workflow_timer" && producer.event == "platform.stage_timer"
+}
+
 // JoinOccurrencePayloadDigest binds the occurrence's exact durable identity and
 // bytes. Declaration authority is supplied only by the workflow join resolver.
 func JoinOccurrencePayloadDigest(event Event) (string, error) {
 	if !joinOccurrencePayloadIdentity(PlatformPayloadProducer(event)) {
 		return "", fmt.Errorf("join payload identity requires its platform occurrence producer")
 	}
+	return occurrencePayloadDigest(event, JoinOccurrencePayloadReference)
+}
+
+func StageTimerPayloadDigest(event Event) (string, error) {
+	if !stageTimerPayloadIdentity(PlatformPayloadProducer(event)) {
+		return "", fmt.Errorf("stage timer payload requires its platform timer producer")
+	}
+	return occurrencePayloadDigest(event, StageTimerPayloadReference)
+}
+
+func occurrencePayloadDigest(event Event, reference string) (string, error) {
 	var payload map[string]any
 	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
 		return "", err
 	}
 	source := event.RoutingSource()
-	raw, err := canonicaljson.Bytes(map[string]any{
-		"reference": JoinOccurrencePayloadReference, "run_id": event.RunID(), "task_id": event.TaskID(),
+	identity := map[string]any{
+		"reference": reference, "run_id": event.RunID(), "task_id": event.TaskID(),
 		"event":        string(event.Type()),
 		"routing_kind": string(source.Kind()), "routing_flow": source.Route().FlowID,
 		"routing_instance": source.Route().FlowInstance, "routing_entity": source.Route().EntityID,
 		"payload": payload,
-	})
+	}
+	if reference == StageTimerPayloadReference {
+		identity["event_id"] = event.ID()
+	}
+	raw, err := canonicaljson.Bytes(identity)
 	if err != nil {
 		return "", err
 	}
@@ -248,10 +277,19 @@ func ApplyPayloadAdmission(event Event, admission PayloadAdmission) (Event, erro
 	if joinOccurrenceEventType(event.Type()) && admission.binding.reference != JoinOccurrencePayloadReference {
 		return Event{}, fmt.Errorf("join occurrence payload requires typed declaration admission")
 	}
+	if event.Type() == "platform.stage_timer" && admission.binding.reference != StageTimerPayloadReference {
+		return Event{}, fmt.Errorf("stage timer payload requires typed declaration admission")
+	}
 	if admission.binding.reference == JoinOccurrencePayloadReference {
 		digest, err := JoinOccurrencePayloadDigest(event)
 		if err != nil || digest != admission.binding.schemaDigest || !bytes.Equal(event.Payload(), admission.Payload()) {
 			return Event{}, fmt.Errorf("join payload binding contradicts its occurrence identity")
+		}
+	}
+	if admission.binding.reference == StageTimerPayloadReference {
+		digest, err := StageTimerPayloadDigest(event)
+		if err != nil || digest != admission.binding.schemaDigest || !bytes.Equal(event.Payload(), admission.Payload()) {
+			return Event{}, fmt.Errorf("stage timer payload binding contradicts its occurrence identity")
 		}
 	}
 	if current, ok := event.PayloadAdmission(); ok {

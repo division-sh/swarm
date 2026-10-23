@@ -1960,6 +1960,7 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 		t.Fatal(err)
 	}
 	base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource, RootAdmission: targetRooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)}
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, targetSource), targetRooted.Admission())
 	if _, err := pg.MaterializeRunFork(ctx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
 		t.Fatalf("missing selected fan-out proof error = %v", err)
 	}
