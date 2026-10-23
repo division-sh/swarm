@@ -239,11 +239,7 @@ func commitWorkflowTimerReconciliation(
 		if err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 		}
-		if !command.Plan.RequestCompletionCandidate {
-			return result, nil
-		}
-		_, err = attempt.RequestCompletion(txctx, candidateWriter, command.RunID, nil)
-		return result, err
+		return result, nil
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
