@@ -263,6 +263,7 @@ func seedSQLiteConversationForkSourceWithContext(t *testing.T, ctx context.Conte
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	source.ctx = ctx
+	ctx = storeTestOriginalProcessContext(t, ctx, s)
 	requireRunFixtureForTest(t, ctx, s, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()

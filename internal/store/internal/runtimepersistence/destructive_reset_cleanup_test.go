@@ -544,6 +544,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeSourceArtifactsReject
 	ctx := testAuthorActivityContext()
 	seedDestructiveResetSourceArtifactRows(t, ctx, pg)
 	outOfPlanRun := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: outOfPlanRun, State: storerunlifecycle.StateCompleted,
 		BundleHash: destructiveResetCleanupBundleHashA,
@@ -711,6 +712,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("agent identity fields: %v", err)
 	}
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: preservedRunID, State: storerunlifecycle.StateCompleted,
 	})
@@ -901,6 +903,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	preservedSourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	for _, runID := range []string{cleanupRunID, preservedSourceRunID, preservedForkRunID} {
+		ctx = storeTestOriginalProcessContext(t, ctx, pg)
 		requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 	seededAt := time.Date(2026, 5, 16, 19, 0, 0, 0, time.UTC)
@@ -1236,10 +1239,12 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	sourceartifactfixture.RequireArtifact(t, ctx, pg, destructiveResetCleanupArtifactA)
 	sourceartifactfixture.RequireArtifact(t, ctx, pg, destructiveResetCleanupArtifactB)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 		RunID: runA, Origin: semanticEventRunOriginForTest(t, sourceEvent, "source.event"),
 		BundleHash: destructiveResetCleanupBundleHashA, StartedAt: seededAt.Add(-time.Hour),
 	})
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 		RunID: runB, Origin: semanticEventRunOriginForTest(t, forkEvent, "source.event"),
 		BundleHash: destructiveResetCleanupBundleHashB, StartedAt: seededAt.Add(-time.Hour),

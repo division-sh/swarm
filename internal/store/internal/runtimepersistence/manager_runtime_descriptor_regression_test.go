@@ -121,6 +121,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
+			ctx = storeTestOriginalProcessContext(t, ctx, pg)
 			requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: identityFields.RunID,
 			})

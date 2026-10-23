@@ -1670,6 +1670,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			}
 
 			unrelatedRunID := uuid.NewString()
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID, StartedAt: createdAt})
 			unrelatedEntityID, unrelatedMutationID := seedFanOutEntityRevision(t, ctx, db, postgres, unrelatedRunID, `["hostile-000","hostile-001","hostile-002"]`, createdAt)
 			bindFanOutEntityRevision(t, ctx, db, postgres, fixture, unrelatedRunID, unrelatedEntityID, unrelatedMutationID, createdAt)
@@ -1707,6 +1708,7 @@ func TestFanOutTriggerRejectsUnrelatedRunWithoutProgressOnBothStores(t *testing.
 			createdAt := time.Now().UTC().Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, createdAt)
 			unrelatedRunID := uuid.NewString()
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID, StartedAt: createdAt})
 			unrelatedEventID := uuid.NewString()
 			unrelated := eventtest.ExistingRunRootIngressWithRoutingSource(
@@ -2037,6 +2039,7 @@ func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *s
 	}
 	fixture := fanOutOwnerFixture{runID: uuid.NewString(), eventID: uuid.NewString(), deliveryID: uuid.NewString(), flowPath: ".", semanticPath: `nodes["fan-out-source"].handlers["items.ready"].fan_out`, createdAt: createdAt, artifact: artifact}
 	fixture.plan = fanOutOwnerTypedPlanFixture(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, BundleHash: artifact.BundleHash(), StartedAt: createdAt})
 	if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.runID).Scan(&fixture.bundleHash); err != nil {
 		t.Fatalf("load fan-out fixture bundle hash: %v", err)

@@ -195,7 +195,7 @@ func TestInMemoryRotationReceiptSurvivesReset(t *testing.T) {
 	if _, err := registry.Rotate(ctx, predecessor, metadata); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.ResetAll(ResetMetadata{Source: "test"}); err != nil {
+	if _, err := registry.ResetAll(context.Background(), ResetMetadata{Source: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	current, err := registry.Acquire(ctx, identity, "owner")

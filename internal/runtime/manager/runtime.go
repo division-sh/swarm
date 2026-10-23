@@ -1343,7 +1343,7 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 		return false, fmt.Errorf("session reset owner is required")
 	}
 	{
-		summary, err := am.sessionResetter.ResetAll(sessions.ResetMetadata{
+		summary, err := am.sessionResetter.ResetAll(am.runtimeContext(), sessions.ResetMetadata{
 			Source: source,
 		})
 		if err != nil {
@@ -1355,6 +1355,7 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 					Failure:   failureEnvelope(err, "agent-manager", "reset_sessions"),
 				})
 			}
+			return false, fmt.Errorf("reset durable sessions: %w", err)
 		} else if summary.OrphanedCount() > 0 && am.bus != nil {
 			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 				Level:     "warn",

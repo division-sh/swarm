@@ -137,18 +137,25 @@ func TestLLMSQLiteResetBusyRetryPreservesExactSummary(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "reset.db")
 			store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 			s := exactFactStore{db: store.backend.ConstructionHandle(), selected: store}
+			if phase == "commit" {
+				var mode string
+				if err := s.db.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+					t.Fatalf("rollback journal=%s err=%v", mode, err)
+				}
+			}
 			f := newLLMResetFixture(t, s)
 			terminal := llmTerminalSnapshot(t, s, f.terminal)
 			var submitted []runlifecycle.Candidate
 			registerLLMResetSink(t, s, f.runs[0], &submitted)
-			blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 0)
+			blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 1)
 			owner, calls := newLLMRetryOwner(t, store, blocker, phase, 2, nil)
 			probe, restore, err := store.backend.InstallTransactionProbeForTest(transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer restore()
-			summary, err := owner.ResetAll(sessions.ResetMetadata{Source: "exact-reset"})
+			ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), store)
+			summary, err := owner.ResetAll(ctx, sessions.ResetMetadata{Source: "exact-reset"})
 			if err != nil {
 				t.Fatal(err)
 			}

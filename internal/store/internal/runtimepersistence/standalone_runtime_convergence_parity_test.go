@@ -58,6 +58,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 						agentIdentity := runtimebustest.IdentityForRun(t, event.RunID(), agentID, "")
 						var delivery <-chan *runtimebus.LocalDelivery
 						if routed {
+							ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 							requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
 								Origin: semanticEventRunOriginForTest(t, event.ID(), string(event.Type())),
 								RunID:  event.RunID(), StartedAt: event.CreatedAt(),
