@@ -178,7 +178,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedPolicyIsFingerprintBound(t *tes
 		}
 		debtWriteModuleSource(t, copy, path, string(data))
 	}
-	if digest, err := debtCollectorDigest(copy); err != nil || digest != debtQ1ReopenCollectorTo {
+	if digest, err := debtCollectorDigest(copy); err != nil || digest != debtDeploymentRegistrationCollectorTo {
 		t.Fatalf("copied reviewed policy=%s %v", digest, err)
 	}
 	const policy = "internal/store/persistence_authority_debt_excluded_fixture_test.go"
@@ -187,7 +187,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedPolicyIsFingerprintBound(t *tes
 		t.Fatal(err)
 	}
 	debtWriteModuleSource(t, copy, policy, strings.Replace(string(data), "!= 1", "< 1", 1))
-	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtQ1ReopenCollectorTo {
+	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtDeploymentRegistrationCollectorTo {
 		t.Fatalf("increased occurrence permission was not fingerprinted: %s %v", digest, err)
 	}
 	if err := os.Remove(filepath.Join(copy, policy)); err != nil {
