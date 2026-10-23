@@ -63,6 +63,21 @@ func (pc *PipelineCoordinator) ServeFanOutCandidate(ctx context.Context, owner F
 		return FanOutTurnResult{}, err
 	}
 	disposition, err := pc.claimAndServeFanOutTurn(ctx, owner, &candidate, time.Now().UTC())
+	if disposition == fanOutTurnCommitted || disposition == fanOutTurnExhausted {
+		activations, advanceErr := owner.AdvanceFanOutBarriers(ctx, candidate)
+		err = errors.Join(err, advanceErr)
+		for _, activation := range activations {
+			if validationErr := activation.Validate(); validationErr != nil {
+				err = errors.Join(err, validationErr)
+				continue
+			}
+			if pc.genericSchedules == nil {
+				err = errors.Join(err, errors.New("committed fan-out barrier requires the generic schedule owner"))
+				continue
+			}
+			err = errors.Join(err, pc.reconcileCommittedGenericSchedule(ctx, activation.ID()))
+		}
+	}
 	return FanOutTurnResult{Refill: disposition.refill()}, err
 }
 
