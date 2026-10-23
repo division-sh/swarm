@@ -268,6 +268,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 		{"row_receipts", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
 		{"row_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, true},
 		{"row_delivery_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
+		{"row_delivery_pending", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
@@ -326,6 +327,9 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 							delivery["status"] = "delivered"
 							delete(delivery, "failure")
 							delete(delivery, "reason_code")
+						}
+						if tc.name == "row_delivery_pending" && eventID == "00000000-0000-4000-8000-000000000003" {
+							delivery["status"], delivery["terminal"] = "in_progress", false
 						}
 						return result
 					case "run.fan_out.list":
@@ -392,6 +396,9 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 			}
 			if tc.name == "row_delivery_refusal" && !strings.Contains(stdout.String(), "review/instance-1") {
 				t.Fatalf("missing refused instance: %s", stdout.String())
+			}
+			if tc.name == "row_delivery_pending" && strings.Contains(stdout.String(), "row 1") {
+				t.Fatalf("pending delivery was assigned a final outcome: %s", stdout.String())
 			}
 			if strings.Contains(stdout.String(), "created") || tc.name == "row_receipts" && strings.Contains(stdout.String(), "review/instance-1") {
 				t.Fatalf("readout claimed creation or named an accepted instance: %s", stdout.String())
@@ -908,6 +915,8 @@ func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
 				return runCommandHealthResult()
 			case "run.start":
 				return runStartCommandResult("922697b4-366d-515c-976b-cd77b98f7ecd", "running")
+			case "run.diagnose":
+				return runCommandReadResult(req.Method, validDiagnosticRunHeader("922697b4-366d-515c-976b-cd77b98f7ecd"))
 			case "run.stop":
 				if got := req.Params["run_id"]; got != "922697b4-366d-515c-976b-cd77b98f7ecd" {
 					t.Fatalf("run.stop run_id = %#v", got)
@@ -934,7 +943,11 @@ func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
 	if code != 130 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.stop"})
+	wantMethods := []string{"health.check", "run.start", "run.stop"}
+	if len(*calls) == 4 {
+		wantMethods = []string{"health.check", "run.start", "run.diagnose", "run.stop"}
+	}
+	assertRunCommandMethods(t, calls, wantMethods)
 	if !strings.Contains(stderr.String(), "interrupted; requested run.stop") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
