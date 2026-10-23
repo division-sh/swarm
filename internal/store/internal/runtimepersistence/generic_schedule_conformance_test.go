@@ -90,6 +90,7 @@ func TestPostgresGenericScheduleEmptyTerminalPreparationTransfersExactClaim(t *t
 			t.Cleanup(func() { _ = selected.ReleaseGenericScheduleClaims(context.Background()) })
 			runID := uuid.NewString()
 			ctx := selectedScheduleTestContext(t, runID)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 
 			scheduler := &selectedStoreLifecycleScheduler{}
@@ -162,6 +163,7 @@ func TestPostgresGenericScheduleOccurrenceUsesDatabaseClockAcrossPrepareAndCommi
 	selected := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
 	ctx := selectedScheduleTestContext(t, runID)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	selected.genericSchedulePostgresOwner.SetNowFnForTest(func() time.Time {
 		return time.Now().UTC().Add(24 * time.Hour)

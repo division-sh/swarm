@@ -22,6 +22,7 @@ func TestCommittedPipelineScopeObservationUsesOriginalOwnerBothStores(t *testing
 			for _, expected := range []runtimepipelineobligation.CommittedScope{runtimepipelineobligation.ScopeDirect, runtimepipelineobligation.ScopeSubscribed} {
 				t.Run(string(expected), func(t *testing.T) {
 					runID, at := uuid.NewString(), time.Now().UTC()
+					ctx = storeTestOriginalProcessContext(t, ctx, selected)
 					requireRunningRunForTest(t, ctx, selected, runID, at.Add(-time.Second))
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), "fixture.scope", "api.v1", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
 					var agents []string

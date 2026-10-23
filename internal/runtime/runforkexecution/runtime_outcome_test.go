@@ -174,10 +174,10 @@ func selectedRuntimeOutcomeRetainedContext(t *testing.T, owner SelectedContractE
 	prepared.bindMu.Lock()
 	runtime := prepared.retainedRuntime
 	prepared.bindMu.Unlock()
-	if runtime == nil || runtime.completionDiagnostics == nil {
+	if runtime == nil || runtime.diagnostics == nil {
 		t.Fatal("acknowledged activation lost its runtime diagnostic owner")
 	}
-	return retained, runtime.completionDiagnostics
+	return retained, runtime.diagnostics
 }
 
 type selectedMaterializationCommitTestError struct {

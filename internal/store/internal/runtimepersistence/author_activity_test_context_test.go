@@ -85,7 +85,9 @@ func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 
 func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
-	return worklifetime.WithOccurrence(ctx, storeTestWorkOwner(t))
+	owner := storeTestWorkOwner(t)
+	value, _ := storeTestWorkFixtures.Load(t)
+	return worklifetime.WithProcess(worklifetime.WithOccurrence(ctx, owner), value.(*storeTestWorkFixture).process)
 }
 
 func storeTestOriginalProcessContext(t *testing.T, ctx context.Context, selected any) context.Context {

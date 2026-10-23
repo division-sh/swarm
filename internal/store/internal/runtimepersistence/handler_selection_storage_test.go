@@ -25,7 +25,7 @@ func TestHandlerSelectionStoragePreservesExactColumnsAndScopesBothStores(t *test
 			var exact events.Event
 			want := make(map[string]HandlerSelectionStorageEvidence)
 			for _, run := range []string{runID, otherRun} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 				event := eventtest.PersistedProjection(uuid.NewString(), "selection.storage", "gateway", "", []byte(`{}`), 0, run, "", events.EventEnvelope{}, time.Now().UTC())
 				if run == runID {
 					exact = event

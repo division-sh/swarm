@@ -212,7 +212,7 @@ func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
 				fixture, _ := openPipelineCrashStore(t, backend, location)
 				ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				eventID := commitPipelineParityEvent(t, ctx, fixture.store.(pipelineObligationParityStore), runID, time.Now().UTC())
 				work, _ := storeTestWorkFixtures.Load(t)
 				if err := selectedMaterializationProcessForTest(t, work.(*storeTestWorkFixture), fixture.store).Release(context.Background()); err != nil {

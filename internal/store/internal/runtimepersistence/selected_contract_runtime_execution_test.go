@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -1389,6 +1390,7 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	forkRunID := uuid.NewString()
 	dependentRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, sourceRunID, now)
 	requirePausedRunForTest(t, ctx, store, forkRunID, now)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)

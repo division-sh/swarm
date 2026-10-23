@@ -28,7 +28,7 @@ func TestPipelineSettlementRetirementCleanupStillHandsOffCandidateBothStores(t *
 			}
 			ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 			owner := selected.PipelineObligations()
 			work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)

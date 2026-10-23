@@ -66,6 +66,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			}
 			ctx := testAuthorActivityContext()
 			identity := testAgentIdentity(t, "removed-source-agent", "")
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 			record := runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -162,6 +163,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					db = selected.backend.ConstructionHandle()
 				}
 				identity := testAgentIdentity(t, "census-drift-agent", "")
+				ctx = storeTestOriginalProcessContext(t, ctx, store)
 				requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 				seedTestAgentRow(t, ctx, db, postgres, identity, "active")
 				fields := testAgentIdentityStorageFields(t, identity)
@@ -283,7 +285,9 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
 	runID := uuid.NewString()
 	readinessIdentity := mustTestAgentIdentityForRun(runID, "process-readiness-agent", "readiness/instance-1")
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, staticIdentity.RunID, now)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, runID, now)
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -838,6 +842,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "source-set-rebind-agent"
 	identity := testAgentIdentity(t, agentID, "global")
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, identity.RunID, now)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{

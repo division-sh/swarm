@@ -19,7 +19,7 @@ func TestReplyReturnStoragePreservesHistoryDuplicateAndEventRunScopesBothStores(
 			eventID, otherEvent := uuid.NewString(), uuid.NewString()
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			for _, scope := range [][2]string{{runID, eventID}, {otherRun, otherEvent}} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, scope[0])
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, scope[0])
 				if err := commitSemanticParentFixture(ctx, fixture.store, scope[0], scope[1], now); err != nil {
 					t.Fatal(err)
 				}

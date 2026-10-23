@@ -84,7 +84,7 @@ func TestMutationProtocolOrdinaryEventWriterMatchesFullHistoricalCaptureBothStor
 					fixture := backend.open(t)
 					ctx := testAuthorActivityContext()
 					runID, eventID := uuid.NewString(), uuid.NewString()
-					seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+					ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 					publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, fixture.dialect == "postgres", runID)
 					baseline := snapshotMutationProtocolHistory(t, ctx, fixture.db, runID)
 

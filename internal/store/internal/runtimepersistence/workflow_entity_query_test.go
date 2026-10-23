@@ -209,6 +209,7 @@ func openWorkflowEntityQueryBackend(t *testing.T, backend string) (workflowEntit
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		selected := admitTestPostgresStore(t, db)
+		ctx = storeTestOriginalProcessContext(t, ctx, selected)
 		requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 		return selected, db, ctx, runID
 	default:

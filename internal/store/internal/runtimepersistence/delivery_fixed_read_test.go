@@ -29,7 +29,7 @@ func deliveryFixedReadFixture(t *testing.T) (*SQLiteRuntimeStore, *sql.DB, strin
 	db.SetMaxIdleConns(1)
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	states := []runtimedelivery.State{runtimedelivery.StateQueued, runtimedelivery.StateLaunching, runtimedelivery.StateRetrying, runtimedelivery.StateDelivered, runtimedelivery.StateExhausted}
 	routes := make([]events.DeliveryRoute, len(states))
 	for i := range routes {

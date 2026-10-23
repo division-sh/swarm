@@ -39,8 +39,9 @@ func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string, retained
 	if _, err := db.Exec(`PRAGMA busy_timeout=1`); err != nil {
 		t.Fatal(err)
 	}
+	attached := phase == "callback" || path == ""
 	lockPath := path
-	if phase == "callback" {
+	if attached {
 		lockPath = filepath.Join(t.TempDir(), "lock.db")
 	} else {
 		var mode string
@@ -53,7 +54,7 @@ func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string, retained
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = other.Close() })
-	if phase == "callback" {
+	if attached {
 		if _, err := other.Exec(`CREATE TABLE retry_lock (id INTEGER PRIMARY KEY,value INTEGER NOT NULL)`); err != nil {
 			t.Fatal(err)
 		}
@@ -75,7 +76,11 @@ func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string, retained
 		}
 	} else {
 		var count int
-		if err := blocker.QueryRow(`SELECT COUNT(*) FROM agent_sessions`).Scan(&count); err != nil {
+		query := `SELECT COUNT(*) FROM agent_sessions`
+		if attached {
+			query = `SELECT COUNT(*) FROM retry_lock`
+		}
+		if err := blocker.QueryRow(query).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -109,6 +114,10 @@ func newLLMRetryOwner(t *testing.T, store *SQLiteRuntimeStore, blocker *sql.Tx, 
 			}
 			return result, err
 		}
+		if phase == "commit" && calls == perAttempt {
+			_, err := tx.ExecContext(ctx, `UPDATE llm_retry_probe.retry_lock SET value=2 WHERE id=1`)
+			return result, err
+		}
 		return result, nil
 	}}
 	owner, err := llmpersistence.NewSQLite(store.backend, store.requireCurrentSchema, probe, store.runLifecycleCandidates, store.now)
@@ -137,17 +146,11 @@ func TestLLMSQLiteResetBusyRetryPreservesExactSummary(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "reset.db")
 			store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 			s := exactFactStore{db: store.backend.ConstructionHandle(), selected: store}
-			if phase == "commit" {
-				var mode string
-				if err := s.db.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
-					t.Fatalf("rollback journal=%s err=%v", mode, err)
-				}
-			}
 			f := newLLMResetFixture(t, s)
 			terminal := llmTerminalSnapshot(t, s, f.terminal)
 			var submitted []runlifecycle.Candidate
 			registerLLMResetSink(t, s, f.runs[0], &submitted)
-			blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 1)
+			blocker := llmSQLiteBusyBlocker(t, s.db, "", phase, 1)
 			owner, calls := newLLMRetryOwner(t, store, blocker, phase, 2, nil)
 			probe, restore, err := store.backend.InstallTransactionProbeForTest(transactiontest.Options{})
 			if err != nil {

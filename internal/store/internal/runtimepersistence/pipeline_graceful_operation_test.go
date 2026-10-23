@@ -155,7 +155,7 @@ func TestPipelineGracefulClaimReadCancellation(t *testing.T) {
 			fixture, store, probe := openPipelineGracefulFixture(t)
 			base := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, base, runID)
+			base = seedAuthorActivityReceiptRun(t, fixture, base, runID)
 			eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
 			if phase == "native_notice" {
 				for _, statement := range []string{
@@ -217,7 +217,7 @@ func TestPipelineGracefulParentFenceDrainsCanceledWait(t *testing.T) {
 	fixture, store, probe := openPipelineGracefulFixture(t)
 	base := testAuthorActivityContext()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, base, runID)
+	base = seedAuthorActivityReceiptRun(t, fixture, base, runID)
 	eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
 	fixture.db.SetMaxOpenConns(2)
 	holder, err := fixture.db.Conn(base)
@@ -311,7 +311,7 @@ func TestPipelineGracefulWriteOutcome(t *testing.T) {
 				fixture, store, probe := openPipelineGracefulFixture(t)
 				base := testAuthorActivityContext()
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, base, runID)
+				base = seedAuthorActivityReceiptRun(t, fixture, base, runID)
 				eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
 				purpose := obligation.PurposeRecovery
 				if method == "mark_decision" {
@@ -470,7 +470,7 @@ func TestPipelineGracefulCanceledAdmissionBothStores(t *testing.T) {
 			store := fixture.store.(pipelineObligationParityStore)
 			base := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, base, runID)
+			base = seedAuthorActivityReceiptRun(t, fixture, base, runID)
 			eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
 			ctx, cancel := context.WithCancel(base)
 			cancel()
