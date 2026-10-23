@@ -40,6 +40,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -297,11 +298,11 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	for _, reader := range originReaders {
 		opts.Durable.RunOrigins = reader(selected)
 	}
-	bus, err := newScopedTestEventBus(selected, opts)
+	bus, err := newNativeScopedTestEventBus(t, selected, opts)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx := nativeBusProcessContext(t, testAuthorActivityContextForSource(context.Background(), source), selected)
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
@@ -499,6 +500,7 @@ func seedCompleteEventDispatchRunWithOrigin(
 	origin runtimerunlifecycle.RunOrigin,
 ) {
 	t.Helper()
+	ctx = nativeBusProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: origin, RunID: runID, StartedAt: startedAt})
 }
 
@@ -611,7 +613,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	}
 	workflow := newEventBusWorkflowCoordinator(f.bus, f.store, newFixtureWorkflowModule(t, bundle))
 	process := worklifetime.NewProcess()
-	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+	managerCtx := nativeBusProcessContext(t, worklifetime.WithProcess(f.ctx, process), f.store)
+	owner, err := process.NewRuntime(managerCtx, worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleHash:        fact.BundleHash(),
 	})
@@ -621,6 +624,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	manager := runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &completeEventRecordingAgent{id: cfg.ID, agentType: cfg.Type, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
 	}, runtimemanager.AgentManagerOptions{
+		BaseContext:        managerCtx,
 		SourceArtifactFact: fact,
 		SemanticSource:     f.source,
 		WorkflowInstances:  workflow,
@@ -651,9 +655,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	if err != nil {
 		t.Fatalf("construct complete-event source set: %v", err)
 	}
-	capability, err := f.store.AcquireProcessCapability(f.ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "complete-event-dispatch-fixture", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
+	capability, err := agentfixture.ProcessCapability(t, f.ctx, f.store)
 	if err != nil {
 		t.Fatalf("acquire complete-event process capability: %v", err)
 	}

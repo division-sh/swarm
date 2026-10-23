@@ -436,6 +436,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	agentRuntimeStopped := false
 	var continuations *runtimedeliverycontinuation.Coordinator
 	defer func() {
+		continuations.BeginRetirement()
 		if agentRuntime != nil && !agentRuntimeStopped {
 			finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
 		}
@@ -612,6 +613,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		default:
 		}
 		stopHeartbeatWork()
+		continuations.BeginRetirement()
 		if err := agentRuntime.Shutdown(); err != nil {
 			return out, fmt.Errorf("%s stop selected-fork runtime after quiescence: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
 		}

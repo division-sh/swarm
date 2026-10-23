@@ -111,7 +111,7 @@ func TestRunControlPublicationFixtureUsesExactSourceAndNativeIndexBothStores(t *
 			}
 			source := runControlPublicationSource(t)
 			ctx := testAuthorActivityContextForSource(context.Background(), source)
-			bus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -155,14 +155,8 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						if err := capability.Release(context.Background()); err != nil {
 							t.Fatal(err)
 						}
-						freshProcess := worklifetime.NewProcess()
-						t.Cleanup(func() {
-							freshProcess.Retire()
-							if _, err := freshProcess.Join(context.Background()); err != nil {
-								t.Error(err)
-							}
-						})
-						capability = selectedContractTestProcessCapability(t, ctx, authorityStore)
+						var freshProcess *worklifetime.Process
+						ctx, freshProcess, capability = successorRunForkProcessForTest(t, ctx, authorityStore)
 						owner = newOwner()
 						if err := owner.BindSelectedProcess(ctx, freshProcess, capability); err != nil {
 							t.Fatal(err)
