@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
-	"github.com/google/uuid"
 )
 
 // These projections target the same intent table as handler fan-out after its
@@ -33,7 +32,7 @@ const deploymentFanOutIntentColumns = `
 		AND i.source_mutation_id IS NULL THEN 1 ELSE 0 END`
 
 func deploymentFeedID(feed durabledata.DeploymentFeed) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.deployment-feed.v1\x00"+feed.RunID+"\x00"+feed.Declaration.Key())).String()
+	return feed.PublicationID()
 }
 
 func (s *PipelinePostgresOwner) CreateDeploymentFeedTx(ctx context.Context, tx *sql.Tx, feed durabledata.DeploymentFeed) error {

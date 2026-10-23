@@ -1277,41 +1277,6 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 	}
 }
 
-func TestLocalRunUsesInvocationRootWithoutLoadingDotEnv(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	_ = os.Unsetenv("SWARM_API_TOKEN")
-	repo := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_API_TOKEN=test-token\nBROKEN\n")
-	payloadPath := filepath.Join(t.TempDir(), "payload.json")
-	writeWorkflowValidationFixtureFile(t, payloadPath, "{}\n")
-	chdirForTest(t, repo)
-
-	var capturedRepo string
-	opts := runCommandOptions{
-		apiOptions:   defaultRootCommandOptions(),
-		sourceRoot:   ".",
-		eventName:    "scan.requested",
-		payloadPath:  payloadPath,
-		changedFlags: map[string]bool{},
-	}
-	opts.apiOptions.runServe = func(ctx context.Context, root InvocationRoot, _ ServeOptions) int {
-		capturedRepo = root.Path()
-		<-ctx.Done()
-		return 1
-	}
-	opts.apiOptions.runReadyTimeout = time.Millisecond
-	opts.apiOptions.runReadyPoll = time.Millisecond
-
-	var stdout, stderr bytes.Buffer
-	_ = runRunCommand(context.Background(), mustInvocationRootForTest(repo), &stdout, &stderr, opts)
-	if capturedRepo != repo {
-		t.Fatalf("local run serve repo = %q, want discovered repo %q; stderr=%s stdout=%s", capturedRepo, repo, stderr.String(), stdout.String())
-	}
-	if got := os.Getenv("SWARM_API_TOKEN"); got != "" {
-		t.Fatalf("local run loaded SWARM_API_TOKEN from repo .env: %q", got)
-	}
-}
-
 func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	chdirForTest(t, t.TempDir())

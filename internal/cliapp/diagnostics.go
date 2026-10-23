@@ -407,11 +407,8 @@ func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts di
 			return []string{fmt.Sprintf("%s %s", result.Run.RunID, result.Run.Status)}, nil
 		})
 	}
-	var result DiagnosticRunDiagnosisResult
-	if err := client.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &result); err != nil {
-		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
-	}
-	if err := validateDiagnosticRunDiagnosis(result); err != nil {
+	result, err := readRunDiagnosis(ctx, client, runID)
+	if err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
@@ -419,6 +416,14 @@ func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts di
 	}, func() ([]string, error) {
 		return []string{fmt.Sprintf("%s %s", result.Run.RunID, stringPointerValue(result.OperationalState))}, nil
 	})
+}
+
+func readRunDiagnosis(ctx context.Context, client *cliAPIClient, runID string) (DiagnosticRunDiagnosisResult, error) {
+	var result DiagnosticRunDiagnosisResult
+	if err := client.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &result); err != nil {
+		return result, err
+	}
+	return result, validateDiagnosticRunDiagnosis(result)
 }
 
 func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticTraceOptions, runID string) error {
