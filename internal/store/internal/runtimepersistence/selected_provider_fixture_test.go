@@ -80,7 +80,7 @@ func selectedProviderTarget(f selectedCompletionFixture) effects.UsageTarget {
 func admitSelectedProviderFixture(t *testing.T, ctx context.Context, f selectedCompletionFixture, issued runfork.SelectedContractRuntimeExecution, authority effects.Authority) pipeline.FlowInstanceActivationPlan {
 	t.Helper()
 	grant := selectedFixtureGrantForAuthority(t, ctx, f, issued, authority)
-	ctx = testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash)
+	ctx = f.ctx
 	actor := f.providerActor.Config.Identity
 	topology, err := agenttopology.SelectedDeclarationAdmission(f.forkRun, f.request.DeclarationPlan)
 	if err != nil {

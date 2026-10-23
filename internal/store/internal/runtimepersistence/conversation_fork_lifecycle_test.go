@@ -13,7 +13,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -605,6 +607,13 @@ const conversationForkSourceFlowInstance = "review"
 
 func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
+	store := admitTestPostgresStore(t, db)
+	ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), store)
+	return seedConversationForkSourceWithContext(t, ctx, store, db, base, historical...)
+}
+
+func seedConversationForkSourceWithContext(t *testing.T, ctx context.Context, store *PostgresStore, db *sql.DB, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
+	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
 		bundleHash: authorActivityTestBundleHash,
@@ -623,9 +632,13 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, histor
 		source.bundleHash = run.Artifact.BundleHash()
 		run.BundleHash = source.bundleHash
 	}
-	ctx := testAuthorActivityContextForBundle(source.bundleHash)
-	store := admitTestPostgresStore(t, db)
-	ctx = storeTestOriginalProcessContext(t, ctx, store)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(source.bundleHash))
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, source.bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	source.ctx = ctx
 	requireRunFixtureForTest(t, ctx, store, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
