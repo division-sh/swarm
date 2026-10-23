@@ -1154,7 +1154,15 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 		return PreparedPublish{}, err
 	}
 	evt = admitted.Event()
-	preparedCtx := events.WithDeliveryContext(ctx, evt.DeliveryContext())
+	deliveryContext := evt.DeliveryContext()
+	if selected, ok := selectedForkRecipientPlanFromContext(ctx, evt); ok && selected.returnReply != nil {
+		id := selected.returnReply.ID
+		if events.DeliveryContextFromContext(ctx).ReplyContextID() != id || (deliveryContext.ReplyContextID() != "" && deliveryContext.ReplyContextID() != id) {
+			return PreparedPublish{}, errors.New("selected return preparation has contradictory reply carriers")
+		}
+		deliveryContext.Reply = &events.ReplyContextRef{ID: id}
+	}
+	preparedCtx := events.WithDeliveryContext(ctx, deliveryContext)
 	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
 		preparedCtx = runtimecorrelation.WithRunID(preparedCtx, runID)
 	}

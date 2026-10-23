@@ -1531,7 +1531,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		droppedEventID, events.EventType("system.recover.drop"), "runtime", "", []byte(`{}`), 0,
 		droppedRunID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
 	))
-	if _, err := db.ExecContext(ctx, `UPDATE events SET run_id = NULL WHERE event_id = $1::uuid`, droppedEventID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE events SET run_id = NULL, run_owner_key = '' WHERE event_id = $1::uuid`, droppedEventID); err != nil {
 		t.Fatalf("plant missing-run recovery corruption: %v", err)
 	}
 

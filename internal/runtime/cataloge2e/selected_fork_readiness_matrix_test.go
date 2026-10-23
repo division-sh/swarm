@@ -529,6 +529,10 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							})
 						}
 						forkRun := result.Materialization.ForkRunID
+						var executionEvidence catalogSelectedExecutionObservation
+						if stage == "initial" && frontier != "activity_rejected" && err == nil {
+							executionEvidence, err = observeCatalogSelectedExecution(t, h, forkRun)
+						}
 						refused := stage == "staged" && frontier != "agent"
 						if stage == "staged" {
 							beforeActivation := selectedForkReadinessSnapshot(t, ctx, h, forkRun, owner.Route)
@@ -542,9 +546,12 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 									ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
 								})
 								if !refused {
-									if activateErr != nil || !activated.Activated || activated.ExecutedEventCount != 1 {
+									if activateErr != nil || !activated.Activated || activated.ExecutedEventCount != 0 {
 										logSelectedForkRecoveryFailure(t, ctx, h, forkRun, activateErr)
 										t.Fatalf("admitted recovery: activated=%t count=%d fork=%s err=%v", activated.Activated, activated.ExecutedEventCount, forkRun, activateErr)
+									}
+									if observed, err := observeCatalogSelectedExecution(t, h, forkRun); err != nil || observed.ExecutedEventCount != 1 {
+										t.Fatalf("retained admitted recovery: evidence=%+v error=%v", observed, err)
 									}
 									continue
 								}
@@ -561,10 +568,10 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								t.Fatalf("failed final validation lost execution evidence: count=%d calls=%d err=%v", result.ExecutedEventCount, activityCalls.Load(), err)
 							}
 						} else if frontier == "mixed" {
-							if err != nil || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || !result.Activation.Activated || acceptedAgentCalls.Load() != int32(declarations) {
+							if err != nil || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || executionEvidence.ExecutedEventCount != 1 || !result.Activation.Activated || acceptedAgentCalls.Load() != int32(declarations) {
 								t.Fatalf("ordinary final entry must retain accepted agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, acceptedAgentCalls.Load(), err)
 							}
-						} else if err != nil || result.ExecutedEventCount != 1 {
+						} else if err != nil || result.ExecutedEventCount != 0 || executionEvidence.ExecutedEventCount != 1 {
 							t.Logf("frontier=%s activity calls=%d", frontier, activityCalls.Load())
 							var logs operatorread.OperatorRuntimeLogListResult
 							var logsErr error
