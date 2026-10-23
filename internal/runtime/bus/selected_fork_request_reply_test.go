@@ -69,9 +69,14 @@ func TestIssue642RequestContinuationBindsBeforeCompiledClaim(t *testing.T) {
 	}
 	sourceRoute.ConnectClaim = original
 	continuation := pinrouting.ReplyRequestContinuation{Record: retained, Plan: plan}
+	raw.Target = sourceRoute.Target.Route()
+	acquired, err := pinrouting.ConnectExecutionClaim(plan, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
 	observed, err := continuation.ClaimForDelivery(sourceRoute)
-	if err != nil || !observed.Equal(original) {
-		t.Fatalf("acquired entity replaced compiled target evidence: %v", err)
+	if err != nil || !observed.Equal(acquired) || observed.Equal(original) {
+		t.Fatalf("request continuation lost its acquired receiver identity: %v", err)
 	}
 	for _, fault := range []string{"terminal", "foreign", "duplicate", "ambiguous", "pair", "ordinary_scope", "canceled"} {
 		t.Run(fault, func(t *testing.T) {
