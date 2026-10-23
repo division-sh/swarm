@@ -2,6 +2,17 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"time"
 
 	"errors"
 	"fmt"
@@ -728,4 +739,18 @@ func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 		t.Fatalf("CompileChannel: %v", err)
 	}
 	return plan
+}
+
+func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegistration {
+	t.Helper()
+	plan := loadSupportedTelegramChannelPlan(t)
+	registration, ok := plan.Registration()
+	if !ok {
+		t.Fatal("Telegram registration plan is missing")
+	}
+	return registration
+}
+
+func supportedRegistrationResponse(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
