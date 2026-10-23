@@ -73,6 +73,7 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				ctx = testAuthorActivityContextForSource(t, ctx, fact)
+				ctx = nativeProcessContextFixture(t, ctx, selected.events)
 				if err := storetest.MaterializeRun(ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash(),
 				}); err != nil {
@@ -88,7 +89,11 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 				var releaseOnce sync.Once
 				unhold := func() { releaseOnce.Do(func() { close(release) }) }
 				defer unhold()
-				am, grant, releaseProcess := newPartialAttachmentManager(t, ctx, selected, source, pc, bus, func(cfg actors.AgentConfig) (manager.Agent, error) {
+				original, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
+				am, grant, releaseProcess := newPartialAttachmentManager(t, ctx, selected, source, pc, bus, original, func(cfg actors.AgentConfig) (manager.Agent, error) {
 					if cfg.ID == missing {
 						close(entered)
 						select {
@@ -418,7 +423,7 @@ func (a *partialAttachmentAgent) OnEvent(context.Context, events.Event) ([]event
 	return nil, nil
 }
 
-func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, source semanticview.Source, pc *pipeline.PipelineCoordinator, bus *runtimebus.EventBus, factory manager.AgentFactory) (*manager.AgentManager, startupownership.LiveGenerationGrant, func()) {
+func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, source semanticview.Source, pc *pipeline.PipelineCoordinator, bus *runtimebus.EventBus, process startupownership.ProcessCapability, factory manager.AgentFactory) (*manager.AgentManager, startupownership.LiveGenerationGrant, func()) {
 	t.Helper()
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
 	if !found || fact.Validate() != nil {
@@ -428,16 +433,15 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 	if !found || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != fact.BundleHash() {
 		t.Fatal("partial attachment manager source disagrees with its context")
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var releaseOnce sync.Once
+	processReleased := false
 	releaseProcess := func() {
 		releaseOnce.Do(func() {
 			if err := process.Release(context.Background()); err != nil {
 				t.Error(err)
+				return
 			}
+			processReleased = true
 		})
 	}
 	t.Cleanup(releaseProcess)
@@ -496,8 +500,10 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := am.Shutdown(); err != nil {
-			t.Error(err)
+		if !processReleased {
+			if err := am.Shutdown(); err != nil {
+				t.Error(err)
+			}
 		}
 	})
 	execution, err := managedexecution.New(managedexecution.KindNormalRuntime, evidence.GrantID, evidence.RuntimeGeneration, "", "partial-attachment", fact.BundleHash(), nil)
@@ -554,7 +560,25 @@ func provePartialAttachmentShutdownRestart(t *testing.T, ctx context.Context, se
 		t.Fatal(err)
 	}
 	releaseProcess()
-	next, nextGrant, _ := newPartialAttachmentManager(t, ctx, selected, source, pc, bus, func(cfg actors.AgentConfig) (manager.Agent, error) { return &partialAttachmentAgent{config: cfg}, nil })
+	fact, _ := correlation.SourceArtifactFactFromContext(ctx)
+	if err := bus.WaitForQuiescence(ctx); err != nil {
+		t.Fatal(err)
+	}
+	replacePipelineExternalWorkOccurrenceForSource(t, fact, pipelineExternalTestWorkOwnerForSource(t, fact))
+	ctx = testAuthorActivityContextForSource(t, ctx, fact)
+	successor, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "partial-attachment-successor", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = nativeOriginalProcessContextFixture(t, ctx, successor)
+	bus, err = newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source}})
+	next, nextGrant, _ := newPartialAttachmentManager(t, ctx, selected, source, pc, bus, successor, func(cfg actors.AgentConfig) (manager.Agent, error) { return &partialAttachmentAgent{config: cfg}, nil })
 	if err := next.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
 		t.Fatalf("native restart did not converge accepted construction: %v", err)
 	}
