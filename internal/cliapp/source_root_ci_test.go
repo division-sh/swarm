@@ -16,7 +16,7 @@ func TestShippedCISmokeUsesPositionalSourceRoot(t *testing.T) {
 	if strings.Contains(source, "--contracts") {
 		t.Fatal("CI restores the retired --contracts source-root interpreter")
 	}
-	if !strings.Contains(source, "./swarm run start examples/routing/root-ingress") {
+	if !strings.Contains(source, `./swarm --swarm-dir "$swarm_dir" run start examples/routing/root-ingress`) {
 		t.Fatal("SQLite smoke does not exercise the canonical positional source root")
 	}
 }
