@@ -26514,8 +26514,8 @@ test_specification:
       archetype_admission: >-
         Every admitted `swarm new` archetype contains an authored derived smoke scenario, verifies structurally, and runs
         through bare public `swarm test` with zero credentials and zero Docker in under 60 seconds. No separate server,
-        deployment configuration, precreated .swarm directory or mock-to-live graduation file is shipped. `swarm new` writes
-        only the selected embedded canonical archetype and refuses overwrite; future producers persist the same canonical plan
+        deployment resource or mock-to-live graduation is required by `swarm test`. `swarm new` writes
+        the selected embedded canonical archetype plus private `.swarm/swarm.yaml` and API token, and refuses overwrite; future producers persist the same canonical plan
         grammar rather than introducing a scaffold-only format.
     non_goals:
     - No runtime/backend/provider implementation is promoted by this section.

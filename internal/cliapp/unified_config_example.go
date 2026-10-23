@@ -77,6 +77,8 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("platform.packs.platform_dirs", `["/path/to/complete/dev-pack/provider.telegram.trigger", "/path/to/complete/dev-pack/provider.telegram.connector", "/path/to/complete/dev-pack/provider.telegram.channel"]`, "Complete replacement for the embedded platform pack inventory during platform development."),
 		e("channels.bindings.hitl.pack", "provider.telegram.hitl_channel", "Channel pack selected for the HITL outbound binding."),
 		e("channels.bindings.hitl.destination", `"-1001234567890"`, "Deployment-owned opaque destination for the HITL outbound binding."),
+		e("channels.hitl.provider", "whatsapp", "Provider of the deployment account used for operator verification at connect."),
+		e("channels.hitl.account", `"+15550100"`, "Canonical deployment account reference; not a credential or flow binding."),
 		e("paths.swarm_dir", ".swarm", "Swarm state directory."),
 		e("paths.monitor_dir", ".swarm/monitor", "Runtime monitor artifact directory."),
 

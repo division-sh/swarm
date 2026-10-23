@@ -196,9 +196,6 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 	if consume == nil || !selected || target.Provider != "telegram" {
 		return false, nil
 	}
-	if !plan.Valid() || !plan.Generation().Equal(target.AdmissionPlanGeneration) || plan.Provider() != target.Provider {
-		return false, channelonboarding.ErrConflict
-	}
 	snapshot := c.snapshot.capture()
 	for _, state := range snapshot.registrations {
 		if state.Pair.Target != target || state.LastVerified == nil {
@@ -214,9 +211,10 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			return false, err
 		}
 		credential := func(admission channelonboarding.CredentialAdmission) bool {
-			value, usable, err := c.opts.CredentialOwner.ObserveValueMatchingSeal(request.Context(), runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
+			projection := c.opts.CredentialOwner.BeginSecretBindingProjection()
+			value, usable, err := projection.ObserveAdmittedActivationCredential(request.Context(), runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}, admission.Receipt)
 			receiving, exists := provider[admission.Role]
-			return err == nil && usable && exists && subtle.ConstantTimeCompare([]byte(value.CredentialValue()), []byte(receiving.CredentialValue())) == 1
+			return err == nil && usable && exists && projection.ValidateCurrent(request.Context()) == nil && subtle.ConstantTimeCompare([]byte(value.CredentialValue()), []byte(receiving.CredentialValue())) == 1
 		}
 		current := func() bool {
 			credentialsCurrent, err := c.credentialObservationTokensCurrent(request.Context(), state.LastVerified.CredentialObservationTokens)
@@ -224,6 +222,9 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 				err == nil && credentialsCurrent
 		}
 		admit := func() (providertriggers.Delivery, error) {
+			if !plan.Valid() || !plan.Generation().Equal(target.AdmissionPlanGeneration) || plan.Provider() != target.Provider {
+				return providertriggers.Delivery{}, channelonboarding.ErrConflict
+			}
 			if request.Method != http.MethodPost {
 				return providertriggers.Delivery{}, providertriggers.Error{Status: http.StatusMethodNotAllowed, Message: "method not allowed"}
 			}

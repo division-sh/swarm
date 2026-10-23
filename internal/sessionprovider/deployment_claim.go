@@ -4,17 +4,15 @@ package sessionprovider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 )
 
 // PollDeploymentClaim uses the original claim settlement owner; only an exact
@@ -54,18 +52,6 @@ func PollDeploymentClaim(ctx context.Context, client *http.Client, operations ch
 	return offset, nil
 }
 
-func settleDeploymentClaim(ctx context.Context, identities operatorchannel.Store, op channelonboarding.Operation, claim operatorchannel.InboundClaim, valid func() bool) error {
-	claim.PublicationID = operatorchannel.SessionClaimReceiptID(op.OperationID, claim.ProviderEventID)
-	body, err := json.Marshal(claim)
-	if err != nil {
-		return err
-	}
-	sealed := authorityfact.SealOwnedClaim(op.OperationID, op.Revision, authorityfact.DeploymentParent,
-		operatorchannel.Hash("telegram-registration-claim-v1", op.OperationID, string(body)), body, time.Now().UTC().Truncate(time.Microsecond), ctx, valid)
-	_, err = identities.SettleSessionChannelClaim(ctx, sealed)
-	return err
-}
-
 func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectionOptions, identities operatorchannel.Store, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
 	if account.Provider != "telegram" || account.Validate() != nil || credential == nil || admit == nil || current == nil || !current() {
 		return false, channelonboarding.ErrInvalidRequest
@@ -79,7 +65,7 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 		return false, err
 	}
 	for _, identity := range rows {
-		if identity.ProviderAuthority.Scope != authorityfact.DeploymentParent || identity.State != operatorchannel.StateAwaitingClaim && identity.State != operatorchannel.StateAwaitingConfirmation {
+		if identity.ProviderAuthority.Scope != authority.DeploymentParent || identity.State != operatorchannel.StateAwaitingClaim && identity.State != operatorchannel.StateAwaitingConfirmation {
 			continue
 		}
 		op, err := opts.Operations.GetChannelOnboarding(ctx, identity.OnboardingOperationID)

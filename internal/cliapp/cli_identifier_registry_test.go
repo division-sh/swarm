@@ -837,6 +837,10 @@ func cliIdentifierStructuralRowCovers(command, selector string) bool {
 }
 
 var cliIdentifierNonResourcePositionals = map[string]bool{
+	cliIdentifierRegistryKey("swarm channel connect", "arg:account"):   true,
+	cliIdentifierRegistryKey("swarm channel reconnect", "arg:account"): true,
+	cliIdentifierRegistryKey("swarm channel rebind", "arg:account"):    true,
+	cliIdentifierRegistryKey("swarm channel logout", "arg:account"):    true,
 	cliIdentifierRegistryKey("swarm mailbox decide", "arg:option"):     true,
 	cliIdentifierRegistryKey("swarm agent directive", "arg:message"):   true,
 	cliIdentifierRegistryKey("swarm describe", "arg:directory"):        true,

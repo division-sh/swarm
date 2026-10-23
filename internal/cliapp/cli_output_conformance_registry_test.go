@@ -439,7 +439,10 @@ func TestCLIOutputConformanceSharedRowsConsumeSharedOwner(t *testing.T) {
 	if !calls["runVerifyCommandWithOutput"]["renderVerifyCommandResult"] || !calls["renderVerifyAdmissionRefusal"]["renderVerifyCommandResult"] {
 		t.Error("verify success and refusal must consume the shared command-result renderer")
 	}
-	for _, runner := range []string{"runChannelConnect", "runChannelResume"} {
+	if !calls["runChannelConnect"]["finishChannelOnboarding"] {
+		t.Error("channel connect must consume the shared onboarding completion owner")
+	}
+	for _, runner := range []string{"finishChannelOnboarding", "runChannelResume"} {
 		if !calls[runner]["renderChannelOnboardingResult"] {
 			t.Errorf("channel runner %s does not call renderChannelOnboardingResult", runner)
 		}
@@ -720,7 +723,7 @@ func cliOutputFunctionCalls(t *testing.T) map[string]map[string]bool {
 					return true
 				}
 				switch ident.Name {
-				case "bindCLIOutputFlags", "renderCLIOutput", "renderVerifyCommandResult", "renderChannelOnboardingResult", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
+				case "bindCLIOutputFlags", "renderCLIOutput", "renderVerifyCommandResult", "finishChannelOnboarding", "renderChannelOnboardingResult", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
 					calls[fn.Name.Name][ident.Name] = true
 				}
 				return true

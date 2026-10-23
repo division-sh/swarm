@@ -1683,10 +1683,12 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 			if target.Provider != provider {
 				continue
 			}
+			authorIngress := declaredAuthorIngress(entry.runtime, entry.context, target)
 			if m.standingServiceSuppressedLocked(target.ServiceID) {
 				return RuntimeIngressContextLookup{
 					Target: target, State: RuntimeContextStateUnloaded,
 					Cause: RuntimeContextCauseStandingSuppressed, Found: true, AliasFound: true,
+					authorIngress: authorIngress,
 				}
 			}
 			state := entry.state
@@ -1697,7 +1699,7 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 			if state != RuntimeContextStateLoaded && cause == "" {
 				cause = RuntimeContextCauseUnavailable
 			}
-			out := RuntimeIngressContextLookup{State: state, Cause: cause, AliasFound: true}
+			out := RuntimeIngressContextLookup{State: state, Cause: cause, AliasFound: true, authorIngress: authorIngress}
 			out.Found = true
 			out.Target = target
 			if state == RuntimeContextStateLoaded {

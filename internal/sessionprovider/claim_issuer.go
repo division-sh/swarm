@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -19,6 +20,18 @@ type sessionSetupProjection struct {
 	claim    authority.Claim
 	inbound  operatorchannel.InboundClaim
 	nonClaim authority.NonClaim
+}
+
+func settleDeploymentClaim(ctx context.Context, identities operatorchannel.Store, op channelonboarding.Operation, claim operatorchannel.InboundClaim, valid func() bool) error {
+	claim.PublicationID = operatorchannel.SessionClaimReceiptID(op.OperationID, claim.ProviderEventID)
+	body, err := json.Marshal(claim)
+	if err != nil {
+		return err
+	}
+	sealed := authorityfact.SealOwnedClaim(op.OperationID, op.Revision, authorityfact.DeploymentParent,
+		operatorchannel.Hash("telegram-registration-claim-v1", op.OperationID, string(body)), body, time.Now().UTC().Truncate(time.Microsecond), ctx, valid)
+	_, err = identities.SettleSessionChannelClaim(ctx, sealed)
+	return err
 }
 
 func prepareSessionSetup(ctx context.Context, admitted input.Admission, trigger providertriggers.InboundAdmissionPlan, channel packs.SatisfactionPlan) (sessionSetupProjection, error) {

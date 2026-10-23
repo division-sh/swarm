@@ -23,7 +23,23 @@ func nativeInputIssuerViolations(path string, source []byte) ([]string, error) {
 	readOnlyAliases := map[*ast.SelectorExpr]bool{}
 	for _, declaration := range file.Decls {
 		general, ok := declaration.(*ast.GenDecl)
-		if !ok || general.Tok != token.TYPE {
+		if !ok {
+			continue
+		}
+		if path == "authority/admission.go" && general.Tok == token.CONST {
+			for _, spec := range general.Specs {
+				value := spec.(*ast.ValueSpec)
+				if len(value.Names) != 1 || len(value.Values) != 1 {
+					continue
+				}
+				selected, ok := value.Values[0].(*ast.SelectorExpr)
+				name := value.Names[0].Name
+				if ok && selected.Sel.Name == name && (name == "RuntimeParent" || name == "DeploymentParent") {
+					readOnlyAliases[selected] = true
+				}
+			}
+		}
+		if general.Tok != token.TYPE {
 			continue
 		}
 		for _, spec := range general.Specs {
@@ -32,7 +48,7 @@ func nativeInputIssuerViolations(path string, source []byte) ([]string, error) {
 				continue
 			}
 			selected, ok := alias.Type.(*ast.SelectorExpr)
-			if ok && (selected.Sel.Name == "Admission" || selected.Sel.Name == "Account" || selected.Sel.Name == "Claim" || selected.Sel.Name == "NonClaim") {
+			if ok && (selected.Sel.Name == "Admission" || selected.Sel.Name == "Account" || selected.Sel.Name == "Claim" || selected.Sel.Name == "NonClaim" || selected.Sel.Name == "ParentScope") {
 				readOnlyAliases[selected] = true
 			}
 		}
@@ -147,6 +163,9 @@ func TestNativeInputIssuerCensusAdmitsOnlyOpaqueReadOnlyNonClaimAlias(t *testing
 	violations, err := nativeInputIssuerViolations("authority/admission.go", []byte(`package authority
 import "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact"
 type NonClaim = authorityfact.NonClaim
+type ParentScope = authorityfact.ParentScope
+const RuntimeParent = authorityfact.RuntimeParent
+const DeploymentParent = authorityfact.DeploymentParent
 `))
 	if err != nil || len(violations) != 0 {
 		t.Fatal("opaque read-only alias classified as a constructor", violations, err)

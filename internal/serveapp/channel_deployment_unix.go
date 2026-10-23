@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -98,6 +99,17 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		defer func() { _ = work.Done() }()
 		if err := capability.ProveCurrent(work.Context()); err != nil {
 			return false, err
+		}
+		operations, err := stores.DeploymentChannels().ListChannelOnboardingOperations(work.Context())
+		if err != nil {
+			return false, err
+		}
+		if !slices.ContainsFunc(operations, func(op channelonboarding.Operation) bool {
+			return op.DeploymentRegistration && op.Provider == account.Provider && op.AccountReference == account.Account &&
+				op.AccountConfirmed && op.IdentityOperationID != "" &&
+				(op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation)
+		}) {
+			return false, nil
 		}
 		client, err := cliapp.UseDeploymentChannelControl(work.Context(), root, config, directory, account.Provider, stores, process, factory)
 		if err != nil {

@@ -23,6 +23,7 @@ func TestPrivateTestIgnoresDeploymentResources(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			unsetStoreSelectorEnv(t)
 			source := scaffoldConformanceArchetype(t, "zero-agent-automation")
+			defer unchangedPrivateTestDeployment(t, source)()
 			var requests atomic.Int32
 			trap := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				requests.Add(1)
@@ -92,7 +93,7 @@ serve:
 			if raw, err := os.ReadFile(storePath); err != nil || string(raw) != "retained-store-sentinel" {
 				t.Fatalf("retained store changed: %q %v", raw, err)
 			}
-			for _, path := range []string{filepath.Join(deployment, "must-not-create"), filepath.Join(source, ".swarm")} {
+			for _, path := range []string{filepath.Join(deployment, "must-not-create")} {
 				if _, err := os.Stat(path); !os.IsNotExist(err) {
 					t.Fatalf("private test created deployment/project state at %s: %v", path, err)
 				}
