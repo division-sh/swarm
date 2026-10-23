@@ -91,6 +91,7 @@ func nativeConstructionContextFixture(t *testing.T, selected storetest.RunFixtur
 		t.Fatal(err)
 	}
 	ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
+	ctx = nativeProcessContextFixture(t, ctx, selected)
 	if err := storetest.MaterializeRun(ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()}); err != nil {
 		t.Fatal(err)
 	}

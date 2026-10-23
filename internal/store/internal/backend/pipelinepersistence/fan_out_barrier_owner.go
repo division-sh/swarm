@@ -967,8 +967,31 @@ func advanceAdmittedFanOutBarriers(ctx context.Context, attempt *mutationprotoco
 		if err != nil {
 			return err
 		}
-		activations, err = advanceFanOutDeliveryBarriersTx(ctx, tx, attempt, postgres, schedules, key.RunID, at)
-		return err
+		if _, err := advanceFanOutDeliveryBarriersTx(ctx, tx, attempt, postgres, schedules, key.RunID, at); err != nil {
+			return err
+		}
+		pending, err := loadFanOutBarriersByStatus(ctx, tx, postgres, key.RunID, fanoutbarrier.StatusClosedPending)
+		if err != nil {
+			return err
+		}
+		for _, barrier := range pending {
+			activation, found, err := schedules.LoadActivationTx(ctx, attempt, barrier.ScheduleActivationID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("pending fan-out barrier activation %s is missing", barrier.ScheduleActivationID)
+			}
+			if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(barrier, activation); err != nil {
+				return err
+			}
+			committed, err := runtimerunlifecycle.NewCommittedGenericScheduleActivation(activation.ID)
+			if err != nil {
+				return err
+			}
+			activations = append(activations, committed)
+		}
+		return nil
 	})
 	return activations, err
 }

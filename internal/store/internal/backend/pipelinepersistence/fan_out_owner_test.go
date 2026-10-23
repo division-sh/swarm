@@ -200,12 +200,13 @@ func fanOutReadbackTestDB(t *testing.T, backend string, pausedRun ...string) *sq
 	}
 	if len(pausedRun) == 1 {
 		var owner runlifecycle.OperationOwner
+		var ctx context.Context
 		if backend == "postgres" {
-			owner = materializePostgresStatementRuns(t, db, true, pausedRun[0])
+			owner, ctx = materializePostgresStatementRuns(t, db, true, pausedRun[0])
 		} else {
-			owner = materializeSQLiteStatementRuns(t, db, true, pausedRun[0])
+			owner, ctx = materializeSQLiteStatementRuns(t, db, true, pausedRun[0])
 		}
-		if _, err := owner.TransitionActiveRun(context.Background(), runlifecycle.ActiveTransitionRequest{RunID: pausedRun[0], State: runlifecycle.StatePaused}); err != nil {
+		if _, err := owner.TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: pausedRun[0], State: runlifecycle.StatePaused}); err != nil {
 			t.Fatal(err)
 		}
 	}
