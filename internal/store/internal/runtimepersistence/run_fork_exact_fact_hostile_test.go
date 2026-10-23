@@ -19,7 +19,7 @@ func seedExactEvent(t *testing.T, s exactFactStore, f runForkRevisionMatrixFixtu
 	exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 		seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, f.eventID, f.at, s.postgres)
 		compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID,
-			exactFactRef(t, runforkrevision.FamilyEvents, f.eventID)), 1, true)
+			exactFactRef(t, runforkrevision.FamilyEvents, f.eventID)), f.initialRevision+1, true)
 	})
 }
 
@@ -105,7 +105,7 @@ func TestRunForkExactFactsHostileBothStores(t *testing.T) {
 		}
 		t.Run("moved_current_row_is_not_old_run_deletion", func(t *testing.T) {
 			exactRollbackTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE events SET run_id=$1 WHERE event_id=$2`, foreign.runID, f.eventID)
+				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE events SET run_id=$1,run_owner_key='run:' || CAST($1 AS TEXT) WHERE event_id=$2`, foreign.runID, f.eventID)
 				_, err := finalizeRunForkRevisionMatrix(ctx, tx, s.postgres, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEvents, f.eventID)))
 				if err == nil {
 					t.Fatal("accepted old-run tombstone although globally keyed current event still exists in foreign run")
@@ -115,13 +115,14 @@ func TestRunForkExactFactsHostileBothStores(t *testing.T) {
 		t.Run("run_scoped_entity_same_id_delete", func(t *testing.T) {
 			exactRollbackTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				ref := exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)
-				for _, runID := range []string{f.runID, foreign.runID} {
+				for _, target := range []runForkRevisionMatrixFixture{f, foreign} {
+					runID := target.runID
 					mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,created_at,updated_at) VALUES ($1,$2,'matrix-flow','matrix-type',$3,$4,$4)`, runID, f.entityID, "entity-"+runID, f.at)
-					compareExactWithWhole(t, ctx, tx, s, runID, exactEffects(t, runID, ref), 2, true)
+					compareExactWithWhole(t, ctx, tx, s, runID, exactEffects(t, runID, ref), target.initialRevision+2, true)
 				}
 				foreignBefore := exactLedger(t, ctx, tx, foreign.runID)
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, ref), 3, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, ref), f.initialRevision+3, true)
 				if !reflect.DeepEqual(foreignBefore, exactLedger(t, ctx, tx, foreign.runID)) {
 					t.Fatal("run-scoped deletion changed foreign history")
 				}
@@ -191,14 +192,14 @@ func TestRunForkExactFactsUntouchedCorruptionBothStores(t *testing.T) {
 					}
 					seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, unrelated, f.at, s.postgres)
 					result, err := finalizeRunForkRevisionMatrix(ctx, tx, s.postgres, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEvents, unrelated)))
-					if err != nil || result[f.runID] != (runforkrevision.Result{Revision: 2, Changed: true}) {
+					if err != nil || result[f.runID] != (runforkrevision.Result{Revision: f.initialRevision + 2, Changed: true}) {
 						t.Fatalf("unrelated exact write result=%#v err=%v", result, err)
 					}
 					if err := validateRunForkRevisionMatrix(ctx, tx, s.postgres, f.runID); err == nil {
 						t.Fatal("full validator accepted untouched corruption")
 					}
 				})
-				facts := loadRunForkRevisionMatrixFacts(t, ctx, s.db, f.runID, 2)
+				facts := loadRunForkRevisionMatrixFacts(t, ctx, s.db, f.runID, f.initialRevision+2)
 				if len(facts) != 1 || facts[0].Key != unrelated || !facts[0].Present {
 					t.Fatalf("unrelated write rewrote/tombstoned untouched fact: %#v", facts)
 				}

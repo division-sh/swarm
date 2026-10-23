@@ -33,23 +33,24 @@ import (
 )
 
 type runForkRevisionMatrixFixture struct {
-	runID        string
-	eventID      string
-	entityID     string
-	mutationID   string
-	deliveryID   string
-	receiptID    string
-	deadLetterID string
-	timerID      string
-	sessionID    string
-	turnID       string
-	auditID      string
-	replyID      string
-	surfaceID    string
-	operationID  string
-	attemptID    string
-	authorityID  string
-	at           time.Time
+	initialRevision int64
+	runID           string
+	eventID         string
+	entityID        string
+	mutationID      string
+	deliveryID      string
+	receiptID       string
+	deadLetterID    string
+	timerID         string
+	sessionID       string
+	turnID          string
+	auditID         string
+	replyID         string
+	surfaceID       string
+	operationID     string
+	attemptID       string
+	authorityID     string
+	at              time.Time
 }
 
 type runForkRevisionMatrixFact struct {

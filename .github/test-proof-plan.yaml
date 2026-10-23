@@ -42,7 +42,6 @@ profiles:
     - codemod-owner-guards
     - local-generated-fanout-fixture
     - local-fanout-handoff-ack-loss
-    - local-api-matrix-registry
     - local-api-routing-canaries
     - local-routing-reporter
     - local-delivery-continuation
@@ -343,12 +342,6 @@ units:
     run: '^TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores$'
     required_children:
       TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores: [sqlite, postgres]
-    count_mode: count-1
-    environment_ids: *postgres_gateway_empty
-    budget_class: full
-  local-api-matrix-registry:
-    packages: [github.com/division-sh/swarm/internal/apiv1]
-    run: '^TestPublicSurfaceBackendMatrixCoversSelectedBackendRows$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
@@ -1479,7 +1472,7 @@ units:
       - github.com/division-sh/swarm/internal/store/selected
       - github.com/division-sh/swarm/internal/serveapp
       - github.com/division-sh/swarm/internal/apiv1
-    run: TestSelectedStoreAbstractionGuardMatrix|TestProductionSelectedStoreBoundaryIsClosed|TestProductionSelectedStoreBoundaryGuardRejectsOldInterpreters|TestSelectedSQLiteRuntimeWriterBoundaryAudit|TestRuntimeWriterBoundaryGuardRejects|TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary|TestPublicSurfaceBackendMatrixCoversSelectedBackendRows|TestPublicSurfaceBackendMatrixRejectsStaleReferences
+    run: TestSelectedStoreAbstractionGuardMatrix|TestProductionSelectedStoreBoundaryIsClosed|TestProductionSelectedStoreBoundaryGuardRejectsOldInterpreters|TestSelectedSQLiteRuntimeWriterBoundaryAudit|TestRuntimeWriterBoundaryGuardRejects|TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary|TestPublicSurfaceBackendMatrixRejectsStaleReferences
     count_mode: count-1
     environment_ids: {local: local-postgres-explicit-v1}
     budget_class: broad

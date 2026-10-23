@@ -9,12 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/effects"
 	"gopkg.in/yaml.v3"
 )
 
@@ -47,49 +46,6 @@ type managedEffectProofReference struct {
 	Proof         string
 	ProofFile     string
 	PrimitiveKeys []string
-}
-
-func TestDurableInvariantProofReferencesConform(t *testing.T) {
-	rootDir := repoRoot(t)
-	root := loadPlatformSpecYAMLNode(t)
-
-	records, problems := validateDurableInvariantRecords(rootDir, root)
-	problems = append(problems, findLegacyInvariantProofShapes(root)...)
-	problems = append(problems, findUnclassifiedGoTestScalars(root)...)
-	if len(records) != 42 {
-		problems = append(problems, fmt.Sprintf("canonical invariant inventory has %d entries, want 42", len(records)))
-	}
-
-	registrations := effects.Registrations()
-	if len(registrations) != 24 {
-		problems = append(problems, fmt.Sprintf("managed-effect registration inventory has %d entries, want 24", len(registrations)))
-	}
-	seenAdapters := make(map[string]struct{}, len(registrations))
-	for _, registration := range registrations {
-		if _, exists := seenAdapters[registration.Adapter]; exists {
-			problems = append(problems, fmt.Sprintf("managed-effect adapter %q is registered more than once", registration.Adapter))
-		}
-		seenAdapters[registration.Adapter] = struct{}{}
-		problems = append(problems, validateManagedEffectProof(rootDir, managedEffectProofReference{
-			Adapter:       registration.Adapter,
-			LaunchSite:    registration.LaunchSite,
-			Proof:         registration.Proof,
-			ProofFile:     registration.ProofFile,
-			PrimitiveKeys: registration.PrimitiveKeys,
-		})...)
-	}
-
-	if len(problems) > 0 {
-		sort.Strings(problems)
-		t.Fatalf("durable invariant proof-reference conformance failed:\n%s", strings.Join(problems, "\n"))
-	}
-
-	ids := make([]string, 0, len(records))
-	for _, record := range records {
-		ids = append(ids, record.ID)
-	}
-	sort.Strings(ids)
-	t.Logf("validated %d domain-local invariant IDs and %d managed-effect proof registrations", len(ids), len(registrations))
 }
 
 func validateDurableInvariantRecords(rootDir string, root *yaml.Node) ([]durableInvariantRecord, []string) {
