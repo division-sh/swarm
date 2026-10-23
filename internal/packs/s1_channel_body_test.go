@@ -61,7 +61,7 @@ func s1CapturedChannelBody(t testing.TB, key, source string) packartifact.Provid
 		"manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
 		"channel.yaml":   []byte(source),
 		"trigger.yaml":   []byte("event_name: {literal: raw}\n"),
-		"connector.yaml": []byte("tools:\n  send_message:\n    category: provider_connector\n    handler_type: http\n    effect_class: non_idempotent_write\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.test/send'}\n"),
+		"connector.yaml": []byte("tools:\n  send_message:\n    category: provider_connector\n    handler_type: http\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.test/send'}\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func TestS1ChannelBodyLogicalReconstructionRetainsNamespace(t *testing.T) {
 		"shop/team-bot/manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
 		"shop/team-bot/channel.yaml":   []byte(s1ChannelDirectoryBody),
 		"shop/team-bot/trigger.yaml":   []byte("event_name: {literal: raw}\n"),
-		"shop/team-bot/connector.yaml": []byte("tools:\n  send_message:\n    category: provider_connector\n    handler_type: http\n    effect_class: non_idempotent_write\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.test/send'}\n"),
+		"shop/team-bot/connector.yaml": []byte("tools:\n  send_message:\n    category: provider_connector\n    handler_type: http\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.test/send'}\n"),
 	}
 	artifact, err := sourceartifact.AdmitMembers(members)
 	if err != nil {

@@ -40,7 +40,7 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 			name: "effect mismatch",
 			mutate: func(_, _, connector map[string]any) {
 				tool := connector["tools"].(map[string]any)["send_interactive"].(map[string]any)
-				tool["category"], tool["effect_class"] = "provider_registration", "read_only"
+				tool["category"] = "provider_registration"
 			},
 			want: "effect class does not match",
 		},

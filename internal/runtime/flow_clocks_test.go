@@ -11,16 +11,21 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, nested))
+		bundle, found := semanticview.Bundle(source)
+		if !found || bundle.SourceArtifact == nil {
+			t.Fatal("declared clock fixture requires its actual captured source")
+		}
 		for _, enabled := range []bool{false, true} {
 			rt := &Runtime{Options: RuntimeOptions{
 				WorkflowModule:     semanticOnlyWorkflowRuntime{source: source},
-				SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA), EnableDeclaredClockBinding: enabled,
+				SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact), EnableDeclaredClockBinding: enabled,
 			}}
 			candidates, err := rt.PlanStandingServiceCandidates()
 			want := 0

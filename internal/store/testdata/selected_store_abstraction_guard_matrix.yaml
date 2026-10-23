@@ -13,29 +13,6 @@ policy:
   fast_proof_projection: selected-store-fast
   full_proof_projection: catalog-full
 rows:
-  - id: public_surface_backend_matrix_accounting
-    classification: matrix_owner
-    tier: required_smoke
-    concepts:
-      - selected backend public API and CLI proof accounting
-      - default SQLite and explicit Postgres row classification
-    owners:
-      - internal/apiv1/testdata/public_surface_backend_matrix.yaml
-      - internal/apiv1 TestPublicSurfaceBackendMatrixCoversSelectedBackendRows
-    proof_refs:
-      - kind: artifact
-        path: internal/apiv1/testdata/public_surface_backend_matrix.yaml
-      - kind: go_test
-        name: TestPublicSurfaceBackendMatrixCoversSelectedBackendRows
-      - kind: go_test
-        name: TestPublicSurfaceBackendMatrixRejectsStaleReferences
-    guard_proof_refs:
-      - kind: go_test
-        name: TestPublicSurfaceBackendMatrixRejectsStaleReferences
-    notes: >
-      #1402 consumes the existing public-surface backend matrix instead of
-      replacing OpenRPC method/schema ownership.
-
   - id: producer_backend_branching_guard
     classification: guard
     tier: required_smoke

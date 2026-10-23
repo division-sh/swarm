@@ -27,6 +27,7 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: session-scope-validation\n")
 	removeClosedVariantFiles(t, root, "events.yaml")
 	writeClosedVariantFile(t, root, "support/entities.yaml", "support_item:\n  entity_id:\n    type: string\n    initial: ''\n    _unused_reason: startup scope fixture field\n")
+	writeClosedVariantFile(t, root, "support/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "item.created:\n  entity_id: string?\n")
 	agentBody := "backend:\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n    - item.created\n  emit_events:\n    - item.created\n"
 	if variant == RuntimeAgentMemoryDirectFlow {
@@ -34,6 +35,7 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 		writeClosedVariantFile(t, root, "support/prompts/backend.md", "Handle support events.\n")
 		writeClosedVariantFile(t, root, "support/agents.yaml", agentBody)
 	} else {
+		writeClosedVariantFile(t, root, "support/extras/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, "support/schema.yaml", "# fixture: support\nstages: []\npins:\n  outputs:\n    - item.created\nconnect:\n  - {event: item.created, from: ., to: extras}\n")
 		writeClosedVariantFile(t, root, "support/extras/schema.yaml", "# fixture: extras\nstages: []\npins:\n  inputs:\n    - item.created\n")
 		writeClosedVariantFile(t, root, "support/extras/prompts/backend.md", "Handle support events.\n")

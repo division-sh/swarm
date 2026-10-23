@@ -62,7 +62,7 @@ func TestIssue2586GeneratedActivityOptionalNullProbe(t *testing.T) {
 		}
 	})
 	wantBinding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-		BundleHash: bundle.SourceArtifact.BundleHash(), EventKey: schema.EventName(),
+		BundleHash: bundle.SourceArtifact.BundleHash(), EventKey: schema.EventName(), FlowID: ".",
 		SchemaDigest: digestBefore, SchemaClass: events.PayloadSchemaGenerated,
 	})
 	if err != nil {

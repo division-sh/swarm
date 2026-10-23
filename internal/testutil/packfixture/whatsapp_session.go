@@ -31,7 +31,6 @@ func WhatsAppSessionProvider(t testing.TB, platformSpecPath string, trigger []by
     category: provider_connector
     handler_type: in_process
     in_process: whatsapp.send_text
-    effect_class: non_idempotent_write
     input_schema:
       type: object
       additionalProperties: false
@@ -45,7 +44,8 @@ func WhatsAppSessionProvider(t testing.TB, platformSpecPath string, trigger []by
       required: [id]
       properties:
         id: {type: string, minLength: 1}
-`),
+`,
+		),
 		"channel.yaml": []byte(`transport: session
 capabilities: {card_render: true, reply_to_reference: true, actions_as_buttons: false, actions_as_text: true, edit: false, acknowledgment: false, inbox_listing: true}
 onboarding:

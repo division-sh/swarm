@@ -31,7 +31,6 @@ func ScopedActivityMembers() map[string][]byte {
 		members[prefix+"tools.yaml"] = []byte(fmt.Sprintf(`shared:
   description: Read the %s scoped fixture endpoint.
   handler_type: http
-  effect_class: read_only
   input_schema: {type: object, additionalProperties: false}
   output_schema:
     type: object
@@ -40,7 +39,8 @@ func ScopedActivityMembers() map[string][]byte {
     properties:
       origin: {type: string, enum: [%s]}
   http: {method: GET, url: 'https://%s.example.test/read'}
-`, origin, origin, origin))
+`,
+			origin, origin, origin))
 	}
 	return members
 }

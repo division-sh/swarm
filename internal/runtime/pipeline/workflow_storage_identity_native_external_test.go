@@ -35,7 +35,8 @@ func workflowStorageNativeFixtureFromSelectedSource(t *testing.T, selected timer
 func workflowStorageIdentityNativeFixture(t *testing.T, backend string) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
 	selected, _, _ := openTimerReplayNativeStore(t, backend)
-	fixture := workflowStorageNativeFixtureFromSelectedSource(t, selected, sourceartifactfixture.Artifact())
+	rooted, _ := sourceartifactfixture.Rooted(t, "workflow-storage", sourceartifactfixture.Artifact())
+	fixture := workflowStorageNativeFixtureFromSelectedSource(t, selected, rooted.Artifact())
 	fixture.Context = withLiveGateExecution(fixture.Context)
 	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	t.Cleanup(func() {
