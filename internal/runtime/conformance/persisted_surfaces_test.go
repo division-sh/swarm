@@ -363,7 +363,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	claims := map[string]runtimedelivery.Claim{}
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base := runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "reused-live-session")
@@ -565,7 +565,7 @@ printf '{"result":"ok"}'
 
 	var deliveryClaim runtimedelivery.Claim
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base := runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
@@ -1246,7 +1246,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 
 	am := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
-		BaseContext:      testAuthorActivityRuntimeContext(context.Background()),
+		BaseContext:      testAuthorActivityRuntimeContext(ctx),
 		Sessions:         registry,
 		SessionResetter:  pg,
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),

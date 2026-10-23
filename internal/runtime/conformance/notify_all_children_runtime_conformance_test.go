@@ -1285,6 +1285,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		processTopology: processTopology,
 	})
 	ctxV2 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV2.sourceArtifactFact), runID)
+	ctxV2 = originalConformanceFixtureContext(t, ctxV2, selected)
 	if _, err := selected.ReviseRunSource(ctxV2, runtimerunlifecycle.SourceRevisionRequest{
 		RunID:  runID,
 		Source: runtimeV2.sourceArtifactFact,
@@ -1375,6 +1376,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		processTopology: processTopology,
 	})
 	ctxV3 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV4.sourceArtifactFact), runID)
+	ctxV3 = originalConformanceFixtureContext(t, ctxV3, selected)
 	if _, err := selected.ReviseRunSource(ctxV3, runtimerunlifecycle.SourceRevisionRequest{
 		RunID:  runID,
 		Source: runtimeV4.sourceArtifactFact,
