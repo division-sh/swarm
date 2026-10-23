@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -282,6 +283,8 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	var rollbackDone <-chan error
 	releaseOrdering := func() {}
 	defer func() { releaseOrdering() }()
+	releaseGeneration := func() {}
+	defer func() { releaseGeneration() }()
 	discard := false
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
@@ -330,6 +333,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		stopRollback = context.AfterFunc(ctx, func() { done <- rollbackTx.Rollback() })
 	}
 	ctx, releaseOrdering = authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectSQLite)
+	ctx, releaseGeneration = generationauthority.BindTransaction(ctx, ctx, tx, true, opts != nil && opts.ReadOnly)
 	ctx = transactiontest.WithAttempt(ctx, probe)
 	if err = ctx.Err(); err != nil {
 		return false, err
