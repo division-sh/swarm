@@ -117,6 +117,7 @@ type Attempt struct {
 	eventCountOrder        []string
 	callerCtx              context.Context
 	runAdmissions          activeRunSources
+	runLocks               map[string]bool
 	initialRunConstruction string
 }
 
