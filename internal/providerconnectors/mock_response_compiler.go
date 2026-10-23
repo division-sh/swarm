@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -45,11 +44,6 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 				parts = append(parts, err.Error())
 			}
 			return nil, fmt.Errorf("compile mock connector response for tool %q: %s", toolID, strings.Join(parts, "; "))
-		}
-		// Native intent requires its owned session/effect implementation. A
-		// schema-generated HTTP fixture is never native provider authority.
-		if tool.Handler() == runtimecontracts.ToolHandlerInProcess {
-			continue
 		}
 		projected, err := tool.OutputSchema().Project()
 		if err != nil {
