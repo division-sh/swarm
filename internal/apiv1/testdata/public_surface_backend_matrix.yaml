@@ -1378,53 +1378,55 @@ rows:
         name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe
 
   - id: run_source_default_sqlite
-    surface: default SQLite swarm run start [source-root] no-service path
+    surface: swarm run start client against a default SQLite serve
     classification: add_to_matrix
     tier: required_smoke
     backends: [default_sqlite]
     cli_commands: [run]
-    api_methods: [health.check, run.start, run.get]
-    openrpc_matrix_methods: [health.check, run.start, run.get]
+    api_methods: [health.check, run.start, run.diagnose, run.fan_out.list]
+    openrpc_matrix_methods: [health.check, run.start, run.diagnose, run.fan_out.list]
     store_owners:
-      - internal/cliapp run start command local serve owner
+      - internal/cliapp run start serve client
       - internal/store/backendselection
       - /v1/rpc health.check
       - /v1/rpc run.start
-      - /v1/rpc run.get
-    proof_dimensions: [backend_selection, selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
+      - /v1/rpc run.diagnose
+      - /v1/rpc run.fan_out.list
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
     proof_refs:
       - kind: go_test
-        name: TestRunCommandLocalForegroundConsumesServeOwnerAndV1API
+        name: TestRunCommandConnectedForegroundReturnsOnRunQuiescence
       - kind: go_test
-        name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
+        name: TestServedRootInputFeedsExecuteAndSettleBothStores
     notes: >
-      The row composes run-command local foreground proof with selected SQLite
-      store construction proof. It intentionally avoids adding a long external
-      process run smoke to every PR.
+      Composes the CLI protocol/quiescence proof with the selected-store public
+      root-input API proof. Backend selection belongs to serve, not run start;
+      this is not an offline host or a native end-to-end CLI journey claim.
 
   - id: run_source_explicit_postgres
-    surface: explicit Postgres counterpart for swarm run start [source-root]
+    surface: swarm run start client against an explicit Postgres serve
     classification: add_to_matrix
     tier: full_conformance
     backends: [explicit_postgres]
     cli_commands: [run]
-    api_methods: [health.check, run.start, run.get]
-    openrpc_matrix_methods: [health.check, run.start, run.get]
+    api_methods: [health.check, run.start, run.diagnose, run.fan_out.list]
+    openrpc_matrix_methods: [health.check, run.start, run.diagnose, run.fan_out.list]
     store_owners:
-      - internal/cliapp run start command local serve owner
+      - internal/cliapp run start serve client
       - internal/store/backendselection
       - /v1/rpc health.check
       - /v1/rpc run.start
-      - /v1/rpc run.get
-    proof_dimensions: [backend_selection, selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
+      - /v1/rpc run.diagnose
+      - /v1/rpc run.fan_out.list
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
     proof_refs:
       - kind: go_test
-        name: TestRunCommandLocalForegroundConsumesServeOwnerAndV1API
+        name: TestRunCommandConnectedForegroundReturnsOnRunQuiescence
       - kind: go_test
-        name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe
+        name: TestServedRootInputFeedsExecuteAndSettleBothStores
     notes: >
-      This row records the explicit-Postgres counterpart without making Postgres
-      startup a required Cartesian duplicate of every fast SQLite run row.
+      The same composed client/public-API evidence runs against Postgres. It does
+      not claim that run start selects a backend, bootstraps storage or starts serve.
 
   - id: entity_read_api
     surface: /v1/rpc entity.list, entity.get, and entity.aggregate over selected stores
