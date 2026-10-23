@@ -18,6 +18,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -76,6 +77,10 @@ type fanOutFailureTestOwner struct {
 	commands     []FanOutChunkCommand
 	retryRelease []FanOutRetryableRelease
 	blocks       []FanOutBlockRequest
+}
+
+func (*fanOutFailureTestOwner) AdvanceFanOutBarriers(context.Context, fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	return nil, errors.New("failure-algebra test does not advance barriers")
 }
 
 func (*fanOutFailureTestOwner) BeginFanOutEvaluation(context.Context, fanoutobligation.Claim, func(FanOutEvaluationInput) error) (FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
