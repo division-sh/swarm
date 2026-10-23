@@ -117,8 +117,11 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !result.Activation.Activated || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+			if !result.Activation.Activated || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 {
 				t.Fatalf("selected chronology=%+v", result)
+			}
+			if observed, err := observeCatalogSelectedExecution(t, h, result.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 {
+				t.Fatalf("retained chronology=%+v error=%v", observed, err)
 			}
 			assertR3RuntimeOutput(t, h, result.Materialization.ForkRunID, "work.accepted", 1)
 			assertR3RuntimeOutput(t, h, catalogRuntimeRunID, "work.accepted", 0)

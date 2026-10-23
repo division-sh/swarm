@@ -105,7 +105,7 @@ func TestRunForkExactFactsHostileBothStores(t *testing.T) {
 		}
 		t.Run("moved_current_row_is_not_old_run_deletion", func(t *testing.T) {
 			exactRollbackTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE events SET run_id=$1,run_owner_key='run:' || CAST($1 AS TEXT) WHERE event_id=$2`, foreign.runID, f.eventID)
+				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE events SET run_id=$1,run_owner_key=$3 WHERE event_id=$2`, foreign.runID, f.eventID, "run:"+foreign.runID)
 				_, err := finalizeRunForkRevisionMatrix(ctx, tx, s.postgres, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEvents, f.eventID)))
 				if err == nil {
 					t.Fatal("accepted old-run tombstone although globally keyed current event still exists in foreign run")

@@ -74,13 +74,17 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !fork.Activation.Activated || fork.ExecutedEventCount != 1 || len(fork.ForkEvents) != 1 || fork.Materialization.SourceRunID != catalogRuntimeRunID || fork.Materialization.ForkPoint.EventID != point {
+			if !fork.Activation.Activated || fork.ExecutedEventCount != 0 || len(fork.ForkEvents) != 0 || fork.Materialization.SourceRunID != catalogRuntimeRunID || fork.Materialization.ForkPoint.EventID != point {
 				t.Fatalf("selected historical fork did not resume its exact agent input: %+v", fork)
+			}
+			observed, err := observeCatalogSelectedExecution(t, h, fork.Materialization.ForkRunID)
+			if err != nil || observed.ExecutedEventCount != 1 {
+				t.Fatalf("retained historical execution=%+v error=%v", observed, err)
 			}
 			// The fork reconstructs entity state; completed execution evidence
 			// remains source-owned through the exact historical fork lineage.
 			plan, err := runScopedCatalogStore(t, h).PlanRunFork(h.ctx, runfork.RunForkPlanRequest{
-				SourceRunID: fork.Materialization.ForkRunID, At: fork.ForkEvents[0].ForkEventID,
+				SourceRunID: fork.Materialization.ForkRunID, At: observed.ForkEvents[0].ForkEventID,
 			})
 			if err != nil || len(plan.Entities) != 2 {
 				t.Fatalf("historical fork snapshot missing: err=%v plan=%+v", err, plan)
