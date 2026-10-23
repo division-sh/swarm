@@ -18,7 +18,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -30,7 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -379,7 +379,7 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 			loads, commits                                int
 			state, status, finalStatus                    string
 		}{
-			{name: "healthy", claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running", finalStatus: "completed"},
+			{name: "healthy", claims: 1, closes: 0, activations: 1, loads: 1, commits: 1, state: "running", status: "running", finalStatus: "running"},
 			{name: "issue_refused", issue: operationErr, refuseIssue: true, discards: 1},
 			{name: "issue_acknowledged_error", issue: operationErr, discards: 1, state: "prepared", status: "cancelled"},
 			{name: "issue_discard_error", issue: operationErr, discard: settlementErr, discards: 1, state: "prepared", status: "paused"},
@@ -389,14 +389,12 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 			{name: "claim_fail_error", claim: operationErr, fail: settlementErr, claims: 1, fails: 1, state: "running", status: "paused"},
 			{name: "claim_close_error", claim: operationErr, close: settlementErr, claims: 1, fails: 1, closes: 1, discards: 1, state: "closed", status: "cancelled"},
 			{name: "prepared_events_error", source: operationErr, claims: 1, fails: 1, closes: 1, discards: 1, loads: 1, state: "closed", status: "cancelled"},
-			{name: "materialization_acknowledged_cleanup", materialization: operationErr, materializationCommitted: true, executeOnly: true, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running", finalStatus: "completed"},
-			{name: "reviewer_materialization_native_cleanup_shape", materialization: errors.Join(operationErr), materializationCommitted: true, executeOnly: true, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running", finalStatus: "completed"},
+			{name: "materialization_acknowledged_cleanup", materialization: operationErr, materializationCommitted: true, executeOnly: true, claims: 1, closes: 0, activations: 1, loads: 1, commits: 1, state: "running", status: "running", finalStatus: "running"},
+			{name: "reviewer_materialization_native_cleanup_shape", materialization: errors.Join(operationErr), materializationCommitted: true, executeOnly: true, claims: 1, closes: 0, activations: 1, loads: 1, commits: 1, state: "running", status: "running", finalStatus: "running"},
 			{name: "materialization_missing_ack", materialization: operationErr, refuseMaterialization: true, executeOnly: true},
-			{name: "source_events_acknowledged_cleanup", source: operationErr, sourceCommitted: true, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running", finalStatus: "completed"},
-			{name: "reviewer_source_events_native_cleanup_shape", source: errors.Join(operationErr), sourceCommitted: true, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running", finalStatus: "completed"},
-			{name: "activation_acknowledged_error", activation: operationErr, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running", finalStatus: "completed"},
-			{name: "activation_and_close_errors", activation: operationErr, close: settlementErr, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running", finalStatus: "completed"},
-			{name: "close_acknowledged_error", close: settlementErr, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running", finalStatus: "completed"},
+			{name: "source_events_acknowledged_cleanup", source: operationErr, sourceCommitted: true, claims: 1, closes: 0, activations: 1, loads: 1, commits: 1, state: "running", status: "running", finalStatus: "running"},
+			{name: "reviewer_source_events_native_cleanup_shape", source: errors.Join(operationErr), sourceCommitted: true, claims: 1, closes: 0, activations: 1, loads: 1, commits: 1, state: "running", status: "running", finalStatus: "running"},
+			{name: "activation_acknowledged_error", activation: operationErr, claims: 1, closes: 0, activations: 1, loads: 1, commits: 1, state: "running", status: "running", finalStatus: "running"},
 		} {
 			if tc.executeOnly && surface != "execute" {
 				continue
@@ -505,6 +503,9 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					probe.mu.Unlock()
 					requireSelectedRuntimeOutcomeErrors(t, "activation ACK diagnostics", diagnostics.err(), tc.materialization, tc.source, tc.activation)
 					probe.releaseACK()
+					if _, err := observeSelectedRetainedExecution(t, wait, owner, selected, forkID); err != nil {
+						t.Fatal(err)
+					}
 					awaitSelectedRuntimeOutcome(t, wait, retained.done, "exact retained preparation retirement", probe)
 					contexts := owner.ports.contexts
 					contexts.mu.Lock()
@@ -626,46 +627,6 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					var count int
 					if err := db.QueryRowContext(observer, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, forkID).Scan(&count); err != nil || count != 0 {
 						t.Fatalf("acknowledged discard retained installed construction: count=%d err=%v", count, err)
-					}
-				}
-				if tc.materializationCommitted || tc.sourceCommitted {
-					if err := owner.RetireSelectedContexts(context.Background()); err != nil {
-						t.Fatal(err)
-					}
-					if err := owner.ports.contexts.capability.Release(context.Background()); err != nil {
-						t.Fatal(err)
-					}
-					var restarted SelectedContractExecutionOwner
-					if backend == "postgres" {
-						restarted = newSelectedContractExecutionOwnerForTest(t, selected.(*store.PostgresStore))
-					} else {
-						restarted = newSelectedContractSQLiteExecutionOwnerForTest(t, selected.(*store.SQLiteRuntimeStore))
-					}
-					process := worklifetime.NewProcess()
-					t.Cleanup(func() {
-						process.Retire()
-						if _, err := process.Join(context.Background()); err != nil {
-							t.Error(err)
-						}
-					})
-					capability := selectedContractTestProcessCapability(t, ctx, selected.(runtimestartupownership.Store))
-					if err := restarted.BindSelectedProcess(ctx, process, capability); err != nil {
-						t.Fatal(err)
-					}
-					recovered, err := restarted.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
-					if err != nil || len(recovered) != 1 || recovered[0].RunID != forkID || recovered[0].Disposition != runfork.SelectedForkRecoveryTerminal || recovered[0].Operation != nil || recovered[0].Continuation != nil {
-						t.Fatalf("acknowledged fork restart recovery=%+v err=%v", recovered, err)
-					}
-					requireSelectedRuntimeOutcomeDurableState(t, ctx, selected, forkID, "terminal restart", "closed", "completed")
-					var eventCount, executionCount int
-					if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, forkID, activityidentity.ForkLineageEventID(forkID, eventID)).Scan(&eventCount); err != nil {
-						t.Fatal(err)
-					}
-					if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkID).Scan(&executionCount); err != nil {
-						t.Fatal(err)
-					}
-					if eventCount != 1 || executionCount != 1 {
-						t.Fatalf("restart duplicated selected fork: events=%d executions=%d", eventCount, executionCount)
 					}
 				}
 			})

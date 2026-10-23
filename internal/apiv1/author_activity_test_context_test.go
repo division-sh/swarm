@@ -92,6 +92,20 @@ func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
 
 func apiTestOriginalProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	} else {
+		process := worklifetime.NewProcess()
+		ctx = worklifetime.WithProcess(ctx, process)
+		t.Cleanup(func() {
+			process.Retire()
+			if _, err := process.Join(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 	owner, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("API native fixture requires its process owner, got %T", selected)
@@ -104,6 +118,21 @@ func apiTestOriginalProcessContext(t testing.TB, ctx context.Context, selected a
 		t.Fatal(err)
 	}
 	return ctx
+}
+
+func bindAPITestHandlerOriginalProcess(t testing.TB, handler *Handler, ctx context.Context) {
+	t.Helper()
+	process, found := worklifetime.ProcessFromContext(ctx)
+	if !found {
+		t.Fatal("native API handler fixture requires its original process")
+	}
+	stamp, bound := process.OriginalProcess()
+	if !bound {
+		t.Fatal("native API handler fixture process has no original acquisition")
+	}
+	if err := handler.workOwner.BindOriginalProcess(stamp); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
