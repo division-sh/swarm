@@ -147,9 +147,12 @@ func CopyHandedOffMixedReplyRequest(t testing.TB) string {
 
 // CopyMixedReplyResponse routes one output both as a reply and as an ordinary
 // observation to the same instance, under different compiled input pins.
-func CopyMixedReplyResponse(t testing.TB) string {
+func CopyMixedReplyResponse(t testing.TB, handedOff ...bool) string {
 	t.Helper()
 	root := CopyMixedReplyRequest(t)
+	if len(handedOff) != 0 && handedOff[0] {
+		root = CopyHandedOffMixedReplyRequest(t)
+	}
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [request.finished, request.observed]", "outputs: [request.finished, request.observed, reply.observed]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    correlation_key: request_id\n", "    correlation_key: request_id\n  - {event: provider.replied, from: provider, to: ., rename: provider.observed}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "request.finished:\n", "reply.observed:\n  request_id: text\nrequest.finished:\n")

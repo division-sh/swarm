@@ -1392,7 +1392,6 @@ func completeProposedEffectRouteInTestMutation(t *testing.T, ctx context.Context
 	if continuation.Verdict == "approve" {
 		expectedID = continuation.RequestEventID
 		expectedName = "platform.activity_requested"
-		parentID = continuation.SourceEventID
 	} else if continuation.Verdict == "revise" {
 		expectedName = continuation.RevisionEvent
 	}

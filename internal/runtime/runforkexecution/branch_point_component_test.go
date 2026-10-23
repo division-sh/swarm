@@ -10,10 +10,61 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
+
+func TestDeliveryAuthorityActivationKeepsAdvancedSourceLiveBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newActivityForkFixture(t, backend)
+			selected := fixture.owner.ports.fork
+			ctx, request, advance := q1StateOnlyGateComponentSource(t, fixture.owner)
+			attachment := q1StageBranchPointComponent(t, ctx, request)
+			advance()
+			activation, err := attachment.activate()
+			if err != nil || !activation.Activated || !activation.SourceAdvancedAfterFork || activation.SourceFrozen || activation.BranchDivergence == nil {
+				t.Fatalf("expected independently live advanced source: %+v %v", activation, err)
+			}
+			if err := selected.(runlifecycle.OperationOwner).RequireActiveRun(ctx, request.SourceRunID); err != nil {
+				t.Fatal(err)
+			}
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "freeze.delivery", "test", "", []byte(`{}`), 0, request.SourceRunID, events.EventEnvelope{}, time.Now().UTC())
+			storetest.CommitSemanticEvent(t, ctx, selected, event)
+			route := selectedExecutionTestAgentRoute(t, request.SourceRunID, "advanced-source", "")
+			storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, event, []events.DeliveryRoute{route})
+			id, err := deliverylifecycle.DeliveryID(event.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := fixture.owner.ports.busDurable.DeliveryLifecycle
+			prior, err := store.Snapshot(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			authority, err := deliverylifecycle.NewNormalExecutionAuthority(prior.Authority.SourceArtifact(), uuid.NewString(), prior.Authority.Generation()+1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := q1ComponentSnapshot(t, selected)
+			if err := store.ActivateDeliveryAuthority(ctx, authority); err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.Snapshot(ctx, id)
+			if err != nil || !got.Authority.Equal(authority) || got.Status != prior.Status || got.ClaimVersion != prior.ClaimVersion || !reflect.DeepEqual(got.Route, prior.Route) {
+				t.Fatalf("advanced source incorrectly excluded: %+v %v", got, err)
+			}
+			if !reflect.DeepEqual(q1ComponentRowsForRun(t, before, attachment.materialized.ForkRunID), q1ComponentRowsForRun(t, q1ComponentSnapshot(t, selected), attachment.materialized.ForkRunID)) {
+				t.Fatal("normal source activation rewrote the independently selected child")
+			}
+		})
+	}
+}
 
 // Old root: runtimepersistence.TestSelectedBranchPointActivationAtomicityBothStores.
 // The native owner and every backend/point/status oracle are unchanged.

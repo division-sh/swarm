@@ -82,6 +82,7 @@ func Test2376ForkDecisionExecutionSourceBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				effectCard, effect := newProposedEffectTestCard(t, sourceRun, now, attemptgeneration.Generation{})
+				effectCard, effect = runForkProposedEffectWithoutReplyForTest(t, effectCard, effect)
 				if err := selected.CreateProposedEffectCard(sourceCtx, effectCard, effect); err != nil {
 					t.Fatal(err)
 				}
