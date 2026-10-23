@@ -6,7 +6,6 @@ planning:
   unknown_package_seconds: 30
 special_packages:
 - github.com/division-sh/swarm/internal/apispec
-- github.com/division-sh/swarm/scripts/rewrite-stages-2566
 - github.com/division-sh/swarm/cmd/swarm-unused
 - github.com/division-sh/swarm/internal/apiv1
 - github.com/division-sh/swarm/internal/cliapp
@@ -227,7 +226,6 @@ units:
     input_paths: [internal, scripts, tools, cmd, platform-spec.yaml, .github]
     packages:
     - github.com/division-sh/swarm/internal/apispec
-    - github.com/division-sh/swarm/scripts/rewrite-stages-2566
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
