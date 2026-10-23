@@ -32,18 +32,20 @@ type RuntimeLogNativeFixtureForTest struct {
 		runlifecycle.OperationOwner
 		runlifecycle.CandidateStore
 	}
-	Context         context.Context
-	RequireRun      func(context.Context, string) error
-	RunSnapshot     func(context.Context, string) (runlifecycle.Snapshot, error)
-	LatestLog       func(context.Context) (events.Event, error)
-	StartupDecision func(context.Context) (events.Event, error)
-	RunPresence     func(context.Context, string) (bool, error)
-	RemoveArtifact  func(context.Context, string) (int64, error)
-	AppendFault     func(context.Context, string, bool) error
-	PublishSubject  func(context.Context, events.Event)
-	PublishDelivery func(context.Context, events.Event, []events.DeliveryRoute, deliverylifecycle.ExecutionAuthority) events.Event
-	Physical        func(context.Context) RuntimeLogPhysicalForTest
-	FanOutCapacity  startupownership.FanOutCapacity
+	Context           context.Context
+	ProcessCapability startupownership.ProcessCapability
+	MutationContext   func(context.Context) (context.Context, error)
+	RequireRun        func(context.Context, string) error
+	RunSnapshot       func(context.Context, string) (runlifecycle.Snapshot, error)
+	LatestLog         func(context.Context) (events.Event, error)
+	StartupDecision   func(context.Context) (events.Event, error)
+	RunPresence       func(context.Context, string) (bool, error)
+	RemoveArtifact    func(context.Context, string) (int64, error)
+	AppendFault       func(context.Context, string, bool) error
+	PublishSubject    func(context.Context, events.Event)
+	PublishDelivery   func(context.Context, events.Event, []events.DeliveryRoute, deliverylifecycle.ExecutionAuthority) events.Event
+	Physical          func(context.Context) RuntimeLogPhysicalForTest
+	FanOutCapacity    startupownership.FanOutCapacity
 }
 
 type RuntimeLogPhysicalForTest struct {
@@ -98,11 +100,14 @@ func nativeRecoveryLogRuntimeForTest(t *testing.T, fixture RuntimeLogNativeFixtu
 	if err != nil {
 		return nil, err
 	}
-	capability, err := store.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "runtime-recovery-log-proof", BootID: uuid.NewString(), RuntimeInstanceID: scope.RuntimeInstanceID,
-	})
-	if err != nil {
-		return nil, err
+	capability := fixture.ProcessCapability
+	if capability == nil {
+		capability, err = store.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+			OwnerID: "runtime-recovery-log-proof", BootID: uuid.NewString(), RuntimeInstanceID: scope.RuntimeInstanceID,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	t.Cleanup(func() {
 		if err := rt.Shutdown(); err != nil {
@@ -152,6 +157,18 @@ func nativeRuntimeLogSourceFactForTest(t *testing.T, fixture RuntimeLogNativeFix
 		t.Fatal("native runtime log fixture requires its admitted source fact")
 	}
 	return fact
+}
+
+func nativeRuntimeRecoveryStartupContext(t *testing.T, fixture RuntimeLogNativeFixtureForTest) context.Context {
+	t.Helper()
+	authority, err := fixture.ProcessCapability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := nativeRuntimeLogSourceFactForTest(t, fixture)
+	ctx := correlation.WithSourceArtifactFact(context.Background(), fact)
+	ctx = correlation.WithRuntimeInstanceID(ctx, authority.RuntimeInstanceID)
+	return authoractivity.WithScope(ctx, authoractivity.BundleScope(authority.RuntimeInstanceID, fact.BundleHash()))
 }
 
 func exactNativeRuntimeLogRecordForTest(t *testing.T, runID string, mode executionmode.Mode, message string) RuntimeLogPersistenceRecord {

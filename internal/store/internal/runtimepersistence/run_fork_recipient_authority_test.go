@@ -48,7 +48,7 @@ func TestRunForkRecipientAuthorityRecoveryRoundTripBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(recipientAuthorityRecoveryStore)
-			ctx := managedExecutionStoreTestContext(t, testAuthorActivityContext())
+			ctx := originalStoreFixtureContext(t, managedExecutionStoreTestContext(t, testAuthorActivityContext()), fixture.store)
 			req := recipientAuthorityRecoveryRequest(t, ctx, selected, want)
 			recorded, err := selected.RecordRunForkSelectedContractRouteRecovery(ctx, req)
 			if err != nil {
@@ -125,7 +125,7 @@ func TestRunForkRecipientAuthorityRecoveryRejectsReducedWireBothStores(t *testin
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(recipientAuthorityRecoveryStore)
-			ctx := managedExecutionStoreTestContext(t, testAuthorActivityContext())
+			ctx := originalStoreFixtureContext(t, managedExecutionStoreTestContext(t, testAuthorActivityContext()), fixture.store)
 			req := recipientAuthorityRecoveryRequest(t, ctx, selected, evidence)
 			for _, carrier := range []string{"route_topology", "recipient_planning"} {
 				for _, tc := range []struct {

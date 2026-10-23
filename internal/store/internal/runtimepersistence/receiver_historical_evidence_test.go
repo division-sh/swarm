@@ -18,6 +18,7 @@ func TestReceiverHistoricalEvidenceUsesExactCanonicalCutBothStores(t *testing.T)
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx, request := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			plan, err := fixture.store.(forkWorkflowOwnershipStore).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: request.SourceRunID, At: request.At})
 			if err != nil || len(plan.Entities) != 1 || plan.ForkPoint.Revision <= 0 {
 				t.Fatalf("canonical creation cut: %+v %v", plan, err)

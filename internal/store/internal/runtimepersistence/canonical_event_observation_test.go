@@ -18,6 +18,7 @@ func TestCanonicalEventObservationPreservesCompleteRecordAndOriginalReadBothStor
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			root := eventtest.RunCreatingRootIngress(uuid.NewString(), "fixture.root", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond))
 			if err := commitSemanticEventFixture(ctx, fixture.store, root); err != nil {
 				t.Fatal(err)

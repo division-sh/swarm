@@ -203,7 +203,7 @@ func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					committed, err := f.owner.CommitFanOutChunk(f.ctx, rejectedFanOutChunk(f.claim, 0, len(input.Items), time.Now().UTC()))
-					intended := err != nil && ((cut == "stop" && errors.Is(err, fanoutobligation.ErrStaleClaim)) || (cut == "source_head" && strings.Contains(err.Error(), "fan-out grant no longer owns the current source-set head")) || (cut == "retired_grant" && strings.Contains(err.Error(), "admit fan-out run execution: run execution generation grant is no longer current")))
+					intended := err != nil && ((cut == "stop" && errors.Is(err, fanoutobligation.ErrStaleClaim)) || (cut == "source_head" && strings.Contains(err.Error(), "fan-out grant no longer owns the current source-set head")) || (cut == "retired_grant" && strings.Contains(err.Error(), "runtime generation grant is retired")))
 					if !intended || len(committed.Publications) != 0 {
 						t.Fatalf("hydration authority change admitted durable effects: %+v %v", committed, err)
 					}

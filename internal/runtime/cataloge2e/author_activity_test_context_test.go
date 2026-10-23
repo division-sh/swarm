@@ -9,12 +9,37 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
+
+func originalCatalogFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	owner, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("catalog fixture lacks its original process owner: %T", selected)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
 	return testAuthorActivityContextForBundle(ctx, authorActivityTestSourceArtifactFact)

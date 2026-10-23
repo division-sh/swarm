@@ -30,6 +30,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 					selected = storetest.StartPostgresRuntimeStore(t)
 				}
 				ctx := testAuthorActivityContextForSource(context.Background(), source)
+				ctx = originalEventBusFixtureContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: "99999999-9999-9999-9999-999999999999",
 					Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),

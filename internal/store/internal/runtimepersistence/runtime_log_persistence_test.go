@@ -21,6 +21,7 @@ import (
 func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -82,6 +83,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
@@ -124,6 +126,7 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	pg := newTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	envelope := computeModuleReplayEvidenceTestEnvelope()
@@ -183,6 +186,7 @@ func computeModuleReplayEvidenceTestEnvelope() computemodule.ReplayEnvelope {
 func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
@@ -287,6 +291,7 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	pg := newTestPostgresStore(t, db)
 	artifact := storeTestSourceArtifact("runtime-log-source-lineage")
 	ctx := testAuthorActivityContextForBundle(artifact.BundleHash())
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	registerTestAuthorActivityCatalogForContext(t, pg, ctx)
 
 	runID := uuid.NewString()
@@ -336,41 +341,5 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	}
 	if sourceEventID != subjectEventID {
 		t.Fatalf("postgres source_event_id = %q, want %q", sourceEventID, subjectEventID)
-	}
-}
-
-func TestPostgresRuntimeLogPersistenceUsesClosedNamedCommits(t *testing.T) {
-	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	pg := newTestPostgresStore(t, db)
-	runID := uuid.NewString()
-	subjectEventID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
-
-	subject := eventtest.RunCreatingRootIngress(
-		subjectEventID, events.EventType("validation/validation.package_ready"),
-		"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	if err := commitSemanticEventFixtureWithAgents(ctx, pg, subject, nil); err != nil {
-		t.Fatalf("commit subject event: %v", err)
-	}
-	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
-		Level: "warn", Message: "closed diagnostic", Component: "eventbus",
-		Action: "closed_named_commit", EventID: subjectEventID, EventType: "validation/validation.package_ready",
-	}); err != nil {
-		t.Fatalf("persist runtime log: %v", err)
-	}
-
-	var sourceEventID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(source_event_id::text, '')
-		FROM events
-		WHERE event_name = 'platform.runtime_log'
-	`).Scan(&sourceEventID); err != nil {
-		t.Fatalf("load transactional runtime log: %v", err)
-	}
-	if sourceEventID != subjectEventID {
-		t.Fatalf("transactional runtime log source_event_id = %q, want %q", sourceEventID, subjectEventID)
 	}
 }

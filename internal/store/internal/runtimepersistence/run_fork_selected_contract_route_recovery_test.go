@@ -61,6 +61,7 @@ func TestRunForkSelectedContractRouteRecoverySelectedStoreParity(t *testing.T) {
 				store := admitTestPostgresStore(t, db)
 				selected, eventStore = store, store
 			}
+			ctx = originalStoreFixtureContext(t, ctx, eventStore)
 			sourceRunID := "00000000-0000-0000-0000-000000023620"
 			forkRunID := "00000000-0000-0000-0000-000000023621"
 			eventID := "00000000-0000-0000-0000-000000023622"
@@ -178,6 +179,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -226,6 +228,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -277,6 +280,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -323,6 +327,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -376,6 +381,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()

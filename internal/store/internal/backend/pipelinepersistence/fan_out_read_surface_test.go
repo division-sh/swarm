@@ -12,18 +12,29 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
-func TestFanOutReadMixedOriginPaginationBothStores(t *testing.T) {
+func VerifyFanOutReadMixedOriginPaginationForTest(t *testing.T, prepare StatementProcessFixtureForTest) {
 	if os.Getenv("SWARM_TEST_POSTGRES_DSN") == "" {
 		t.Fatal("SWARM_TEST_POSTGRES_DSN required for dual-store readback proof")
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			runID := uuid.NewString()
-			db := fanOutReadbackTestDB(t, backend, runID)
+			db, location := openFanOutReadbackTestDB(t, backend)
+			var owner runlifecycle.OperationOwner
+			var ctx context.Context
+			if backend == "postgres" {
+				owner, ctx = materializePostgresStatementRuns(t, db, location, true, prepare, runID)
+			} else {
+				owner, ctx = materializeSQLiteStatementRuns(t, db, location, true, prepare, runID)
+			}
+			if _, err := owner.TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: runlifecycle.StatePaused}); err != nil {
+				t.Fatal(err)
+			}
+			initializeFanOutReadbackTestDB(t, db, backend)
 			handler := seedFanOutReadbackClaim(t, db, runID).Claim.Key
 			ids := []string{
 				"00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002",

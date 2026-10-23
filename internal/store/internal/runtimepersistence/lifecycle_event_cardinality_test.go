@@ -19,6 +19,7 @@ func TestLifecycleEventCardinalityPreservesDuplicatesNamesAndClassesBothStores(t
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx, runID, sibling := testAuthorActivityContext(), uuid.NewString(), uuid.NewString()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			at := time.Date(2026, 10, 4, 17, 0, 0, 0, time.UTC)
 			for _, run := range []string{runID, sibling} {
 				seedAuthorActivityReceiptRun(t, fixture, ctx, run)

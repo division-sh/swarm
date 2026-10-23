@@ -170,6 +170,15 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	}
 	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal}
 	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), op.Coordinate.RuntimeInstanceID, op.Coordinate.BundleHash)
+	f.ctx, err = startupownership.WithRuntimeMutationAuthority(f.ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned, err = startupownership.WithRuntimeMutationAuthority(owned, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.owned = owned
 	f.binding, err = grant.ProcessExecutionBinding()
 	if err != nil {
 		t.Fatal(err)

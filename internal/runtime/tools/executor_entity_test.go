@@ -1456,7 +1456,7 @@ accounts:
 	forkEventID := uuid.NewString()
 	at := time.Unix(1700000710, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	ctx := unmanagedToolTestContext()
+	ctx := toolFixtureProcessContext(t, unmanagedToolTestContext(), pg)
 	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 		t.Fatalf("EnsureSourceArtifact: %v", err)
 	}
@@ -1563,7 +1563,7 @@ accounts:
 	forkEventID := uuid.NewString()
 	at := time.Unix(1700000720, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	ctx := unmanagedToolTestContext()
+	ctx := toolFixtureProcessContext(t, unmanagedToolTestContext(), pg)
 	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 		t.Fatalf("EnsureSourceArtifact: %v", err)
 	}
@@ -1623,6 +1623,7 @@ accounts:
 	}
 	forkCtx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), materialized.ForkRunID)
 	forkCtx = runtimecorrelation.WithSourceArtifactFact(forkCtx, forkSource)
+	forkCtx = toolFixtureProcessContext(t, forkCtx, pg)
 	actor = entityToolFixtureActor(t, semanticview.Wrap(bundle), actor, materialized.ForkRunID, "review", "review/inst-1")
 	forkCtx = runtimetools.WithActor(forkCtx, actor)
 	if _, err := exec.Execute(forkCtx, "save_entity_field", map[string]any{

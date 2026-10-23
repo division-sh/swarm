@@ -15,6 +15,7 @@ func TestWorkspaceInvocationPhasesRetainNativeStateWithoutMutationBothStores(t *
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			active := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			closed := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			if _, err := fixture.store.SettleSuccess(ctx, closed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
@@ -74,7 +75,8 @@ func TestWorkspaceInvocationPhasesRejectUnownedAndLateFailureBothStores(t *testi
 		for _, cut := range []string{"cancelled", "closed", "missing_attempts", "late_missing_effects"} {
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				fixture := backend.open(t)
-				seedDeliveryRecoveryClaim(t, fixture, testAuthorActivityContext())
+				setupCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+				seedDeliveryRecoveryClaim(t, fixture, setupCtx)
 				readCtx := ctx
 				switch cut {
 				case "cancelled":

@@ -25,7 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
+
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -151,57 +151,6 @@ func (processIngressCredentialStore) Delete(context.Context, string) error      
 func (s processIngressCredentialStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
 	value, present, err := s.Get(ctx, key)
 	return runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: key, Present: present}, value), err
-}
-
-type processIngressProofStore struct {
-	recorded  bool
-	store     runtimebus.EventStore
-	lastError error
-}
-
-func (s *processIngressProofStore) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
-	if err := command.Validate(); err != nil {
-		s.lastError = err
-		return runtimeinbound.CommitResult{}, err
-	}
-	s.recorded = true
-	owner, ok := s.store.(*processIngressEventStore)
-	if !ok || owner == nil {
-		return runtimeinbound.CommitResult{}, errors.New("process ingress proof requires its validated publication store")
-	}
-	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
-	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
-	for i, finalized := range command.Finalization.Events {
-		var err error
-		committed[i], err = owner.commitValidatedPublication(command.Publications[i])
-		if err != nil {
-			s.lastError = err
-			return runtimeinbound.CommitResult{}, err
-		}
-		eventFingerprint, err := runtimeinbound.EventIntegrityFingerprint(finalized.Event, finalized.Kind, finalized.Authorization)
-		if err != nil {
-			return runtimeinbound.CommitResult{}, err
-		}
-		children[i] = runtimeinbound.EventRecord{
-			Ordinal: finalized.Ordinal, EventID: finalized.Event.ID(), EventName: string(finalized.Event.Type()),
-			Kind: finalized.Kind, Authorization: finalized.Authorization, EventIntegrityFingerprint: eventFingerprint,
-			RecipientManifestFingerprint: strings.Repeat("0", 64), RecipientCount: len(command.Publications[i].Commit.DeliveryRoutes),
-			Event: finalized.Event,
-		}
-	}
-	return runtimeinbound.CommitResult{
-		Acknowledged: true,
-		Record:       runtimeinbound.Record{Request: command.Request, State: "committed", OutputCount: len(children), Events: children, Created: true},
-		Publications: committed,
-	}, nil
-}
-
-func (*processIngressProofStore) LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
-	return runtimeinbound.Record{}, false, nil
-}
-
-func (*processIngressProofStore) ValidateInboundPublicationIntegrity(context.Context) error {
-	return nil
 }
 
 type processIngressEventStore struct {

@@ -104,6 +104,10 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 				if err != nil {
 					t.Fatal(err)
 				}
+				ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+				if err != nil {
+					t.Fatal(err)
+				}
 				proof := startuphandoff.New()
 				barrier := &startupTimerPublicationBarrier{entered: make(chan lifecycleprobe.Signal, 1), release: make(chan struct{}), handoff: proof}
 				var candidates []serveRuntimeBundleContext

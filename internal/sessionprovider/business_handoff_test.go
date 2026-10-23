@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -39,8 +40,12 @@ func (f *activeInputFixture) restartBusinessConnection(t *testing.T) {
 	coordinate := f.operation.Coordinate
 	coordinate.RuntimeInstanceID = uuid.NewString()
 	coordinate.ContextPublicationGeneration++
+	if err := f.nativeProcess.Release(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	acquireLogoutProcessFixture(t, f, coordinate.RuntimeInstanceID)
 	var err error
-	f.operation, err = f.selected.AdvanceChannelOnboarding(context.Background(), channelonboarding.AdvanceRequest{
+	f.operation, err = f.selected.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
 		OperationID: f.operation.OperationID, ExpectedRevision: f.operation.Revision, Phase: f.operation.Phase,
 		RebindCoordinate: &coordinate, Now: time.Now().UTC().Truncate(time.Microsecond)})
 	if err != nil {
@@ -57,7 +62,7 @@ func (f *activeInputFixture) restartBusinessConnection(t *testing.T) {
 
 func (f *activeInputFixture) republishBusinessStanding(t *testing.T) {
 	t.Helper()
-	sequence, err := f.selected.PublishStandingService(context.Background(), f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
+	sequence, err := f.selected.PublishStandingService(f.ctx, f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
 	if err != nil || sequence < 1 {
 		t.Fatalf("republish the original standing service: sequence=%d %v", sequence, err)
 	}
@@ -69,6 +74,11 @@ func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
 	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source),
 		authoractivity.BundleScope(f.operation.Coordinate.RuntimeInstanceID, source.BundleHash()))
+	var err error
+	f.ctx, err = startupownership.WithProcessMutationAuthority(f.ctx, f.nativeProcess)
+	if err != nil {
+		t.Fatal(err)
+	}
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.operation.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})
 	if err != nil {

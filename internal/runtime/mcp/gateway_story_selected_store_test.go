@@ -33,12 +33,14 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -129,7 +131,16 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("derive story-writer prompt: %v", err)
 			}
-			lifecycleToken := seedGatewayStoryRuntime(t, selected, runID, actor, sourceFact, sourceArtifact)
+			originalCtx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
+			process, err := agentfixture.ProcessCapability(t, originalCtx, selected.backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalCtx, err = startupownership.WithProcessMutationAuthority(originalCtx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lifecycleToken := seedGatewayStoryRuntime(t, originalCtx, selected, runID, actor, sourceFact, sourceArtifact)
 			executor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 			if !gatewayStoryToolOffered(executor, actor, "send_story") {
 				t.Fatalf("send_story is not offered to actor: %#v", executor.ToolDefinitionsForActor(actor))
@@ -141,6 +152,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			registry := runtimemcp.NewTurnContextRegistry(models.ActorFromContext)
 			newGateway := func(registry *runtimemcp.TurnContextRegistry) *runtimemcp.Gateway {
 				return runtimemcp.NewGateway(executor, gatewayStoryAuthToken, runtimemcp.GatewayHooks{
+					CarryMutationContext:      startupownership.CarryMutationAuthority,
 					WithActor:                 models.WithActor,
 					WithInboundEvent:          runtimebus.WithInboundEvent,
 					ActorFromContext:          models.ActorFromContext,
@@ -154,7 +166,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			gateway := newGateway(registry)
 			surface, authority, admission := gatewayStoryCapabilitySurface(t, gateway, actor, runID, lifecycleToken)
 
-			successCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-success")
+			successCtx := gatewayStoryManagedTurnContext(originalCtx, selected, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-success")
 			successToken := registry.RegisterTurnContextWithCapabilitySurface(successCtx, time.Hour, surface)
 			response := callGatewayStoryTool(t, gateway, successToken, "send_story", map[string]any{})
 			if gatewayStoryResponseIsError(response) {
@@ -165,7 +177,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 				t.Fatalf("HTTP dispatches = %d, want 1", got)
 			}
 
-			missingScopeCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, runtimeauthoractivity.Scope{}, sourceFact, authority, admission, lifecycleToken, "gateway-http-missing-scope")
+			missingScopeCtx := gatewayStoryManagedTurnContext(originalCtx, selected, actor, runID, runtimeauthoractivity.Scope{}, sourceFact, authority, admission, lifecycleToken, "gateway-http-missing-scope")
 			missingScopeToken := registry.RegisterTurnContextWithCapabilitySurface(missingScopeCtx, time.Hour, surface)
 			failed := callGatewayStoryTool(t, gateway, missingScopeToken, "send_story", map[string]any{})
 			if !gatewayStoryResponseIsError(failed) {
@@ -176,7 +188,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 				t.Fatalf("scope-less call dispatched HTTP request; dispatches = %d, want 1", got)
 			}
 			t.Run("native_worker_committed_lost_reply", func(t *testing.T) {
-				lostCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-lost-reply")
+				lostCtx := gatewayStoryManagedTurnContext(originalCtx, selected, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-lost-reply")
 				lostToken := registry.RegisterTurnContextWithCapabilitySurface(lostCtx, time.Hour, surface)
 				defer registry.UnregisterTurnContext(lostToken)
 				var drop atomic.Bool
@@ -234,11 +246,28 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 				// The same authority must still refuse redispatch from durable evidence.
 				transport.Close()
 				registry.Reset()
+				if err := process.Release(context.Background()); err != nil {
+					t.Fatal(err)
+				}
 				if err := selected.close(); err != nil {
 					t.Fatal(err)
 				}
 				reopened := selected.reopen()
-				reopenedCtx := runtimeeffects.WithController(lostCtx, runtimeeffects.NewController(reopened.backend).WithExecutionPosture(executionposture.Live))
+				reopenedCtx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
+				reopenedProcess, err := agentfixture.ProcessCapability(t, reopenedCtx, reopened.backend)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reopenedCtx, err = startupownership.WithProcessMutationAuthority(reopenedCtx, reopenedProcess)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reopenedCtx = gatewayStoryManagedTurnContext(reopenedCtx, reopened, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-lost-reply")
+				inbound, ok := runtimecorrelation.InboundEventFromContext(lostCtx)
+				if !ok {
+					t.Fatal("original managed turn lacks its inbound event")
+				}
+				reopenedCtx = runtimebus.WithInboundEvent(reopenedCtx, inbound)
 				freshRegistry := runtimemcp.NewTurnContextRegistry(models.ActorFromContext)
 				freshGateway := newGateway(freshRegistry)
 				freshToken := freshRegistry.RegisterTurnContextWithCapabilitySurface(reopenedCtx, time.Hour, surface)
@@ -401,15 +430,15 @@ func writeGatewayStoryFixture(t *testing.T, path, contents string) {
 	}
 }
 
-func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, runID string, actor models.AgentConfig, source runtimecorrelation.SourceArtifactFact, artifact *sourceartifact.AdmittedSourceArtifact) runtimeeffects.LifecycleToken {
+func seedGatewayStoryRuntime(t *testing.T, ctx context.Context, selected gatewayStorySelectedStore, runID string, actor models.AgentConfig, source runtimecorrelation.SourceArtifactFact, artifact *sourceartifact.AdmittedSourceArtifact) runtimeeffects.LifecycleToken {
 	t.Helper()
 	now := time.Now().UTC()
 	bundleHash := source.BundleHash()
-	storetest.RequireRun(t, context.Background(), selected.backend, storetest.RunFixture{
+	storetest.RequireRun(t, ctx, selected.backend, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now,
 		BundleHash: bundleHash, Artifact: artifact,
 	})
-	if err := storetest.UpsertStaticAgentFixtureForSource(t, context.Background(), selected.backend, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected.backend, runtimemanager.PersistedAgent{
 		Config: actor, Status: "active", StartedAt: now,
 		LifecycleEpoch: 7, LifecycleGeneration: 3,
 		LifecyclePhase: runtimemanager.AgentLifecycleRunning, LifecycleRunMode: runtimemanager.AgentRunModeStandard,

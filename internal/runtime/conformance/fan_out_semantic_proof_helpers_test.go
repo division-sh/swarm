@@ -369,9 +369,11 @@ func newSemanticProofFixtureWithSourcePreparation(t *testing.T, backend string, 
 		},
 	})
 	f.ctx = correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), f.runtime.sourceArtifactFact), f.runID)
-	if err := f.runtime.manager.Run(managedConformanceExecutionContextForBundle(t, f.ctx, "fan-out-semantic-proof", f.runtime.sourceArtifactFact)); err != nil {
+
+	if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, f.ctx, "fan-out-semantic-proof", f.runtime.sourceArtifactFact), f.runtime.bus, f.runtime.manager); err != nil {
 		t.Fatal(err)
 	}
+
 	if prepare == nil {
 		publishNotifyAllChildrenRunCreatingEvent(t, f.ctx, f.runtime, f.source, f.runID, "portfolio.opened", map[string]any{"portfolio_id": f.runID, "threshold": 75})
 	} else {

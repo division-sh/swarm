@@ -71,7 +71,7 @@ func TestPipelineObligationSQLitePostgresParityMatrix(t *testing.T) {
 			if !ok {
 				t.Fatalf("%T does not expose the canonical pipeline obligation owner", fixture.store)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 
 			t.Run("age_independent_selection_and_global_presence", func(t *testing.T) {
 				provePipelineAgeIndependentSelection(t, ctx, fixture, selected)

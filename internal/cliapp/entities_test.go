@@ -17,10 +17,32 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
+
+func cliFixtureProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		return ctx
+	}
+	store, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("CLI fixture requires its native lifecycle owner: %T", selected)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
 
 func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
@@ -110,6 +132,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	ctx := context.Background()
 	setCLIAPITestToken(t, "test-token")
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	ctx = cliFixtureProcessContext(t, ctx, sqliteStore)
 	runID := "11111111-1111-1111-1111-111111111111"
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"

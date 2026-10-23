@@ -27,6 +27,7 @@ func TestLLMSessionAcquireRotateReleaseAttemptJourneyBothStores(t *testing.T) {
 		fixture := newExactFactFixture(t, selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
 		ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), 15*time.Second)
+		ctx = originalStoreFixtureContext(t, ctx, selected.selected)
 		defer cancel()
 
 		var bundleHash string

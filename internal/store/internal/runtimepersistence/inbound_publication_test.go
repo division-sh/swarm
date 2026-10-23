@@ -36,6 +36,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -165,7 +166,12 @@ func inboundPublicationProofBus(t *testing.T, store inboundPublicationProofStore
 	if err != nil {
 		return nil, empty, err
 	}
-	bus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{SourceArtifactFact: fact, ProviderOutputVerifier: catalog, ContractBundle: source})
+	bus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
+		SourceArtifactFact: fact, ProviderOutputVerifier: catalog, ContractBundle: source,
+		MutationContext: func(command context.Context) (context.Context, error) {
+			return startupownership.CarryMutationAuthority(command, ctx), nil
+		},
+	})
 	return bus, admission, err
 }
 
@@ -218,6 +224,7 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 				candidate.Source = mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 				seedStoreTestPersistedArtifact(t, f.db, bundle.SourceArtifact)
 				ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
+				ctx = originalStoreFixtureContext(t, ctx, f.selected)
 				registrar := store.(testAuthorActivityCatalogRegistrar)
 				registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
 				standing, err := f.workflow.ReconcileStandingService(ctx, candidate)
@@ -281,6 +288,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 		testAuthorActivityContextForBundle(candidate.Source.BundleHash()),
 		candidate.Source,
 	)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	seedStoreTestPersistedArtifact(t, db, artifact)
 	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
 	if !ok {

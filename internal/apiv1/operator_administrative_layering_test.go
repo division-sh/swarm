@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -24,6 +25,10 @@ func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	capability := acquireAdministrativeResetCapability(t, selected)
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	external := newBlockingAdministrativeExternalWork()
 	coordinator := &destructivereset.Coordinator{
@@ -183,6 +188,10 @@ func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.
 			Containers: external,
 		}
 		ctx, cancel := context.WithCancel(context.Background())
+		ctx, err := startupownership.WithProcessMutationAuthority(ctx, capability)
+		if err != nil {
+			t.Fatal(err)
+		}
 		result := make(chan error, 1)
 		go func() {
 			_, err := executeRuntimeNuke(ctx, Request{

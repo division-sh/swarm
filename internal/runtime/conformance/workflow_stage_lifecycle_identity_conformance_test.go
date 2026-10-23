@@ -126,6 +126,7 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 			runtime, processCapability, publications := newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
 			runtimeCtx := testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
+			runtimeCtx = originalConformanceFixtureContext(t, runtimeCtx, lifecycleStore)
 			runID := uuid.NewString()
 			runCtx := runtimecorrelation.WithRunID(runtimeCtx, runID)
 			memberA := uuid.NewString()
@@ -168,6 +169,7 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 			runtime, processCapability, _ = newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
 			runtimeCtx = testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
+			runtimeCtx = originalConformanceFixtureContext(t, runtimeCtx, lifecycleStore)
 			runCtx = runtimecorrelation.WithRunID(runtimeCtx, runID)
 			assertStageLifecycleIndexedConstruction(t, runCtx, lifecycleStore, module.source, flowIdentity)
 			if deliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation); deliveryID != setupDeliveryID {

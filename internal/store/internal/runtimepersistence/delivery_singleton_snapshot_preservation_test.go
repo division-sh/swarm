@@ -23,6 +23,7 @@ func TestDeliverySingletonSnapshotIndependentParityBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			adapter := m29DeliveryAdapter(t, backend.name == "postgres")
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -159,6 +160,7 @@ func TestDeliverySingletonSnapshotMembershipRefusalBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			adapter := m29DeliveryAdapter(t, backend.name == "postgres")
 			runID, foreignRun := uuid.NewString(), uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)

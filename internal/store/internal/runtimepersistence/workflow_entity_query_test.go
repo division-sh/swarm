@@ -118,7 +118,7 @@ func TestWorkflowEntityCollectionIncludesStateOnlyRowsOnBothStores(t *testing.T)
 					seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/wrong-type", "other_item", map[string]any{"account_id": "wrong-type"})
 
 					wrongRunID := uuid.NewString()
-					requireRunningRunForTest(t, context.Background(), selected, wrongRunID, time.Now().UTC())
+					requireRunningRunForTest(t, ctx, selected, wrongRunID, time.Now().UTC())
 					seedWorkflowEntityQueryRowAs(t, backend, db, wrongRunID, "child/wrong-run", "review_item", map[string]any{"account_id": "wrong-run"})
 					// A sibling run's lifecycle must not hide this run's state-only row.
 					seedLifecycle(wrongRunID, uuid.NewString(), "child/state-only", inactiveStatus)
@@ -202,12 +202,14 @@ func openWorkflowEntityQueryBackend(t *testing.T, backend string) (workflowEntit
 	switch backend {
 	case "sqlite":
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+		ctx = originalStoreFixtureContext(t, ctx, selected)
 		requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 		return selected, selected.backend.ConstructionHandle(), ctx, runID
 	case "postgres":
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		selected := admitTestPostgresStore(t, db)
+		ctx = originalStoreFixtureContext(t, ctx, selected)
 		requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 		return selected, db, ctx, runID
 	default:

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -64,7 +65,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 				_, db, _ := testutil.StartPostgres(t)
 				store = admitTestPostgresStore(t, db)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			identity := testAgentIdentity(t, "removed-source-agent", "")
 			requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 			record := runtimemanager.PersistedAgent{
@@ -100,6 +101,11 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 				BundleHash: hash, RuntimeInstanceID: authority.RuntimeInstanceID, RuntimeGeneration: 2, SourceSetRevision: plan.Revision,
 			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx = authoractivity.WithScope(correlation.WithRuntimeInstanceID(testAuthorActivityContextForBundle(hash), authority.RuntimeInstanceID), authoractivity.BundleScope(authority.RuntimeInstanceID, hash))
+			ctx, err = runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,6 +168,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					db = selected.backend.ConstructionHandle()
 				}
 				identity := testAgentIdentity(t, "census-drift-agent", "")
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 				seedTestAgentRow(t, ctx, db, postgres, identity, "active")
 				fields := testAgentIdentityStorageFields(t, identity)
@@ -205,12 +212,15 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					t.Fatalf("read predecessor lifecycle binding: %v", err)
 				}
 
-				request := testStartupAcquireRequest("census-drift-successor")
-				capability, err := store.AcquireProcessCapability(ctx, request)
+				capability, err := agentfixture.ProcessCapability(t, ctx, store.(agentfixture.Store))
 				if err != nil {
 					t.Fatalf("acquire census-drift capability: %v", err)
 				}
 				t.Cleanup(func() { _ = capability.Release(context.Background()) })
+				authority, err := capability.Evidence()
+				if err != nil {
+					t.Fatal(err)
+				}
 				plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
 					BundleHash: testAgentTopologyBundleHash,
 				}}, nil)
@@ -222,7 +232,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 				}
 				grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 					BundleHash:        testAgentTopologyBundleHash,
-					RuntimeInstanceID: request.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+					RuntimeInstanceID: authority.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 				})
 				if err != nil {
 					t.Fatalf("issue census-drift successor grant: %v", err)
@@ -278,7 +288,7 @@ func TestAgentLifecyclePreparedReadinessRebindBothStores(t *testing.T) {
 
 func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSourceSetRebindStore, sourceSetRebind ...bool) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	now := time.Now().UTC()
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
 	runID := uuid.NewString()
@@ -619,11 +629,17 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	acquire := runtimestartupownership.AcquireRequest{
 		OwnerID: "process-binding-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
 	}
+	ctx = correlation.WithRuntimeInstanceID(testAuthorActivityContextForBundle(coordinate.BundleHash), acquire.RuntimeInstanceID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(acquire.RuntimeInstanceID, coordinate.BundleHash))
 	successor, err := store.AcquireProcessCapability(ctx, acquire)
 	if err != nil {
 		t.Fatalf("acquire successor process capability: %v", err)
 	}
 	t.Cleanup(func() { _ = successor.Release(context.Background()) })
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, successor)
+	if err != nil {
+		t.Fatal(err)
+	}
 	grant, err := successor.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 		BundleHash:        coordinate.BundleHash,
 		RuntimeInstanceID: acquire.RuntimeInstanceID, RuntimeGeneration: 2, SourceSetRevision: plan.Revision,
@@ -834,7 +850,7 @@ func seedLifecycleReadinessOwner(
 
 func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRebindStore) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "source-set-rebind-agent"
 	identity := testAgentIdentity(t, agentID, "global")

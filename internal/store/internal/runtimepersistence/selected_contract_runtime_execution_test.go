@@ -283,6 +283,7 @@ func TestSelectedForkRuntimeAuthorityFinalizationAfterRunTerminalSelectedStorePa
 			}
 
 			quiesceFixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, quiesceFixture.request)
 			if err != nil {
 				t.Fatalf("issue quiesce authority: %v", err)
@@ -400,6 +401,7 @@ func TestSelectedForkCompletionAuthorityRecoveryNoRedispatchPostgres(t *testing.
 func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixture selectedCompletionFixture) {
 	t.Helper()
 	ctx := testAuthorActivityContextForBundle(fixture.request.DeclarationPlan.BundleHash)
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	issued, err := fixture.store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 	if err != nil {
 		t.Fatal(err)
@@ -711,6 +713,7 @@ func TestSelectedForkDiscardSelectedStoreParity(t *testing.T) {
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatalf("issue retained selected execution: %v", err)
@@ -758,6 +761,7 @@ func TestSelectedForkDiscardRollbackSelectedStoreParity(t *testing.T) {
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatalf("issue rollback selected execution: %v", err)
@@ -782,10 +786,11 @@ func TestSelectedForkDiscardMissingRunIsIdempotentOnBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			store, _, _ := selectedForkDiscardTestStore(t, backend)
 			missing := uuid.NewString()
-			if err := store.DiscardMaterializedSelectedContractExecutionFork(testAuthorActivityContext(), missing); err != nil {
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+			if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, missing); err != nil {
 				t.Fatalf("discard missing selected fork: %v", err)
 			}
-			if err := store.DiscardMaterializedSelectedContractExecutionFork(testAuthorActivityContext(), missing); err != nil {
+			if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, missing); err != nil {
 				t.Fatalf("repeat discard missing selected fork: %v", err)
 			}
 		})
@@ -798,6 +803,7 @@ func TestSelectedForkDiscardDeletesUnretainedPausedRunOnBothStores(t *testing.T)
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			requirePausedRunForTest(t, ctx, store, runID, time.Now().UTC())
 
 			if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, runID); err != nil {
@@ -923,6 +929,7 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedProviderCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 
 	issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 	if err != nil {
@@ -1113,6 +1120,7 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, store, fixture.forkRun)
 	route := testAgentDeliveryRoute(t, fixture.forkRun, "selected-agent", "fixture/selected-agent")
 	eventsByState := []events.Event{
@@ -1167,6 +1175,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	defer cancel()
 
 	issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
@@ -1308,6 +1317,7 @@ func TestSelectedForkRetainedDiscardRollbackIncludesRevisionPublicationPostgres(
 			store := admitTestPostgresStore(t, db)
 			fixture := newSelectedCompletionFixture(t, store, db, false)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatalf("issue retained selected execution: %v", err)
@@ -1383,6 +1393,7 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -1481,6 +1492,13 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability, sourceArtifacts ...*sourceartifact.AdmittedSourceArtifact) selectedCompletionFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	if len(sourceArtifacts) != 0 {
+		ctx = testAuthorActivityContextForBundle(sourceArtifacts[0].BundleHash())
+	}
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	sourceRun := uuid.NewString()
 	forkRun := uuid.NewString()
@@ -1493,7 +1511,6 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	registerTestAuthorActivityCatalog(t, registrar)
 	if len(sourceArtifacts) != 0 {
 		artifact := sourceArtifacts[0]
-		ctx = testAuthorActivityContextForBundle(artifact.BundleHash())
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
 	} else {
 		requireRunningRunForTest(t, ctx, store, sourceRun, now)

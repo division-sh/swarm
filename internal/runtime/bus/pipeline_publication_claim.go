@@ -47,7 +47,7 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) error {
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	var err error
-	ctx, err = c.bus.admitSourceArtifactFact(ctx)
+	ctx, err = c.bus.sourceArtifactContext(ctx)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +48,7 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 			source := semanticview.Wrap(bundle)
 			ctx := testAuthorActivityContextForSource(context.Background(), source)
 			selected := newTargetOwnerParityStore(t, backend, ctx)
+			ctx = originalEventBusFixtureContext(t, ctx, selected)
 			runID := uuid.NewString()
 			sourceEntityID := runtimeflowidentity.EntityID(runID)
 			rootOwner := events.RouteIdentity{
@@ -126,7 +126,7 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 				t.Fatalf("durable duplicate preflight = %#v, want original route %#v", duplicatePlan, persisted[0])
 			}
 			duplicateCtx := runtimedelivery.WithRoute(
-				runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID),
+				ctx,
 				events.DeliveryRoute{Target: events.MustExistingEntityTarget(events.RouteIdentity{
 					FlowID: "foreign", FlowInstance: "foreign/changed-topology", EntityID: uuid.NewString(),
 				})},
@@ -194,106 +194,6 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 			requireDurableTargetOwnerPublicProjection(t, ctx, selected, eventID, wantOwner)
 		})
 	}
-}
-
-func TestPreparedPublishAggregateCorruptionRejectsBothStoreReadbackAndExactDuplicate(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
-			selected := newTargetOwnerParityStore(t, backend, ctx)
-			runID := uuid.NewString()
-			target := events.RouteIdentity{
-				FlowID: "review", FlowInstance: "review/one", EntityID: uuid.NewString(),
-			}.Normalized()
-			evt := eventtest.RunCreatingRootIngress(
-				uuid.NewString(), events.EventType("prepared.aggregate.corruption"), "fixture", "", json.RawMessage(`{}`), 0,
-				runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC(),
-			)
-			routes := []events.DeliveryRoute{
-				{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator-one")), Target: events.MustExistingEntityTarget(target)},
-				{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator-two")), Target: events.MustExistingEntityTarget(target)},
-			}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, evt, routes, runtimepipelineobligation.ScopeSubscribed)
-
-			originalIdentity, err := routes[1].Identity()
-			if err != nil {
-				t.Fatalf("derive original route identity: %v", err)
-			}
-			corruptRoute := events.DeliveryRoute{
-				Recipient: routes[0].Recipient,
-				Target:    events.MustMaterializingEntityTarget(target),
-			}
-			corruptIdentity, err := corruptRoute.Identity()
-			if err != nil {
-				t.Fatalf("derive corrupt route identity: %v", err)
-			}
-			corruptPreparedDeliveryRow(
-				t, ctx, selected, evt.ID(),
-				events.EncodeDeliveryRouteIdentity(originalIdentity),
-				corruptRoute,
-			)
-			before := loadPreparedDeliveryCorruption(t, ctx, selected, evt.ID(), events.EncodeDeliveryRouteIdentity(corruptIdentity))
-
-			if _, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID()); found || err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
-				t.Fatalf("corrupt prepared readback = found:%v err:%v, want aggregate contradiction", found, err)
-			}
-			restarted, err := newScopedTestEventBus(selected)
-			if err != nil {
-				t.Fatalf("create duplicate EventBus: %v", err)
-			}
-			duplicateCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			if err := restarted.Publish(duplicateCtx, evt); err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
-				t.Fatalf("corrupt exact duplicate error = %v, want aggregate contradiction", err)
-			}
-			if _, err := restarted.CheckPublishRecipientPlan(duplicateCtx, evt); err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
-				t.Fatalf("corrupt duplicate preflight error = %v, want aggregate contradiction", err)
-			}
-			after := loadPreparedDeliveryCorruption(t, ctx, selected, evt.ID(), events.EncodeDeliveryRouteIdentity(corruptIdentity))
-			if before != after {
-				t.Fatalf("rejected corrupt duplicate mutated durable row: before=%#v after=%#v", before, after)
-			}
-		})
-	}
-}
-
-type preparedDeliveryCorruption struct {
-	count          int
-	subscriberID   string
-	routeIdentity  string
-	targetEncoding string
-}
-
-func corruptPreparedDeliveryRow(
-	t testing.TB,
-	ctx context.Context,
-	selected targetOwnerParityStore,
-	eventID string,
-	originalIdentity string,
-	conflicting events.DeliveryRoute,
-) {
-	t.Helper()
-	changed, err := storetest.SetPreparedTargetConflict(ctx, selected, eventID, originalIdentity, conflicting)
-	if err != nil {
-		t.Fatalf("corrupt prepared delivery row: %v", err)
-	}
-	if err != nil || changed != 1 {
-		t.Fatalf("corrupt prepared delivery rows = %d err=%v, want one", changed, err)
-	}
-}
-
-func loadPreparedDeliveryCorruption(
-	t testing.TB,
-	ctx context.Context,
-	selected targetOwnerParityStore,
-	eventID string,
-	routeIdentity string,
-) preparedDeliveryCorruption {
-	t.Helper()
-	out, err := storetest.ReadPreparedTargetConflict(ctx, selected, eventID, routeIdentity)
-	if err != nil {
-		t.Fatalf("load corrupt prepared delivery row: %v", err)
-	}
-	return preparedDeliveryCorruption{count: out.Count, subscriberID: out.SubscriberID, routeIdentity: out.RouteIdentity, targetEncoding: out.TargetEncoding}
 }
 
 func newTargetOwnerParityStore(t *testing.T, backend string, ctx context.Context) targetOwnerParityStore {

@@ -53,6 +53,7 @@ type completionSettlementFixture struct {
 	authority   runtimeeffects.Authority
 	origin      runtimedelivery.Claim
 	context     context.Context
+	original    context.Context
 	sessionID   string
 	agentID     string
 	leaseHolder string
@@ -561,12 +562,12 @@ func proveSettledProviderResponseRebindsStatelessSession(t *testing.T, fixture c
 
 	expireProviderOriginLease(t, fixture, fixture.origin)
 	deliveryStore := fixture.store.(deliveryFixtureStore)
-	snapshot, err := deliveryStore.Snapshot(testAuthorActivityContext(), fixture.origin.DeliveryID())
+	snapshot, err := deliveryStore.Snapshot(fixture.original, fixture.origin.DeliveryID())
 	if err != nil {
 		t.Fatal(err)
 	}
 	event := loadCompletionOriginEvent(t, fixture, snapshot.EventID)
-	claimed, err := deliveryStore.ClaimDelivery(testAuthorActivityContext(), snapshot.Authority, event, snapshot.Route)
+	claimed, err := deliveryStore.ClaimDelivery(fixture.original, snapshot.Authority, event, snapshot.Route)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +583,7 @@ func proveSettledProviderResponseRebindsStatelessSession(t *testing.T, fixture c
 	successor.Target = runtimeeffects.UsageTarget{}
 	setCompletionFixtureGeneration(t, fixture, int(successor.Normal.Generation))
 	currentSessionID := uuid.NewString()
-	successorCtx := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), successor.Normal)
+	successorCtx := runtimeeffects.WithLifecycleToken(fixture.original, successor.Normal)
 	successorCtx = runtimeeffects.WithAuthority(successorCtx, successor)
 	successorCtx = managedExecutionStoreTestContext(t, successorCtx)
 	successorCtx = runtimedelivery.WithClaim(successorCtx, reclaimed.Claim)
@@ -630,12 +631,12 @@ func proveSettledProviderResponseContinuesExactReclaimedDelivery(t *testing.T, f
 
 	expireProviderOriginLease(t, fixture, fixture.origin)
 	deliveryStore := fixture.store.(deliveryFixtureStore)
-	snapshot, err := deliveryStore.Snapshot(testAuthorActivityContext(), fixture.origin.DeliveryID())
+	snapshot, err := deliveryStore.Snapshot(fixture.original, fixture.origin.DeliveryID())
 	if err != nil {
 		t.Fatalf("load expired origin snapshot: %v", err)
 	}
 	event := loadCompletionOriginEvent(t, fixture, snapshot.EventID)
-	claimed, err := deliveryStore.ClaimDelivery(testAuthorActivityContext(), snapshot.Authority, event, snapshot.Route)
+	claimed, err := deliveryStore.ClaimDelivery(fixture.original, snapshot.Authority, event, snapshot.Route)
 	if err != nil {
 		t.Fatalf("reclaim exact completion origin: %v", err)
 	}
@@ -650,7 +651,7 @@ func proveSettledProviderResponseContinuesExactReclaimedDelivery(t *testing.T, f
 	successor.ExecutionOwner = "completion-successor"
 	successor.Target = runtimeeffects.UsageTarget{}
 	setCompletionFixtureGeneration(t, fixture, int(successor.Normal.Generation))
-	successorCtx := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), successor.Normal)
+	successorCtx := runtimeeffects.WithLifecycleToken(fixture.original, successor.Normal)
 	successorCtx = runtimeeffects.WithController(runtimeeffects.WithAuthority(successorCtx, successor), newCompletionControllerForTest(fixture.store))
 	successorCtx = managedExecutionStoreTestContext(t, successorCtx)
 	successorCtx = runtimedelivery.WithClaim(successorCtx, reclaimed.Claim)
@@ -793,9 +794,9 @@ func requireActiveCompletionContinuation(t *testing.T, fixture completionSettlem
 func loadCompletionOriginEvent(t *testing.T, fixture completionSettlementFixture, eventID string) events.Event {
 	t.Helper()
 	if fixture.sqlite {
-		return loadSQLiteDeliveryFixtureEvent(t, testAuthorActivityContext(), fixture.db, eventID)
+		return loadSQLiteDeliveryFixtureEvent(t, fixture.original, fixture.db, eventID)
 	}
-	return loadPostgresDeliveryFixtureEvent(t, testAuthorActivityContext(), fixture.db, eventID)
+	return loadPostgresDeliveryFixtureEvent(t, fixture.original, fixture.db, eventID)
 }
 
 func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettlementFixture) {
@@ -837,7 +838,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 					handle = beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "launched-grant")
 				}
 				identity := fixture.authority.Target.AgentIdentity
-				acquireCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				acquireCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 				replacement, err := store.(sessions.Registry).Acquire(acquireCtx, identity, fixture.leaseHolder)
 				if err != nil || replacement == nil || replacement.GrantID == fixture.grantID {
 					t.Fatalf("replace admitted grant: lease=%+v err=%v", replacement, err)
@@ -878,7 +879,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 				} else {
 					now := time.Now().UTC()
 					setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, now.Add(-time.Second))
-					summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+					summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
 					if err != nil {
 						t.Fatalf("recover replaced-grant attempt: summary=%+v err=%v", summary, err)
 					}
@@ -910,7 +911,7 @@ func TestCompletionLaunchChecksGrantExpiryAfterSessionLockBothStores(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		readCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 		attemptQuery := `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`
 		candidateQuery := `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`
 		sessionQuery := `SELECT conversation,turn_count,runtime_state,lease_grant_id,status FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
@@ -975,7 +976,7 @@ func TestCompletionSettlementChecksGrantExpiryAfterSessionLockBothStores(t *test
 		ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
 		handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "expiry-settlement-wait")
 		settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
-		readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		readCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 		sessionQuery := `SELECT conversation,turn_count,runtime_state,lease_grant_id,status FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
 		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
 		beforeSession := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID)
@@ -1063,7 +1064,7 @@ func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothSt
 			Payload: original.Payload, SessionID: fixture.sessionID, Identity: settlement.AgentTurn.Identity,
 			Memory: settlement.AgentTurn.Memory, ExpectedTurnCount: 0, TurnCount: 1, Messages: projectionMessages,
 		}
-		readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		readCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 		sessionQuery := `SELECT * FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
 		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
 		attemptQuery := `SELECT completion_projection_phase,completion_successor_turn FROM runtime_external_effect_attempts WHERE attempt_id=$1`
@@ -1131,7 +1132,7 @@ func TestCompletionProjectionChecksGrantExpiryAfterSessionLockBothStores(t *test
 			SessionID: fixture.sessionID, Identity: settlement.AgentTurn.Identity, Memory: settlement.AgentTurn.Memory,
 			ExpectedTurnCount: 0, TurnCount: 1, Messages: projectionMessages,
 		}
-		readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		readCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 		sessionQuery := `SELECT conversation,turn_count,runtime_state,lease_grant_id,status FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
 		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
 		phaseQuery := `SELECT completion_projection_phase,completion_successor_turn FROM runtime_external_effect_attempts WHERE attempt_id=$1`
@@ -1348,7 +1349,7 @@ func TestDeliveryClaimRenewalPublishesCompleteRunForkRevisionPostgres(t *testing
 
 func proveDeliveryClaimRenewalPublishesCompleteRunForkRevision(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := fixture.original
 	setProviderOriginLease(t, fixture, fixture.origin, time.Now().UTC().Add(30*time.Second))
 	before := providerOriginLease(t, fixture, fixture.origin)
 	publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, !fixture.sqlite, fixture.authority.Target.RunID)
@@ -1409,7 +1410,7 @@ func proveCompletionAttemptHeartbeatFencesRecovery(t *testing.T, fixture complet
 	if err := fixture.store.HeartbeatCompletionAttempt(ctx, stale, time.Now().UTC(), 2*time.Minute); err == nil {
 		t.Fatal("stale completion fence renewed the attempt lease")
 	}
-	summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
 	if err != nil {
 		t.Fatalf("reconcile heartbeating completion: %v", err)
 	}
@@ -1458,7 +1459,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 		t.Fatalf("authorize live completion: %v", err)
 	}
 	now := time.Now().UTC()
-	summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
 	if err != nil {
 		t.Fatalf("reconcile live completion: %v", err)
 	}
@@ -1470,7 +1471,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 
 	initialGeneration := int(fixture.authority.Normal.Generation)
 	setCompletionFixtureGeneration(t, fixture, initialGeneration+1)
-	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+	summary, err = fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now.Add(time.Second)))
 	if err == nil {
 		t.Fatal("reconcile stale prelaunch completion without a lifecycle drain succeeded")
 	}
@@ -1500,7 +1501,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 		t.Fatalf("mark completion launched: %v", err)
 	}
 	setCompletionFixtureGeneration(t, fixture, initialGeneration+1)
-	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(2*time.Second)))
+	summary, err = fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now.Add(2*time.Second)))
 	if err == nil {
 		t.Fatal("reconcile stale launched completion without a lifecycle drain succeeded")
 	}
@@ -1548,6 +1549,7 @@ func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlem
 func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, actor runtimeactors.AgentConfig) completionSettlementFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"
 	sessionID := uuid.NewString()
@@ -1605,7 +1607,7 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 		completionCtx = runtimeeffects.WithSessionGrant(completionCtx, runtimeeffects.SessionGrant{SessionID: sessionID, GrantID: grantID, LockOwner: leaseHolder})
 	}
 	return completionSettlementFixture{
-		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx,
+		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx, original: ctx,
 		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder, grantID: grantID,
 	}
 }
@@ -1633,7 +1635,7 @@ func claimCompletionOriginEventForTest(t testing.TB, ctx context.Context, store 
 }
 
 func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authority) context.Context {
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(f.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(f.original, authority), newCompletionControllerForTest(f.store))
 	if authority.Target.Memory.Enabled {
 		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: f.sessionID, GrantID: f.grantID, LockOwner: f.leaseHolder})
 	}

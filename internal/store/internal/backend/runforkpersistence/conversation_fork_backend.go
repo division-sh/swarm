@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 )
 
@@ -144,6 +145,25 @@ func (s conversationForkStore) runForkMutation(ctx context.Context, forkID strin
 }
 
 func (s conversationForkStore) runPostgresMutation(ctx context.Context, forkID *string, serializable bool, fn func(context.Context, *sql.Tx) error) (err error) {
+	return s.withPostgresMutationSession(ctx, forkID, func(ctx context.Context, session *postgresbackend.SessionAuthority) error {
+		opts := &sql.TxOptions{}
+		if serializable {
+			opts.Isolation = sql.LevelSerializable
+			// A clean pre-domain fence rollback may start a fresh transaction;
+			// the original, retained session and domain writer never change.
+			result := mutationprotocol.RunRetainedPostgresWithOptions(ctx, session, opts, mutationprotocol.AuthorityFence, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				return struct{}{}, attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+					return fn(ctx, tx)
+				})
+			})
+			return result.Err()
+		}
+		_, err := postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, session, opts, fn)
+		return err
+	})
+}
+
+func (s conversationForkStore) withPostgresMutationSession(ctx context.Context, forkID *string, run func(context.Context, *postgresbackend.SessionAuthority) error) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -201,12 +221,7 @@ func (s conversationForkStore) runPostgresMutation(ctx context.Context, forkID *
 			}
 		}()
 	}
-	opts := &sql.TxOptions{}
-	if serializable {
-		opts.Isolation = sql.LevelSerializable
-	}
-	_, err = postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, session, opts, fn)
-	return err
+	return run(ctx, session)
 }
 
 func nullableConversationForkID(value string) any {

@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -52,6 +53,11 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	// Keep the first artifact write inside RequireRun's accounting boundary.
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
+	ctx = originalPipelineFixtureContext(t, ctx, selected)
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	original := &nativeActivityJournalFixtureOwner{WorkflowPersistenceOwner: selected}
 	persistence := pipeline.NewWorkflowPersistence(original)
 	var buses []*runtimebus.EventBus
@@ -67,7 +73,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	var releaseJournal func()
 	admitJournal := func(ctx context.Context) {
 		setup.Do(func() {
-			journal, release := captureActivityReplayJournal(t, ctx, selected.(startupownership.Store), activityFixtureJoin(join))
+			journal, release := captureActivityReplayJournal(t, ctx, selected.(startupownership.Store), activityFixtureJoin(join), process)
 			if err := original.bind(journal); err != nil {
 				t.Fatal(err)
 			}
@@ -120,9 +126,9 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		// Register after the bus catalog lease so cleanup joins this bus
 		// before releasing its catalog, runtime occurrence or selected store.
 		t.Cleanup(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := deliveryBus.WaitForQuiescence(ctx); err != nil {
+			if err := join(cleanup); err != nil {
 				t.Error(err)
 			}
 		})
@@ -233,6 +239,9 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			}
 			if releaseJournal != nil {
 				releaseJournal()
+			}
+			if err := process.Release(context.Background()); err != nil {
+				t.Fatal(err)
 			}
 			if err := selected.Close(); err != nil {
 				t.Fatal(err)

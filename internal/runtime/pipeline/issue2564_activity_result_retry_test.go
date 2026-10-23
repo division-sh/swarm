@@ -99,6 +99,7 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 			} else {
 				selected = backend.open(t)
 			}
+			ctx = originalPipelineFixtureContext(t, ctx, selected.events)
 			storetest.RequireBundleDataCatalog(t, ctx, selected.events.(storetest.DurableDataCatalogStore), bundle)
 			if _, err := selected.events.CreateRun(ctx, runlifecycle.CreateRequest{RunID: runID, Origin: runlifecycle.ScenarioSetupRunOrigin(), Source: fact, StartedAt: time.Now().UTC()}); err != nil {
 				t.Fatal(err)

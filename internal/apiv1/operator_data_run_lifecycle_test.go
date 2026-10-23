@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -198,7 +199,7 @@ func TestRunCreationRequestBindingAcrossSelectedStores(t *testing.T) {
 
 func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), fixture.primary)
 		catalog, scanRef, scoreRef := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatalf("register data run catalog: %v", err)
@@ -565,7 +566,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		})
 
 		t.Run("fork pin owner preserves exact selected subset and overrides", func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := startupownership.CarryMutationAuthority(testAuthorActivityContext(context.Background()), ctx)
 			newTarget := func() string {
 				runID := uuid.NewString()
 				storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
@@ -680,6 +681,9 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			amendedSource := semanticview.Wrap(amendedBundle)
 			amendedBus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &amended, runtimebus.EventBusOptions{
 				ContractBundle: amendedSource, SourceArtifactFact: mustAPITestSourceArtifactFact(amendedBundleHash),
+				MutationContext: func(work context.Context) (context.Context, error) {
+					return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
+				},
 			})
 			if err != nil {
 				t.Fatalf("new amended data EventBus: %v", err)
@@ -719,7 +723,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("schema amendment history = %#v, %v", snapshot, err)
 			}
 
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := startupownership.CarryMutationAuthority(testAuthorActivityContext(context.Background()), ctx)
 			incompatibleTarget := uuid.NewString()
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: incompatibleTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),

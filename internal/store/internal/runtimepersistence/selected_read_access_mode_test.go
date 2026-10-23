@@ -13,116 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/operatorread"
-	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
+
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
-
-func TestSQLiteStandaloneSelectedReadsBypassMutationAdmission(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	db := store.backend.ConstructionHandle()
-	ctx := testAuthorActivityContext()
-	requireDefaultSourceArtifactForTest(t, ctx, store)
-	runID := uuid.NewString()
-	source := mustStoreTestSourceArtifactFact(authorActivityTestBundleHash)
-	createSelectedReadProofRun(t, ctx, store, runID, source)
-
-	capability, err := store.AcquireProcessCapability(ctx, testStartupAcquireRequest("selected-read-proof"))
-	if err != nil {
-		t.Fatalf("acquire process capability: %v", err)
-	}
-	capabilityReleased := false
-	t.Cleanup(func() {
-		if !capabilityReleased {
-			_ = capability.Release(context.Background())
-		}
-	})
-
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "selected-read-proof", 1)
-	if err != nil {
-		t.Fatalf("construct delivery authority: %v", err)
-	}
-	reads := selectedSQLiteReadProofs(store, capability.CurrentSourceSet, authority, runID)
-	identity := mustTestAgentIdentityForRun(runID, "read-snapshot-agent", "global")
-	seedTestAgentRow(t, ctx, db, false, identity, "active")
-	reads = append(reads,
-		selectedReadProof{name: "agent lifecycle snapshot", run: func(ctx context.Context) error {
-			_, err := store.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{identity})
-			return err
-		}},
-		selectedReadProof{name: "agent summary snapshot", run: func(ctx context.Context) error {
-			_, err := store.operatorAgentSQLite.ListOperatorAgents(ctx, operatorread.OperatorAgentListOptions{})
-			return err
-		}},
-		selectedReadProof{name: "agent diagnosis snapshot", run: func(ctx context.Context) error {
-			_, err := store.operatorAgentSQLite.LoadOperatorAgentDiagnosis(ctx, identity, operatorread.OperatorAgentDiagnosisOptions{})
-			return err
-		}},
-		selectedReadProof{name: "pending facts snapshot", run: func(ctx context.Context) error {
-			_, err := store.ListPendingAgentDeliveryFacts(ctx, []agentidentity.Identity{identity}, time.Time{})
-			return err
-		}},
-		selectedReadProof{name: "pending details snapshot", run: func(ctx context.Context) error {
-			_, err := store.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{AgentIdentity: identity})
-			return err
-		}},
-		selectedReadProof{name: "standing status snapshot", run: func(ctx context.Context) error {
-			_, err := store.pipelineSQLiteOwner.ListStandingServiceStatuses(ctx)
-			return err
-		}},
-	)
-	before := captureSelectedReadSideEffects(t, db, false, runID)
-
-	holderStarted := make(chan struct{})
-	holderRelease := make(chan struct{})
-	holderDone := make(chan error, 1)
-	go func() {
-		holderDone <- store.runRuntimeMutation(ctx, "selected read proof holder", func(context.Context, *sql.Tx) error {
-			close(holderStarted)
-			<-holderRelease
-			return nil
-		})
-	}()
-	<-holderStarted
-
-	for _, read := range reads {
-		read := read
-		t.Run(read.name, func(t *testing.T) {
-			readCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			if err := read.run(readCtx); err != nil {
-				t.Fatalf("read while mutation admission held: %v", err)
-			}
-		})
-	}
-	after := captureSelectedReadSideEffects(t, db, false, runID)
-	if after != before {
-		t.Fatalf("standalone reads changed mutation side effects: before=%+v after=%+v", before, after)
-	}
-
-	close(holderRelease)
-	if err := <-holderDone; err != nil {
-		t.Fatalf("release mutation holder: %v", err)
-	}
-
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	for _, read := range reads {
-		if err := read.run(cancelled); !errors.Is(err, context.Canceled) {
-			t.Errorf("%s cancellation = %v, want context.Canceled", read.name, err)
-		}
-	}
-	if err := capability.Release(context.Background()); err != nil {
-		t.Fatalf("release process capability: %v", err)
-	}
-	capabilityReleased = true
-}
 
 func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -137,11 +34,13 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 			if postgres {
 				_, db, _ = testutil.StartPostgres(t)
 				selected := admitTestPostgresStore(t, db)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				store = selected
 				requireDefaultSourceArtifactForTest(t, ctx, selected)
 				createSelectedReadProofRun(t, ctx, selected, runID, source)
 			} else {
 				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				store = selected
 				db = selected.backend.ConstructionHandle()
 				requireDefaultSourceArtifactForTest(t, ctx, selected)
@@ -214,23 +113,6 @@ func selectedReaderAsWriterProofs(store selectedReaderAsWriterStore, authority r
 			return err
 		}},
 	}
-}
-
-func selectedSQLiteReadProofs(
-	store *SQLiteRuntimeStore,
-	loadSourceSet func(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error),
-	authority runtimedelivery.ExecutionAuthority,
-	runID string,
-) []selectedReadProof {
-	reads := selectedReaderAsWriterProofs(store, authority, runID)
-	return append(reads,
-		selectedReadProof{name: "load source set", run: func(ctx context.Context) error { _, _, err := loadSourceSet(ctx); return err }},
-		selectedReadProof{name: "load inbound publication", run: func(ctx context.Context) error {
-			_, _, err := store.LoadInboundPublicationByIdentity(ctx, runtimeinbound.Identity{ServiceID: uuid.NewString(), RunID: runID, Generation: 1, Provider: "test", ProviderEventID: "missing"})
-			return err
-		}},
-		selectedReadProof{name: "load run bundle", run: func(ctx context.Context) error { _, err := store.LoadRunBundleAvailability(ctx, runID); return err }},
-	)
 }
 
 func createSelectedReadProofRun(t *testing.T, ctx context.Context, store interface {

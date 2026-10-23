@@ -434,6 +434,7 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 	runID := uuid.NewString()
 	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}, gateOwned: true, source: semanticview.Wrap(bundle)}
 	f.ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), f.runID)
+	f.ctx = originalStoreFixtureContext(t, f.ctx, opened.store)
 	f.ctx, err = eventreceiver.NormalExecution().Bind(f.ctx, executionmode.Live)
 	if err != nil {
 		t.Fatal(err)
@@ -838,11 +839,11 @@ func (b *forkContentionBarrier) awaitPostgresContender(t *testing.T, ctx context
 		if err == sql.ErrNoRows {
 			return false
 		}
-		if err != nil {
-			t.Fatal(err)
-		}
 		if gate.pid != 0 && (!wait.fenced || !strings.Contains(wait.query, "author_activity_order")) {
 			return false
+		}
+		if err != nil {
+			t.Fatal(err)
 		}
 		gate.contender = wait
 		return true

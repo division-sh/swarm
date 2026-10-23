@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ import (
 func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	now := time.Unix(1700000000, 0).UTC()
 	newer := uuid.NewString()
 	older := uuid.NewString()
@@ -76,6 +78,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		if fixture.runID == older {
 			eventCtx = testAuthorActivityContextForBundle(bundleB)
 		}
+		eventCtx = startupownership.CarryMutationAuthority(eventCtx, ctx)
 		envelope := events.EventEnvelope{}
 		if fixture.entityID != "" {
 			envelope = events.EnvelopeForEntityID(envelope, fixture.entityID)
@@ -251,6 +254,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	sqliteStore.nowFn = func() time.Time { return now }
 

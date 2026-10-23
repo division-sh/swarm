@@ -2,17 +2,14 @@ package serveapp
 
 import (
 	"context"
-	"encoding/json"
+
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
+
 	"path/filepath"
 	"strings"
-	"sync"
+
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -25,13 +22,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
-	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
-	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -703,16 +698,6 @@ func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T)
 	}
 }
 
-func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegistration {
-	t.Helper()
-	plan := loadSupportedTelegramChannelPlan(t)
-	registration, ok := plan.Registration()
-	if !ok {
-		t.Fatal("Telegram registration plan is missing")
-	}
-	return registration
-}
-
 func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	t.Helper()
 	repo := repoRootForTest()
@@ -743,8 +728,4 @@ func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 		t.Fatalf("CompileChannel: %v", err)
 	}
 	return plan
-}
-
-func supportedRegistrationResponse(status int, body string) *http.Response {
-	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }

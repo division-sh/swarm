@@ -80,9 +80,11 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	})
 	runID := uuid.NewString()
 	ctx := correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), rt.sourceArtifactFact), runID)
-	if err := rt.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "nested-capacity-one", rt.sourceArtifactFact)); err != nil {
+
+	if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "nested-capacity-one", rt.sourceArtifactFact), rt.bus, rt.manager); err != nil {
 		t.Fatal(err)
 	}
+
 	publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
 	if probe.rejection != nil {
 		publishNotifyAllChildrenEventAsync(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})

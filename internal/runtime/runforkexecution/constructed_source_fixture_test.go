@@ -31,6 +31,7 @@ import (
 // Empty route projections do not prove physical runtime attachment or public launch.
 func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selected *store.PostgresStore, loaded LoadedSelectedContractSource, runID, eventID, eventName string, at time.Time, mode executionmode.Mode, routes []events.DeliveryRoute, inputs ...selectedExecutionInputFixture) events.Event {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected)
 	bundle, found := semanticview.Bundle(loaded.Source)
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("source constructor requires its admitted artifact")

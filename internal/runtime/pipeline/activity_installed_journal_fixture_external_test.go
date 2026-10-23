@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -53,16 +54,20 @@ func bindActivityBoringDeliveryJournal(t *testing.T, fixture *pipeline.PipelineD
 	return fixture
 }
 
-func captureActivityReplayJournal(t *testing.T, ctx context.Context, selected startupownership.Store, bus interface{ WaitForQuiescence(context.Context) error }) (pipeline.ActivityAttemptJournal, func()) {
+func captureActivityReplayJournal(t *testing.T, ctx context.Context, selected startupownership.Store, bus interface{ WaitForQuiescence(context.Context) error }, originals ...startupownership.ProcessCapability) (pipeline.ActivityAttemptJournal, func()) {
 	t.Helper()
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
 	scope, scoped := authoractivity.ScopeFromContext(ctx)
 	if !found || fact.Validate() != nil || !scoped || scope.RuntimeInstanceID == "" {
 		t.Fatal("activity proof requires its exact admitted source and runtime scope")
 	}
-	process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "activity-journal-proof", BootID: uuid.NewString(), RuntimeInstanceID: scope.RuntimeInstanceID,
-	})
+	var process startupownership.ProcessCapability
+	var err error
+	if len(originals) != 0 {
+		process = originals[0]
+	} else {
+		process, err = agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

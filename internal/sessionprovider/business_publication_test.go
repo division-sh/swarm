@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -56,9 +57,14 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 	if err != nil {
 		t.Fatal(err)
 	}
+	original := f.nativeProcess
 	eventBus, err := bus.NewEventBusWithOptions(selected, bus.EventBusOptions{
-		ContractBundle:   sessionBusinessSemanticFixture(t),
-		ExecutionPosture: executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID,
+		MutationContext: func(ctx context.Context) (context.Context, error) {
+			return startupownership.WithProcessMutationAuthority(ctx, original)
+		},
+		CarryMutationContext: startupownership.CarryMutationAuthority,
+		ContractBundle:       sessionBusinessSemanticFixture(t),
+		ExecutionPosture:     executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID,
 		WorkOwner: f.workOwner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
 		Durable: bus.DurableDependencies{ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,

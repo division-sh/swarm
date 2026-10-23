@@ -52,6 +52,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			} else {
 				surface = fixture.sqlite
 			}
+			ctx = originalStoreFixtureContext(t, ctx, surface)
 			owner, ok := surface.(interface {
 				runtimerunlifecycle.OperationOwner
 				sourceartifactfixture.Writer
@@ -221,7 +222,7 @@ func TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse(t *testing
 			} else {
 				surface = fixture.sqlite
 			}
-			ctx := testAuthorActivitySourceArtifactContext()
+			ctx := fixture.context
 			now := fixture.forkedAt.Add(time.Minute)
 			seedTestAgentRow(
 				t, ctx, fixture.db, fixture.postgres != nil,
@@ -360,7 +361,7 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 				AgentID: token.AgentID, AgentIdentity: identity, SessionID: uuid.NewString(),
 				Memory: agentmemory.Plan{}, FlowInstance: identity.FlowInstance(),
 			}
-			ctx := runtimecorrelation.WithRunID(testAuthorActivitySourceArtifactContext(), fixture.sourceRun)
+			ctx := runtimecorrelation.WithRunID(fixture.context, fixture.sourceRun)
 			if current, err := surface.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
 				t.Fatalf("frozen external authority current=%v err=%v", current, err)
 			}
@@ -421,7 +422,7 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	if fixture.postgres != nil {
 		capabilityStore = fixture.postgres
 	}
-	if err := capabilityStore.SaveManagedCapabilitySurface(context.Background(), capabilitySurface); err != nil {
+	if err := capabilityStore.SaveManagedCapabilitySurface(fixture.context, capabilitySurface); err != nil {
 		t.Fatalf("seed frozen external-effect capability surface: %v", err)
 	}
 	capabilityPlanFingerprint, err := capabilitySurface.PlanFingerprint()

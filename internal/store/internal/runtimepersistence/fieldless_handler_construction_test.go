@@ -260,7 +260,7 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					runtimeID := uuid.NewString()
+					runtimeID, _ := correlation.RuntimeInstanceIDFromContext(f.ctx)
 					deliveryAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(fact, "delivery-fixture:"+correlation.RunIDFromContext(f.ctx), 1)
 					if err != nil {
 						t.Fatal(err)

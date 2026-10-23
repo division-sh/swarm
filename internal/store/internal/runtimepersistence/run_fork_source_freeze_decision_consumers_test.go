@@ -34,7 +34,7 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := testAuthorActivitySourceArtifactContext()
+			ctx := fixture.context
 			now := fixture.forkedAt.Add(-time.Minute)
 			var surface forkedDecisionConsumerSurface
 			if fixture.postgres != nil {
@@ -177,12 +177,12 @@ func insertForkedConsumerEvent(t *testing.T, fixture *forkedConsumerTestBackend,
 		"", []byte(`{}`), 0, fixture.sourceRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, at,
 	)
 	if fixture.postgres != nil {
-		if err := insertCanonicalEventRecordFixture(context.Background(), fixture.postgres, event); err != nil {
+		if err := insertCanonicalEventRecordFixture(fixture.context, fixture.postgres, event); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
-	if err := insertCanonicalEventRecordFixture(context.Background(), fixture.sqlite, event); err != nil {
+	if err := insertCanonicalEventRecordFixture(fixture.context, fixture.sqlite, event); err != nil {
 		t.Fatal(err)
 	}
 }

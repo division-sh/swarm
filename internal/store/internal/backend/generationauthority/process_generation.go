@@ -149,6 +149,9 @@ func ProcessGenerationCurrent(ctx context.Context, tx *sql.Tx, expected processb
 	if ctx == nil || tx == nil {
 		return false, errors.New("process-generation context and transaction are required")
 	}
+	if processAdmittedInNativeTransaction(ctx, tx, expected, sqlite) {
+		return true, nil
+	}
 	if err := FenceMutation(ctx, tx, sqlite); err != nil {
 		return false, err
 	}

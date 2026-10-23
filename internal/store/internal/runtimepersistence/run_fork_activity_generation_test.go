@@ -30,6 +30,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID, entityID := uuid.NewString(), flowidentity.EntityID("flow-a")
 	sourceEventID := uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
@@ -60,7 +61,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	}
 	requestJSON, _ := json.Marshal(requestPayload)
-	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer", at, selectedActivityProducerSourceWithLoops(t, false, true), requestJSON)
+	seedDeclaredActivityRequestExecutionSource(t, ctx, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer", at, selectedActivityProducerSourceWithLoops(t, false, true), requestJSON)
 	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID, string(accumulator)); err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +134,7 @@ func TestSelectedContractForkProjectsUnissuedActivityWithoutAttempt(t *testing.T
 	db := fixture.db
 	ctx := testAuthorActivityContext()
 	pg := fixture.store.(selectedActivityProjectionStore)
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), flowidentity.EntityID("flow-a"), uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
 	if err != nil {
@@ -162,7 +164,7 @@ func TestSelectedContractForkProjectsUnissuedActivityWithoutAttempt(t *testing.T
 		"source_task_id": "", "parent_event_id": "", "chain_depth": 0,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	})
-	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "reader", at, selectedActivityProducerSourceWithLoops(t, false, true), payload)
+	seedDeclaredActivityRequestExecutionSource(t, ctx, db, sourceRunID, entityID, requestEventID, sourceEventID, "reader", at, selectedActivityProducerSourceWithLoops(t, false, true), payload)
 	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID, string(accumulator)); err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +205,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), flowidentity.EntityID("flow-a"), uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
 	if err != nil {
@@ -232,7 +235,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		"source_task_id": "", "parent_event_id": "", "chain_depth": 0,
 		"loop_generation": generation, "loop_stage": "review",
 	})
-	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer", at, selectedActivityProducerSourceWithLoops(t, false, true), requestPayload)
+	seedDeclaredActivityRequestExecutionSource(t, ctx, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer", at, selectedActivityProducerSourceWithLoops(t, false, true), requestPayload)
 	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID, string(accumulator)); err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +304,7 @@ func forkTestJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-func seedDeclaredActivityRequestExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID, parentEventID, node string, at time.Time, source semanticview.Source, payload []byte) {
+func seedDeclaredActivityRequestExecutionSource(t *testing.T, ctx context.Context, db *sql.DB, runID, entityID, eventID, parentEventID, node string, at time.Time, source semanticview.Source, payload []byte) {
 	t.Helper()
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle.SourceArtifact == nil {
@@ -319,7 +322,7 @@ func seedDeclaredActivityRequestExecutionSource(t *testing.T, db *sql.DB, runID,
 	parent := semanticEventRecordFixture(parentEventID, runID, "review.accepted", eventtest.Producer(events.EventProducerPlatform, "workflow"), []byte(`{}`),
 		semanticEventRecordFixtureEnvelope(entityID, "flow-a"), at.Add(-time.Microsecond))
 	selected := admitTestPostgresStore(t, db)
-	ctx := correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID)
+	ctx = startupownership.CarryMutationAuthority(correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID), ctx)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),

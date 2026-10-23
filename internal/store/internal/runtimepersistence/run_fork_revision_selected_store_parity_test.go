@@ -85,11 +85,11 @@ func TestRunForkRevisionThirteenFamilySelectedStoreParity(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		db := store.backend.ConstructionHandle()
-		results["sqlite"] = proveRunForkRevisionThirteenFamilyMatrix(t, db, false, fixture)
+		results["sqlite"] = proveRunForkRevisionThirteenFamilyMatrix(t, store, db, false, fixture)
 	})
 	t.Run("postgres", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		results["postgres"] = proveRunForkRevisionThirteenFamilyMatrix(t, db, true, fixture)
+		results["postgres"] = proveRunForkRevisionThirteenFamilyMatrix(t, nil, db, true, fixture)
 	})
 	if !reflect.DeepEqual(results["sqlite"], results["postgres"]) {
 		t.Fatalf("selected-store canonical revision facts differ:\nsqlite=%#v\npostgres=%#v", results["sqlite"], results["postgres"])
@@ -116,8 +116,9 @@ func TestRunForkPlannerSelectedStoreParity(t *testing.T) {
 				selected = store
 			} else {
 				_, db, _ = testutil.StartPostgres(t)
-				selected = newPostgresStoreWithBackend(mustPostgresBackend(db))
+				selected = admitTestPostgresStore(t, db)
 			}
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 			})
@@ -194,7 +195,7 @@ func TestRunForkSelectedStoreLifecycleParity(t *testing.T) {
 						return
 					}
 					_, db, _ := testutil.StartPostgres(t)
-					store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+					store := admitTestPostgresStore(t, db)
 					proofs[backend] = proveRunForkSelectedStoreLifecycle(t, store, store, db, true, sourceState)
 				})
 			}
@@ -207,7 +208,7 @@ func TestRunForkSelectedStoreLifecycleParity(t *testing.T) {
 
 func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLifecycleStore, store any, db *sql.DB, postgres bool, sourceState runtimerunlifecycle.State) runForkSelectedLifecycleProof {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -436,13 +437,12 @@ func newRunForkRevisionMatrixFixture() runForkRevisionMatrixFixture {
 	}
 }
 
-func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres bool, fixture runForkRevisionMatrixFixture) []runForkRevisionMatrixFact {
+func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, selected any, db *sql.DB, postgres bool, fixture runForkRevisionMatrixFixture) []runForkRevisionMatrixFact {
 	t.Helper()
-	ctx := testAuthorActivityContext()
-	var selected any = NewSQLiteRuntimeStoreForTest(db)
 	if postgres {
-		selected = newPostgresStoreWithBackend(mustPostgresBackend(db))
+		selected = admitTestPostgresStore(t, db)
 	}
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 	})

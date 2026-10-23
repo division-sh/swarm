@@ -73,9 +73,17 @@ func (startupReadinessWorkflowModule) GuardRegistry() runtimepipeline.GuardRegis
 }
 
 func newStartupReadinessTestRuntime(t testing.TB, nodes ...runtimepipeline.BackgroundNode) *Runtime {
+	return newStartupReadinessTestRuntimeWithSession(t, nil, nodes...)
+}
+
+func newStartupReadinessTestRuntimeWithSession(t testing.TB, decorate func(*runtimeTestRetainedSession) startupownership.RetainedSession, nodes ...runtimepipeline.BackgroundNode) *Runtime {
 	t.Helper()
 	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
-	_, grant, err := newRuntimeTestProcessCapability(t, nil, nil, fact, authorActivityTestRuntimeInstanceID)
+	var decorators []func(*runtimeTestRetainedSession) startupownership.RetainedSession
+	if decorate != nil {
+		decorators = append(decorators, decorate)
+	}
+	_, grant, err := newRuntimeTestProcessCapabilityWithSession(t, nil, nil, fact, authorActivityTestRuntimeInstanceID, nil, decorators...)
 	if err != nil {
 		t.Fatalf("construct startup readiness generation grant: %v", err)
 	}
@@ -480,29 +488,30 @@ func (r startupAbortCatalogRegistrar) RegisterAuthorActivityEventCatalog(scope a
 	return r.registry.Register(scope, descriptors)
 }
 
-type startupReadinessFailingGrant struct {
-	startupownership.LiveGenerationGrant
-	cause         error
-	evidencePanic any
+type startupReadinessFailingSession struct {
+	startupownership.RetainedSession
+	cause error
 }
 
-func (g startupReadinessFailingGrant) Evidence() (startupownership.GrantEvidence, error) {
-	if g.evidencePanic != nil {
-		panic(g.evidencePanic)
+func (s startupReadinessFailingSession) RecordGenerationGrantTransition(ctx context.Context, previous *startupownership.GrantEvidence, next startupownership.GrantEvidence) error {
+	if next.State == startupownership.GrantProbeSettled {
+		return s.cause
 	}
-	return g.LiveGenerationGrant.Evidence()
-}
-
-func (g startupReadinessFailingGrant) MarkProbesSettled(context.Context, []string) (startupownership.GrantEvidence, error) {
-	return startupownership.GrantEvidence{}, g.cause
+	return s.RetainedSession.RecordGenerationGrantTransition(ctx, previous, next)
 }
 
 func TestRuntimeStartOwnsEarlyFailureAndPanicCleanup(t *testing.T) {
 	for _, phase := range []string{"catalog_error", "catalog_panic", "retired_preparation", "grant_panic", "prepare_panic", "release_error", "release_panic"} {
 		t.Run(phase, func(t *testing.T) {
-			rt := newStartupReadinessTestRuntime(t)
-			grant := rt.startupGrant
 			cause := errors.New("startup boundary failure")
+			var decorate func(*runtimeTestRetainedSession) startupownership.RetainedSession
+			if phase == "release_error" {
+				decorate = func(session *runtimeTestRetainedSession) startupownership.RetainedSession {
+					return startupReadinessFailingSession{RetainedSession: session, cause: cause}
+				}
+			}
+			rt := newStartupReadinessTestRuntimeWithSession(t, decorate)
+			grant := rt.startupGrant
 			registries := []*authoractivity.EventCatalogRegistry{
 				authoractivity.NewEventCatalogRegistry(), authoractivity.NewEventCatalogRegistry(), authoractivity.NewEventCatalogRegistry(),
 			}
@@ -523,11 +532,14 @@ func TestRuntimeStartOwnsEarlyFailureAndPanicCleanup(t *testing.T) {
 			if phase == "retired_preparation" {
 				rt.CloseAdmission()
 			}
-			if phase == "release_error" {
-				rt.startupGrant = startupReadinessFailingGrant{LiveGenerationGrant: grant, cause: cause}
-			}
 			if phase == "grant_panic" {
-				rt.startupGrant = startupReadinessFailingGrant{LiveGenerationGrant: grant, evidencePanic: cause}
+				restore, err := startupownership.InstallGenerationGrantFaultProbeForTest(grant, startupownership.GenerationGrantFaultProbeForTest{
+					EvidenceError: func() error { panic(cause) },
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(restore)
 			}
 			rt.Options.BootProgress = func(event BootProgressEvent) {
 				if (phase == "prepare_panic" && event.Step == 5) || (phase == "release_panic" && event.Step == 16) {

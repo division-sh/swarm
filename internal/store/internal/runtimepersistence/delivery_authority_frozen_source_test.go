@@ -22,6 +22,7 @@ func TestDeliveryAuthorityActivationPreservesRecordedFrozenSourceBothStores(t *t
 			t.Run(fmt.Sprintf("%s/replacement=%t", backend.name, replacement), func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				source, child := uuid.NewString(), uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, source)
 				seedAuthorActivityReceiptRun(t, fixture, ctx, child)
@@ -90,6 +91,7 @@ func TestDeliveryAuthorityActivationPreservesLiveEligibilityBothStores(t *testin
 			t.Run(backend.name+"/"+string(state), func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateLaunching} {

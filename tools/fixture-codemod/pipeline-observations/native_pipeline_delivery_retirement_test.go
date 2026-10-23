@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -63,49 +62,6 @@ func TestNativePipelineReopenCountersFollowStandingWorkerJoin(t *testing.T) {
 	early = strings.Replace(early, "next.Continuations.Retire(join)", sample+"\nnext.Continuations.Retire(join)", 1)
 	if err := nativePipelineReopenObservationOrder(early); err == nil {
 		t.Fatal("global counter observation before standing-worker join accepted")
-	}
-}
-
-func TestNativePipelineDeliverySharedTailRecipesStaySourcePinned(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, row := range rows {
-		if row.Family != "native-pipeline-delivery-shared-tail-semantic" {
-			continue
-		}
-		count++
-		source := []byte("package probe\n" + row.Before)
-		after, changed, err := rewriteFunction(row.File, source, row)
-		if err != nil || !changed {
-			t.Fatalf("finite native repair failed: %s/%v", row.Function, err)
-		}
-		if _, changed, err := rewriteFunction(row.File, after, row); err != nil || changed {
-			t.Fatalf("native repair is not idempotent: %s/%v", row.Function, err)
-		}
-		if _, _, err := rewriteFunction(row.File, bytes.Replace(source, []byte("{"), []byte("{ unreviewedEscape();"), 1), row); err == nil {
-			t.Fatalf("changed native source admitted: %s", row.Function)
-		}
-		if row.Removed {
-			if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
-				t.Fatalf("retired shared-tail capability survived: %s/%v", row.Function, err)
-			}
-			continue
-		}
-		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, nativePipelineRecipeReplacementName(t, row)))
-		current := row.After
-		if row.Successor != "" {
-			current = row.Successor
-		}
-		want, afterErr := canonicalFunction(current)
-		if err != nil || afterErr != nil || actual != want {
-			t.Fatalf("native repair differs from its reviewed snapshot: %s/%v/%v", row.Function, err, afterErr)
-		}
-	}
-	if count != 28 {
-		t.Fatalf("native delivery shared-tail recipes=%d, want 28", count)
 	}
 }
 

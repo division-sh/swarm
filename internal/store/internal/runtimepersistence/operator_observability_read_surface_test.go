@@ -22,6 +22,7 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -120,6 +121,7 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	targetEntityID := uuid.NewString()
@@ -172,6 +174,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -294,6 +297,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -394,6 +398,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -442,6 +447,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	artifactA := storeTestSourceArtifact("operator-observability-a")
 	artifactB := storeTestSourceArtifact("operator-observability-b")
@@ -517,6 +523,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	base := time.Unix(1700000300, 0).UTC()
@@ -592,6 +599,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	businessEvent := uuid.NewString()
@@ -621,6 +629,7 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	entityOne := uuid.NewString()

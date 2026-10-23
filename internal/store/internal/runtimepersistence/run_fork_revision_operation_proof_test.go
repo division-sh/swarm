@@ -26,7 +26,7 @@ func TestRunForkRevisionTargetFailurePublicationIsCompleteOnBothStores(t *testin
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			now := time.Date(2026, 8, 26, 2, 30, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -112,7 +112,7 @@ func TestRunForkRevisionDirectDeliveryTerminalizationIsCompleteOnBothStores(t *t
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			now := time.Date(2026, 8, 26, 2, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)

@@ -120,6 +120,7 @@ func newOperatorConversationProjectionTestBackend(t *testing.T, name string) ope
 
 func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorConversationProjectionTestBackend) operatorConversationProjectionFixture {
 	t.Helper()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.settlement)
 	const (
 		runID              = "00000000-0000-4000-8000-000000000001"
 		sessionID          = "00000000-0000-4000-8000-000000000002"
@@ -170,11 +171,11 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 	validMalformedSeedBlocks := `[{"kind":"tool_use","tool_name":"inspect","input":{"secret":"private-malformed-input"},"data":{"tool_use_id":"tool-use-malformed"}}]`
 	identity := mustTestAgentIdentityForRun(runID, agentID, "conversation")
 	malformedIdentity := mustTestAgentIdentityForRun(runID, malformedAgentID, "conversation-malformed")
-	requireRunFixtureForTest(t, context.Background(), backend.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+	requireRunFixtureForTest(t, ctx, backend.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID, StartedAt: base,
 	})
-	seedTestAgentRow(t, testAuthorActivityContext(), backend.db, !backend.sqlite, identity, "active")
-	seedTestAgentRow(t, testAuthorActivityContext(), backend.db, !backend.sqlite, malformedIdentity, "active")
+	seedTestAgentRow(t, ctx, backend.db, !backend.sqlite, identity, "active")
+	seedTestAgentRow(t, ctx, backend.db, !backend.sqlite, malformedIdentity, "active")
 	seedOperatorConversationProjectionSession(t, backend, runID, sessionID, identity, 0, base, lastAt)
 	seedOperatorConversationProjectionSession(t, backend, runID, malformedSessionID, malformedIdentity, 0, base, lastAt)
 	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[0], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: turnIDs[0], triggerType: "task.one", taskID: "task-1", turnBlocks: privateBlocks, parseOK: true, latencyMS: 101, createdAt: firstAt})
@@ -183,7 +184,7 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[3], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: publishEventID, triggerType: "task.done", taskID: "task-4", turnBlocks: mixedBlocks, latencyMS: 404, failure: mixedFailure, createdAt: lastAt})
 	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: malformedIdentity, turnID: turnIDs[4], runID: runID, sessionID: malformedSessionID, triggerEventID: malformedEventID, triggerType: "task.malformed", taskID: "task-malformed", turnBlocks: validMalformedSeedBlocks, parseOK: true, latencyMS: 1, createdAt: lastAt})
 	for _, claim := range backend.claims {
-		if _, err := backend.settlement.SettleSuccess(testAuthorActivityContext(), claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
+		if _, err := backend.settlement.SettleSuccess(ctx, claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatalf("settle projection fixture delivery: %v", err)
 		}
 	}
@@ -275,6 +276,7 @@ func seedOperatorConversationProjectionTurn(
 	seed operatorConversationProjectionTurnSeed,
 ) {
 	t.Helper()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.settlement)
 	var blocks []runtimellm.TurnBlock
 	if err := json.Unmarshal([]byte(seed.turnBlocks), &blocks); err != nil {
 		t.Fatalf("decode projection fixture turn blocks: %v", err)
@@ -288,7 +290,7 @@ func seedOperatorConversationProjectionTurn(
 	}
 	claim, ok := backend.claims[seed.triggerEventID]
 	if !ok {
-		lifecycle, found, err := backend.settlement.LoadAgentLifecycleState(testAuthorActivityContext(), seed.identity)
+		lifecycle, found, err := backend.settlement.LoadAgentLifecycleState(ctx, seed.identity)
 		if err != nil {
 			t.Fatalf("load projection fixture lifecycle: %v", err)
 		}
@@ -313,10 +315,10 @@ func seedOperatorConversationProjectionTurn(
 			EntityID:      seed.entityID,
 		}
 		event := managedCompletionTestEventWithIdentity(authority, seed.triggerEventID, seed.triggerType)
-		claim = claimCompletionOriginEventForTest(t, testAuthorActivityContext(), backend.settlement, authority, event)
+		claim = claimCompletionOriginEventForTest(t, ctx, backend.settlement, authority, event)
 		backend.claims[seed.triggerEventID] = claim
 	}
-	ctx := runtimedelivery.WithClaim(testAuthorActivityContext(), claim)
+	ctx = runtimedelivery.WithClaim(ctx, claim)
 	usage := runtimeeffects.CompletionUsage{
 		ResolvedModel: "store-test-model",
 		Exactness:     runtimeeffects.CompletionUsageExact,

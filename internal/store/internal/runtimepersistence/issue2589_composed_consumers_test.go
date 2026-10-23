@@ -26,6 +26,7 @@ func TestIssue2589ComposedConsumersPreserveResultsBothStores(t *testing.T) {
 			at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 
 			t.Run("scenario_multiple_entities_and_diffs", func(t *testing.T) {
+				ctx := originalStoreFixtureContext(t, ctx, selected)
 				requireDefaultSourceArtifactForTest(t, ctx, selected)
 				runID := uuid.NewString()
 				request := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at}
@@ -130,7 +131,7 @@ func TestIssue2589NativeAdmissionFrameIsolationBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			opened := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), opened.store)
 			runs := []string{uuid.NewString(), uuid.NewString()}
 			for _, runID := range runs {
 				requireRunningRunForTest(t, ctx, opened.store, runID, time.Now().UTC())
