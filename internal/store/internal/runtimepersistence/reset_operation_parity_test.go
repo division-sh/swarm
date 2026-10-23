@@ -109,7 +109,13 @@ func TestResetQuiescenceReceiptCommitsWithRunCancellationBothStores(t *testing.T
 				selected, db = newTestPostgresStore(t, database), database
 			}
 			ctx := testAuthorActivityContext()
-			cap, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("reset-quiescence"))
+			request := testStartupAcquireRequest("reset-quiescence")
+			request.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+			cap, err := selected.AcquireProcessCapability(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, cap)
 			if err != nil {
 				t.Fatal(err)
 			}

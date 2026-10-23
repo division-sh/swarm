@@ -268,6 +268,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				t.Fatal(err)
 			}
 			targetCtx := testAuthorActivityContextForBundle(target.BundleHash)
+			targetCtx = originalStoreFixtureContext(t, targetCtx, selected)
 			registerTestAuthorActivityCatalogForContext(t, selected, targetCtx)
 			requireRunFixtureForTest(t, targetCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: forkRunID, BundleHash: target.BundleHash, Artifact: rootBundle.SourceArtifact, StartedAt: now})
 			rootGraph, found := rootBundle.WorkflowStageTopology(".")

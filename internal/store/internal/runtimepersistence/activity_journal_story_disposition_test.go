@@ -17,6 +17,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
@@ -361,7 +362,7 @@ func TestActivityJournalStoryFailureAtomicityBothStores(t *testing.T) {
 
 func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture, mode executionmode.Mode, status string, generated bool) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+	ctx := originalStoreFixtureContext(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	activityNativeJournalForFixture(t, fixture)
@@ -453,6 +454,7 @@ func activityStoryOuter(t *testing.T, fixture authorActivityReceiptFixture, op s
 	j, ctx := fixture.store.(activityStoryJournal), testAuthorActivityContext()
 	if fixture.activityJournal != nil && fixture.activityJournal.owner != nil {
 		j = fixture.activityJournal.owner
+		ctx = startupownership.CarryMutationAuthority(ctx, fixture.activityJournal.original)
 	}
 	switch op {
 	case "start":

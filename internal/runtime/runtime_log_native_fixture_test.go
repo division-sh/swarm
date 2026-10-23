@@ -100,11 +100,14 @@ func nativeRecoveryLogRuntimeForTest(t *testing.T, fixture RuntimeLogNativeFixtu
 	if err != nil {
 		return nil, err
 	}
-	capability, err := store.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "runtime-recovery-log-proof", BootID: uuid.NewString(), RuntimeInstanceID: scope.RuntimeInstanceID,
-	})
-	if err != nil {
-		return nil, err
+	capability := fixture.ProcessCapability
+	if capability == nil {
+		capability, err = store.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+			OwnerID: "runtime-recovery-log-proof", BootID: uuid.NewString(), RuntimeInstanceID: scope.RuntimeInstanceID,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	t.Cleanup(func() {
 		if err := rt.Shutdown(); err != nil {

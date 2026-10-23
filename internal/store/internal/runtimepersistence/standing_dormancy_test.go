@@ -248,6 +248,7 @@ func TestRecoveryRequiredStandingReconciliationBothStores(t *testing.T) {
 			f := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
 			candidate := f.candidate("learned-authority-stale")
+			ctx = originalStoreFixtureContext(t, ctx, f.selected)
 			created, err := f.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatal(err)

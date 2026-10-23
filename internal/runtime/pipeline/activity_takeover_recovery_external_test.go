@@ -13,12 +13,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -56,8 +58,11 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 			}
 			intent.BundleHash, intent.WorkflowVersion = fact.BundleHash(), source.WorkflowVersion()
 			store := selected.events.(startupownership.Store)
-			request := startupownership.AcquireRequest{OwnerID: "activity-recovery-original", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
-			original, err := store.AcquireProcessCapability(ctx, request)
+			original, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			processEvidence, err := original.Evidence()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,7 +74,7 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 			if _, err := original.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
 				t.Fatal(err)
 			}
-			grant, err := original.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: intent.BundleHash, RuntimeInstanceID: request.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+			grant, err := original.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: intent.BundleHash, RuntimeInstanceID: processEvidence.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,14 +131,18 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			successorRequest := startupownership.AcquireRequest{OwnerID: "activity-recovery-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
-			successor, err := store.AcquireProcessCapability(ctx, successorRequest)
+			recoveryCtx := authoractivity.WithScope(context.Background(), authoractivity.RuntimeScope(successorRequest.RuntimeInstanceID))
+			successor, err := store.AcquireProcessCapability(recoveryCtx, successorRequest)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = successor.Release(context.Background()) })
+			recoveryCtx, err = startupownership.WithProcessMutationAuthority(recoveryCtx, successor)
+			if err != nil {
+				t.Fatal(err)
+			}
 			// Serve has process/runtime scope at this pre-dispatch boundary. The
 			// native owner, not a caller-selected primary bundle, knows each row.
-			recoveryCtx := authoractivity.WithScope(ctx, authoractivity.RuntimeScope(successorRequest.RuntimeInstanceID))
 			summary, err := startupownership.ReconcileDisplacedHTTPActivities(recoveryCtx, successor)
 			if err != nil || len(summary.Results) != 1 {
 				t.Fatalf("displaced native recovery: results=%d err=%v", len(summary.Results), err)
@@ -155,7 +164,19 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 					t.Fatalf("recovery replay changed the original result: %v", err)
 				}
 			}
-			if err := pc.PublishRecoveredHTTPActivity(ctx, terminal); err != nil {
+			resultCtx := correlation.WithSourceArtifactFact(correlation.WithRuntimeInstanceID(correlation.WithRunID(context.Background(), runID), successorRequest.RuntimeInstanceID), fact)
+			resultCtx = authoractivity.WithScope(resultCtx, authoractivity.BundleScope(successorRequest.RuntimeInstanceID, fact.BundleHash()))
+			resultBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+				ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: successorRequest.RuntimeInstanceID,
+				MutationContext: func(work context.Context) (context.Context, error) {
+					return startupownership.WithProcessMutationAuthority(work, successor)
+				},
+			}, terminal.ResultEventType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resultCoordinator := newGateRecoveryCoordinator(resultBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
+			if err := resultCoordinator.PublishRecoveredHTTPActivity(resultCtx, terminal); err != nil {
 				t.Fatalf("acknowledged native result publication: %v", err)
 			}
 			result := loadActivityResultForProof(t, ctx, selected, terminal.ResultEventID)
@@ -163,7 +184,7 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				t.Fatal("recovery publication changed the original terminal timestamp")
 			}
 			beforeReplay := storetest.ObserveActivityResultPublicationStorage(t, ctx, selected.events)
-			if err := pc.PublishRecoveredHTTPActivity(ctx, terminal); err != nil {
+			if err := resultCoordinator.PublishRecoveredHTTPActivity(resultCtx, terminal); err != nil {
 				t.Fatalf("exact recovered result replay: %v", err)
 			}
 			if !reflect.DeepEqual(result, loadActivityResultForProof(t, ctx, selected, terminal.ResultEventID)) ||

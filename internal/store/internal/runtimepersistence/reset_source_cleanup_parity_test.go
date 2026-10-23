@@ -37,7 +37,13 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				artifact := sourceartifactfixture.Artifact()
 				sourceartifactfixture.RequireArtifact(t, ctx, selected, artifact)
-				cap, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("reset-source-atomicity"))
+				request := testStartupAcquireRequest("reset-source-atomicity")
+				request.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+				cap, err := selected.AcquireProcessCapability(ctx, request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, err = startupownership.WithProcessMutationAuthority(ctx, cap)
 				if err != nil {
 					t.Fatal(err)
 				}
