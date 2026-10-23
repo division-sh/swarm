@@ -175,7 +175,7 @@ func (o *notifyAllChildrenLifecycleOwner) current() (runtimestartupownership.Gen
 	return o.grant, nil
 }
 
-func (o *notifyAllChildrenLifecycleOwner) BindRuntimeMutationContext(ctx context.Context) (context.Context, error) {
+func (o *notifyAllChildrenLifecycleOwner) mutationContext(ctx context.Context) (context.Context, error) {
 	grant, err := o.current()
 	if err != nil {
 		return ctx, err
@@ -1229,6 +1229,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	})
 	sourceV1Fact := conformanceSourceArtifactFact(t, sourceV1)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceV1Fact), runID)
+	ctx = originalConformanceFixtureContext(t, ctx, selected)
 	processTopology := newNotifyAllChildrenProcessTopology(t, ctx, selected)
 	scopeV1, ok := semanticview.FlowScopeByID(sourceV1, notifyallchildren.ChildFlowID)
 	if !ok || len(scopeV1.Agents) != 2 {
@@ -1539,6 +1540,7 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 			}
 
 			failReplacement()
+			ctx = originalConformanceFixtureContext(t, ctx, selected)
 			err = runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 				ContractBundle: source,
 				Instance:       before.Identity(),
@@ -2181,7 +2183,7 @@ func newNotifyAllChildrenRuntime(
 		deliveryLifecycle = opts.deliveryLifecycle
 	}
 	busOptions := durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
-		MutationContext:      generationLifecycle.BindRuntimeMutationContext,
+		MutationContext:      generationLifecycle.mutationContext,
 		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
 		ExecutionPosture:     posture,
 		ContractBundle:       source,
@@ -2392,17 +2394,18 @@ func newNotifyAllChildrenRuntime(
 		roles = gateLifecycleDiagnosticOverlap(t, db, roles)
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:   posture,
-		BaseContext:        originalConformanceFixtureContext(t, runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), backend),
-		SourceArtifactFact: sourceArtifactFact,
-		WorkflowInstances:  coordinator,
-		WorkOwner:          workOwner,
-		DeliveryStore:      deliveryLifecycle,
-		LifecycleStore:     lifecycleStore,
-		SemanticSource:     source,
-		Sessions:           sessionStore,
-		LLMBackend:         llmBackend,
-		PersistenceRoles:   roles, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:     posture,
+		BaseContext:          originalConformanceFixtureContext(t, runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), backend),
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		SourceArtifactFact:   sourceArtifactFact,
+		WorkflowInstances:    coordinator,
+		WorkOwner:            workOwner,
+		DeliveryStore:        deliveryLifecycle,
+		LifecycleStore:       lifecycleStore,
+		SemanticSource:       source,
+		Sessions:             sessionStore,
+		LLMBackend:           llmBackend,
+		PersistenceRoles:     roles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	grant := opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), manager, source, sourceArtifactFact, generationLifecycle)
