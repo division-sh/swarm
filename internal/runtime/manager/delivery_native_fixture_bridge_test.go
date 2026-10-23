@@ -34,6 +34,18 @@ type ManagerDeliveryNativeFixture struct {
 
 type managerDeliveryNativeFactory func(*testing.T) *ManagerDeliveryNativeFixture
 
+func (s *ManagerDeliveryNativeFixture) normalRunContext(t testing.TB) context.Context {
+	t.Helper()
+	admission, err := managedexecution.New(
+		managedexecution.KindNormalRuntime, s.Authority.ExecutionID(), s.Authority.Generation(), "",
+		"manager-test-actors", s.Authority.SourceArtifact().BundleHash(), nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return managedexecution.WithAdmission(s.Context, admission)
+}
+
 func (s *ManagerDeliveryNativeFixture) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {
 	return s.Authority
 }

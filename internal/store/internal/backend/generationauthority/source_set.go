@@ -38,3 +38,12 @@ func SourceSetContains(plan agenttopology.SourceSetPlan, source agenttopology.So
 	}
 	return false
 }
+
+func SourceSetContainsBundle(plan agenttopology.SourceSetPlan, hash string) bool {
+	for _, candidate := range plan.Sources {
+		if candidate.BundleHash == hash {
+			return true
+		}
+	}
+	return false
+}

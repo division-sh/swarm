@@ -8,7 +8,9 @@ func CopyServedReceiverInitialization(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml": `name: served-receiver-initialization
+		"account/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: served-receiver-initialization
 pins:
   inputs:
     - work.requested
@@ -45,7 +47,7 @@ work.ready:
           account_id: payload.account_id
           values: payload.values
 `,
-		"account/schema.yaml": `name: account
+		"account/schema.yaml": `# fixture: account
 instance: account_id
 pins:
   inputs:

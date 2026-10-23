@@ -76,7 +76,8 @@ func TestIssue2269TurnTimeoutEventBindingDiskAndRetained(t *testing.T) {
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: timeout-bound\nstages:\n  waiting: {}\n  done: {final: true}\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: timeout-bound\nstages:\n  waiting: {}\n  done: {final: true}\n")
 			writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: investigate}\n  turn_timeout: {after: 10m, emit: investigation.aborted}\n")
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), row.events)
 			artifact, err := sourceartifact.AdmitDirectory(root)
@@ -92,7 +93,7 @@ func TestIssue2269TurnTimeoutEventBindingDiskAndRetained(t *testing.T) {
 				t.Fatal(err)
 			}
 			disk, diskErr := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
-			loaded, loadedErr := LoadWorkflowContractBundleFromArtifact(repo, retained, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+			loaded, loadedErr := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, retained), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 			if (diskErr == nil) != row.accepted || (loadedErr == nil) != row.accepted {
 				t.Fatalf("accepted=%t disk=%v retained=%v", row.accepted, diskErr, loadedErr)
 			}

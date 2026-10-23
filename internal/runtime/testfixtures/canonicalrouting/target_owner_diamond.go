@@ -8,8 +8,17 @@ func CopyTargetOwnerDiamond(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
+		"branch/manifest.yaml":                      "version: 1.0.0\nplatform_version: '*'\n",
+		"branch/worker/manifest.yaml":               "version: 1.0.0\nplatform_version: '*'\n",
+		"branch/worker/result-static/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"branch/worker/result/manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"decoy/manifest.yaml":                       "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":                             "version: 1.0.0\nplatform_version: '*'\n",
+		"unrelated/manifest.yaml":                   "version: 1.0.0\nplatform_version: '*'\n",
+		"unrelated/worker/manifest.yaml":            "version: 1.0.0\nplatform_version: '*'\n",
+		"unrelated/worker/result/manifest.yaml":     "version: 1.0.0\nplatform_version: '*'\n",
 
-		"schema.yaml": `name: target-owner-diamond
+		"schema.yaml": `# fixture: target-owner-diamond
 pins:
   inputs:
     - branch.done
@@ -33,7 +42,7 @@ connect:
         id: root_owner
         check: _entity.id != ""
 `,
-		"branch/schema.yaml": `name: branch
+		"branch/schema.yaml": `# fixture: branch
 instance: branch_id
 pins:
   inputs:
@@ -60,7 +69,7 @@ connect:
         check: _entity.id != ""
 `,
 
-		"branch/worker/result-static/schema.yaml": `name: static-result
+		"branch/worker/result-static/schema.yaml": `# fixture: static-result
 pins:
   inputs:
     - work.ready
@@ -73,7 +82,7 @@ pins:
         id: inherited_owner
         check: _entity.id != ""
 `,
-		"branch/worker/result/schema.yaml": `name: singleton-result
+		"branch/worker/result/schema.yaml": `# fixture: singleton-result
 pins:
   inputs:
     - work.ready
@@ -83,13 +92,13 @@ pins:
   event_handlers:
     work.ready: {}
 `,
-		"decoy/schema.yaml": `name: decoy
+		"decoy/schema.yaml": `# fixture: decoy
 pins:
   outputs:
     - work.ready
 `,
 		"decoy/events.yaml": "work.ready:\n  branch_id: string\n",
-		"unrelated/worker/result/schema.yaml": `name: hostile
+		"unrelated/worker/result/schema.yaml": `# fixture: hostile
 pins:
   inputs:
     - work.ready

@@ -68,7 +68,8 @@ func TestRuntimeLogCaptureRetainsExactFactsWithoutInventingDurability(t *testing
 }
 
 func newTestRuntimeLogger(persistence RuntimeLogPersistence) *RuntimeLogger {
-	return NewRuntimeLogger(persistence, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return NewRuntimeLogger(persistence, executionposture.Live, func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 }
@@ -89,7 +90,8 @@ func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCaptur
 
 func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		var payload map[string]any
 		if err := json.Unmarshal(event.Payload(), &payload); err != nil {
 			return events.PayloadAdmission{}, err
@@ -130,7 +132,8 @@ func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
 
 func TestRuntimeLoggerOmitsAbsentNestedDetailFieldsBeforeAdmission(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 	if err := logger.Log(context.Background(), RuntimeLogEntry{
@@ -161,7 +164,8 @@ func TestRuntimeLoggerOmitsAbsentNestedDetailFieldsBeforeAdmission(t *testing.T)
 
 func TestRuntimeLoggerRejectsNullDetailListElements(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 	err := logger.Log(context.Background(), RuntimeLogEntry{
@@ -458,6 +462,10 @@ func VerifyRuntimeLogger_Log_StampsSourceArtifactFactOnRunRowForTest(t *testing.
 
 func VerifyRuntimeLogSetupRejectsDeletedPersistedSourceArtifactFactForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	rooted, rootErr := artifact.RootedSource()
+	if rootErr != nil {
+		t.Fatal(rootErr)
+	}
 	fixture := open(t, artifact)
 	runID := uuid.NewString()
 	sourceFact := testPersistedSourceArtifactFact(t, artifact.BundleHash())
@@ -468,7 +476,7 @@ func VerifyRuntimeLogSetupRejectsDeletedPersistedSourceArtifactFactForTest(t *te
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 
 	before := fixture.Physical(ctx)
-	_, err := fixture.Runs.CreateRun(ctx, storerunlifecycle.CreateRequest{RunID: runID, Source: sourceFact, Origin: storerunlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC()})
+	_, err := fixture.Runs.CreateRun(ctx, storerunlifecycle.CreateRequest{RunID: runID, Source: sourceFact, RootAdmission: rooted.Admission(), Origin: storerunlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC()})
 	if !errors.Is(err, storerunlifecycle.ErrSourceArtifactUnavailable) {
 		t.Fatalf("run setup error = %v, want ErrSourceArtifactUnavailable", err)
 	}
@@ -905,7 +913,10 @@ func assertRunRowExists(t *testing.T, fixture RuntimeLogNativeFixtureForTest, ct
 func admittedRuntimeLogSourceArtifactForTest(t *testing.T) *sourceartifact.AdmittedSourceArtifact {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: runtime-log-test\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)

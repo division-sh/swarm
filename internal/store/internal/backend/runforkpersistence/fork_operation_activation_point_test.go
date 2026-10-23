@@ -19,10 +19,11 @@ func TestForkActivationLoadsExactMaterializedPointBothStores(t *testing.T) {
 				t.Run(string(point.Kind), func(t *testing.T) {
 					point.Input = point.EventID
 					db := forkOperationTestDatabase(t, backend)
+					root := forkOperationTargetRoot(t)
 					if _, err := db.Exec(`CREATE TABLE run_fork_selected_contract_bindings (
 						binding_id TEXT PRIMARY KEY, fork_run_id TEXT NOT NULL, source_run_id TEXT NOT NULL,
 						fork_point_kind TEXT NOT NULL, fork_revision BIGINT NOT NULL, fork_event_id TEXT,
-						mode TEXT NOT NULL, bundle_hash TEXT
+						mode TEXT NOT NULL, bundle_hash TEXT, target_bundle_hash TEXT NOT NULL, source_root_directory TEXT NOT NULL
 					)`); err != nil {
 						t.Fatal(err)
 					}
@@ -31,22 +32,22 @@ func TestForkActivationLoadsExactMaterializedPointBothStores(t *testing.T) {
 					request := runfork.ForkOperationRequest{
 						OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "exact-activation",
 						TransportHash: "sha256:exact-activation", SourceRunID: uuid.NewString(), ForkEventID: point.EventID,
-						TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+						TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 						ResolvedPoint: &point,
 					}
 					withForkOperationTx(t, db, func(tx *sql.Tx) {
 						if _, _, err := bindForkOperationTx(ctx, tx, request, childID, bindingID, backend == "postgres"); err != nil {
 							t.Fatal(err)
 						}
-						if _, err := tx.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings VALUES ($1,$2,$3,$4,$5,$6,'selected_contracts',NULL)`,
-							bindingID, childID, request.SourceRunID, point.Kind, point.Revision, nullableForkEventID(point)); err != nil {
+						if _, err := tx.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings VALUES ($1,$2,$3,$4,$5,$6,'selected_contracts',NULL,$7,$8)`,
+							bindingID, childID, request.SourceRunID, point.Kind, point.Revision, nullableForkEventID(point), root.BundleHash, root.RootDirectory); err != nil {
 							t.Fatal(err)
 						}
 					})
 					caller := request
 					caller.ResolvedPoint = nil
 					lineage := runForkActivationLineage{ForkRunID: childID, SourceRunID: request.SourceRunID,
-						ForkBundleHash: request.TargetBundleHash, ForkPoint: point}
+						ForkBundleHash: request.TargetBundleHash, ForkRootReference: root, ForkPoint: point}
 					check := func(caller runfork.ForkOperationRequest, lineage runForkActivationLineage, want bool) {
 						t.Helper()
 						withForkOperationTx(t, db, func(tx *sql.Tx) {
@@ -67,12 +68,26 @@ func TestForkActivationLoadsExactMaterializedPointBothStores(t *testing.T) {
 					changed = caller
 					changed.TargetBundleHash = "sha256:other"
 					check(changed, lineage, false)
+					changed = caller
+					changed.TargetRootReference.RootDirectory = "other-root"
+					check(changed, lineage, false)
 					other := lineage
 					other.ForkPoint.Revision++
 					check(caller, other, false)
 					other = lineage
 					other.SourceRunID = uuid.NewString()
 					check(caller, other, false)
+					other = lineage
+					other.ForkRootReference.RootDirectory = "other-root"
+					check(caller, other, false)
+					if _, err := db.Exec(`UPDATE run_fork_selected_contract_bindings SET source_root_directory=$1 WHERE binding_id=$2`, "other-root", bindingID); err != nil {
+						t.Fatal(err)
+					}
+					check(caller, lineage, false)
+					if _, err := db.Exec(`UPDATE run_fork_selected_contract_bindings SET source_root_directory=$1 WHERE binding_id=$2`, root.RootDirectory, bindingID); err != nil {
+						t.Fatal(err)
+					}
+					check(caller, lineage, true)
 					if _, err := db.Exec(`UPDATE run_fork_selected_contract_bindings SET fork_revision=8 WHERE binding_id=$1`, bindingID); err != nil {
 						t.Fatal(err)
 					}
@@ -93,12 +108,13 @@ func TestForkActivationLoadsExactMaterializedPointBothStores(t *testing.T) {
 
 func TestForkOperationPostgresReadOnlyResultLookup(t *testing.T) {
 	db := forkOperationTestDatabase(t, "postgres")
+	root := forkOperationTargetRoot(t)
 	ctx := context.Background()
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 3}
 	request := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "read-only-result",
 		TransportHash: "sha256:read-only-result", SourceRunID: uuid.NewString(),
-		TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 		ResolvedPoint: &point,
 	}
 	childID, bindingID := uuid.NewString(), uuid.NewString()

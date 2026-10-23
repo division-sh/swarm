@@ -1,4 +1,4 @@
-name: fan-in-stream
+# fixture: fan-in-stream
 pins:
   inputs:
     - operating.report.triggered

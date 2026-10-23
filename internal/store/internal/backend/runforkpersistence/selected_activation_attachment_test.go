@@ -503,7 +503,7 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 					t.Fatal("unexpected divergence")
 					return nil
 				},
-				freeze: func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error {
+				freeze: func(context.Context, context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error {
 					steps = append(steps, "activate")
 					return nil
 				},

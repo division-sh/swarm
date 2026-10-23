@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
@@ -160,9 +161,9 @@ func (s *CatalogSnapshot) CompileAdmission(req CompileAdmissionRequest) (Inbound
 	if err := runtimecontracts.ValidateIngressAlias(alias); err != nil {
 		return InboundAdmissionPlan{}, err
 	}
-	provider := NormalizeProviderName(req.Provider)
-	if provider == "" {
-		return InboundAdmissionPlan{}, fmt.Errorf("ingress admission requires alias and provider")
+	provider := req.Provider
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return InboundAdmissionPlan{}, fmt.Errorf("ingress admission requires an exact portable provider directory key: %w", err)
 	}
 	if s == nil {
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q cannot compile admission: provider trigger catalog snapshot is required", alias, provider)
@@ -214,13 +215,13 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	if err != nil {
 		return InboundAdmissionPlan{}, err
 	}
-	ack := strings.TrimSpace(declaration.Acknowledge)
+	ack := declaration.Acknowledge
 	if auth == RequestAuthenticationSession {
 		if signingSecret != "" || ack != "" {
 			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q session transport forbids signing_secret and webhook acknowledgement", alias, provider)
 		}
 	} else {
-		if err := validateAcknowledgement(alias, provider, auth, ack, true); err != nil {
+		if err := validateAcknowledgement(alias, provider, auth, ack); err != nil {
 			return InboundAdmissionPlan{}, err
 		}
 	}
@@ -255,8 +256,8 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 	if err != nil {
 		return InboundAdmissionPlan{}, err
 	}
-	ack := strings.TrimSpace(declaration.Acknowledge)
-	if err := validateAcknowledgement(alias, provider, auth, ack, false); err != nil {
+	ack := declaration.Acknowledge
+	if err := validateAcknowledgement(alias, provider, auth, ack); err != nil {
 		return InboundAdmissionPlan{}, err
 	}
 	requiresSecret := auth != RequestAuthenticationNone
@@ -307,15 +308,15 @@ func manifestRequestAuthentication(manifest Manifest) (RequestAuthentication, er
 	}
 }
 
-func validateAcknowledgement(alias, provider string, auth RequestAuthentication, acknowledge string, pack bool) error {
+func validateAcknowledgement(alias, provider string, auth RequestAuthentication, acknowledge string) error {
+	if auth == RequestAuthenticationNone && acknowledge == "" {
+		return fmt.Errorf("trigger %q provider %q accepts unsigned webhooks; set acknowledge: %s under its exact deployment-config triggers entry", alias, provider, UnsignedWebhookAcknowledgement)
+	}
 	if acknowledge != "" && acknowledge != UnsignedWebhookAcknowledgement {
-		return fmt.Errorf("ingress alias %q provider %q admission.acknowledge must be %q when present; remove it or use the canonical token", alias, provider, UnsignedWebhookAcknowledgement)
+		return fmt.Errorf("trigger %q provider %q deployment acknowledge must be %q when present; remove it or use the canonical token", alias, provider, UnsignedWebhookAcknowledgement)
 	}
 	if auth != RequestAuthenticationNone && acknowledge != "" {
-		return fmt.Errorf("ingress alias %q provider %q acknowledges unsigned_webhook, but the compiled admission uses %s; remove admission.acknowledge", alias, provider, auth)
-	}
-	if pack && auth == RequestAuthenticationNone && acknowledge == "" {
-		return fmt.Errorf("ingress alias %q provider %q resolves an unauthenticated verified pack; add admission.acknowledge: unsigned_webhook to authorize this public endpoint, or install an authenticated pack", alias, provider)
+		return fmt.Errorf("trigger %q provider %q acknowledges unsigned_webhook, but the compiled admission uses %s; remove deployment acknowledge", alias, provider, auth)
 	}
 	return nil
 }
@@ -440,12 +441,9 @@ func (s *CatalogSnapshot) InstalledCapabilitySubjects() ([]packs.Subject, error)
 	entries := s.Entries()
 	subjects := make([]packs.Subject, 0, len(entries))
 	for _, entry := range entries {
-		loaded := LoadedPack{
-			Envelope: packs.Envelope{
-				ID: entry.Identity.ID, Version: entry.Identity.Version, ManifestHash: entry.Identity.ManifestHash,
-				Provenance: packs.Provenance{Source: entry.Identity.Provenance},
-			},
-			Manifest: entry.Manifest, SourcePath: entry.SourcePath, Source: entry.Source,
+		loaded, err := loadPackBody(entry.Manifest.value.providerBody)
+		if err != nil {
+			return nil, err
 		}
 		subject, err := loaded.CapabilitySubject()
 		if err != nil {
@@ -562,7 +560,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 	if p.Transport() != packs.ChannelTransportWebhook {
 		return AdmittedRequest{}, unauthorized("session trigger requires its retained account and activation authority, not a webhook request")
 	}
-	provider := NormalizeProviderName(req.Provider)
+	provider := req.Provider
 	if provider == "" {
 		provider = p.provider
 	}

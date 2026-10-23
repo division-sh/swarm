@@ -16,7 +16,7 @@ func sessionCompiledActivationFixture(t *testing.T) (channelonboarding.CompiledA
 	t.Helper()
 	plan, trigger := discordPaperPort(t)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration("native_selected", plan, "123456789012345678", nil,
-		map[string]string{"discord_bot_token": "discord.provider"}, "ingress:.:discord")
+		map[string]string{"discord.discord_bot_token": "discord.provider"}, "ingress:.:discord")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func sessionCompiledActivationFixture(t *testing.T) (channelonboarding.CompiledA
 			PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
 			ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1},
 		Plan: binding, CredentialAdmissions: []channelonboarding.CredentialAdmission{
-			{Role: "discord_bot_token", StoreKey: "discord.provider", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("a")},
+			{Role: "discord.discord_bot_token", StoreKey: "discord.provider", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("a")},
 		},
 		SessionAccount: operatorchannel.SessionAccountAdmission{Provider: "discord", ConnectionID: "22222222-2222-4222-8222-222222222222",
 			AccountRef: "123456789012345678", AdmissionID: "33333333-3333-4333-8333-333333333333", Revision: 1},

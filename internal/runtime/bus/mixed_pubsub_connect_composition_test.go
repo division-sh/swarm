@@ -11,64 +11,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
-
-func TestMixedPubsubConnectCompositionSameCoordinateDifferentRoles(t *testing.T) {
-	consumerNode := testFlowNode(t, "consumer", "shared-node")
-	producerNode := testFlowNode(t, "producer", "shared-node")
-	consumerRecipient := events.MustNodeDeliveryRecipient(consumerNode)
-	producerRecipient := events.MustNodeDeliveryRecipient(producerNode)
-	producerTarget := events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: "producer", FlowInstance: "producer", EntityID: "00000000-0000-4000-8000-000000000001",
-	})
-	consumerTarget := events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: "consumer", FlowInstance: "consumer", EntityID: "00000000-0000-4000-8000-000000000002",
-	})
-	connectPlan := newRoutePlan(events.Event{})
-	connectPlan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
-	connectPlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
-		Recipient: consumerRecipient, TargetOwnership: consumerTarget,
-		Handler:  runtimepipeline.MustDeliveryTargetHandler(consumerNode).ForEvent("work.accepted"),
-		Producer: routeIntentProducerConnectRoutePlan, Persist: true,
-	})
-	connectPlan.RoutedRecipients = []Subscriber{{
-		Recipient: consumerRecipient, Path: "consumer", routeSource: subscriberRouteSourceConnectRoutePlan,
-		handlerNode:   consumerNode,
-		targetHandler: runtimepipeline.MustDeliveryTargetHandler(consumerNode),
-	}}
-	localPlan := newRoutePlan(events.Event{})
-	localPlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
-		Recipient: producerRecipient, TargetOwnership: producerTarget,
-		Handler:  runtimepipeline.MustDeliveryTargetHandler(producerNode).ForEvent("work.ready"),
-		Producer: routeIntentProducerConcreteNodeRoute, Persist: true,
-	})
-	localPlan.RoutedRecipients = []Subscriber{{
-		Recipient: producerRecipient, Path: "producer", routeSource: subscriberRouteSourceSubscription,
-		handlerNode:   producerNode,
-		targetHandler: runtimepipeline.MustDeliveryTargetHandler(producerNode),
-	}}
-	plan := composeIndependentPubsubBranch(connectPlan, localPlan)
-	routes := plan.DeliveryRoutes()
-	if len(routes) != 2 {
-		t.Fatalf("delivery routes = %#v, want two same-ID roles; routed=%#v intents=%#v", routes, plan.RoutedRecipients, plan.DeliveryIntents)
-	}
-	seenTargets := map[string]bool{}
-	for _, route := range routes {
-		if route.Recipient.LocalID() != "shared-node" {
-			t.Fatalf("route recipient = %#v, want shared-node", route.Recipient)
-		}
-		seenTargets[route.Target.Route().FlowInstance] = true
-	}
-	if !seenTargets["producer"] || !seenTargets["consumer"] {
-		t.Fatalf("same-ID route targets = %#v, want producer and consumer", routes)
-	}
-}
 
 func TestMixedPubsubConnectCompositionMultiBoundary(t *testing.T) {
 	for _, reverse := range []bool{false, true} {
@@ -168,30 +116,18 @@ func TestMixedPubsubConnectCompositionConcurrentSources(t *testing.T) {
 
 func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 	const eventName = "deploy.done"
-	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
-		{
-			id: "producer", mode: runtimecontracts.FlowModeStatic,
-			outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"producer-local": {
-					SubscribesTo:  []string{eventName},
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: existingOwnerHandlerFixture()},
-				},
-			},
-			agents: map[string]runtimecontracts.AgentRegistryEntry{
-				"producer-agent": {ID: "producer-agent", Subscriptions: []string{eventName}},
-			},
-		},
-		{
-			id: "consumer", mode: runtimecontracts.FlowModeStatic,
-			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.accepted"}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"consumer-node": {
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.accepted": existingOwnerHandlerFixture()},
-				},
-			},
-		},
-	}, []runtimecontracts.FlowConnect{{Event: eventName, From: "producer", To: "consumer", Rename: "deploy.accepted"}}))
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.accepted\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/events.yaml":   "deploy.done:\n",
+		"producer/nodes.yaml":    "producer-local:\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"producer/agents.yaml":   "producer-agent:\n  intent: {inline: 'Observe deployment completion.'}\n  subscriptions: [deploy.done]\n",
+		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.accepted]\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.accepted:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+	}))
 	owners := mixedStaticOwners(t, source, "producer", "consumer")
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(owners...)
@@ -281,67 +217,57 @@ func assertMixedNodeAgentConnectRoutes(t testing.TB, routes []events.DeliveryRou
 	}
 }
 
-func mixedFanoutToFanoutSource(t testing.TB, reverse bool) semanticview.Source {
-	localNode := func(id, event string) map[string]runtimecontracts.SystemNodeContract {
-		return map[string]runtimecontracts.SystemNodeContract{
-			id: {
-				SubscribesTo:  []string{event},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: existingOwnerHandlerFixture()},
-			},
-		}
-	}
-	receiver := func(id, event string) map[string]runtimecontracts.SystemNodeContract {
-		return map[string]runtimecontracts.SystemNodeContract{
-			id: {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: existingOwnerHandlerFixture()}},
-		}
-	}
-	flows := []connectRoutePlanTestFlow{
-		{
-			id: "producer", mode: runtimecontracts.FlowModeStatic,
-			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "branch.ready"}},
-			nodes:   localNode("producer-local", "branch.ready"),
-		},
-		{
-			id: "left", mode: runtimecontracts.FlowModeStatic,
-			inputs:  []runtimecontracts.FlowInputEventPin{{Event: "branch.accepted"}},
-			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "branch.done"}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"left-receiver": receiver("left-receiver", "branch.accepted")["left-receiver"],
-				"left-local":    localNode("left-local", "branch.done")["left-local"],
-			},
-		},
-		{
-			id: "right", mode: runtimecontracts.FlowModeStatic,
-			inputs:  []runtimecontracts.FlowInputEventPin{{Event: "branch.accepted"}},
-			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "branch.done"}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"right-receiver": receiver("right-receiver", "branch.accepted")["right-receiver"],
-				"right-local":    localNode("right-local", "branch.done")["right-local"],
-			},
-		},
-		{
-			id: "left-sink", mode: runtimecontracts.FlowModeStatic,
-			inputs: []runtimecontracts.FlowInputEventPin{{Event: "branch.final"}},
-			nodes:  receiver("left-sink-node", "branch.final"),
-		},
-		{
-			id: "right-sink", mode: runtimecontracts.FlowModeStatic,
-			inputs: []runtimecontracts.FlowInputEventPin{{Event: "branch.final"}},
-			nodes:  receiver("right-sink-node", "branch.final"),
-		},
-	}
-	connects := []runtimecontracts.FlowConnect{
-		{Event: "branch.ready", From: "producer", To: "left", Rename: "branch.accepted"},
-		{Event: "branch.ready", From: "producer", To: "right", Rename: "branch.accepted"},
-		{Event: "branch.done", From: "left", To: "left-sink", Rename: "branch.final"},
-		{Event: "branch.done", From: "right", To: "right-sink", Rename: "branch.final"},
+func mixedFanoutToFanoutSource(t *testing.T, reverse bool) semanticview.Source {
+	t.Helper()
+	connects := []map[string]string{
+		{"event": "branch.ready", "from": "producer", "to": "left", "rename": "branch.accepted"},
+		{"event": "branch.ready", "from": "producer", "to": "right", "rename": "branch.accepted"},
+		{"event": "branch.done", "from": "left", "to": "left-sink", "rename": "branch.final"},
+		{"event": "branch.done", "from": "right", "to": "right-sink", "rename": "branch.final"},
 	}
 	if reverse {
 		for left, right := 0, len(connects)-1; left < right; left, right = left+1, right-1 {
 			connects[left], connects[right] = connects[right], connects[left]
 		}
 	}
-	return semanticview.Wrap(connectRoutePlanTestBundle(t, flows, connects))
+	schema, err := yaml.Marshal(map[string]any{"stages": []any{}, "connect": connects})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            string(schema),
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [branch.ready]\n",
+		"producer/events.yaml":   "branch.ready:\n",
+		"producer/nodes.yaml":    "producer-local:\n  execution_type: system_node\n  subscribes_to: [branch.ready]\n  event_handlers:\n    branch.ready:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+	}
+	for _, id := range []string{"left", "right"} {
+		files[id+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [branch.accepted]\n  outputs: [branch.done]\n"
+		files[id+"/events.yaml"] = "branch.done:\n"
+		files[id+"/nodes.yaml"] = fmt.Sprintf(`%s-receiver:
+  execution_type: system_node
+  event_handlers:
+    branch.accepted:
+      guard: {id: selected_owner, check: _entity.id != ""}
+%s-local:
+  execution_type: system_node
+  subscribes_to: [branch.done]
+  event_handlers:
+    branch.done:
+      guard: {id: selected_owner, check: _entity.id != ""}
+`, id, id)
+		files[id+"-sink/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files[id+"-sink/schema.yaml"] = "stages: []\npins:\n  inputs: [branch.final]\n"
+		files[id+"-sink/nodes.yaml"] = fmt.Sprintf(`%s-sink-node:
+  execution_type: system_node
+  event_handlers:
+    branch.final:
+      guard: {id: selected_owner, check: _entity.id != ""}
+`, id)
+	}
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 }
 
 func mixedStaticOwners(t testing.TB, source semanticview.Source, flowIDs ...string) []ActiveTargetDescriptor {

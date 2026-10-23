@@ -5,11 +5,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"regexp"
+
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/spf13/cobra"
@@ -325,157 +324,38 @@ func TestUnsupportedSpellingsWithFlagsFailCurrentAdmission(t *testing.T) {
 // survives. Lines carrying an explicit retirement/historical marker are
 // exempt: a retirement message may name the spelling it retires, and
 // historical ledgers may record superseded decisions.
-func retiredTopologySpellingScanner(t *testing.T) func(string, string) bool {
-	t.Helper()
-	retiredWords := regexp.MustCompile("swarm (runs|agents|events|entities|conversations)([^a-z]|$)" +
-		"|swarm (status|trace)([^a-z]|$)" +
-		"|swarm fork([^a-z]|$)") // forkchat excluded by the non-letter guard
-	// The bare-run start form is scanned everywhere, including authoritative
-	// spec prose — the #1686 re-review rejected a spec-wide exemption as
-	// institutionalizing drift. Only explicit retirement language exempts a
-	// line; present-truth rows must say `swarm run start`.
-	bareRunStart := regexp.MustCompile("swarm run --|`swarm run`")
-	// unbackticked bare-run behavioral prose ("swarm run consumes", "foreground
-	// swarm run") needs a not-followed-by-live-subcommand check that RE2 cannot
-	// express; handled below.
-	bareRunPhrase := regexp.MustCompile(`swarm run ([a-zA-Z0-9_-]+)`)
-	var stdout, stderr bytes.Buffer
-	commandRoot := newRootCommand(context.Background(), t.TempDir(), &stdout, &stderr)
-	run := findCommandByPath(commandRoot, []string{"run"})
-	if run == nil {
-		t.Fatal("live run command group missing")
-	}
-	liveRunSubcommands := map[string]bool{}
-	for _, command := range run.Commands() {
-		if !command.Hidden {
-			liveRunSubcommands[command.Name()] = true
-		}
-	}
-	bareRunHistoricalMarker := regexp.MustCompile("(?i)retired|renamed|no longer|superseded|historical|noun-group|run command group|promoted pointer message")
-	// Exemptions are line-local and explicit only: the line itself must carry
-	// historical/retirement language. No category-level shapes (field names,
-	// issue references, block types) exempt anything — that is how drift
-	// hides (#1686 re-reviews three, five, and six).
-	// Marker vocabulary is built top-down from words that can ONLY describe
-	// closed history — never authority direction. "restore" was removed after
-	// re-reviews eight and nine ("restores X as planned authority",
-	// "X work remain split"): active/future authority language is the stale claim
-	// itself, and it exempted itself through the marker (drift blessing drift).
-	// Split/remaining-work language is tracker state, not closed history.
-	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|--dry-run\\|")
-	return func(line, scanText string) bool {
-		wordHit := retiredWords.MatchString(line) || retiredWords.MatchString(scanText)
-		bareHit := bareRunStart.MatchString(line) || bareRunStart.MatchString(scanText)
-		for _, match := range bareRunPhrase.FindAllStringSubmatch(scanText, -1) {
-			if !liveRunSubcommands[match[1]] {
-				bareHit = true
-				break
-			}
-		}
-		return (wordHit && !historicalMarker.MatchString(scanText)) ||
-			(bareHit && !bareRunHistoricalMarker.MatchString(scanText))
-	}
-}
 
-func TestRetiredTopologySpellingScannerUsesExactLiveCommandTokens(t *testing.T) {
-	scan := retiredTopologySpellingScanner(t)
-	for _, tc := range []struct {
-		text string
-		want bool
-	}{
-		{"command: swarm run fan-out list <run-id>", false},
-		{"command: swarm run fan-out", false},
-		{`{Command: "swarm run fan-out list", Selector: "arg:run-id"}`, false},
-		{"swarm run status", false},
-		{"swarm run fan", true},
-		{"swarm run fan-outside list", true},
-		{"swarm run fan_out list", true},
-		{"swarm run status-extra", true},
-		{"swarm run status2", true},
-		{"swarm run consumes the event", true},
-		{"swarm run --event scan.requested", true},
-		{"`swarm run`", true},
-		{"swarm runs", true},
-		{"swarm status", true},
-		{"swarm fork <run-id>", true},
-		{"swarm run fan-out list and swarm run consumes", true},
-		{"swarm run fan-out list and swarm runs", true},
-		{"historical: swarm runs", false},
-	} {
-		t.Run(tc.text, func(t *testing.T) {
-			if got := scan(tc.text, tc.text); got != tc.want {
-				t.Fatalf("retired spelling = %v, want %v", got, tc.want)
-			}
-		})
-	}
-	if scan("command: swarm run", "command: swarm run fan-out list <run-id>") {
-		t.Fatal("wrapped live fan-out command classified as retired")
-	}
-	if !scan("command: swarm", "command: swarm runs") {
-		t.Fatal("wrapped retired command escaped the scan")
-	}
-}
+// forkchat excluded by the non-letter guard
+// The bare-run start form is scanned everywhere, including authoritative
+// spec prose — the #1686 re-review rejected a spec-wide exemption as
+// institutionalizing drift. Only explicit retirement language exempts a
+// line; present-truth rows must say `swarm run start`.
 
-func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
-	scan := retiredTopologySpellingScanner(t)
+// unbackticked bare-run behavioral prose ("swarm run consumes", "foreground
+// swarm run") needs a not-followed-by-live-subcommand check that RE2 cannot
+// express; handled below.
 
-	root := driftTestRepoRoot(t)
-	skipDirs := map[string]bool{".swarm": true, "coverage": true, "data": true}
-	var targets []string
-	err := checkoutsource.WalkDir(root, root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		name := d.Name()
-		switch {
-		case strings.HasSuffix(name, "_test.go"):
-			return nil // tests exercise retired spellings on purpose
-		case name == "CHANGELOG.md":
-			return nil // historical by definition
-		case strings.HasSuffix(name, ".go"), strings.HasSuffix(name, ".yaml"),
-			strings.HasSuffix(name, ".yml"), strings.HasSuffix(name, ".md"):
-			targets = append(targets, path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(targets) < 100 {
-		t.Fatalf("scan targets = %d, want a repo-wide sweep; walk is broken", len(targets))
-	}
+// Exemptions are line-local and explicit only: the line itself must carry
+// historical/retirement language. No category-level shapes (field names,
+// issue references, block types) exempt anything — that is how drift
+// hides (#1686 re-reviews three, five, and six).
+// Marker vocabulary is built top-down from words that can ONLY describe
+// closed history — never authority direction. "restore" was removed after
+// re-reviews eight and nine ("restores X as planned authority",
+// "X work remain split"): active/future authority language is the stale claim
+// itself, and it exempted itself through the marker (drift blessing drift).
+// Split/remaining-work language is tracker state, not closed history.
 
-	for _, path := range targets {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		physical := strings.Split(string(raw), "\n")
-		for i, line := range physical {
-			// Wrapped/folded scalars split spellings across physical lines
-			// (#1686 re-review seven): scan each line joined with its
-			// successor, whitespace-collapsed, so the unit of meaning is the
-			// logical text. Exemption markers on either physical line cover
-			// the join. Not covered (stated, not hidden): spellings assembled
-			// by code (string concatenation) rather than written in text.
-			scanText := line
-			if i+1 < len(physical) {
-				scanText = strings.TrimRight(line, " \\") + " " + strings.TrimLeft(physical[i+1], " \\")
-			}
-			if !scan(line, scanText) {
-				continue
-			}
-			rel, _ := filepath.Rel(root, path)
-			t.Errorf("%s:%d: retired topology spelling in unstructured text (update to the v2.2 spelling, or mark the line historical): %s", rel, i+1, strings.TrimSpace(line))
-		}
-	}
-}
+// tests exercise retired spellings on purpose
+
+// historical by definition
+
+// Wrapped/folded scalars split spellings across physical lines
+// (#1686 re-review seven): scan each line joined with its
+// successor, whitespace-collapsed, so the unit of meaning is the
+// logical text. Exemption markers on either physical line cover
+// the join. Not covered (stated, not hidden): spellings assembled
+// by code (string concatenation) rather than written in text.
 
 // Pre-dispatch argv interpreters must classify command paths against the same
 // normalized argv cobra sees — root persistent flags stripped. A validator

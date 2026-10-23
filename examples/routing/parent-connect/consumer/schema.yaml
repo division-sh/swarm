@@ -1,4 +1,4 @@
-name: consumer
+# fixture: consumer
 pins:
   inputs:
     - work.ready

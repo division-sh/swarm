@@ -23,9 +23,14 @@ func (*snapshotHistoricalReader) WithHistoricalFlowInstancePlanningTx(ctx contex
 
 func TestInstanceSnapshotSourceConflictRequiresValidSourceAndLineage(t *testing.T) {
 	artifact := sourceartifactfixture.Artifact()
-	source := semanticview.Wrap(&contracts.WorkflowContractBundle{SourceArtifact: artifact, Semantics: contracts.WorkflowSemanticView{Version: "original"}})
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", artifact)
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(pipeline.WorkflowRepoRoot(), rooted, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
 	run := runlifecycle.Snapshot{RunID: "11111111-1111-1111-1111-111111111111", State: runlifecycle.StateRunning,
-		Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()}
+		Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: artifact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: time.Now().UTC()}
 	owner := &snapshotHistoricalReader{}
 	if err := validateFlowInstanceIndexSnapshot(source, artifact.BundleHash(), run, owner); err != nil {
 		t.Fatalf("exact admitted source refused: %v", err)
@@ -54,10 +59,15 @@ func TestInstanceSnapshotSourceConflictRequiresValidSourceAndLineage(t *testing.
 			case "crossed_request_hash":
 				requested = "bundle-v2:sha256:" + strings.Repeat("c", 64)
 			case "missing_version":
-				selected = semanticview.Wrap(&contracts.WorkflowContractBundle{SourceArtifact: artifact})
+				bad := *bundle
+				bad.Semantics.Version = ""
+				selected = semanticview.Wrap(&bad)
 			case "missing_artifact":
-				selected = semanticview.Wrap(&contracts.WorkflowContractBundle{Semantics: contracts.WorkflowSemanticView{Version: "original"}})
+				bad := *bundle
+				bad.SourceArtifact = nil
+				selected = semanticview.Wrap(&bad)
 			}
+			active.RootReference.BundleHash = active.BundleHash
 			err := validateFlowInstanceIndexSnapshot(selected, requested, active, history)
 			var conflict *pipeline.FlowInstanceSourceConflict
 			classified := errors.As(err, &conflict)

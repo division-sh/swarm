@@ -364,7 +364,7 @@ func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-	activityNativeJournalForFixture(t, fixture)
+	activityNativeJournalForFixture(t, fixture, runID)
 	record := runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: mode, EntityID: uuid.NewString(), FlowInstance: "flow/" + uuid.NewString(),
 		NodeID: activityidentity.MustNodeOwner(mustPersistenceNode("flow", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",

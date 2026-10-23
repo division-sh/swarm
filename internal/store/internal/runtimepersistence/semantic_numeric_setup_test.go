@@ -24,12 +24,12 @@ func TestDirectScenarioSetupSemanticNumericParity(t *testing.T) {
 			}
 			if backend == "sqlite" {
 				s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				requireDefaultSourceArtifactForTest(t, ctx, s)
+				ctx = requireDefaultSourceArtifactForTest(t, ctx, s)
 				setup, db = s, s.backend.ConstructionHandle()
 			} else {
 				_, db, _ = testutil.StartPostgres(t)
 				s := newTestPostgresStore(t, db)
-				requireDefaultSourceArtifactForTest(t, ctx, s)
+				ctx = requireDefaultSourceArtifactForTest(t, ctx, s)
 				setup = s
 			}
 			run, entity := uuid.NewString(), uuid.NewString()

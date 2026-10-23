@@ -23,7 +23,7 @@ func missingMutationRunProof(t *testing.T, initial bool) {
 	t.Helper()
 	db := fanOutReadbackTestDB(t, "sqlite")
 	for _, ddl := range []string{
-		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL, bundle_hash TEXT)`,
+		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL, bundle_hash TEXT, source_root_directory TEXT)`,
 		`CREATE TABLE entity_mutations (mutation_id TEXT PRIMARY KEY)`,
 		`CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY, last_sequence INTEGER NOT NULL)`,
 	} {

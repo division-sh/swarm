@@ -93,6 +93,7 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		loopValidationCheckID:                     "structural",
 		collectionItemSemanticsCheckID:            "structural",
 		stageGateValidationCheckID:                "structural",
+		stageGateChannelScopeCheckID:              "structural",
 		"tool_resolution":                         "mixed",
 		"required_mcp_tool_availability":          "execution",
 		"platform_tool_usage_hints":               "mixed",

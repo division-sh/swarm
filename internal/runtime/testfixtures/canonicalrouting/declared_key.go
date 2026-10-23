@@ -15,7 +15,9 @@ func CopyTargetedDeclaredKey(t testing.TB, acquisition string) string {
 		t.Fatalf("unsupported declared-key acquisition %q", acquisition)
 	}
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`name: declared-key-execution
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "review/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`# fixture: declared-key-execution
 pins:
   inputs: [work.requested]
   outputs: [work.keyed]
@@ -35,7 +37,7 @@ connect:
           account_id: payload.account_id
           item: payload.item
 `)
-	writeClosedVariantFile(t, root, "review/schema.yaml", fmt.Sprintf(`name: review
+	writeClosedVariantFile(t, root, "review/schema.yaml", fmt.Sprintf(`# fixture: review
 instance: %s
 stages:
   active: {}

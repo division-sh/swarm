@@ -204,8 +204,8 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 	if !resolved.HasSchema {
 		t.Fatalf("composed source did not resolve imported Telegram schema: %#v", resolved)
 	}
-	globalResolved := semanticview.ResolveEventSchema(source, "", eventName)
-	if !globalResolved.HasCompiled || !globalResolved.HasClassification || globalResolved.Classification != runtimecontracts.CompiledEventSchemaImported {
+	globalResolved, found := source.SemanticCapabilities().ProviderTriggerSchemaReadback(eventName)
+	if !found || globalResolved.Classification() != runtimecontracts.CompiledEventSchemaImported {
 		t.Fatalf("target-free composed source did not resolve imported Telegram schema: %#v scopes=%#v", globalResolved, source.FlowScopes())
 	}
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)

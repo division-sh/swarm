@@ -13,17 +13,16 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type operatorChannelInboundSelectedStore interface {
@@ -54,15 +53,10 @@ func TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity(t *
 func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorChannelInboundSelectedStore, db *sql.DB, sqlite bool, runID, entityID, flowInstance string) {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	source := providerRawSettlementSemanticSource(t, runtimepkg.InboundTarget{FlowPath: flowInstance, Alias: entityID}, providerRawSettlementCase{provider: "telegram", eventName: "inbound.telegram"}, "telegram-secret")
-	var inboundTarget runtimepkg.InboundTarget
-	if sqlite {
-		inboundTarget = seedSQLiteInboundGatewayRuntime(t, ctx, selected.(*store.SQLiteRuntimeStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
-	} else {
-		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
-	}
+	source := capturedTelegramOperatorSource(t)
+	ctx, inboundTarget := seedCapturedProviderTarget(t, ctx, selected, source, runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
 
-	plan := compileEmbeddedTelegramOperatorChannelPlan(t)
+	plan := compileCapturedTelegramOperatorChannelPlan(t, source)
 	identity, err := plan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -109,12 +103,12 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		t.Fatal(err)
 	}
 
-	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source},
-		"inbound.telegram", "inbound.telegram.text_message", "inbound.telegram.callback_action")
+	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source)},
+		"inbound.telegram.raw", "inbound.telegram.text_message", "inbound.telegram.callback_action")
 	if err != nil {
 		t.Fatal(err)
 	}
-	gateway := newTestInboundGateway(t, bus, nil, nil, selected)
+	gateway := newCapturedProviderGateway(t, bus, source, selected)
 	gateway.SetChannelPlans([]packs.SatisfactionPlan{plan})
 
 	negativeBodies := []struct {
@@ -166,7 +160,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	for _, tc := range negativeBodies {
 		t.Run(tc.name, func(t *testing.T) {
 			response := publishOperatorChannelTelegramUpdate(t, gateway, bus, inboundTarget, ctx, []byte(tc.body))
-			wantEvents := []string{"inbound.telegram"}
+			wantEvents := []string{"inbound.telegram.raw"}
 			if tc.actionIntent {
 				wantEvents = nil
 			}
@@ -292,25 +286,15 @@ func requireOperatorChannelOperationState(t *testing.T, selected operatorchannel
 	return operatorchannel.Operation{}
 }
 
-func compileEmbeddedTelegramOperatorChannelPlan(t *testing.T) packs.SatisfactionPlan {
+func compileCapturedTelegramOperatorChannelPlan(t *testing.T, source semanticview.Source) packs.SatisfactionPlan {
 	t.Helper()
-	repoRoot := filepath.Join("..", "..")
-	snapshot, err := yamlsource.LoadFile(filepath.Join(repoRoot, "platform-spec.yaml"))
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("operator channel requires its captured source")
+	}
+	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var spec runtimecontracts.PlatformSpecDocument
-	spec, err = runtimecontracts.AdmitPlatformSpecValue(snapshot.Document(filepath.Join(repoRoot, "platform-spec.yaml")).Root())
-	if err != nil {
-		t.Fatal(err)
-	}
-	registry, err := packs.NewInterfaceRegistry(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plans, err := packs.CompileChannelInventory(registry, packfixture.ChannelPacks(t), packfixture.TriggerCatalog(t).PackDescriptors(), packfixture.ConnectorRegistry(t).PackDescriptors())
-	if err != nil {
-		t.Fatal("compile embedded channel inventory", err)
-	}
-	return packfixture.ChannelPlanByID(t, plans, "provider.telegram.hitl_channel")
+	return packfixture.ChannelPlanByID(t, projection.ChannelPlans, "telegram")
 }

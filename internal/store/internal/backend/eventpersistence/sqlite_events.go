@@ -44,7 +44,7 @@ func (s *EventSQLiteOwner) ensureEventPayloadAdmission(ctx context.Context, admi
 		return events.AdmittedEvent{}, fmt.Errorf("event payload admission evidence is required")
 	}
 	flowID := strings.TrimSpace(event.RoutingSource().Route().FlowID)
-	payload, err := admitter(ctx, event, flowID)
+	payload, err := admitter(ctx, event, events.EventPayloadProducer(event, flowID))
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("admit event payload: %w", err)
 	}
@@ -159,12 +159,19 @@ func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, a
 	if !ok {
 		return fmt.Errorf("ensure active sqlite run row: executable bundle source fact is required")
 	}
+	root, ok, rootErr := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if rootErr != nil {
+		return rootErr
+	}
+	if !ok {
+		return fmt.Errorf("ensure active sqlite run row: exact rooted source admission is required")
+	}
 	origin, err := runtimerunlifecycle.EventRunOrigin(triggerEventID, triggerEventType)
 	if err != nil {
 		return fmt.Errorf("ensure active sqlite run row origin: %w", err)
 	}
 	_, err = s.RunLifecycleSQLiteOwner.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: origin, Source: fact, StartedAt: runtimerunlifecycle.CanonicalTimestamp(now),
+		RunID: runID, Origin: origin, Source: fact, RootAdmission: root, StartedAt: runtimerunlifecycle.CanonicalTimestamp(now),
 	})
 	if err != nil {
 		return err

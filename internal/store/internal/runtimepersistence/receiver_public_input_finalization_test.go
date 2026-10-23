@@ -43,12 +43,17 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
 			fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 			runID := uuid.NewString()
 			ctx := correlation.WithRuntimeInstanceID(
 				correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), runID),
 				authorActivityTestRuntimeInstanceID,
 			)
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 			if err := ensureRunFixtureSourceArtifactForTest(ctx, selected, fact.BundleHash(), bundle.SourceArtifact); err != nil {
 				t.Fatal(err)
 			}
@@ -89,7 +94,10 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 				t.Fatal(err)
 			}
 			workflow := configureAgentFixtureFlowLifecycle(t, selected, &sqliteFlowActivationBus{}, bundle)
-			coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)

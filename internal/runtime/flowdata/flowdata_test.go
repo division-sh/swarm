@@ -59,10 +59,12 @@ func TestValidateSourceEvaluatesNestedPhysicalAgentDeclarationExactlyOnce(t *tes
 func writeNestedFlowDataFixture(t *testing.T, declaredFile string, writeFile bool) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-flow-data\n")
+	writeFlowDataFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeEmptyFlowDataContractFiles(t, root)
 	flowRoot := filepath.Join(root, "support")
-	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {}\n")
+	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages:\n  active: {}\n")
 	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:
   role: worker

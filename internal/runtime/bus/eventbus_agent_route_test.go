@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -23,6 +24,7 @@ type ExactHandoffNativeFixtureForTest struct {
 	Store         runtimedelivery.Store
 	Authority     runtimedelivery.ExecutionAuthority
 	Context       context.Context
+	Source        semanticview.Source
 	SelectedEvent events.Event
 	SelectedRoute events.DeliveryRoute
 	Seed          func(*testing.T, string, string, events.DeliveryRoute) events.Event
@@ -256,7 +258,7 @@ func TestEventBusAgentRouteRemovalWaitsForDequeuedWork(t *testing.T) {
 
 func VerifyEventBusSnapshottedAgentRouteSendLinearizesWithRemovalForTest(t *testing.T, open ExactHandoffNativeOpenerForTest) {
 	store := newExactHandoffProofStore(open(t, false), false)
-	eb, err := newScopedTestEventBus(store)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: store.fixture.Source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -433,7 +435,8 @@ func TestEventBusAgentRouteFailedHandoffRetainsCarrierForExactRetry(t *testing.T
 }
 
 func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
-	owned := sourceMutationFact(t, "9")
+	source := sourceMutationPublicationSource(t, "route-cleanup")
+	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
 	for _, tc := range []struct {
 		name           string
 		subscriberType string
@@ -456,7 +459,7 @@ func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			bus := newSourceMutationProbeBusWithStore(t, InMemoryEventStore{}, owned, newSourceMutationProbeOwner())
+			bus := newSourceMutationProbeBusWithStore(t, InMemoryEventStore{}, owned, newSourceMutationProbeOwner(), source)
 			continuations := &controlledTestDeliveryOwner{}
 			if err := bus.SetDeliveryContinuationOwner(continuations); err != nil {
 				t.Fatalf("install recording delivery continuation owner: %v", err)

@@ -3,6 +3,7 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,12 +17,13 @@ import (
 )
 
 // applyRunForkSourceFreeze is the only writer of the terminal forked source
-// state. The caller owns the surrounding serializable transaction.
-func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runForkActivationLineage, now time.Time, confirmed bool, changes *privaterunlifecycle.ChannelCardChanges) error {
+// state. The caller owns the surrounding native transaction and the admitted
+// activation; only A's subtree receives sourceCtx, never F's activation tail.
+func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx, sourceCtx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runForkActivationLineage, now time.Time, confirmed bool, changes *privaterunlifecycle.ChannelCardChanges) error {
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
-	if err := requirePostgresRunActive(ctx, tx, lineage.SourceRunID); err != nil {
+	if err := requirePostgresRunActive(sourceCtx, tx, lineage.SourceRunID); err != nil {
 		return fmt.Errorf("admit run fork source freeze: %w", err)
 	}
 	if !confirmed {
@@ -32,14 +34,14 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 	} else {
 		now = now.UTC()
 	}
-	if err := requireRunForkSourceFreezeReady(ctx, tx, postgresDeliveryAdapter, postgresManagedExternalAttemptRunQuery, lineage.SourceRunID, now); err != nil {
+	if err := requireRunForkSourceFreezeReady(sourceCtx, tx, postgresDeliveryAdapter, postgresManagedExternalAttemptRunQuery, lineage.SourceRunID, now); err != nil {
 		return err
 	}
-	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, lineage.SourceBundleHash)
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(sourceCtx, lineage.SourceBundleHash)
 	if err != nil {
 		return err
 	}
-	sourceCtx := runtimeauthoractivity.WithScope(ctx, sourceScope)
+	sourceCtx = runtimeauthoractivity.WithScope(sourceCtx, sourceScope)
 	if _, _, err := s.RunLifecyclePostgresOwner.ForkSourceTx(sourceCtx, attempt, runtimerunlifecycle.ForkSourceRequest{
 		RunID:            lineage.SourceRunID,
 		ContinuedAsRunID: lineage.ForkRunID,
@@ -59,11 +61,11 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 	return nil
 }
 
-func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runForkActivationLineage, now time.Time, confirmed bool, changes *privaterunlifecycle.ChannelCardChanges) error {
+func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx, sourceCtx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runForkActivationLineage, now time.Time, confirmed bool, changes *privaterunlifecycle.ChannelCardChanges) error {
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
-	if err := requireSQLiteRunActive(ctx, tx, lineage.SourceRunID); err != nil {
+	if err := requireSQLiteRunActive(sourceCtx, tx, lineage.SourceRunID); err != nil {
 		return fmt.Errorf("admit run fork source freeze: %w", err)
 	}
 	if !confirmed {
@@ -74,14 +76,14 @@ func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *s
 	} else {
 		now = now.UTC()
 	}
-	if err := requireRunForkSourceFreezeReady(ctx, tx, sqliteDeliveryAdapter, sqliteManagedExternalAttemptRunQuery, lineage.SourceRunID, now); err != nil {
+	if err := requireRunForkSourceFreezeReady(sourceCtx, tx, sqliteDeliveryAdapter, sqliteManagedExternalAttemptRunQuery, lineage.SourceRunID, now); err != nil {
 		return err
 	}
-	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, lineage.SourceBundleHash)
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(sourceCtx, lineage.SourceBundleHash)
 	if err != nil {
 		return err
 	}
-	sourceCtx := runtimeauthoractivity.WithScope(ctx, sourceScope)
+	sourceCtx = runtimeauthoractivity.WithScope(sourceCtx, sourceScope)
 	if _, _, err := s.RunLifecycleSQLiteOwner.ForkSourceTx(sourceCtx, attempt, runtimerunlifecycle.ForkSourceRequest{
 		RunID: lineage.SourceRunID, ContinuedAsRunID: lineage.ForkRunID, EndedAt: now,
 	}, changes); err != nil {
@@ -97,7 +99,13 @@ func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *s
 
 func (s *RunForkPostgresOwner) ApplyRunForkSourceFreezeTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage RunForkActivationLineage, now time.Time, confirmed bool, changes *privaterunlifecycle.ChannelCardChanges) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return s.applyRunForkSourceFreeze(ctx, tx, attempt, lineage, now, confirmed, changes)
+		if _, err := loadRunForkSelectedContractBinding(ctx, tx, lineage.ForkRunID); !errors.Is(err, sql.ErrNoRows) {
+			if err == nil {
+				return fmt.Errorf("selected source freeze requires its admitted activation coordinator")
+			}
+			return err
+		}
+		return s.applyRunForkSourceFreeze(ctx, ctx, tx, attempt, lineage, now, confirmed, changes)
 	})
 }
 

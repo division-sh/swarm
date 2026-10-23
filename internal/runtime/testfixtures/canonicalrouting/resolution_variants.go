@@ -192,6 +192,8 @@ func CopyNestedProducerTemplateSelectResolution(t testing.TB, opts TemplateSelec
 	if err := os.Rename(filepath.Join(root, "producer"), nestedProducer); err != nil {
 		t.Fatalf("move producer into nested flow: %v", err)
 	}
+	writeClosedVariantFile(t, root, "left/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "left/child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    to: producer\n", "    to: left/child/producer\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		"  - event: account.work.requested\n    from: .\n    to: producer\n",

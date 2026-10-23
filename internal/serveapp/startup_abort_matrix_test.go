@@ -129,8 +129,8 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 		candidate, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 			ExecutionPosture: executionposture.Live,
 			Ctx:              ctx, Stores: projectServeRuntimePersistence(stores), Config: cfg, Loaded: loaded,
-			WorkspaceBackend:       cliapp.WorkspaceBackendSelection{Backend: "host"},
-			ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process, RuntimeInstanceID: instance,
+			WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: "host"},
+			ProcessWorkOwner: process, RuntimeInstanceID: instance,
 			Credentials: credentials, ProviderCredentials: credentials,
 			Options: cliapp.ServeOptions{TestLLMRuntime: servedNoopLLMRuntime{}, ShutdownGrace: 5 * time.Second},
 		})

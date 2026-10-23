@@ -70,7 +70,7 @@ func TestChannelSessionResetInstallationKeepsOriginalIssuer(t *testing.T) {
 		t.Run(map[bool]string{false: "same_process", true: "startup_recovery"}[recovered], func(t *testing.T) {
 			var original []BundleContext
 			if !recovered {
-				original = []BundleContext{testBundleContext(t, runtimeContextTestHashA, "alpha.requested")}
+				original = []BundleContext{capturedOrdinaryRuntimeContext(t, "alpha.requested")}
 			}
 			manager, err := newTestRuntimeContextManager(t, nil, original...)
 			if err != nil {
@@ -85,7 +85,7 @@ func TestChannelSessionResetInstallationKeepsOriginalIssuer(t *testing.T) {
 					t.Fatal(result.ShutdownErr)
 				}
 			}
-			next := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+			next := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 			if recovered {
 				err = manager.StageRecoveredRuntimeContexts(next)
 			} else {

@@ -1,4 +1,4 @@
-name: terminal-retirement-root
+# fixture: terminal-retirement-root
 pins:
   inputs:
     - worker.ready

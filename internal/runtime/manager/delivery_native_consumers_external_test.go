@@ -10,7 +10,7 @@ func TestManagerWatcherAndExplicitShutdownJoinOneTransition(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerWatcherAndExplicitShutdownJoinOneTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -20,7 +20,7 @@ func TestManagerResetSerializesAfterSharedShutdown(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerResetSerializesAfterSharedShutdown(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -30,7 +30,7 @@ func TestManagerConcurrentResetsJoinOneResetTransition(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerConcurrentResetsJoinOneResetTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -40,7 +40,7 @@ func TestManagerSharedShutdownPreservesCallerGraceResults(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerSharedShutdownPreservesCallerGraceResults(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -50,7 +50,7 @@ func TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -60,7 +60,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -70,7 +70,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -80,7 +80,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -90,7 +90,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -100,7 +100,7 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -110,7 +110,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -120,7 +120,7 @@ func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -130,7 +130,7 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeExecutionProjectionRecoveryStartsPersistedRunningCell(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -140,7 +140,7 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -150,7 +150,7 @@ func TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDeli
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDelivery(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -158,12 +158,15 @@ func TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDeli
 
 func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 	t.Run("unit", func(t *testing.T) {
-		manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t, nil, nil)
+		manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t, managerProjectionDeliverySource(t), nil, nil)
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t,
-				func(t *testing.T) *manager.ManagerDeliveryNativeFixture { return openManagerNativeDelivery(t, backend) },
+			source := managerProjectionDeliverySource(t)
+			manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t, source,
+				func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+					return openManagerNativeDelivery(t, backend, source)
+				},
 				func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
 					return openManagerNativeSelectedDelivery(t, backend)
 				},
@@ -196,7 +199,7 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescendant(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerClaimedExecutorDeliverySource(t))
 			})
 		})
 	}
@@ -206,7 +209,7 @@ func TestManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim(t *testing.T) 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -316,7 +319,7 @@ func TestClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t *testing.T
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerClaimedExecutorDeliverySource(t))
 			})
 		})
 	}
@@ -386,7 +389,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerFailureDeliverySource(t))
 			})
 		})
 	}
@@ -396,7 +399,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -406,7 +409,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -416,7 +419,7 @@ func TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *testing
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerFailureDeliverySource(t))
 			})
 		})
 	}
@@ -426,7 +429,7 @@ func TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateReleas
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerSourceSetDeliverySource(t))
 			})
 		})
 	}
@@ -436,7 +439,7 @@ func TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancella
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerSourceSetDeliverySource(t))
 			})
 		})
 	}

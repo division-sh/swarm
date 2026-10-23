@@ -1,4 +1,4 @@
-name: support
+# fixture: support
 pins:
   inputs:
     - support.requested

@@ -1,0 +1,12 @@
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+capabilities:
+  can:
+    receive_https_route: /webhooks/{alias}/telegram
+    verify_secret: webhook_signing_secret
+    emit_events: [raw, callback_action, text_message]
+    persist_dedupe_markers: true
+    call_provider_actions: [send_message, send_interactive, edit_message, answer_callback, install_inbox_commands, read_inbox_commands, install_shared_inbox_commands, read_shared_inbox_commands, read_chat_menu_button, read_default_menu_button, identify_bot, read_bot_address, apply_webhook, read_webhook]
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot: [emit_undeclared_events, run_code_before_admission, touch_unbound_resources, bypass activity_attempts, retry non_idempotent_write automatically, expose credential values]

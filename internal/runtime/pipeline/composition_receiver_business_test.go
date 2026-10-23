@@ -14,7 +14,8 @@ import (
 
 func VerifyCompositionReceiverInitializationAndRepeatedBusinessWritesBothStoresForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: budget\nstages:\n  active: {}\n  done: {final: true}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
 		"entities.yaml": "budget:\n  spent_usd: {type: number, initial: 0}\n  status: {type: text, initial: pending}\n",
 		"events.yaml":   "spend.recorded:\n  amount_usd: number\n  business_key: text\n",
 		"nodes.yaml": `budget-writer:

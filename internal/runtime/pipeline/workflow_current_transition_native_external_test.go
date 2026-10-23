@@ -23,7 +23,8 @@ import (
 
 func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *testing.T) {
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":   "name: current-transition\nstages:\n  left: {}\n  right: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  left: {}\n  right: {}\n",
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "step.left:\nstep.right:\nobserve:\nfield.write:\n",
 		"nodes.yaml": `router:

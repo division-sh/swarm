@@ -65,7 +65,7 @@ func TestStaticDataArtifactReconstructionIgnoresOriginalRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseline, err := LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+	baseline, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestStaticDataArtifactReconstructionIgnoresOriginalRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, owned := range []*sourceartifact.AdmittedSourceArtifact{artifact, decoded} {
-		bundle, err := LoadWorkflowContractBundleFromArtifact(repo, owned, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+		bundle, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, owned), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,7 +112,8 @@ func TestStaticDataCatalogRejectsInvalidUTF8OnlyWhenReferenced(t *testing.T) {
 func writeStaticDataCatalogFixture(t *testing.T, alpha, beta []byte, alphaAccess bool) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: static-catalog-test\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: static-catalog-test\n")
 	writeStaticDataCatalogFlow(t, root, "alpha", alpha, alphaAccess)
 	writeStaticDataCatalogFlow(t, root, "beta", beta, true)
 	return root
@@ -121,7 +122,8 @@ func writeStaticDataCatalogFixture(t *testing.T, alpha, beta []byte, alphaAccess
 func writeStaticDataCatalogFlow(t *testing.T, root, flowID string, content []byte, access bool) {
 	t.Helper()
 	flowRoot := filepath.Join(root, flowID)
-	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+flowID+"\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages: []\n# fixture: "+flowID+"\n")
 	agent := "worker:\n  role: worker\n  intent: {inline: \"Read admitted static data.\"}\n"
 	if access {
 		agent += "  flow_data_access:\n    - resume.md\n"

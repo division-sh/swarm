@@ -10,11 +10,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
 func TestHistoricalAgentAttachmentCannotBorrowNativeConstruction(t *testing.T) {
 	source := connectRoutePlanRootProducerSingletonSource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		t.Fatal("historical attachment requires its captured source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	identity := ConstructedFlowInstanceIdentityFixture(source, ".", "", busInternalTestRunID)
 	native := constructionIndexObservation(t, source, busInternalTestRunID, identity, "")
 	instance, err := native.WorkflowInstance()
@@ -27,7 +36,7 @@ func TestHistoricalAgentAttachmentCannotBorrowNativeConstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 	historical, err := pipeline.AdmitHistoricalFlowInstanceObservation(native.Selection(), instance,
-		runlifecycle.Snapshot{RunID: busInternalTestRunID, State: runlifecycle.StateRunning, Origin: origin, BundleHash: native.SourceFact().BundleHash(), StartedAt: instance.CreatedAt},
+		runlifecycle.Snapshot{RunID: busInternalTestRunID, State: runlifecycle.StateRunning, Origin: origin, BundleHash: native.SourceFact().BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: instance.CreatedAt},
 		1, pipeline.HistoricalFlowInstanceConstruction{Identity: identity, SourceRevision: 1, WorkflowVersion: instance.WorkflowVersion, SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRun, Route: flowidentity.StoredRoute(".", sourceRun, sourceRun)}}, nil)
 	if err != nil {
 		t.Fatal(err)

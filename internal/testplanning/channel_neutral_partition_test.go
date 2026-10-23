@@ -7,13 +7,12 @@ import (
 	"testing"
 )
 
-const originalChannelLearnedSelection = `^TestChannel(Learned.*|TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)$`
+const channelNeutralSelection = `^Test(Channel(TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)|Prov.*)$`
 
 func TestChannelNeutralSplitRetainsCompleteProofEnvelopes(t *testing.T) {
 	policy := loadPersistenceDebtPolicy(t)
 	for id, run := range map[string]string{
-		"serveapp-channel-learned": `^TestChannelLearned.*$`,
-		"serveapp-channel-neutral": `^Test(Channel(TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)|Prov.*)$`,
+		"serveapp-channel-neutral": channelNeutralSelection,
 	} {
 		want := UnitPolicy{
 			Packages: []string{policy.Module + "/internal/serveapp"}, Run: run,
@@ -37,17 +36,17 @@ func TestChannelNeutralSplitPreservesOriginalRootPartition(t *testing.T) {
 }
 
 func validateChannelNeutralSplit(policy Policy) error {
-	old := regexp.MustCompile(originalChannelLearnedSelection)
+	old := regexp.MustCompile(channelNeutralSelection)
 	matchers := []func(string) bool{func(name string) bool { return !old.MatchString(name) }}
-	for _, id := range []string{"serveapp-channel-learned", "serveapp-channel-neutral"} {
+	for _, id := range []string{"serveapp-channel-neutral"} {
 		pattern := regexp.MustCompile(policy.Units[id].Run)
-		matchers = append(matchers, func(name string) bool { return old.MatchString(name) && pattern.MatchString(name) })
+		matchers = append(matchers, pattern.MatchString)
 	}
 	return validateGoProofMatchers(filepath.Join("..", "..", "internal", "serveapp"), matchers)
 }
 
 func TestChannelNeutralSplitRejectsOmissionOverlapAndBackendFiltering(t *testing.T) {
-	for _, run := range []string{`^$`, originalChannelLearnedSelection, `^TestChannelTextReplyBaselinePublicJourneyBothStores$/sqlite`, `^TestChannel.*$`} {
+	for _, run := range []string{`^$`, `^Test.*$`, `^TestChannelTextReplyBaselinePublicJourneyBothStores$/sqlite`, `^TestChannel.*$`} {
 		t.Run(run, func(t *testing.T) {
 			policy := loadPersistenceDebtPolicy(t)
 			unit := policy.Units["serveapp-channel-neutral"]

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
@@ -74,9 +75,12 @@ func selectedForkOperationReplayAfterAbort(ctx context.Context, committed bool, 
 	return err
 }
 
-func requireForkOperationMaterializationRequest(operation *runfork.ForkOperationRequest, sourceRunID string, point runfork.RunForkPoint, targetBundleHash string, selection runfork.RunForkContractSelection, overrides []durabledata.ExplicitPin) error {
+func requireForkOperationMaterializationRequest(operation *runfork.ForkOperationRequest, sourceRunID string, point runfork.RunForkPoint, target sourceartifact.RootAdmission, selection runfork.RunForkContractSelection, overrides []durabledata.ExplicitPin) error {
 	if operation == nil {
 		return nil
+	}
+	if err := target.Validate(); err != nil {
+		return err
 	}
 	canonical, _, err := operation.Canonical()
 	if err != nil {
@@ -87,7 +91,7 @@ func requireForkOperationMaterializationRequest(operation *runfork.ForkOperation
 		return err
 	}
 	if canonical.ResolvedPoint == nil || *canonical.ResolvedPoint != point || canonical.SourceRunID != sourceRunID ||
-		canonical.TargetBundleHash != targetBundleHash ||
+		canonical.TargetBundleHash != target.BundleHash() || canonical.TargetRootReference != target.Reference() ||
 		canonical.ContractSelection != selection || !slices.Equal(canonical.DataPinOverrides, pins) {
 		return fmt.Errorf("fork operation differs from selected materialization request")
 	}
@@ -381,6 +385,7 @@ func resolvedForkOperationForActivationTx(ctx context.Context, tx *sql.Tx, calle
 	if !found || record.Status != runfork.ForkOperationMaterialized || record.ForkRunID != lineage.ForkRunID ||
 		record.SemanticHash != semanticHash || record.Request.Actor != canonical.Actor ||
 		record.Request.IdempotencyKey != canonical.IdempotencyKey || record.Request.TransportHash != canonical.TransportHash ||
+		record.Request.TargetRootReference != lineage.ForkRootReference ||
 		record.Request.SourceRunID != lineage.SourceRunID || record.Request.TargetBundleHash != lineage.ForkBundleHash {
 		return runfork.ForkOperationRequest{}, fmt.Errorf("selected activation differs from materialized fork operation")
 	}
@@ -395,8 +400,10 @@ func resolvedForkOperationForActivationTx(ctx context.Context, tx *sql.Tx, calle
 		WHERE binding_id=$1 AND fork_run_id=$2 AND source_run_id=$3
 		AND fork_point_kind=$4 AND fork_revision=$5 AND COALESCE(CAST(fork_event_id AS TEXT),'')=$6
 		AND mode=$7 AND COALESCE(bundle_hash,'')=$8
+		AND target_bundle_hash=$9 AND source_root_directory=$10
 	)`, record.BindingID, lineage.ForkRunID, lineage.SourceRunID, point.Kind, point.Revision, point.EventID,
-		record.Request.ContractSelection.Mode, record.Request.ContractSelection.BundleHash).Scan(&bound)
+		record.Request.ContractSelection.Mode, record.Request.ContractSelection.BundleHash,
+		record.Request.TargetRootReference.BundleHash, record.Request.TargetRootReference.RootDirectory).Scan(&bound)
 	if err != nil {
 		return runfork.ForkOperationRequest{}, fmt.Errorf("verify selected fork operation binding: %w", err)
 	}

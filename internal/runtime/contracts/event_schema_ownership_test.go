@@ -222,11 +222,19 @@ func TestConnectedRootInputUsesExactBindingForBothRootCoordinates(t *testing.T) 
 	}
 	for _, flow := range []string{".", ""} {
 		got, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(flow, "work.ready")
-		if err != nil || !ok || got.value != producer.value {
+		if flow == "" {
+			if ok || got.value != nil {
+				t.Errorf("empty flow recovered compiled binding: found=%t err=%v", ok, err)
+			}
+		} else if err != nil || !ok || got.value != producer.value {
 			t.Errorf("root %q lost exact connected binding: %t %v", flow, ok, err)
 		}
 		entry, name, ok := bundle.ResolveFlowEventCatalogEntry(flow, "work.ready")
-		if !ok || name != producer.EventName() || entry.Payload.Properties["value"].Type != "text" {
+		if flow == "" {
+			if ok || name != "" || len(entry.Payload.Properties) != 0 {
+				t.Errorf("empty flow recovered producer catalog evidence: %q %t %+v", name, ok, entry)
+			}
+		} else if !ok || name != producer.EventName() || entry.Payload.Properties["value"].Type != "text" {
 			t.Errorf("root %q lost producer catalog evidence: %q %t %+v", flow, name, ok, entry)
 		}
 	}
@@ -441,8 +449,9 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 			})
 		}
 		root := t.TempDir()
-		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: coordinates\n")
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 		for _, flow := range []string{".", "nested"} {
+			writeFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeFixtureFile(t, filepath.Join(root, flow, "events.yaml"), "work.ready:\nchild/work.ready:\nother/work.ready:\n")
 		}
 		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -464,8 +473,12 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 		}
 	})
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: ownership\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "consumer", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), "pins:\n  inputs: [work.ready]\n")
 	for endpoint, fieldType := range map[string]string{"producer-a": "text", "producer-b": "uuid"} {
+		writeFixtureFile(t, filepath.Join(root, endpoint, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeFixtureFile(t, filepath.Join(root, endpoint, "events.yaml"), "work.ready:\n  value: "+fieldType+"\n")
 	}
 	repo := repoRootForContractsTest(t)

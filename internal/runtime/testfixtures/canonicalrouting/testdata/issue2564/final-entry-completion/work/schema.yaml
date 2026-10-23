@@ -1,4 +1,4 @@
-name: work
+# fixture: work
 instance: case_id
 stages:
   waiting: {}

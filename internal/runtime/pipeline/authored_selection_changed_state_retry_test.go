@@ -63,7 +63,8 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 					nodes = strings.Replace(nodes, "entity.marker == 'first'", "query_entities(marker == 'first').count == 1", 1)
 				}
 				bundle := loadWorkflowTempBundle(t, map[string]string{
-					"schema.yaml":   "name: selection-retry\nstages:\n  queued: {}\n  done: {final: true}\n",
+					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+					"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
 					"entities.yaml": "test_entity:\n  marker: text\n",
 					"events.yaml":   "source.evt:\n",
 					"nodes.yaml":    nodes,

@@ -915,10 +915,11 @@ func workflowJoinLifecycleBundleWithOptions(t *testing.T, review bool, loop stri
 
 func workflowJoinLifecycleFixtureFiles(review bool, loop string) map[string]string {
 	files := map[string]string{
-		"schema.yaml":   "name: workflow-join-lifecycle\n",
-		"entities.yaml": "test_entity: {}\n",
-		"orders/schema.yaml": `name: orders
-instance: instance_key
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":          "stages: []\n",
+		"entities.yaml":        "test_entity: {}\n",
+		"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"orders/schema.yaml": `instance: instance_key
 stages:
   awaiting: {}
   dispatching: {}
@@ -1011,7 +1012,6 @@ join-node:
 	for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 		files[name] = files["orders/"+name]
 	}
-	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "name: orders", "name: workflow-join-lifecycle", 1)
 	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "instance: instance_key\n", "", 1)
 	return files
 }

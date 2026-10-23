@@ -1,4 +1,4 @@
-name: claude-resource-read
+# fixture: claude-resource-read
 stages:
   pending: {}
   done: {final: true}

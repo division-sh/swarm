@@ -181,7 +181,7 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 					t.Fatal("selected delay requires its actual loader-owned source artifact")
 				}
 				storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, target.SourceArtifactFact),
-					selected.(storetest.DurableDataCatalogStore), bundle)
+					selected.(storetest.RootedDataCatalogStore), bundle)
 			}
 			selection := runforkadmission.SelectedContractSelection(target.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-template-arrival", IdempotencyKey: "fixed-cut",

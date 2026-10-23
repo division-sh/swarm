@@ -144,10 +144,10 @@ func TestFlowAttachmentCleanupRetainsExactPredecessorBothStores(t *testing.T) {
 					scheduler := pipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t))
 					t.Cleanup(scheduler.Stop)
 					f := newReceiverConfigActivationFixtureWithOwnership(t, backend, true, map[string]string{
-						"schema.yaml":          "name: cleanup-failure\n",
-						"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 2h, emit: timer.timeout}\npins:\n  inputs:\n    - task.started\n",
+						"schema.yaml":          "stages: []\n",
+						"review/schema.yaml":   "instance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 2h, emit: timer.timeout}\npins:\n  inputs:\n    - task.started\n",
 						"review/entities.yaml": "review_item:\n  request_id: text\n",
-						"review/events.yaml":   "task.started:\ntimer.timeout:\n",
+						"review/events.yaml":   "task.started:\ntimer.timeout:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					}, nil, func(t *testing.T, am *manager.AgentManager) *manager.AgentManager {
 						t.Cleanup(func() {
 							fault.enabled.Store(false)

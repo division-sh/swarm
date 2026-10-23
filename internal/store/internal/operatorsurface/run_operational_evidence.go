@@ -28,16 +28,28 @@ import (
 type runOperationalSourceMemo struct {
 	gate   chan struct{}
 	stored sourceartifact.Persisted
+	root   sourceartifact.RootAdmissionReference
 	source semanticview.Source
+}
+
+type operationalRootedSourceReader interface {
+	sourceartifact.Reader
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 }
 
 func newRunOperationalSourceMemo() *runOperationalSourceMemo {
 	return &runOperationalSourceMemo{gate: make(chan struct{}, 1)}
 }
 
-func (m *runOperationalSourceMemo) load(ctx context.Context, sources sourceartifact.Reader, header operatorread.RunHeader) (semanticview.Source, error) {
+func (m *runOperationalSourceMemo) load(ctx context.Context, sources operationalRootedSourceReader, header operatorread.RunHeader, root sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if err := root.Validate(); err != nil {
+		return nil, err
+	}
+	if root.BundleHash != header.BundleHash {
+		return nil, fmt.Errorf("operational source root contradicts exact run bundle")
 	}
 	// Always read the current retained row inside the caller's coherent report
 	// snapshot. A warm memo cannot conceal deletion, corruption or reassociation.
@@ -48,6 +60,19 @@ func (m *runOperationalSourceMemo) load(ctx context.Context, sources sourceartif
 	if stored.BundleHash != header.BundleHash {
 		return nil, fmt.Errorf("operational source contradicts exact run bundle")
 	}
+	if _, err := stored.Decode(); err != nil {
+		return nil, err
+	}
+	rooted, err := sources.GetRootedSource(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	if err := rooted.Validate(); err != nil {
+		return nil, err
+	}
+	if rooted.Admission().Reference() != root || !bytes.Equal(rooted.Artifact().LogicalBlob(), stored.SourceBlob) {
+		return nil, fmt.Errorf("operational source contradicts exact run root")
+	}
 	select {
 	case m.gate <- struct{}{}:
 		defer func() { <-m.gate }()
@@ -57,16 +82,12 @@ func (m *runOperationalSourceMemo) load(ctx context.Context, sources sourceartif
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if m.source != nil && stored.BundleHash == m.stored.BundleHash &&
+	if m.source != nil && root == m.root && stored.BundleHash == m.stored.BundleHash &&
 		stored.MemberCount == m.stored.MemberCount && stored.TotalBytes == m.stored.TotalBytes &&
 		stored.CreatedAt.Equal(m.stored.CreatedAt) && bytes.Equal(stored.SourceBlob, m.stored.SourceBlob) {
 		return m.source, nil
 	}
-	artifact, err := stored.Decode()
-	if err != nil {
-		return nil, err
-	}
-	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", artifact, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +95,7 @@ func (m *runOperationalSourceMemo) load(ctx context.Context, sources sourceartif
 		return nil, err
 	}
 	m.stored = stored
+	m.root = root
 	m.stored.SourceBlob = bytes.Clone(stored.SourceBlob)
 	// This private source never escapes the read-only operational projection;
 	// neither live facts nor a mutable bundle are exposed to report consumers.
@@ -81,7 +103,7 @@ func (m *runOperationalSourceMemo) load(ctx context.Context, sources sourceartif
 	return m.source, nil
 }
 
-func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter *privatedelivery.Adapter, sources sourceartifact.Reader, sourceMemo *runOperationalSourceMemo, instances PipelineObligationSource, timers TimerObligationSource, header operatorread.RunHeader, work operatorread.RunTestQuiescence, observedAt time.Time) (*operatorread.RunOperationalFacts, error) {
+func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter *privatedelivery.Adapter, sources operationalRootedSourceReader, sourceMemo *runOperationalSourceMemo, instances PipelineObligationSource, timers TimerObligationSource, header operatorread.RunHeader, root sourceartifact.RootAdmissionReference, work operatorread.RunTestQuiescence, observedAt time.Time) (*operatorread.RunOperationalFacts, error) {
 	facts := &operatorread.RunOperationalFacts{ObservedAt: observedAt}
 	// These existing summaries are run-scoped. Do not invent an instance owner
 	// for work whose canonical readback does not provide one.
@@ -97,7 +119,7 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 	if err != nil {
 		return nil, err
 	}
-	source, err := sourceMemo.load(ctx, sources, header)
+	source, err := sourceMemo.load(ctx, sources, header, root)
 	if errors.Is(err, sourceartifact.ErrNotFound) {
 		return facts, nil
 	}
