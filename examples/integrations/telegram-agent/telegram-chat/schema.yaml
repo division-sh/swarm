@@ -1,4 +1,4 @@
-# fixture: telegram-chat
+name: telegram-chat
 imports:
   connector_packs:
     - provider: telegram

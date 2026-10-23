@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -70,7 +71,8 @@ func TestS1DirectoryTriggerSchemasUseCapturedInputEvidence(t *testing.T) {
 					t.Fatal("caller readback erased the captured raw input/output binding")
 				}
 			}
-			if len(after.Source().SemanticCapabilities().ProviderTriggerOutputBindings()) != 0 || len(after.Source().SemanticCapabilities().ProviderIngressEvents()) != 0 {
+			if !reflect.DeepEqual(after.Source().SemanticCapabilities().ProviderTriggerOutputBindings(), first.Source().SemanticCapabilities().ProviderTriggerOutputBindings()) ||
+				!reflect.DeepEqual(after.Source().SemanticCapabilities().ProviderIngressEvents(), first.Source().SemanticCapabilities().ProviderIngressEvents()) {
 				t.Fatal("input readback created publication or ingress authority")
 			}
 		})

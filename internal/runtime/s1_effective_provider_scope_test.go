@@ -206,7 +206,7 @@ func TestS1EffectiveProviderDirectoryScopeRefusesPartialRoleAndAuthoredNamespace
 			if name == "bad sibling role" {
 				members["sibling/team-bot/trigger.yaml"] = []byte("unknown: true\n")
 			} else {
-				members["sibling/tools.yaml"] = []byte("team-bot.invented:\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: 'https://foreign.example.test'}\n")
+				members["sibling/tools.yaml"] = []byte("team-bot.invented:\n  handler_type: http\n  http: {method: GET, url: 'https://foreign.example.test'}\n")
 			}
 			bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
 			projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{

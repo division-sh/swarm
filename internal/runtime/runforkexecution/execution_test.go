@@ -3105,6 +3105,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
 	root := t.TempDir()
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 	repoRoot := runForkExecutionRepoRoot(t)

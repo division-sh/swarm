@@ -1,4 +1,4 @@
-# fixture: telegram-agent
+name: telegram-agent
 imports:
   provider_trigger_events:
     - provider: telegram

@@ -97,7 +97,7 @@ func issue2655PreparedProjection(t *testing.T) *PreparedSelectedFork {
 }
 
 func TestIssue2655PreparedOperationPointBinding(t *testing.T) {
-	target, _ := sourceartifactfixture.Rooted(t, "operation-target", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	target, _ := sourceartifactfixture.Rooted(t, "operation-target", sourceartifactfixture.Artifact())
 	plan := runfork.RunForkPlan{SourceRunID: uuid.NewString(), ForkPoint: runfork.RunForkPoint{
 		Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), EventName: "work.ready", Revision: 3,
 		Timestamp: time.Now().UTC(), ProducedBy: "producer", ProducedByType: "node",
@@ -158,7 +158,7 @@ func TestIssue2655PreparedOperationPointBinding(t *testing.T) {
 }
 
 func TestIssue2655PreparedOperationOriginalSelectorCorrespondence(t *testing.T) {
-	target, _ := sourceartifactfixture.Rooted(t, "operation-target", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	target, _ := sourceartifactfixture.Rooted(t, "operation-target", sourceartifactfixture.Artifact())
 	for _, explicit := range []bool{false, true} {
 		for _, resolved := range []bool{false, true} {
 			t.Run(map[bool]string{false: "omitted", true: "explicit"}[explicit]+"/"+map[bool]string{false: "unresolved", true: "resolved"}[resolved], func(t *testing.T) {

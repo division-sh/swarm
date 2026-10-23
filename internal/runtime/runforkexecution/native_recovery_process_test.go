@@ -184,7 +184,7 @@ func nativeSelectedForkCrashFixture(t *testing.T, repo string) string {
     if not results:
         return {"calls": [{"name": "emit_task_completed", "arguments": {"fork_result": "selected-native-once"}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
     return {"text": "selected-native-once committed", "usage": {"input_tokens": 1, "output_tokens": 1}}
-`,
+`, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, "worker", name), []byte(contents), 0o600); err != nil {
 			t.Fatal(err)

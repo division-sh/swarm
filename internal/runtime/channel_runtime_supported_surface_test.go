@@ -62,17 +62,15 @@ type channelActivityDispatchFenceProbe struct {
 func configuredChannelAgentBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadRuntimeTempBundle(t, map[string]string{
-		"schema.yaml": "name: channel-runtime\n",
-		"global/schema.yaml": `name: global
-stages:
-  active: {}
-`,
+		"schema.yaml":        "stages: []\n",
+		"global/schema.yaml": "stages:\n  active: {}\n",
+
 		"global/entities.yaml": "channel_state: {}\n",
 		"global/agents.yaml": `channel-sender:
   role: worker
   intent: {inline: "Deliver provider-neutral channel operations."}
   model: regular
-`,
+`, "global/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	})
 }
 

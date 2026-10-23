@@ -372,7 +372,7 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 	if err != nil {
 		t.Fatal(err)
 	}
-	rooted, _ := sourceartifactfixture.Rooted(t, "selected-contract-target", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	rooted, _ := sourceartifactfixture.Rooted(t, "selected-contract-target", sourceartifactfixture.Artifact())
 	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 	if err != nil {
 		t.Fatal(err)

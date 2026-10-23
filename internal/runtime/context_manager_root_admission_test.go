@@ -230,7 +230,7 @@ func TestS1RuntimeContextCancellationAndClearAcquireNoLease(t *testing.T) {
 	canceled, cancel := context.WithCancel(base)
 	cancel()
 	before := first.WorkOwner.ActiveCount()
-	foreign, _ := loadRootedBudgetSource(t, "foreign", "stages: [waiting]\n")
+	foreign, _ := loadRootedBudgetSource(t, "foreign", "stages: []\n# foreign source\n")
 	foreignFact := sourceartifactfixture.FactFor(foreign.Artifact())
 	for _, ctx := range []context.Context{nil, canceled, correlation.WithRootAdmission(base, sourceartifact.RootAdmission{}), correlation.WithRootAdmission(context.Background(), root.Admission()), correlation.WithSourceArtifactFact(context.Background(), foreignFact)} {
 		use, _, err := manager.AcquireBundleHash(ctx, first.BundleHash())
