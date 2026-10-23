@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -25,16 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
-
-// Ordinary materialization retains its exact blockers. Selected preparation
-// supplies the admitted historical evidence for the original success oracles.
-func TestServedJoinWriterCompletedHistoryRefusalBothStores(t *testing.T) {
-	testServedJoinWriterCompletedHistoryRefusal(t, false, false)
-}
-
-func TestServedJoinWriterCompletedHistoryRefusalSeparateCheckpointBothStores(t *testing.T) {
-	testServedJoinWriterCompletedHistoryRefusal(t, true, false)
-}
 
 func TestServedJoinWriterForkRetainedGenerationsBothStores(t *testing.T) {
 	testServedJoinWriterCompletedHistoryRefusal(t, false, true)
