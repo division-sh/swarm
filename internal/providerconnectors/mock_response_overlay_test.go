@@ -11,10 +11,6 @@ import (
 )
 
 func TestOverlayMockResponsePlanUsesCanonicalToolAdmission(t *testing.T) {
-	emptyObject, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaObject)
-	if err != nil {
-		t.Fatal(err)
-	}
 	boolean, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaBoolean)
 	if err != nil {
 		t.Fatal(err)
@@ -26,42 +22,60 @@ func TestOverlayMockResponsePlanUsesCanonicalToolAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool, err := runtimecontracts.NewToolSchemaEntry(
-		runtimecontracts.WithToolCategory("provider_connector"),
-		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}),
-		runtimecontracts.WithToolSchemas(emptyObject, output),
-	)
-	if err != nil {
-		t.Fatal(err)
+	tool := withOutputSchema(t, telegramConnectorTool("https://example.test"), output)
+	native, ok := testBuiltinTool(t, "whatsapp", "whatsapp.send_text")
+	if !ok {
+		t.Fatal("shipped WhatsApp connector is missing")
 	}
-	source, err := semanticview.WithRuntimeTools(emptyMockResponseSource{}, map[string]runtimecontracts.ToolSchemaEntry{"provider.send": tool})
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest, err := tool.OutputSchema().CanonicalHash()
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := OverlayMockResponsePlan(nil, source, []scenarioexecution.ConnectorResponse{{
-		ToolID: "provider.send", OutputSchemaDigest: digest, Response: json.RawMessage(`{"ok":true}`),
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	admitted, err := plan.Admit("provider.send", tool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := admitted.Materialize()
-	if err != nil || got.(map[string]any)["ok"] != true {
-		t.Fatalf("materialize = %#v, %v", got, err)
-	}
-	_, err = OverlayMockResponsePlan(plan, source, []scenarioexecution.ConnectorResponse{{
-		ToolID: "provider.send", OutputSchemaDigest: "sha256:" + strings.Repeat("0", 64), Response: json.RawMessage(`{"ok":false}`),
-	}})
-	if err == nil || !strings.Contains(err.Error(), "output_schema digest mismatch") {
-		t.Fatalf("digest mismatch error = %v", err)
+	for _, tc := range []struct {
+		id       string
+		tool     runtimecontracts.ToolSchemaEntry
+		response string
+		field    string
+		want     any
+	}{
+		{"telegram.send_message", tool, `{"ok":true}`, "ok", true},
+		{"whatsapp.send_text", native, `{"id":"wamid-offline-2765"}`, "id", "wamid-offline-2765"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			source, err := semanticview.WithRuntimeTools(emptyMockResponseSource{}, map[string]runtimecontracts.ToolSchemaEntry{tc.id: tc.tool})
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest, err := tc.tool.OutputSchema().CanonicalHash()
+			if err != nil {
+				t.Fatal(err)
+			}
+			base, err := CompileMockResponsePlan(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := OverlayMockResponsePlan(base, source, []scenarioexecution.ConnectorResponse{{
+				ToolID: tc.id, OutputSchemaDigest: digest, Response: json.RawMessage(tc.response),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			admitted, err := plan.Admit(tc.id, tc.tool)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := admitted.Materialize()
+			if err != nil || got.(map[string]any)[tc.field] != tc.want {
+				t.Fatalf("materialize = %#v, %v", got, err)
+			}
+			for _, invalid := range []struct {
+				response scenarioexecution.ConnectorResponse
+				want     string
+			}{
+				{scenarioexecution.ConnectorResponse{ToolID: tc.id, OutputSchemaDigest: "sha256:" + strings.Repeat("0", 64), Response: json.RawMessage(tc.response)}, "output_schema digest mismatch"},
+				{scenarioexecution.ConnectorResponse{ToolID: tc.id, OutputSchemaDigest: digest, Response: json.RawMessage(`{}`)}, "does not match output_schema"},
+			} {
+				if _, err := OverlayMockResponsePlan(plan, source, []scenarioexecution.ConnectorResponse{invalid.response}); err == nil || !strings.Contains(err.Error(), invalid.want) {
+					t.Fatalf("invalid overlay error = %v, want %q", err, invalid.want)
+				}
+			}
+		})
 	}
 }
 

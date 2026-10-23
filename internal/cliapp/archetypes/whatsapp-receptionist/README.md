@@ -20,5 +20,7 @@ to retain pairing across restarts.
 The session provider does not pace sends. Flows must pace themselves;
 high-rate sending risks WhatsApp account restrictions or a ban.
 
-Authored `connector_responses` cannot mock `whatsapp.send_text`, including
-failures: it is an in-process session operation, not an HTTP connector.
+In `swarm test` scenarios, `whatsapp.send_text` returns a deterministic
+schema-valid response without pairing or sending a real message. A `derive`
+scenario can override that response with `connector_responses`; mocked
+failures are not supported.
