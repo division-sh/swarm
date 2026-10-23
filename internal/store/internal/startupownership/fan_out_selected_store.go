@@ -42,7 +42,11 @@ func (s *StartupPostgresOwner) BindSelectedDeploymentFanOutGrant(grant runtimeow
 	if s == nil || s.fanOutPipeline == nil {
 		return nil, errors.New("selected deployment serving requires assembled PostgreSQL startup owner")
 	}
-	err = s.backend.RunTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+	ctx, err := s.originalGrantContext(context.Background(), grant)
+	if err != nil {
+		return nil, err
+	}
+	err = s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		admission, err := selectedFanOutAdmission(ctx, tx, false, grant)
 		if err != nil {
 			return err
@@ -64,7 +68,11 @@ func (s *StartupSQLiteOwner) BindSelectedDeploymentFanOutGrant(grant runtimeowne
 	if s == nil || s.fanOutPipeline == nil {
 		return nil, errors.New("selected deployment serving requires assembled SQLite startup owner")
 	}
-	err = s.backend.RunTransaction(context.Background(), "bind selected deployment fan-out grant", func(ctx context.Context, tx *sql.Tx) error {
+	ctx, err := s.originalGrantContext(context.Background(), grant)
+	if err != nil {
+		return nil, err
+	}
+	err = s.backend.RunTransaction(ctx, "bind selected deployment fan-out grant", func(ctx context.Context, tx *sql.Tx) error {
 		admission, err := selectedFanOutAdmission(ctx, tx, true, grant)
 		if err != nil {
 			return err
