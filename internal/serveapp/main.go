@@ -944,6 +944,13 @@ type runtimeCompositionRequest struct {
 
 // buildRuntimeComposition owns the common acquisition/start/ready/close path for
 // live serving and private test execution. Existing owners retain all semantics.
+func bindCompositionProcessCapability(ctx context.Context, lifecycle *activatedServeLifecycle, capability runtimestartupownership.ProcessCapability) (context.Context, error) {
+	if err := lifecycle.SetProcessCapability(capability); err != nil {
+		return ctx, err
+	}
+	return runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+}
+
 func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) (exitCode int) {
 	repo, opts, cfgResult := req.Repo, req.Options, req.Config
 	publicListener := opts.PublicWebhookListener
@@ -1114,7 +1121,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
-	if err := selectedLifecycle.SetProcessCapability(processCapability); err != nil {
+	ctx, err = bindCompositionProcessCapability(ctx, selectedLifecycle, processCapability)
+	if err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
@@ -1623,8 +1631,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	apiHandler := newAPIServer(serveSupervisorReadiness{serveReadiness: ready, supervisor: supervisor}, apiV1Handler, inboundHandler, ctx).Handler
 	mcpServer = &http.Server{Handler: http.HandlerFunc(supervisor.serveMCP), ReadHeaderTimeout: 5 * time.Second}
-	apiHandler = processOwnedHTTPHandler(processWorkOwner, apiHandler)
-	mcpServer.Handler = processOwnedHTTPHandler(processWorkOwner, mcpServer.Handler)
+	apiHandler = processOwnedHTTPHandler(processWorkOwner, apiHandler, processCapability)
+	mcpServer.Handler = processOwnedHTTPHandler(processWorkOwner, mcpServer.Handler, nil)
 	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
 		presenter.fail(20, "context_registry", err)
 		return 3
@@ -2283,17 +2291,17 @@ func (c *serveStandingServiceController) mutateStandingService(ctx context.Conte
 		err = fmt.Errorf("unknown standing command %q", command)
 	}
 	if result.CommittedMutation == "" {
-		return result, errors.Join(err, c.restoreAdmission(owner, transition))
+		return result, errors.Join(err, c.restoreAdmission(ctx, owner, transition))
 	}
 	if result.CommittedMutation == runtimerunlifecycle.MutationExactNoop {
-		return result, errors.Join(err, transition.Restore(context.Background()))
+		return result, errors.Join(err, transition.Restore(context.WithoutCancel(ctx)))
 	}
 	if result.CommittedMutation != runtimerunlifecycle.MutationApplied {
 		return result, errors.Join(err, fmt.Errorf("standing service %s returned invalid committed mutation %q", result.ServiceID, result.CommittedMutation))
 	}
 	// An acknowledged commit is never rolled back by cleanup or publication
 	// failure. Join the captured resources without caller cancellation first.
-	if retireErr := transition.Retire(context.Background()); retireErr != nil {
+	if retireErr := transition.Retire(context.WithoutCancel(ctx)); retireErr != nil {
 		return result, errors.Join(err, fmt.Errorf("retire standing predecessor: %w", retireErr))
 	}
 	if err != nil {
@@ -2339,43 +2347,44 @@ func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, owne
 	if err != nil {
 		var cleanupErr error
 		if transition.occurrence != nil {
-			cleanupErr = c.restoreAdmission(owner, transition)
+			cleanupErr = c.restoreAdmission(ctx, owner, transition)
 		}
 		pipelineRecovery.Done()
 		return nil, errors.Join(err, cleanupErr)
 	}
 	if owner.InboundGateway != nil && (drain || !expected.RestartDisposition.Executable()) {
 		if err := owner.InboundGateway.WaitForStandingServiceAdmission(ctx, serviceID); err != nil {
-			cleanupErr := c.restoreAdmission(owner, transition)
+			cleanupErr := c.restoreAdmission(ctx, owner, transition)
 			pipelineRecovery.Done()
 			return nil, errors.Join(err, cleanupErr)
 		}
 	}
 	if err := transition.Wait(ctx); err != nil {
-		cleanupErr := c.restoreAdmission(owner, transition)
+		cleanupErr := c.restoreAdmission(ctx, owner, transition)
 		pipelineRecovery.Done()
 		return nil, errors.Join(err, cleanupErr)
 	}
 	return transition, nil
 }
 
-func (c *serveStandingServiceController) restoreAdmission(owner *runtime.Runtime, transition *serveStandingServiceTransition) error {
+func (c *serveStandingServiceController) restoreAdmission(ctx context.Context, owner *runtime.Runtime, transition *serveStandingServiceTransition) error {
+	ctx = context.WithoutCancel(ctx)
 	serviceID := transition.expected.ServiceID
-	if err := transition.Wait(context.Background()); err != nil {
+	if err := transition.Wait(ctx); err != nil {
 		return fmt.Errorf("join standing service %s before compensation: %w", serviceID, err)
 	}
 	if transition.admissionFenced && owner.InboundGateway != nil {
-		if err := owner.InboundGateway.WaitForStandingServiceAdmission(context.Background(), serviceID); err != nil {
+		if err := owner.InboundGateway.WaitForStandingServiceAdmission(ctx, serviceID); err != nil {
 			return fmt.Errorf("join standing service %s ingress before compensation: %w", serviceID, err)
 		}
 	}
 	if transition.expected.RestartDisposition.Executable() {
-		current, found, err := owner.Pipeline.LoadReconciledStandingService(context.Background(), transition.candidate)
+		current, found, err := owner.Pipeline.LoadReconciledStandingService(ctx, transition.candidate)
 		if err != nil || !found || !transition.expected.SameAuthority(current) {
-			return errors.Join(err, fmt.Errorf("standing service %s predecessor authority changed; admission remains closed", serviceID), transition.Retire(context.Background()))
+			return errors.Join(err, fmt.Errorf("standing service %s predecessor authority changed; admission remains closed", serviceID), transition.Retire(ctx))
 		}
 	}
-	if err := transition.Restore(context.Background()); err != nil {
+	if err := transition.Restore(ctx); err != nil {
 		return fmt.Errorf("restore standing service %s process targets: %w", serviceID, err)
 	}
 	if transition.previousAdmissionOpen && transition.expected.RestartDisposition.Executable() && owner.InboundGateway != nil {
@@ -2965,7 +2974,7 @@ type systemWorkspaceContainerLister interface {
 	SystemWorkspaceContainers() []string
 }
 
-func processOwnedHTTPHandler(owner *worklifetime.Process, next http.Handler) http.Handler {
+func processOwnedHTTPHandler(owner *worklifetime.Process, next http.Handler, original runtimestartupownership.ProcessCapability) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if owner == nil || next == nil {
 			http.Error(w, "runtime process unavailable", http.StatusServiceUnavailable)
@@ -2978,6 +2987,13 @@ func processOwnedHTTPHandler(owner *worklifetime.Process, next http.Handler) htt
 		}
 		defer func() { _ = lease.Done() }()
 		ctx := worklifetime.WithProcess(lease.Context(), owner)
+		if original != nil {
+			ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, original)
+			if err != nil {
+				http.Error(w, "runtime process unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -93,7 +93,7 @@ func (eb *EventBus) dispatchPublicPublication(ctx context.Context, prepared Prep
 }
 
 func (eb *EventBus) publicCompletionContext(ctx context.Context, lease *worklifetime.Lease, runID string) context.Context {
-	ctx = bindWorkContext(ctx, lease, eb.workOwnerForContext(lease.Context()))
+	ctx = bindWorkContext(ctx, lease, eb.workOwnerForContext(lease.Context()), eb.carryMutationContext)
 	return runtimecorrelation.WithRunID(ctx, runID)
 }
 

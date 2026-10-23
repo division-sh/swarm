@@ -21,6 +21,7 @@ func TestAPIEventStoragePreservesWholeStoreCountsLineageAndNativeSnapshotBothSto
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			original := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{"value":1}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at)
 			replay := eventtest.Child(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{"value":1}`), 1, original, events.EventEnvelope{}, at.Add(time.Second))
@@ -141,6 +142,7 @@ func TestAPILatestNamedEventIdentityPreservesPhysicalOrderAndGlobalScopeBothStor
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			first := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at)
 			second := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at.Add(time.Second))
@@ -179,6 +181,7 @@ func TestAPIEventAcknowledgmentCountsPreserveNativeScopesBothStores(t *testing.T
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "ack.observation", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, event); err != nil {
 				t.Fatal(err)

@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -203,6 +204,7 @@ func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) cont
 func eventBusTestRunContextForSource(t *testing.T, selected eventBusRunFixtureStore, source semanticview.Source) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), eventBusTestRunID)
+	ctx = originalEventBusFixtureContext(t, ctx, selected)
 	if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
 		t.Fatalf("persist exact event bus test source artifact: %v", err)
 	}
@@ -217,6 +219,7 @@ func eventBusTestRunContextForSource(t *testing.T, selected eventBusRunFixtureSt
 func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	if err := storetest.EnsureEphemeralRun(ctx, pg, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("create run through lifecycle owner: %v", err)
@@ -234,6 +237,7 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *tes
 func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
+	ctx = originalEventBusFixtureContext(t, ctx, sqliteStore)
 	runID := uuid.NewString()
 	if err := storetest.EnsureEphemeralRun(ctx, sqliteStore, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("create run through lifecycle owner: %v", err)
@@ -301,6 +305,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		t.Fatalf("register author activity catalog: %v", err)
 	}
 	ctx := testAuthorActivityContext(context.Background())
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	if err := storetest.EnsureEphemeralRun(ctx, pg, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("create run through lifecycle owner: %v", err)
@@ -331,6 +336,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		t.Fatalf("register author activity catalog: %v", err)
 	}
 	ctx := testAuthorActivityContext(context.Background())
+	ctx = originalEventBusFixtureContext(t, ctx, sqliteStore)
 	runID := uuid.NewString()
 	if err := storetest.EnsureEphemeralRun(ctx, sqliteStore, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("create run through lifecycle owner: %v", err)
@@ -369,6 +375,7 @@ func TestEventBusZeroRouteExactDuplicateRetainsDurableAuthorityBothStores(t *tes
 			} else {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
+			ctx = originalEventBusFixtureContext(t, ctx, selected)
 			runID := uuid.NewString()
 			if err := storetest.EnsureEphemeralRun(ctx, selected, runID, time.Now().UTC()); err != nil {
 				t.Fatal(err)
@@ -407,6 +414,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 	markTerminal func() error,
 ) {
 	t.Helper()
+	ctx := originalEventBusFixtureContext(t, testAuthorActivityContext(context.Background()), eventStore)
 	eb, err := newScopedTestEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -426,7 +434,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 		if err != nil {
 			t.Fatalf("load state before duplicate preflight: %v", err)
 		}
-		if _, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt); err != nil {
+		if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err != nil {
 			t.Fatalf("preflight exact duplicate: %v", err)
 		}
 		afterPreflight, err := loadState()
@@ -443,7 +451,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 				if err != nil {
 					t.Fatalf("load state before duplicate: %v", err)
 				}
-				if err := publish(testAuthorActivityContext(context.Background()), evt); err != nil {
+				if err := publish(ctx, evt); err != nil {
 					t.Fatalf("publish exact duplicate: %v", err)
 				}
 				after, err := loadState()
@@ -983,6 +991,7 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 				}
 				source := busPublicationFailureSource(t)
 				ctx := testAuthorActivityContextForSource(context.Background(), source)
+				ctx = originalEventBusFixtureContext(t, ctx, selected)
 				runID, eventID := uuid.NewString(), uuid.NewString()
 				if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
 					t.Fatalf("persist selected source artifact: %v", err)
@@ -2183,6 +2192,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			source := busPublicationClaimsSource(t)
 			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+			ctx = originalEventBusFixtureContext(t, ctx, selected)
 			if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
 				t.Fatal(err)
 			}
@@ -2308,6 +2318,7 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 
 			ctx, cancel := context.WithTimeout(testAuthorActivityContextForSource(context.Background(), source), 15*time.Second)
 			defer cancel()
+			ctx = originalEventBusFixtureContext(t, ctx, pg)
 			var workers sync.WaitGroup
 			defer func() {
 				cancel()
@@ -2378,23 +2389,23 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			if _, err := newScopedTestEventBus(seedStore); err != nil {
 				t.Fatalf("prepare replay seed author activity catalog: %v", err)
 			}
-			eventIDs := make([]string, poolSize)
-			runIDs := make([]string, poolSize)
-			decisionRoute := surface == "decision_periodic"
-			for i := 0; i < poolSize; i++ {
-				runIDs[i] = uuid.NewString()
-				storetest.RequireRun(t, context.Background(), seedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash})
-				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
-			}
 			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), seedStore); err != nil {
 				t.Fatal(err)
 			}
-
+			eventIDs := make([]string, poolSize)
+			runIDs := make([]string, poolSize)
+			seedCtx := originalEventBusFixtureContext(t, testAuthorActivityContext(context.Background()), seedStore)
+			decisionRoute := surface == "decision_periodic"
+			for i := 0; i < poolSize; i++ {
+				runIDs[i] = uuid.NewString()
+				storetest.RequireRun(t, seedCtx, seedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash})
+				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
+			}
 			claimed := make(chan struct{}, poolSize)
 			release := make(chan struct{})
 			start := make(chan struct{})
 			errs := make(chan error, poolSize)
-			workerContext, cancelWorkers := context.WithCancel(context.Background())
+			workerContext, cancelWorkers := context.WithCancel(seedCtx)
 			var workers sync.WaitGroup
 			var releaseOnce sync.Once
 			defer func() {
@@ -2467,6 +2478,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 
 func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID string, decisionRoute bool) string {
 	t.Helper()
+	ctx := originalEventBusFixtureContext(t, testAuthorActivityContext(context.Background()), selected)
 	eventID, entityID := uuid.NewString(), uuid.NewString()
 	eventType := events.EventType("custom.replay_pool_saturation")
 	payload := []byte(`{}`)
@@ -2495,10 +2507,10 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := selected.CreateDecisionCard(testAuthorActivityContext(context.Background()), card); err != nil {
+		if err := selected.CreateDecisionCard(ctx, card); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := storetest.DecisionCardDomain(selected).ApplyDecisionForTest(testAuthorActivityContext(context.Background()), decisioncard.DecideRequest{
+		if _, err := storetest.DecisionCardDomain(selected).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
 			CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash,
 			DecisionEventID: eventID, Now: time.Now().UTC(),
 		}); err != nil {
@@ -2509,7 +2521,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 	}
 	evt := eventtest.ExistingRunRootIngress(eventID, eventType, "test", "", payload, 0, runID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
-	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(context.Background()), selected, evt, nil, runtimepipelineobligation.ScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	return eventID
 }
 
@@ -2606,6 +2618,7 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	}
 	source := semanticview.Wrap(bundle)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	forkRunID := uuid.NewString()
 	providerReached := make(chan struct{}, 1)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
@@ -2798,6 +2811,7 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 			return peer
 		}
 	}
+	ctx = originalEventBusFixtureContext(t, ctx, selected)
 	at := time.Now().UTC()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at})
 	for _, flowID := range []string{".", "consumer"} {
@@ -3023,13 +3037,16 @@ func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycle
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), sourceFact)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(uuid.NewString(),
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(uuid.NewString(),
 
 		events.EventType("scan.requested"),
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -3050,6 +3067,7 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 	source := busRuntimeControlSource(t)
 	sourceFact := testSourceArtifactFact(source)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		ContractBundle:     source,
 		SourceArtifactFact: sourceFact,
@@ -3127,7 +3145,7 @@ func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *tes
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	interceptor.probe = storetest.CollectTransactions(t, pg, storetest.TransactionProbeOptions{})
-	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("11111111-1111-1111-1111-111111111111",
+	if err := eb.Publish(originalEventBusFixtureContext(t, context.Background(), pg), eventtest.RunCreatingRootIngress("11111111-1111-1111-1111-111111111111",
 		events.EventType("custom.root"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -3210,6 +3228,7 @@ func TestEventBusPublish_RuntimeControlBypassesContradictionRouting(t *testing.T
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersistedDeliveries(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3272,9 +3291,11 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 }
 
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalReceipt(t *testing.T) {
+	fixtureOwner := t
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := busRuntimeControlSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3334,7 +3355,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				RunID:      tc.runID,
 				BundleHash: testSourceArtifactFact(source).BundleHash(),
 			})
-			agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, tc.runID, agentID, testSourceArtifactFact(source))
+			agentIdentity := seedActiveRuntimeBusAgentForSource(fixtureOwner, ctx, pg, tc.runID, agentID, testSourceArtifactFact(source))
 			subscriptions := []string{string(tc.eventType)}
 			admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 				AgentID: agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
@@ -3470,7 +3491,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})

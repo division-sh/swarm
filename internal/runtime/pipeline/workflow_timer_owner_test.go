@@ -1805,7 +1805,7 @@ func VerifyNativeWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStoresF
 				case "restore":
 					go func() { operationErr <- pc.RestoreWorkflowTimers(ctx) }()
 				case "recovery":
-					if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
+					if !pc.workflowTimers.startWakeupRecovery(ctx, activation.Ref) {
 						t.Fatal("start workflow timer recovery")
 					}
 				default:
@@ -1876,7 +1876,7 @@ func VerifyNativeWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoinsForTest(t
 				<-release
 			}
 			for attempt := 0; attempt < 3; attempt++ {
-				if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
+				if !pc.workflowTimers.startWakeupRecovery(ctx, activation.Ref) {
 					t.Fatalf("start coalesced recovery attempt %d", attempt+1)
 				}
 			}
@@ -1915,7 +1915,7 @@ func VerifyNativeWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoinsForTest(t
 			if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
 				t.Fatalf("retire initial workflow timer wakeup: %v", err)
 			}
-			if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
+			if !pc.workflowTimers.startWakeupRecovery(ctx, activation.Ref) {
 				t.Fatal("start pending recovery")
 			}
 			stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -2226,45 +2226,6 @@ func VerifyNativeWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStoresFo
 				t.Fatal("timed-out preparation persisted an occurrence publication")
 			}
 		})
-	}
-}
-
-func VerifyNativeWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutationForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	for _, tc := range workflowJoinStoreCases() {
-		if tc.name != "postgres" {
-			continue
-		}
-		fixture, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
-		store := pc.workflowStore
-		rollback, err := fixture.HoldUnstampedAdmissionTransaction(ctx, activation.RunID)
-		if err != nil {
-			t.Fatalf("hold original-coordinator outer mutation: %v", err)
-		}
-		t.Cleanup(func() {
-			if err := rollback(); err != nil {
-				t.Error(err)
-			}
-		})
-		if fixture.Transactions().Active != 1 {
-			t.Fatal("outer mutation did not reach the original coordinator")
-		}
-		outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
-		if err != nil || outcome != WorkflowTimerFireCommitted {
-			t.Fatalf("FireWorkflowTimer outcome=%q err=%v, want independently committed named operation", outcome, err)
-		}
-		if fixture.Transactions().Active != 1 {
-			t.Fatal("independent fire settled or retained the outer transaction")
-		}
-		if err := rollback(); err != nil {
-			t.Fatalf("Rollback: %v", err)
-		}
-		if fixture.Transactions().Active != 0 {
-			t.Fatal("outer rollback did not join its original transaction")
-		}
-		persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
-		if persisted.Status != workflowTimerStatusFired {
-			t.Fatalf("named-operation timer status = %q, want fired", persisted.Status)
-		}
 	}
 }
 

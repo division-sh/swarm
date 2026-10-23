@@ -44,7 +44,7 @@ func TestResetRetainedCleanupProviderAuthorityBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					if !drained {
-						if _, err := fixture.store.(deliverylifecycle.Store).SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
+						if _, err := fixture.store.(deliverylifecycle.Store).SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -91,8 +91,8 @@ func TestResetRetainedCleanupDirectiveAuthorityBothStores(t *testing.T) {
 	for _, state := range []string{"prepared", "executing", "indeterminate", "succeeded", "failed", "expired_succeeded", "expired_failed"} {
 		t.Run(state, func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
-				ctx := testAuthorActivityContext()
-				seedDirectiveOperationRun(t, backend.db, backend.name == "postgres")
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)
+				seedDirectiveOperationRun(t, ctx, backend.db, backend.name == "postgres")
 				now := time.Now().UTC()
 				if strings.HasPrefix(state, "expired_") {
 					now = now.Add(-48 * time.Hour)
@@ -121,7 +121,7 @@ func TestResetRetainedCleanupDirectiveAuthorityBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				capability, err := backend.store.(startupownership.Store).AcquireProcessCapability(ctx, testStartupAcquireRequest("reset-directive-guard"))
+				capability, err := agentfixture.ProcessCapability(t, ctx, backend.store.(agentfixture.Store))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -161,7 +161,7 @@ func TestResetRetainedCleanupScopeAndRollbackBothStores(t *testing.T) {
 	for _, condition := range []string{"foreign_key", "late_source_run", "late_retained_run", "forged_quiescence"} {
 		t.Run(condition, func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)
 				artifact := sourceartifactfixture.Artifact()
 				sourceartifactfixture.RequireArtifact(t, ctx, backend.store.(sourceartifactfixture.Writer), artifact)
 				seedRun := func(id string) {
@@ -170,7 +170,7 @@ func TestResetRetainedCleanupScopeAndRollbackBothStores(t *testing.T) {
 				}
 				runID := uuid.NewString()
 				seedRun(runID)
-				capability, err := backend.store.(startupownership.Store).AcquireProcessCapability(ctx, testStartupAcquireRequest("reset-scope-guard"))
+				capability, err := agentfixture.ProcessCapability(t, ctx, backend.store.(agentfixture.Store))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -257,6 +257,13 @@ func admitRetainedResetCleanupProof(t *testing.T, capability startupownership.Pr
 
 func admitRetainedResetCleanupProofWithContext(t *testing.T, ctx context.Context, capability startupownership.ProcessCapability, quiescer destructivereset.QuiescenceStore, runID string, includeSources bool, additionalRunIDs ...string) destructivereset.CleanupRequest {
 	t.Helper()
+	if !startupownership.HasMutationAuthority(ctx) {
+		var err error
+		ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	now := time.Now().UTC().Add(time.Minute)
 	operation, err := capability.AdmitResetOperation(ctx, destructivereset.Request{
 		OperationID: uuid.NewString(), ActorTokenID: "operator-token", RequestHash: "cleanup-guard",

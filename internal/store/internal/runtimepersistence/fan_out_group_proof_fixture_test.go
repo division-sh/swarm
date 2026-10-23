@@ -328,6 +328,15 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 	}
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 30*time.Second)
 	t.Cleanup(cancel)
+	if parent != nil {
+		var err error
+		ctx, err = startupownership.WithProcessMutationAuthority(ctx, parent.process)
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		ctx = originalStoreFixtureContext(t, ctx, f.raw)
+	}
 	artifact, bundle := fanOutMixedRouteSource(t)
 	f.seed = seedFanOutOwnerFixtureWithArtifact(t, ctx, f.db, f.raw, f.postgres, count, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, f.seed.bundleHash))
@@ -365,6 +374,16 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 	} else {
 		f.grant, f.occurrence = parent.grant, parent.occurrence
 		f.process = parent.process
+	}
+	grantEvidence, err := f.grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRuntimeInstanceID(ctx, grantEvidence.RuntimeInstanceID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(grantEvidence.RuntimeInstanceID, grantEvidence.BundleHash))
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, f.grant)
+	if err != nil {
+		t.Fatal(err)
 	}
 	{
 		executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 1), done: make(chan struct{})}
@@ -406,12 +425,12 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 		}
 	})
 	if parent == nil {
-		catalog, err := f.raw.(selectedFanOutMixedRouteOwner).RegisterAuthorActivityEventCatalog(authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, f.seed.bundleHash), []authoractivity.EventDescriptor{{EventType: "producer/mixed.none", Disposition: authoractivity.StoryAuthored}})
+		catalog, err := f.raw.(selectedFanOutMixedRouteOwner).RegisterAuthorActivityEventCatalog(authoractivity.BundleScope(grantEvidence.RuntimeInstanceID, f.seed.bundleHash), []authoractivity.EventDescriptor{{EventType: "producer/mixed.none", Disposition: authoractivity.StoryAuthored}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(catalog.Release)
-		f.bus, err = newStoreTestEventBus(t, f.raw.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: mustStoreTestSourceArtifactFact(f.seed.bundleHash), RuntimeInstanceID: authorActivityTestRuntimeInstanceID})
+		f.bus, err = newStoreTestEventBus(t, f.raw.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: mustStoreTestSourceArtifactFact(f.seed.bundleHash), RuntimeInstanceID: grantEvidence.RuntimeInstanceID})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -29,7 +29,7 @@ func (p *processCapability) AdmitResetOperation(ctx context.Context, req destruc
 	if err = p.proveCurrent(ctx); err != nil {
 		return out, err
 	}
-	out, err = p.session.AdmitResetOperation(ctx, req)
+	out, err = p.session.AdmitResetOperation(p.processMutationContext(ctx), req)
 	p.retireOnPossessionFailure(err)
 	return
 }
@@ -71,7 +71,7 @@ func (p *processCapability) AdvanceResetOperation(ctx context.Context, before, a
 	if err := p.proveCurrent(ctx); err != nil {
 		return err
 	}
-	err := p.session.AdvanceResetOperation(ctx, before, after)
+	err := p.session.AdvanceResetOperation(p.processMutationContext(ctx), before, after)
 	p.retireOnPossessionFailure(err)
 	return err
 }

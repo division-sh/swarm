@@ -33,13 +33,13 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 					_, db, _ = testutil.StartPostgres(t)
 					selected = admitTestPostgresStore(t, db)
 				}
-				sourceCtx := testAuthorActivityContext()
+				sourceCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 				targetBundle := runForkRootGateBundleForTest(t)
 				target, err := runtimecontracts.BootBundleIdentity(targetBundle)
 				if err != nil {
 					t.Fatal(err)
 				}
-				targetCtx := testAuthorActivityContextForBundle(target.BundleHash)
+				targetCtx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(target.BundleHash), selected)
 				registerTestAuthorActivityCatalogForContext(t, selected, targetCtx)
 				now := time.Date(2026, 10, 2, 22, 0, 0, 0, time.UTC)
 				sourceRun, childRun := uuid.NewString(), uuid.NewString()

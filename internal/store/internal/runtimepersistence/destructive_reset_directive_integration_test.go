@@ -52,7 +52,7 @@ func (a *destructiveResetBlockingDirectiveAgent) BoardStep(context.Context, runt
 
 func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := storeTestWorkContext(t, testAuthorActivityContext())
+	ctx := storeTestWorkContext(t, originalStoreFixtureContext(t, testAuthorActivityContext(), pg))
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})

@@ -46,7 +46,7 @@ func TestSameSlugSiblingExternalEffectAuthorityPostgres(t *testing.T) {
 
 func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	now := time.Date(2026, 7, 10, 19, 0, 0, 0, time.UTC)
 	identities := []struct {
 		identity runtimeagentidentity.Identity
@@ -155,7 +155,7 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 
 func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
 	identity := testAgentIdentity(t, "lifecycle-agent", "global")
 	rec := runtimemanager.PersistedAgent{

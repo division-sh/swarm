@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ type pipelineNativeDeliveryPublicationStore interface {
 	CommitPublication(context.Context, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
 }
 
-func workflowHandlerNativeCoordinator(t *testing.T, selected timerReplaySelectedStore, options pipeline.PipelineCoordinatorOptions, fact correlation.SourceArtifactFact) (*pipeline.PipelineCoordinator, *runtimebus.EventBus) {
+func workflowHandlerNativeCoordinator(t *testing.T, selected timerReplaySelectedStore, options pipeline.PipelineCoordinatorOptions, fact correlation.SourceArtifactFact) (*pipeline.PipelineCoordinator, *runtimebus.EventBus, func(context.Context) error) {
 	t.Helper()
 	var componentEvents []string
 	if bundle, found := semanticview.Bundle(options.Module.SemanticSource()); found {
@@ -74,14 +75,28 @@ func workflowHandlerNativeCoordinator(t *testing.T, selected timerReplaySelected
 	}
 	options.WorkOwner = pipelineExternalTestWorkOwnerForSource(t, fact)
 	pc := newTimerReplayCoordinator(t, bus, selected, options, fact)
+	var joinMu sync.Mutex
+	joined := false
+	joinCoordinator := func(ctx context.Context) error {
+		joinMu.Lock()
+		defer joinMu.Unlock()
+		if joined {
+			return nil
+		}
+		if err := bus.WaitForQuiescence(ctx); err != nil {
+			return err
+		}
+		joined = true
+		return nil
+	}
 	t.Cleanup(func() {
 		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := bus.WaitForQuiescence(join); err != nil {
+		if err := joinCoordinator(join); err != nil {
 			t.Error(err)
 		}
 	})
-	return pc, bus
+	return pc, bus, joinCoordinator
 }
 
 func pipelineDeliveryNativeFixture(t *testing.T, backend string, source semanticview.Source) *pipeline.PipelineDeliveryNativeFixtureForTest {
@@ -92,6 +107,10 @@ func pipelineDeliveryNativeFixture(t *testing.T, backend string, source semantic
 
 func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview.Source, base pipeline.WorkflowHandlerNativeFixtureForTest, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, probe *storetest.TransactionCollector) *pipeline.PipelineDeliveryNativeFixtureForTest {
 	t.Helper()
+	original, err := agentfixture.ProcessCapability(t, base.Context, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle, _ := semanticview.Bundle(source)
 	fact := sourceartifactfixture.RequireArtifact(t, base.Context, selected.(sourceartifactfixture.Writer), bundle.SourceArtifact)
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(fact, authorActivityTestRuntimeInstanceID, 1)
@@ -168,6 +187,9 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		}
 		retire()
 		projectionOnly = true
+		if err := original.Release(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 		if err := selected.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -180,6 +202,9 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		}
 		retire()
 		projectionOnly = true
+		if err := original.Release(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 		if err := selected.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -197,7 +222,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		if fixture.Continuations != nil {
 			t.Fatal("native delivery fixture already has its exact component coordinator")
 		}
-		pc, bus := workflowHandlerNativeCoordinator(t, selected, options, fact)
+		pc, bus, joinCoordinator := workflowHandlerNativeCoordinator(t, selected, options, fact)
 		work := pipelineExternalTestWorkOwnerForSource(t, fact)
 		predecessor = work
 		fixture.Context = worklifetime.WithOccurrence(base.Context, work)
@@ -240,7 +265,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 			if err := continuations.Retire(join); err != nil {
 				t.Fatal(err)
 			}
-			if err := bus.WaitForQuiescence(join); err != nil {
+			if err := joinCoordinator(join); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := work.RetireAndWait(join); err != nil {

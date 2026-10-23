@@ -67,6 +67,16 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, postgres := tc.start(t)
 			ctx := testAuthorActivityContext(context.Background())
+			capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+				OwnerID: "budget-recovery-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			})
+			if err != nil {
+				t.Fatalf("acquire budget recovery process capability: %v", err)
+			}
+			ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			now := time.Now().UTC().Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			entityA, entityB, terminalEntity, crossSourceEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -101,7 +111,15 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				}
 			}
 
-			bus, err := newRuntimeTestEventBus(t, selected)
+			bus, err := newRuntimeTestEventBusWithOptions(t, selected, runtimebus.EventBusOptions{
+				MutationContext: func(input context.Context) (context.Context, error) {
+					if !runtimestartupownership.HasMutationAuthority(input) {
+						input = runtimestartupownership.CarryMutationAuthority(input, ctx)
+					}
+					_, err := runtimestartupownership.CaptureMutationAuthority(input)
+					return input, err
+				},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -157,12 +175,6 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatalf("construct budget recovery topology plan: %v", err)
-			}
-			capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-				OwnerID: "budget-recovery-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			})
-			if err != nil {
-				t.Fatalf("acquire budget recovery process capability: %v", err)
 			}
 			if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
 				OperationID: uuid.NewString(), Plan: plan,

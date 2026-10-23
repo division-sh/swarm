@@ -22,6 +22,7 @@ func lifecycleCausalFixture(t *testing.T, sqlite bool, kind string) (lifecycleDi
 	t.Helper()
 	store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	seed := createNamedLifecycleDiagnostic(t, ctx, store, "lineage-seed")
 	ctx = runtimecorrelation.WithRunID(ctx, seed.Identity.RunID)
 	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, storeTestPayloadAdmitter)

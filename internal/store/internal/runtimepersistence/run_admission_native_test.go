@@ -14,11 +14,13 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sourceartifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -43,12 +45,26 @@ func selectedAdmissionLifecycleWriter(selected any) admissionLifecycleWriter {
 	}
 }
 
+func runAdmissionFixtureContext(t *testing.T, fixture runLifecycleCandidateParityFixture) context.Context {
+	t.Helper()
+	ctx := testAuthorActivitySourceArtifactContext()
+	process, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
 func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
-			ctx := testAuthorActivitySourceArtifactContext()
+			ctx := runAdmissionFixtureContext(t, fixture)
 			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, runLifecycleCandidateParityReplacementArtifact)
 			for _, change := range []string{"pause", "source-revision", "terminal", "complete", "fork-source", "terminal-uuid-alias", "terminal-unbound-caller"} {
 				t.Run(change, func(t *testing.T) {
@@ -154,7 +170,7 @@ func TestRunAdmissionMissingRunRefusesBeforeMutationBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
-			ctx := testAuthorActivitySourceArtifactContext()
+			ctx := runAdmissionFixtureContext(t, fixture)
 			runID := uuid.NewString()
 			rollback := errors.New("rollback after missing-run admission")
 			err := runSelectedFixtureMutation(ctx, fixture.store, "missing-run admission", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
@@ -192,7 +208,7 @@ func TestRunAdmissionWarmArtifactLossRefusesBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
-			ctx := testAuthorActivitySourceArtifactContext()
+			ctx := runAdmissionFixtureContext(t, fixture)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Now().UTC())
 			rollback := errors.New("rollback after warmed-artifact refusal")
@@ -270,6 +286,7 @@ func TestMutationLogCannotBorrowLookupFactBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Now())
 			fact, err := fixture.store.RequireActiveRunSource(ctx, runID)
@@ -314,6 +331,7 @@ func TestPendingEventDeltaVisibleThroughUnboundTerminalLoanBothStores(t *testing
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			started := time.Now().UTC().Round(time.Microsecond)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, started)

@@ -13,10 +13,12 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
@@ -31,6 +33,10 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 				bundle := workflowTimerServedLifecycleBundle(t, state == "advanced" || state == "advanced_cancelled")
 				source := semanticview.Wrap(bundle)
 				ctx, fact := nativeConstructionContextFixture(t, selected.(storetest.RunFixtureStore), source, runID)
+				original, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
 				identity := testRunScopedWorkflowInstanceForRun(runID, runID)
 				build := func() (*runtimepipeline.PipelineCoordinator, func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) runtimepipeline.DynamicFlowRuntimeActivationAttempt, func()) {
 					t.Helper()
@@ -129,10 +135,14 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 				}
 				baseline := storetest.ObserveWorkflowTimerReplayStorage(t, ctx, selected, runID, entityID)
 				stop()
+				if err := original.Release(context.Background()); err != nil {
+					t.Fatal(err)
+				}
 				if err := closeStore(); err != nil {
 					t.Fatal(err)
 				}
 				selected = reopen()
+				ctx = originalPipelineFixtureContext(t, withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID)), selected)
 				pc, admitAttachment, _ = build()
 				attempt = admitAttachment(construction.Plan.Readiness)
 				reader = selected

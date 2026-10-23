@@ -109,7 +109,7 @@ func ProveNativeWriteReceiptPreservesCommittedSettlementAndContinuation(t *testi
 				if phase == "continuation_error" || phase == "both_errors" {
 					bus.failure = cleanup
 				}
-				am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store})
+				am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store, BaseContext: nativeDelivery.Context, MutationContext: nativeDelivery.MutationContext, CarryMutationContext: nativeDelivery.CarryMutationContext})
 				evt := eventtest.RunCreatingRootIngress(eventtest.UUID("receipt-outcome"), "work.requested", "", "", nil, 0, eventtest.UUID("receipt-outcome-run"), "", events.EventEnvelope{}, time.Time{})
 				nativeDelivery.seedAgentDeliveries(t, "agent-a", []events.Event{evt})
 				ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, "agent-a")
@@ -168,7 +168,7 @@ func ProveNativeProcessEventDoesNotResettleAcknowledgedReceiptError(t *testing.T
 			nativeDelivery := newNativeDelivery(t)
 			store := &receiptOutcomeStore{Store: nativeDelivery, failure: failure}
 			bus := &receiptOutcomeBus{failure: cleanup}
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store})
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store, BaseContext: nativeDelivery.Context, MutationContext: nativeDelivery.MutationContext, CarryMutationContext: nativeDelivery.CarryMutationContext})
 			agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a"}}
 			if failed {
 				agent.err = errors.New("handler failed")

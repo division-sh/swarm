@@ -268,7 +268,7 @@ func ProveNativeRunningManagerInterventionSettlementFailureShutsDownAndRecoversC
 			newFactory := func(runtimeactors.AgentConfig) (Agent, error) {
 				return agent, nil
 			}
-			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
+			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw(), BaseContext: nativeDelivery.Context, MutationContext: nativeDelivery.MutationContext, CarryMutationContext: nativeDelivery.CarryMutationContext}, persistence)
 			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention.settlement"}})}, true); err != nil {
 				t.Fatalf("spawn intervention settlement agent: %v", err)
 			}
@@ -347,7 +347,7 @@ func ProveNativeProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *
 	nativeDelivery := newNativeDelivery(t)
 	deliveryStore := nativeDelivery
 	store := &startupReplayTestStore{recoveryTestStore: recoveryTestStore{}, ManagerDeliveryNativeFixture: deliveryStore}
-	am := newTestAgentManager(t, &recordingReceiptBus{}, nil, store)
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{BaseContext: nativeDelivery.Context, MutationContext: nativeDelivery.MutationContext, CarryMutationContext: nativeDelivery.CarryMutationContext}, store)
 	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil)
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-uncertain"), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("uncertain-run"), "", events.EventEnvelope{}, time.Time{})

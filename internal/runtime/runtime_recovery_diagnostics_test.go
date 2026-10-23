@@ -847,13 +847,13 @@ func TestDeliveryRecoveryInventoryPartitionsEveryRunByStandingDisposition(t *tes
 func VerifyRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedulesForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
-	ctx := fixture.Context
+	ctx := nativeRuntimeRecoveryStartupContext(t, fixture)
 	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
 	deliveryStore := fixture.Deliveries
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
+	rt, err := newScopedNativeTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
 		WorkflowPersistence: startupRecoveryWorkflowPersistence(scheduleStore),
 		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
@@ -871,7 +871,7 @@ func VerifyRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedulesFor
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         noopLLMRuntime{},
-		}})
+		}}, fixture.ProcessCapability)
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -902,7 +902,7 @@ func VerifyRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedulesFor
 func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
-	ctx := fixture.Context
+	ctx := nativeRuntimeRecoveryStartupContext(t, fixture)
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-manager-work"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -925,9 +925,12 @@ func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(
 		Topology: managerTopology,
 	}}}
 	managerStore.session.admitRun(t, managerIdentity.RunID, nativeRuntimeLogSourceFactForTest(t, fixture))
+	if err := fixture.RequireRun(runtimecorrelation.WithRunID(fixture.Context, managerIdentity.RunID), managerIdentity.RunID); err != nil {
+		t.Fatal(err)
+	}
 	deliveryStore := fixture.Deliveries
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
+	rt, err := newScopedNativeTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
 		WorkflowPersistence: startupRecoveryWorkflowPersistence(nil),
 		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
@@ -943,7 +946,7 @@ func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         noopLLMRuntime{},
-		}}, startupRecoveryFanOutSessionForTest(t, fixture.FanOutCapacity))
+		}}, fixture.ProcessCapability)
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1003,13 +1006,13 @@ func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(
 func VerifyRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummaryForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
-	ctx := fixture.Context
+	ctx := nativeRuntimeRecoveryStartupContext(t, fixture)
 	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
 	deliveryStore := fixture.Deliveries
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+	rt, err := newScopedNativeTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
 		WorkflowPersistence: startupRecoveryWorkflowPersistence(scheduleStore),
 		DeliveryStore:       deliveryStore,
 		RuntimeLogStore:     fixture.Persistence,
@@ -1027,7 +1030,7 @@ func VerifyRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummaryForTest(t *tes
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         noopLLMRuntime{},
-		}}, startupRecoveryFanOutSessionForTest(t, fixture.FanOutCapacity))
+		}}, fixture.ProcessCapability)
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1072,7 +1075,7 @@ func VerifyRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummaryForTest(t *tes
 func VerifyRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetailForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
-	ctx := fixture.Context
+	ctx := nativeRuntimeRecoveryStartupContext(t, fixture)
 	const runID = "31000000-0000-0000-0000-000000000001"
 	scheduleStore := &recoveryDisabledScheduleStore{
 		obligations: &runtimetimerobligation.Snapshot{
@@ -1090,7 +1093,7 @@ func VerifyRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDet
 	managerStore := &recoveryGuardManagerStore{}
 	deliveryStore := fixture.Deliveries
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+	rt, err := newScopedNativeTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
 		WorkflowPersistence: startupRecoveryWorkflowPersistence(scheduleStore),
 		DeliveryStore:       deliveryStore,
 		RuntimeLogStore:     fixture.Persistence,
@@ -1108,7 +1111,7 @@ func VerifyRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDet
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         noopLLMRuntime{},
-		}}, startupRecoveryFanOutSessionForTest(t, fixture.FanOutCapacity))
+		}}, fixture.ProcessCapability)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1176,7 +1179,7 @@ func TestStartupRecoveryDecisionBootPayloadOmitsNilCollections(t *testing.T) {
 func VerifyRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummaryForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
-	ctx := fixture.Context
+	ctx := nativeRuntimeRecoveryStartupContext(t, fixture)
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-claim-failure"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -1239,7 +1242,7 @@ func VerifyRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummaryForTest(t *te
 func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
-	ctx := fixture.Context
+	ctx := nativeRuntimeRecoveryStartupContext(t, fixture)
 	activeWorkflowVersion := strings.TrimSpace(module.SemanticSource().WorkflowVersion())
 	if activeWorkflowVersion == "" {
 		t.Fatal("startup readiness test requires an active workflow version")
@@ -1248,7 +1251,7 @@ func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTes
 	managerStore := &startupRecoveryManagerStore{session: newRuntimeTestRetainedSession(t)}
 	eventStore := startupRecoveryMinimalEventStore{}
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+	rt, err := newScopedNativeTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
 		WorkflowPersistence: startupRecoveryWorkflowPersistence(nil),
 		DeliveryStore:       deliveryStore,
 		RuntimeLogStore:     fixture.Persistence,
@@ -1264,7 +1267,7 @@ func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTes
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         noopLLMRuntime{},
-		}}, startupRecoveryFanOutSessionForTest(t, fixture.FanOutCapacity))
+		}}, fixture.ProcessCapability)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1278,6 +1281,9 @@ func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTes
 	}
 	bundleHash := sourceFact.BundleHash()
 	managerStore.session.admitRun(t, runID, sourceFact)
+	if err := fixture.RequireRun(runtimecorrelation.WithRunID(fixture.Context, runID), runID); err != nil {
+		t.Fatal(err)
+	}
 	readinessStore := &startupReadinessFinalizationStore{items: []runtimepipeline.DynamicFlowRuntimeReadiness{{
 		InstancePath:    "review/inst-1",
 		OwningRunSource: sourceFact,
@@ -1329,12 +1335,12 @@ func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTes
 func VerifyRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatalForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
-	ctx := fixture.Context
+	ctx := nativeRuntimeRecoveryStartupContext(t, fixture)
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := startupRecoveryManagerStore{loadErr: errors.New("load agents failed")}
 	deliveryStore := fixture.Deliveries
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+	rt, err := newScopedNativeTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
 		WorkflowPersistence: startupRecoveryWorkflowPersistence(nil),
 		DeliveryStore:       deliveryStore,
 		RuntimeLogStore:     fixture.Persistence,
@@ -1350,7 +1356,7 @@ func VerifyRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatalF
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         noopLLMRuntime{},
-		}})
+		}}, fixture.ProcessCapability)
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)

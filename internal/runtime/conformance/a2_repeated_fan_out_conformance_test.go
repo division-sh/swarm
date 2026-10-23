@@ -32,9 +32,11 @@ func TestA2RepeatedFanOutTriggerIsolationOnBothStores(t *testing.T) {
 					dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected)
 				}
 			})
-			if err := rt.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "a2-repeated-fan-out", rt.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "a2-repeated-fan-out", rt.sourceArtifactFact), rt.bus, rt.manager); err != nil {
 				t.Fatal(err)
 			}
+
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
 			accounts := []string{"acct-c", "acct-a", "acct-b"}
 			publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{

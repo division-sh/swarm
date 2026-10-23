@@ -785,7 +785,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 			result = runtimedeliverycontinuation.Fatal(errors.Join(result.Failure(), closeErr))
 		}
 	}()
-	ctx = bindWorkContext(ctx, work, eb.workOwner)
+	ctx = bindWorkContext(ctx, work, eb.workOwner, eb.carryMutationContext)
 	ctx, scope, closeDispatch, err := eb.beginDeliveryDispatch(ctx, evt, []events.DeliveryRoute{route})
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(fmt.Errorf("acquire exact delivery carrier: %w", err))

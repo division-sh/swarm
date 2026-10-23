@@ -35,6 +35,11 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
+			capability := selectedContractTestProcessCapability(t, ctx, selected)
+			ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
 			repo, root := runForkExecutionRepoRoot(t), t.TempDir()
 			if err := os.CopyFS(root, os.DirFS(filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"))); err != nil {
 				t.Fatal(err)
@@ -95,7 +100,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)},
+				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 			})
 			if err != nil {
 				t.Fatalf("retained selected fork execution: %v", err)

@@ -23,7 +23,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newForkChatCompletionAuthorityFixture(t, backend == "sqlite")
 			runID, entityID := f.source.runID, uuid.NewString()
-			ctx := correlation.WithRunID(testAuthorActivityContext(), runID)
+			ctx := originalStoreFixtureContext(t, correlation.WithRunID(testAuthorActivityContext(), runID), f.store)
 			captureFanOutBarrierForkRevision(t, ctx, f.db, runID, backend == "postgres")
 			owner := f.store.(pipeline.WorkflowEngineMutationOwner)
 			created := f.source.turn1At.Add(-90 * time.Second)
@@ -84,7 +84,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			foreignRun := uuid.NewString()
-			foreignCtx := correlation.WithRunID(testAuthorActivityContext(), foreignRun)
+			foreignCtx := correlation.WithRunID(ctx, foreignRun)
 			requireRunFixtureForTest(t, foreignCtx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: foreignRun, StartedAt: created, BundleHash: f.source.bundleHash})
 			foreign := record
 			foreign.Identity.RunID = foreignRun

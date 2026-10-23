@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -29,6 +30,7 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 				f := openStandingDispositionParityFixture(t, backend)
 				f.workflow, _ = newGenericScheduleAwareWorkflowTestCoordinator(t, f.selected)
 				ctx := testAuthorActivityRuntimeContext()
+				ctx = originalStoreFixtureContext(t, ctx, f.selected)
 				candidate := f.candidate("credential-loss")
 				created, err := f.workflow.ReconcileStandingService(ctx, candidate)
 				if err != nil {
@@ -38,6 +40,7 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 					t.Fatal(err)
 				}
 				workCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), created.RunID)
+				workCtx = runtimestartupownership.CarryMutationAuthority(workCtx, ctx)
 				eventID, unsettledID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 				identity := mustTestAgentIdentityForRun(created.RunID, "standing-agent", "standing/ingress")
 				fields := testAgentIdentityStorageFields(t, identity)
@@ -125,6 +128,7 @@ func TestDormantStandingRestorationPreservesSuspendedOverrideBothStores(t *testi
 		t.Run(backend, func(t *testing.T) {
 			f := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, f.selected)
 			candidate := f.candidate("credential-loss-suspended")
 			created, err := f.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -161,6 +165,7 @@ func TestDormantStandingReconciliationBothStores(t *testing.T) {
 			var coordinator *runtimepipeline.PipelineCoordinator
 			if backend == "sqlite" {
 				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				db = selected.backend.ConstructionHandle()
 				coordinator = newSQLiteWorkflowTestCoordinator(t, db, selected)
 			} else {
@@ -168,6 +173,7 @@ func TestDormantStandingReconciliationBothStores(t *testing.T) {
 				t.Cleanup(cleanup)
 				db = opened
 				selected := admitTestPostgresStore(t, opened)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				coordinator = newPostgresWorkflowTestCoordinator(t, db, selected)
 			}
 			artifact := storeTestSourceArtifact("credential-dormancy-" + backend)
@@ -242,6 +248,7 @@ func TestRecoveryRequiredStandingReconciliationBothStores(t *testing.T) {
 			f := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
 			candidate := f.candidate("learned-authority-stale")
+			ctx = originalStoreFixtureContext(t, ctx, f.selected)
 			created, err := f.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatal(err)

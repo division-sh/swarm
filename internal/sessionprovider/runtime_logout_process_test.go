@@ -89,12 +89,13 @@ func TestWhatsAppLogoutJournalProcessDeathBothStores(t *testing.T) {
 				if err := f.state.close(f.ctx); err != nil {
 					t.Fatal("parent did not release original private-state possession", err)
 				}
+				if err := f.nativeProcess.Release(f.ctx); err != nil {
+					t.Fatal("release parent native process before child startup", err)
+				}
 				id := killNativeLogoutAtBoundary(t, logoutProcessFixture{Backend: backend, Location: f.location,
 					Directory: f.basePath, OperationID: f.operation.OperationID, Phase: phase})
+				acquireLogoutProcessFixture(t, f, uuid.NewString())
 				ctx := f.ctx
-				if phase == "reserved" {
-					acquireLogoutProcessFixture(t, f, uuid.NewString())
-				}
 				original, err := f.selected.GetChannelTeardown(ctx, id)
 				if err != nil || original.Logout == nil || original.Phase != channelonboarding.TeardownAuthorityRetired {
 					t.Fatal("process death lost its exact pending responsibility", original, err)

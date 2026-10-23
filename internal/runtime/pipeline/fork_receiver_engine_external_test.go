@@ -122,6 +122,10 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.SourceArtifactFact.BundleHash()))
 				ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 				ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
+				ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+				if err != nil {
+					t.Fatal(err)
+				}
 				runID := uuid.NewString()
 				seed := eventtest.RunCreatingRootIngress(uuid.NewString(), "start.seeded", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 				if err := rt.Bus.PublishAndWait(ctx, seed); err != nil {
@@ -669,6 +673,10 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 		t.Fatal(err)
 	}
 	capability, err := selected.StartupOwnership().AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "fork-engine-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
 	if err != nil {
 		t.Fatal(err)
 	}

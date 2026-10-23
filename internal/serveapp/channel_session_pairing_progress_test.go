@@ -94,13 +94,13 @@ func requireTimedServedNativeOnboardingRetry(t *testing.T, endpoint, operationID
 func TestServedSessionPairingContinuationRequiresCanonicalPending(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			service, adapter, op, release := startPendingSessionFixture(t, backend, "pairing-consumer-controls")
+			service, adapter, op, release, ctx := startPendingSessionFixture(t, backend, "pairing-consumer-controls")
 			defer release()
-			original, err := service.Get(t.Context(), op.OperationID)
+			original, err := service.Get(ctx, op.OperationID)
 			requireSessionPendingResult(t, original, op, err)
 			requireServedPairingConsumerCases(t, original)
 			release()
-			if err := adapter.RetireInactiveSessions(t.Context()); err != nil {
+			if err := adapter.RetireInactiveSessions(ctx); err != nil {
 				t.Fatal(err)
 			}
 			adapter.mu.Lock()

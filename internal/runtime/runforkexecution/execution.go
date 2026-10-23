@@ -235,7 +235,7 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 	}
 	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
-	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+	activation, err := container.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		InheritedSchedules:    prepared.readiness,
 		ForkOperation:         forkOperation,
 		DataPins:              materialization.DataPins,
@@ -367,7 +367,7 @@ func (p *PreparedSelectedFork) cleanupExecutionFailure(ctx context.Context, stor
 	}
 	if operation != nil {
 		failure := runfork.ForkOperationFailure{Code: "selected_execution_failed", Reason: cause.Error()}
-		if err := store.FailMaterializedSelectedContractExecutionFork(context.WithoutCancel(ctx), forkRunID, failure); err != nil {
+		if err := p.settleConstructionFailure(context.WithoutCancel(ctx), store, forkRunID, failure, false); err != nil {
 			return errors.Join(cause, fmt.Errorf("retain failed selected-contract fork %s: %w", forkRunID, err))
 		}
 		return cause

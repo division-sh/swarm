@@ -33,7 +33,7 @@ func TestRunForkExactCompletionWriterPreservesTurnUUIDSpellingsBothStores(t *tes
 					fixture.authority.Target.ID = inputID
 					// The origin event is derived from the chosen turn spelling.
 					// Admit its real delivery before authorizing the completion.
-					fixture.origin = claimCompletionOriginForTest(t, testAuthorActivityContext(), fixture.store, fixture.authority, time.Now().UTC())
+					fixture.origin = claimCompletionOriginForTest(t, fixture.original, fixture.store, fixture.authority, time.Now().UTC())
 				}
 				ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.contextFor(fixture.authority), "completion-uuid:"+spelling)
 				handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "completion-uuid:"+spelling)

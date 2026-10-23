@@ -33,6 +33,7 @@ func TestCatalogCausalObservationPreservesScopeOrderAndPayloadReferencesBothStor
 				registerTestAuthorActivityCatalog(t, h.sqlite, "fixture.root", "fixture.child", "fixture.foreign", "fixture.history")
 			}
 			foreignRun := uuid.NewString()
+			ctx = originalCatalogFixtureContext(t, ctx, selected)
 			for _, runID := range []string{catalogRuntimeRunID, foreignRun} {
 				storetest.RequireRun(t, ctx, setup, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 			}

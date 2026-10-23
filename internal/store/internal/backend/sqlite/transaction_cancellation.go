@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 type transactionFinalization struct {
@@ -68,6 +70,18 @@ func cancellationBeforeFirstAttempt(callerErr, admissionErr error, priorAttempts
 		return &cleanTransactionCancellation{cause: admissionErr, beforeAttempt: true}
 	}
 	return callerErr
+}
+
+// Admission has not acquired a permit, connection or transaction. Validate the
+// original independently of cancellation; this context is never used for SQL.
+func cancellationBeforeMutationAdmission(ctx context.Context, err error) error {
+	if err != context.Canceled || ctx == nil || ctx.Err() != context.Canceled {
+		return err
+	}
+	if _, authorityErr := runtimeownership.CaptureMutationAuthority(context.WithoutCancel(ctx)); authorityErr != nil {
+		return errors.Join(err, authorityErr)
+	}
+	return cancellationBeforeFirstAttempt(context.Canceled, err, 0)
 }
 
 func cancelledAttemptError(callerErr, nativeErr error, priorAttempts int) error {

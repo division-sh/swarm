@@ -37,6 +37,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						t.Fatal(err)
 					}
 					ctx := testAuthorActivityContext()
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					identity := mustTestAgentIdentityForRun(fixture.forkRun, "diagnostic-fork-worker", "global")
 					transition := diagnosticTestTransition(t, identity, runtimemanager.LifecycleDiagnosticOrigin{}, executionmode.Live)
 					plan, err := identity.Plan()
@@ -138,7 +139,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						t.Fatalf("close selected execution: acknowledged=%t error=%v", acknowledged, err)
 					}
 					if scenario == "malformed_provenance" {
-						proveMalformedDiagnosticProvenance(t, db, projector, item)
+						proveMalformedDiagnosticProvenance(t, ctx, db, projector, item)
 						return
 					}
 					if scenario == "historical_provenance_conflict" {
@@ -152,7 +153,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						return
 					}
 					if scenario == "delayed_close" || scenario == "causal_delayed_close" || scenario == "discard_projected" || strings.HasPrefix(scenario, "ack_") {
-						if n, err := projectDiagnosticTestBatch(context.Background(), projector, 100); err != nil || n != 1 {
+						if n, err := projectDiagnosticTestBatch(ctx, projector, 100); err != nil || n != 1 {
 							t.Fatalf("delayed projection n=%d err=%v", n, err)
 						}
 						assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
@@ -269,7 +270,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 	}
 }
 
-func proveMalformedDiagnosticProvenance(t *testing.T, db *sql.DB, projector diagnosticProjectionTestStore, item diaglog.LifecycleDiagnostic) {
+func proveMalformedDiagnosticProvenance(t *testing.T, ctx context.Context, db *sql.DB, projector diagnosticProjectionTestStore, item diaglog.LifecycleDiagnostic) {
 	t.Helper()
 	var raw []byte
 	if err := db.QueryRow(`SELECT payload FROM agent_lifecycle_diagnostic_outbox WHERE outbox_id=$1`, item.OutboxID).Scan(&raw); err != nil {
@@ -338,13 +339,13 @@ func proveMalformedDiagnosticProvenance(t *testing.T, db *sql.DB, projector diag
 			// lifecycle/fork owners must still reject altered historical authority.
 			write(changed)
 			defer write(original)
-			if n, err := projectDiagnosticTestBatch(context.Background(), projector, 100); err == nil || n != 0 {
+			if n, err := projectDiagnosticTestBatch(ctx, projector, 100); err == nil || n != 0 {
 				t.Fatalf("forged %s projected n=%d error=%v", field, n, err)
 			}
 			assertDiagnosticCounts(t, db, item.OutboxID, 0, 1)
 		})
 	}
-	if n, err := projectDiagnosticTestBatch(context.Background(), projector, 100); err != nil || n != 1 {
+	if n, err := projectDiagnosticTestBatch(ctx, projector, 100); err != nil || n != 1 {
 		t.Fatalf("restored authority failed n=%d error=%v", n, err)
 	}
 	assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)

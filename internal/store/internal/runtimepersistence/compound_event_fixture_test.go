@@ -62,6 +62,7 @@ func TestCompoundEventFixturesAtomicReplayAndRevisionBothStores(t *testing.T) {
 				selected, runID := decisionCardTestStore(t, backend)
 				db, _ := decisionCardStoreDB(t, selected)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				commit := func(event events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition) (bool, error) {
 					if revisioned {
@@ -135,6 +136,7 @@ func TestCompoundEventFixturesUseExactSQLiteAdmission(t *testing.T) {
 			selected := owner.(*SQLiteRuntimeStore)
 			db, _ := decisionCardStoreDB(t, owner)
 			ctx, stop := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			defer stop()
 			eventID := uuid.NewString()
 			admitted, settlement, routes := compoundFixtureEvent(t, runID, eventID, `{"value":1}`, time.Now().UTC())
@@ -229,6 +231,7 @@ func TestCompoundEventFixtureForkFrontierRetainsPostgresScope(t *testing.T) {
 			selected, runID := decisionCardTestStore(t, backend)
 			db, _ := decisionCardStoreDB(t, selected)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			eventID := uuid.NewString()
 			admitted, settlement, routes := compoundFixtureEvent(t, runID, eventID, `{}`, time.Now().UTC())
 			before := compoundFixtureCounts(t, db, runID, eventID)

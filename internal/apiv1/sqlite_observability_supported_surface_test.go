@@ -172,6 +172,7 @@ func traceRowsContainEvent(t *testing.T, rows []any, eventName string) bool {
 func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	ctx = originalAPIFixtureContext(t, ctx, sqliteStore)
 	base := time.Unix(1700003100, 0).UTC()
 	runID := "00000000-0000-0000-0000-000000001429"
 	eventOnlyID := "00000000-0000-0000-0000-000000001401"
@@ -298,6 +299,7 @@ type observabilityFixtureStore interface {
 
 func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore, db *sql.DB, sqlite bool) observabilitySurfaceFixture {
 	t.Helper()
+	ctx = originalAPIFixtureContext(t, ctx, store)
 	registrar, ok := store.(authorActivityTestCatalogRegistrar)
 	if !ok {
 		t.Fatal("observability fixture store does not implement the author activity catalog registry")

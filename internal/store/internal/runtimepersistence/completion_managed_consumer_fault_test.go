@@ -386,7 +386,7 @@ func TestManagedBlockedProviderGrantReplacementIsEvidenceOnlyBothStores(t *testi
 						store = admitTestPostgresStore(t, db)
 					}
 					fixture := newCompletionSettlementFixture(t, store, db, backend == "sqlite")
-					seedCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+					seedCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 					seedLease, _, err := store.(runtimellm.LiveSessionAcquirer).AcquireLiveSession(seedCtx, fixture.authority.Target.AgentIdentity, fixture.leaseHolder)
 					if err != nil {
 						t.Fatalf("acquire canonical conversation seed: %v", err)
@@ -405,13 +405,6 @@ func TestManagedBlockedProviderGrantReplacementIsEvidenceOnlyBothStores(t *testi
 					resume := make(chan struct{})
 					observedRequest := make(chan []byte, 1)
 					var providerCalls atomic.Int32
-					defer func() {
-						select {
-						case <-resume:
-						default:
-							close(resume)
-						}
-					}()
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						payload, _ := io.ReadAll(r.Body)
 						observedRequest <- payload
@@ -422,7 +415,14 @@ func TestManagedBlockedProviderGrantReplacementIsEvidenceOnlyBothStores(t *testi
 						w.Header().Set("Content-Type", "application/json")
 						_, _ = w.Write([]byte(`{"id":"resp_1","model":"test-model","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"late answer"}]}],"usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}`))
 					}))
-					defer server.Close()
+					defer func() {
+						select {
+						case <-resume:
+						default:
+							close(resume)
+						}
+						server.Close()
+					}()
 					cfg := &config.Config{LLM: config.LLMConfig{Backend: "openai_responses", OpenAIResponses: config.OpenAIResponsesConfig{BaseURL: server.URL}}}
 					controller := liveTestCompletionController(store, store, store, publicationGroupSpendProjection{})
 					runtime, err := (runtimellm.RuntimeFactory{
@@ -456,7 +456,7 @@ func TestManagedBlockedProviderGrantReplacementIsEvidenceOnlyBothStores(t *testi
 						t.Fatal(err)
 					}
 					defer func() { _ = work.Done() }()
-					ctx := worklifetime.WithProcess(testAuthorActivityContext(), process)
+					ctx := worklifetime.WithProcess(fixture.original, process)
 					ctx = worklifetime.WithOccurrence(ctx, root)
 					ctx = runtimeeffects.WithController(ctx, controller)
 					ctx = runtimedelivery.WithClaim(ctx, fixture.origin)
@@ -490,7 +490,7 @@ func TestManagedBlockedProviderGrantReplacementIsEvidenceOnlyBothStores(t *testi
 					if !bytes.Contains(payload, []byte("canonical acquired history")) || bytes.Contains(payload, []byte("stale caller history")) {
 						t.Fatalf("provider received stale rather than acquired conversation: %s", payload)
 					}
-					readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+					readCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 					sessionQuery := `SELECT * FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
 					revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
 					var beforeSession, beforeRevision []string

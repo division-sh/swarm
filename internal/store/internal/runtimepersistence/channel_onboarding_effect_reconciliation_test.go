@@ -39,6 +39,10 @@ func TestChannelOnboardingEffectReconciliationSelectedStoreParity(t *testing.T) 
 			ctx := testAuthorActivityContext()
 			capability, _, startup := admitRegistrationTestGeneration(t, ctx, selected, "channel-effect-reconciliation")
 			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+			ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			for _, authorityKind := range []runtimeeffects.AuthorityKind{
 				runtimeeffects.AuthorityServeRegistration,
@@ -52,9 +56,9 @@ func TestChannelOnboardingEffectReconciliationSelectedStoreParity(t *testing.T) 
 					runtimeeffects.StateSettled,
 				} {
 					t.Run(string(authorityKind)+"/"+string(state), func(t *testing.T) {
-						handle, onboardingID, coordinate := beginSelectedChannelEffect(t, selected, startup, authorityKind, state)
+						handle, onboardingID, coordinate := beginSelectedChannelEffect(t, ctx, selected, startup, authorityKind, state)
 						outcomes, err := selected.ReconcileChannelOnboardingEffectOutcomes(
-							testAuthorActivityContextForBundle(coordinate.BundleHash), onboardingID, time.Now().UTC(),
+							runtimestartupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(coordinate.BundleHash), ctx), onboardingID, time.Now().UTC(),
 						)
 						if err != nil {
 							t.Fatal(err)
@@ -85,7 +89,7 @@ func TestChannelOnboardingEffectReconciliationSelectedStoreParity(t *testing.T) 
 							t.Fatalf("effect lost exact onboarding coordinate: outcome=%#v coordinate=%#v", outcome, coordinate)
 						}
 						replayed, err := selected.ReconcileChannelOnboardingEffectOutcomes(
-							testAuthorActivityContextForBundle(coordinate.BundleHash), onboardingID, time.Now().UTC().Add(time.Second),
+							runtimestartupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(coordinate.BundleHash), ctx), onboardingID, time.Now().UTC().Add(time.Second),
 						)
 						if err != nil || len(replayed) != 1 || replayed[0].State != want || replayed[0].AttemptState != want {
 							t.Fatalf("idempotent reconciliation=%#v err=%v", replayed, err)
@@ -99,6 +103,7 @@ func TestChannelOnboardingEffectReconciliationSelectedStoreParity(t *testing.T) 
 
 func beginSelectedChannelEffect(
 	t *testing.T,
+	original context.Context,
 	selected channelOnboardingEffectSelectedStore,
 	startup runtimestartupownership.GrantEvidence,
 	authorityKind runtimeeffects.AuthorityKind,
@@ -152,6 +157,7 @@ func beginSelectedChannelEffect(
 	if !authority.Valid() {
 		t.Fatalf("invalid %s authority: %#v", authorityKind, authority)
 	}
+	ctx = runtimestartupownership.CarryMutationAuthority(ctx, original)
 	var handle *runtimeeffects.Handle
 	var err error
 	if authorityKind == runtimeeffects.AuthorityServeRegistration {

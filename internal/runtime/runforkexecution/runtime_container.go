@@ -76,6 +76,7 @@ type SelectedContractForkLocalRuntimeContainer struct {
 }
 
 type selectedContractForkLocalRuntimeContainer struct {
+	preparation       runfork.SelectedForkPreparationBinding
 	proof             SelectedContractForkLocalRuntimeContainer
 	req               publishSelectedContractForkEventsRequest
 	ports             *selectedContractExecutionPorts
@@ -246,7 +247,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	proof.ContainerPlanFingerprint = issued.ContainerPlanFingerprint
 	proof.ActorCensusFingerprint = issued.ActorCensusFingerprint
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
-	container := selectedContractForkLocalRuntimeContainer{proof: proof, req: req, ports: ports, diagnostics: &selectedForkCommitDiagnostics{}}
+	container := selectedContractForkLocalRuntimeContainer{preparation: preparation, proof: proof, req: req, ports: ports, diagnostics: &selectedForkCommitDiagnostics{}}
 	if err != nil {
 		return container, err
 	}
@@ -312,7 +313,19 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	}
 	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
 	controller := runtimeeffects.NewController(c.ports.effects).WithExecutionPosture(c.req.AgentRuntime.Options.ExecutionPosture)
-	sourceEvents, err := c.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents, req.OriginalLoopCarriage)
+	if req.SourcePlan.ForkPoint.Kind == runfork.RunForkPointEvent {
+		if err := c.ports.replay.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.SourcePlan.ForkPoint.EventID); err != nil {
+			return err
+		}
+	}
+	process := req.Prepared.processOwner
+	var sourceResult startupownership.PreparedForkSourceEventsResult
+	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, &sourceResult)
+	if err != nil {
+		return err
+	}
+	err = process.RunPreparedOperation(ctx, sourceOperation)
+	sourceEvents, err := sourceResult.Outcome(err)
 	if err != nil {
 		sourceRunID, forkRunID, committed, ok := isolatedSelectedForkSourceEventsCommit(err)
 		if !ok {
@@ -358,6 +371,7 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	}
 	payloadAdmitter := runtimepkg.NewRuntimePayloadAdmitter(nil, req.LoadedSource.Source, req.LoadedSource.SourceArtifactFact)
 	bus, err := runtimebus.NewEventBusWithOptions(c.ports.events, runtimebus.EventBusOptions{
+		CarryMutationContext:        startupownership.CarryMutationAuthority,
 		ExecutionPosture:            req.AgentRuntime.Options.ExecutionPosture,
 		WorkOwner:                   forkOwner,
 		RuntimeInstanceID:           c.runtimeInstanceID,
@@ -424,7 +438,7 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 		cancelRuntime(err)
 		return errors.Join(err, lease.Done())
 	}
-	runCtx = managedexecution.WithAdmission(runCtx, admission)
+	runCtx = managedexecution.WithAdmission(agentRuntime.operationContext, admission)
 	if agentRuntime == nil || agentRuntime.manager == nil || agentRuntime.generationGrant == nil {
 		cancelRuntime(errors.New("selected lifecycle manager missing"))
 		return errors.Join(errors.New("selected-contract fork-local lifecycle manager was not materialized"), lease.Done())
@@ -645,6 +659,14 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if err := continuations.Start(runCtx); err != nil {
 		return fmt.Errorf("start selected delivery continuations: %w", err)
 	}
+	agentRuntimeStopped := false
+	if agentRuntime != nil {
+		defer func() {
+			if !agentRuntimeStopped {
+				finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
+			}
+		}()
+	}
 	defer func() {
 		finalErr = errors.Join(finalErr, continuations.Retire(context.WithoutCancel(runCtx)))
 	}()
@@ -709,7 +731,12 @@ func (c selectedContractForkLocalRuntimeContainer) reconcileRecoveredDeliveries(
 	if err := c.attachment.runtime.bus.RecoverSelectedRunPipelineToExhaustion(ctx, c.req.ForkRunID); err != nil {
 		return fmt.Errorf("recover selected child event pipeline: %w", err)
 	}
-	if err := c.ports.fork.ReconcileSelectedSuccessorDeliveryAuthority(ctx, c.req.Prepared.recoveryFromExecutionID, c.attachment.deliveryAuthority); err != nil {
+	process := c.req.Prepared.processOwner
+	operation, err := startupownership.PreparedForkDeliveryReconcileOperation(ctx, process, c.ports.fork, c.preparation, c.authority, c.req.Prepared.recoveryFromExecutionID, c.attachment.deliveryAuthority)
+	if err != nil {
+		return err
+	}
+	if err := process.RunPreparedOperation(ctx, operation); err != nil {
 		return fmt.Errorf("reconcile recovered selected child deliveries: %w", err)
 	}
 	if err := continuations.Synchronize(ctx); err != nil {
@@ -1109,7 +1136,20 @@ func projectSelectedContractSourceEvents(
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Quiesce(ctx context.Context) error {
-	return c.ports.runtimeExecution.QuiesceRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority)
+	return c.settle(context.WithoutCancel(ctx), startupownership.PreparedForkQuiesce, nil, 0)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) activate(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (result runfork.RunForkActivation, err error) {
+	if c.req.Prepared == nil || c.req.Prepared.processOwner == nil {
+		return result, errors.New("selected activation requires its retained preparation process")
+	}
+	process := c.req.Prepared.processOwner
+	operation, err := startupownership.PreparedForkActivateOperation(ctx, process, c.ports.fork, c.preparation, c.authority, request, &result)
+	if err != nil {
+		return result, err
+	}
+	err = process.RunPreparedOperation(ctx, operation)
+	return result, err
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) error {
@@ -1121,7 +1161,7 @@ func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) er
 }
 
 func (c selectedContractForkLocalRuntimeContainer) closeAcknowledged(ctx context.Context) (bool, error) {
-	acknowledged, err := c.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority.ID)
+	acknowledged, err := c.settleAcknowledged(context.WithoutCancel(ctx), startupownership.PreparedForkClose, nil, 0)
 	if !acknowledged {
 		return false, errors.Join(errors.New("selected execution close remains unacknowledged"), err)
 	}
@@ -1140,7 +1180,7 @@ func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cau
 	if err != nil {
 		return false, err
 	}
-	if err := c.ports.runtimeExecution.FailRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw); err != nil {
+	if err := c.settle(context.WithoutCancel(ctx), startupownership.PreparedForkFail, raw, 0); err != nil {
 		return false, err
 	}
 	return c.closeAcknowledged(ctx)
@@ -1152,7 +1192,7 @@ func (c selectedContractForkLocalRuntimeContainer) FailActivated(ctx context.Con
 	if err != nil {
 		return false, err
 	}
-	return c.ports.runtimeExecution.FailActivatedRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw)
+	return c.settleAcknowledged(context.WithoutCancel(ctx), startupownership.PreparedForkFailActivated, raw, 0)
 }
 
 func (c selectedContractForkLocalRuntimeContainer) failureDispositionContext(ctx context.Context) context.Context {
@@ -1163,6 +1203,25 @@ func (c selectedContractForkLocalRuntimeContainer) failureDispositionContext(ctx
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(c.runtimeInstanceID, fact.BundleHash()))
 	ctx = selectedContractRuntimeContainerLineageContext(ctx, c.proof)
 	return runtimeeffects.WithAuthority(ctx, c.authority)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) settle(ctx context.Context, kind startupownership.PreparedForkSettlementKind, failure json.RawMessage, lease time.Duration) error {
+	_, err := c.settleAcknowledged(ctx, kind, failure, lease)
+	return err
+}
+
+func (c selectedContractForkLocalRuntimeContainer) settleAcknowledged(ctx context.Context, kind startupownership.PreparedForkSettlementKind, failure json.RawMessage, lease time.Duration) (bool, error) {
+	if c.req.Prepared == nil || c.req.Prepared.processOwner == nil {
+		return false, errors.New("selected settlement requires its retained preparation process")
+	}
+	process := c.req.Prepared.processOwner
+	var acknowledged bool
+	operation, err := startupownership.PreparedForkSettlementOperation(ctx, process, c.ports.runtimeExecution, c.preparation, c.authority, kind, failure, lease, &acknowledged)
+	if err != nil {
+		return false, err
+	}
+	err = process.RunPreparedOperation(ctx, operation)
+	return acknowledged, err
 }
 
 type selectedContractRuntimeContainerLoggerHook struct {

@@ -22,6 +22,7 @@ func TestDecisionCompletionPreservesCommittedHandoffOutcome(t *testing.T) {
 			t.Run(backend+"/"+kind, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cards)
 				now := time.Now().UTC()
 				var card decisioncard.Card
 				var err error

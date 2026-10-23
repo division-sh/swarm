@@ -35,6 +35,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -50,6 +52,10 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixture) {
 	selected := fixture.owner.ports.fork
 	ctx := runForkTestContext(t)
+	ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, fixture.owner.ports.contexts.capability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 
 	var connectorCalls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -135,9 +141,9 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID,
 				Generation: sourceGeneration, LoopStage: "review",
 			}
-			sourceEvent := fixture.seedSource(t, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource, requestPayload)
-			seedSelectedContractActivityLoop(t, fixture, loaded, sourceEvent, entityID, activation, at)
-			fixture.capture(t, sourceRunID)
+			sourceEvent := fixture.seedSource(t, ctx, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource, requestPayload)
+			seedSelectedContractActivityLoop(t, ctx, fixture, loaded, sourceEvent, entityID, activation, at)
+			fixture.capture(t, ctx, sourceRunID)
 			if tt.sourceAttemptStatus != "" {
 				seedSelectedContractActivityAttempt(t, selected, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
 			}
@@ -328,10 +334,10 @@ func newActivityForkFixture(t *testing.T, backend string) activityForkFixture {
 	}
 }
 
-func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time, route events.DeliveryRoute, source events.RoutingSource, request selectedContractActivityRequestPayload) events.Event {
+func (f activityForkFixture) seedSource(t *testing.T, ctx context.Context, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time, route events.DeliveryRoute, source events.RoutingSource, request selectedContractActivityRequestPayload) events.Event {
 	t.Helper()
 	envelope := events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), source.Route())
-	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
 	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), storetest.RunFixture{
@@ -388,9 +394,13 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 	return event
 }
 
-func (f activityForkFixture) capture(t *testing.T, runID string) {
+func (f activityForkFixture) capture(t *testing.T, ctx context.Context, runID string) {
 	t.Helper()
-	captureSelectedExecutionSourceRevision(t, f.owner.ports.fork, runID)
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, f.owner.ports.contexts.capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureSelectedExecutionSourceRevision(t, ctx, f.owner.ports.fork, runID)
 }
 
 func waitSelectedContractActivityInputAccounting(t *testing.T, ctx context.Context, fixture activityForkFixture, result SelectedContractExecutionResult, sourceRequestID string) string {
@@ -602,14 +612,14 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 	return semanticview.Wrap(bundle)
 }
 
-func seedSelectedContractActivityLoop(t *testing.T, fixture activityForkFixture, loaded LoadedSelectedContractSource, sourceEvent events.Event, entityID string, activation loopruntime.Activation, at time.Time) {
+func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture activityForkFixture, loaded LoadedSelectedContractSource, sourceEvent events.Event, entityID string, activation loopruntime.Activation, at time.Time) {
 	t.Helper()
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatalf("store source loop activation: %v", err)
 	}
 	runID := sourceEvent.RunID()
-	ctx := effects.WithExecutionMode(runtimecorrelation.WithInboundEvent(runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact), runID), sourceEvent), executionmode.Live)
+	ctx = effects.WithExecutionMode(runtimecorrelation.WithInboundEvent(runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), runID), sourceEvent), executionmode.Live)
 	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute("flow_a", "flow_a", "flow_a"))
 	if err != nil {
 		t.Fatal(err)

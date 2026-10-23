@@ -85,6 +85,21 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 
 			process := worklifetime.NewProcess()
 			runtimeInstanceID := uuid.NewString()
+			capability, err := selected.StartupOwnership().AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
+				OwnerID: "dynamic-topology-preflight-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := capability.Release(context.Background()); err != nil {
+					t.Errorf("release preflight process possession: %v", err)
+				}
+			})
+			original, err := runtimestartupownership.WithProcessMutationAuthority(context.Background(), capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			providerRegistry := testProviderTriggerCatalog(t)
 			runtimes := make([]*runtimepkg.Runtime, 0, len(facts))
 			t.Cleanup(func() {
@@ -121,10 +136,10 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 				if foreign.sourceTransition && index == 1 {
 					captured = 0
 				}
-				seedServeDynamicTopologyReadiness(t, selected, runtimes[captured], loaded[captured].source,
+				seedServeDynamicTopologyReadiness(t, original, selected, runtimes[captured], loaded[captured].source,
 					facts[captured], runIDs[index], paths[index])
 				if captured != index {
-					ctx := serveDynamicTopologySetupContext(facts[index], runIDs[index], runtimeInstanceID)
+					ctx := serveDynamicTopologySetupContext(original, facts[index], runIDs[index], runtimeInstanceID)
 					disposition, err := storetest.ReviseRunSource(ctx,
 						selected.RuntimeDeps().EventBusDurable.RunLifecycle.(storetest.RunFixtureStore),
 						runlifecycle.SourceRevisionRequest{RunID: runIDs[index], Source: facts[index]})
@@ -157,17 +172,6 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 					t.Fatalf("corrupt foreign readiness: %v", err)
 				}
 			}
-			capability, err := selected.StartupOwnership().AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
-				OwnerID: "dynamic-topology-preflight-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := capability.Release(context.Background()); err != nil {
-					t.Errorf("release preflight process possession: %v", err)
-				}
-			})
 			var coordinates []runtimeagenttopology.SourceCoordinate
 			var desired []runtimeagenttopology.DesiredAgent
 			for index, rt := range runtimes {
@@ -288,14 +292,14 @@ func loadServeDynamicTopologySource(t *testing.T, selected *selectedStoreOwner, 
 	return loaded
 }
 
-func serveDynamicTopologySetupContext(fact runtimecorrelation.SourceArtifactFact, runID, runtimeID string) context.Context {
-	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), fact)
+func serveDynamicTopologySetupContext(ctx context.Context, fact runtimecorrelation.SourceArtifactFact, runID, runtimeID string) context.Context {
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, fact.BundleHash()))
 	return effects.WithExecutionMode(ctx, executionmode.Live)
 }
 
-func seedServeDynamicTopologyReadiness(t *testing.T, selected *selectedStoreOwner, rt *runtimepkg.Runtime,
+func seedServeDynamicTopologyReadiness(t *testing.T, original context.Context, selected *selectedStoreOwner, rt *runtimepkg.Runtime,
 	source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runID, instancePath string,
 ) {
 	t.Helper()
@@ -303,7 +307,7 @@ func seedServeDynamicTopologyReadiness(t *testing.T, selected *selectedStoreOwne
 	if !found || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != fact.BundleHash() {
 		t.Fatal("startup construction requires its exact compiled and stored artifact")
 	}
-	ctx := worklifetime.WithOccurrence(serveDynamicTopologySetupContext(fact, runID, rt.Options.RuntimeInstanceID), rt.WorkOccurrence())
+	ctx := worklifetime.WithOccurrence(serveDynamicTopologySetupContext(original, fact, runID, rt.Options.RuntimeInstanceID), rt.WorkOccurrence())
 	storetest.RequireRun(t, ctx, selected.RuntimeDeps().EventBusDurable.RunLifecycle.(storetest.RunFixtureStore),
 		storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")

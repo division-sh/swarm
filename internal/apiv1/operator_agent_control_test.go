@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -248,6 +249,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestSourceArtifactFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
@@ -258,8 +260,12 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
-		BaseContext:      testAuthorActivityContext(context.Background()),
-		WorkOwner:        workOwner,
+		BaseContext:      ctx,
+		MutationContext: func(work context.Context) (context.Context, error) {
+			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
+		},
+		CarryMutationContext: startupownership.CarryMutationAuthority,
+		WorkOwner:            workOwner,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleState:      pg,
 			LifecycleOutcome:    pg,
@@ -273,11 +279,11 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 			t.Errorf("shutdown directive integration manager: %v", err)
 		}
 	})
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 	})
-	materializeAPITestAgent(t, testAuthorActivityContext(context.Background()), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
+	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -319,6 +325,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bootFact := authorActivityTestSourceArtifactFact
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContextForSource(context.Background(), bootFact), pg)
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bootFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		SourceArtifactFact: bootFact,
@@ -332,8 +339,12 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
-		BaseContext:      testAuthorActivityContextForSource(context.Background(), bootFact),
-		WorkOwner:        workOwner,
+		BaseContext:      ctx,
+		MutationContext: func(work context.Context) (context.Context, error) {
+			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
+		},
+		CarryMutationContext: startupownership.CarryMutationAuthority,
+		WorkOwner:            workOwner,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleState:      pg,
 			LifecycleOutcome:    pg,
@@ -347,11 +358,11 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 			t.Errorf("shutdown canonical source manager: %v", err)
 		}
 	})
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 		BundleHash: bootFact.BundleHash(),
 	})
-	materializeAPITestAgent(t, testAuthorActivityContextForSource(context.Background(), bootFact), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
+	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -373,6 +384,16 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 }
 
 func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
+	t.Helper()
+	ctx = originalAPIFixtureContext(t, ctx, selected)
+	admitted := admitAPITestAgent(t, ctx, selected, cfg)
+	ctx = runtimecorrelation.WithRunID(ctx, admitted.Config.Identity.RunID)
+	if err := manager.MaterializeAdmittedAgentForExecution(ctx, admitted); err != nil {
+		t.Fatalf("materialize API test agent: %v", err)
+	}
+}
+
+func admitAPITestAgent(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig) runtimemanager.PersistedAgent {
 	t.Helper()
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if runID == "" {
@@ -411,9 +432,7 @@ func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storete
 	}
 	// Prompt is process-local; keep the selected execution descriptor from storage.
 	admitted.Config.Prompt = cfg.Prompt
-	if err := manager.MaterializeAdmittedAgentForExecution(ctx, *admitted); err != nil {
-		t.Fatalf("materialize API test agent: %v", err)
-	}
+	return *admitted
 }
 
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {

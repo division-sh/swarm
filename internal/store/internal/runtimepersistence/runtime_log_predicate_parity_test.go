@@ -31,6 +31,7 @@ func TestRuntimeLogPredicateBoundariesBothStores(t *testing.T) {
 			} else {
 				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
 			}
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			artifactA, artifactB := storeTestSourceArtifact("predicate-a"), storeTestSourceArtifact("predicate-b")
 			runA, runB, entity := uuid.NewString(), uuid.NewString(), uuid.NewString()

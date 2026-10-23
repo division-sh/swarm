@@ -26,6 +26,7 @@ import (
 )
 
 type GatewayHooks struct {
+	CarryMutationContext           func(context.Context, context.Context) context.Context
 	RuntimeIngressRequestPaused    func(context.Context) (bool, error)
 	RuntimeShutdownAdmissionClosed func() bool
 	WithActor                      func(context.Context, models.AgentConfig) context.Context
@@ -995,6 +996,9 @@ func isActivationProbeContext(ctx context.Context) bool {
 }
 
 func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
+	if g.hooks.CarryMutationContext != nil {
+		ctx = g.hooks.CarryMutationContext(ctx, turn.original)
+	}
 	if turn.HasAuthorActivityScope {
 		ctx = runtimeauthoractivity.WithScope(ctx, turn.AuthorActivityScope)
 	}

@@ -39,10 +39,12 @@ func TestScenarioMailboxActualServerContinuationBothStores(t *testing.T) {
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(instance, fact.BundleHash()))
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStore(t)
+				ctx = cliFixtureProcessContext(t, ctx, s)
 				storetest.RequireRun(t, ctx, s, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 				selected = s
 			} else {
 				s := storetest.StartPostgresRuntimeStore(t)
+				ctx = cliFixtureProcessContext(t, ctx, s)
 				storetest.RequireRun(t, ctx, s, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 				selected = s
 			}

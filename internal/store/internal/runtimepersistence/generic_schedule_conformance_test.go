@@ -20,6 +20,7 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -90,6 +91,7 @@ func TestPostgresGenericScheduleEmptyTerminalPreparationTransfersExactClaim(t *t
 			t.Cleanup(func() { _ = selected.ReleaseGenericScheduleClaims(context.Background()) })
 			runID := uuid.NewString()
 			ctx := selectedScheduleTestContext(t, runID)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 
 			scheduler := &selectedStoreLifecycleScheduler{}
@@ -162,6 +164,7 @@ func TestPostgresGenericScheduleOccurrenceUsesDatabaseClockAcrossPrepareAndCommi
 	selected := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
 	ctx := selectedScheduleTestContext(t, runID)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	selected.genericSchedulePostgresOwner.SetNowFnForTest(func() time.Time {
 		return time.Now().UTC().Add(24 * time.Hour)
@@ -609,7 +612,7 @@ func transitionGenericScheduleRun(t *testing.T, selected any, runID string, stop
 		t.Fatalf("generic schedule run control owner = %T, want selected-store owner", selected)
 	}
 	request := runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "generic schedule conformance", ControlledBy: "test", Now: time.Now().UTC()}
-	ctx := authorGenericScheduleConsumerContext(runID)
+	ctx := originalStoreFixtureContext(t, authorGenericScheduleConsumerContext(runID), selected)
 	var err error
 	var outcome runtimeruncontrol.StoreTransition
 	if stop {
@@ -680,7 +683,7 @@ func TestGenericScheduleRunStateAndGlobalAdmissionOnBothStores(t *testing.T) {
 				ExecutionMode: executionmode.Live,
 				Due:           runtimegenericschedule.EveryDue(time.Hour), TaskID: "global-only",
 			}
-			if admitted, err := selected.AdmitGenericScheduleOutcome(context.Background(), global); err != nil || !admitted.Acknowledged || admitted.Result.Activation.Command.RunID != "" {
+			if admitted, err := selected.AdmitGenericScheduleOutcome(startupownership.CarryMutationAuthority(context.Background(), ctx), global); err != nil || !admitted.Acknowledged || admitted.Result.Activation.Command.RunID != "" {
 				t.Fatalf("global admission = %#v, %v", admitted, err)
 			}
 		})

@@ -117,6 +117,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, source)
 			const periodID = "2026-Q3"
@@ -284,6 +285,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			backend, _ := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, source)
 			constructionCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
@@ -438,6 +440,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 				FlowID: "portfolio", FlowInstance: "portfolio/selected-period", EntityID: selectedOwner,
 			}.Normalized()
 			seedRuntime := newFanInBarrierRuntime(t, backend, source)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.bus, seedRuntime.manager, source, selectedOwner)
 			requireSelectedRunTargetOwner(t, ctx, backend, source, runID, "portfolio/selected-period", selectedOwner)
 
@@ -783,6 +786,7 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 	var (
 		coordinator *runtimepipeline.PipelineCoordinator
 		manager     *runtimemanager.AgentManager
+		grant       runtimestartupownership.LiveGenerationGrant
 	)
 	workOwner := conformanceTestRuntimeOccurrence(t, fact.BundleHash())
 	var joinEvents []string
@@ -790,9 +794,13 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 		joinEvents = []string{"platform.join_complete", "platform.join_timeout"}
 	}
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
-		ContractBundle:     source,
-		SourceArtifactFact: fact,
-		WorkOwner:          workOwner,
+		MutationContext: func(ctx context.Context) (context.Context, error) {
+			return runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+		},
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		ContractBundle:       source,
+		SourceArtifactFact:   fact,
+		WorkOwner:            workOwner,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -858,15 +866,16 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 
 	lifecycle := &notifyAllChildrenLifecycleOwner{}
 	manager = runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:   executionposture.Live,
-		BaseContext:        baseCtx,
-		SourceArtifactFact: fact,
-		SemanticSource:     source,
-		WorkflowInstances:  coordinator,
-		WorkOwner:          workOwner,
-		DeliveryStore:      backend,
-		LifecycleStore:     lifecycle,
-		PersistenceRoles:   conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:     executionposture.Live,
+		BaseContext:          baseCtx,
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		SourceArtifactFact:   fact,
+		SemanticSource:       source,
+		WorkflowInstances:    coordinator,
+		WorkOwner:            workOwner,
+		DeliveryStore:        backend,
+		LifecycleStore:       lifecycle,
+		PersistenceRoles:     conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend)
 	ctx := runtimecorrelation.WithRuntimeInstanceID(baseCtx, authorActivityTestRuntimeInstanceID)
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -891,7 +900,7 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 	} else if current.Revision != plan.Revision {
 		t.Fatalf("fan-in conformance source set changed: current=%s want=%s", current.Revision, plan.Revision)
 	}
-	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+	grant, err = capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 		BundleHash: coordinate.BundleHash, RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		RuntimeGeneration: runtimeGeneration, SourceSetRevision: plan.Revision,
 	})
@@ -933,6 +942,7 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 
 func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, source semanticview.Source, runID string) {
 	t.Helper()
+	ctx = originalConformanceFixtureContext(t, ctx, backend)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		t.Fatal("fan-in run requires an admitted source bundle")

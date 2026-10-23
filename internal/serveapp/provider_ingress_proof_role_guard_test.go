@@ -46,7 +46,6 @@ func TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProo
 			"TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies",
 		},
 		"internal/serveapp/process_inbound_handler_test.go": {
-			"TestRuntimeProcessInboundHandlerSelectsExactLoadedContext",
 			"TestRuntimeProcessInboundHandlerTeachesUnknownStandingAlias",
 		},
 		"internal/runtime/standing_targets_test.go": {

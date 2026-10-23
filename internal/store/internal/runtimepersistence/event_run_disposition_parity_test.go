@@ -85,7 +85,7 @@ func TestExistingRunEventClassesNeverCreateOrReopenRunsParity(t *testing.T) {
 			t.Run(backend.name+"/"+test.name, func(t *testing.T) {
 				t.Run("missing_run", func(t *testing.T) {
 					fixture := backend.open(t)
-					ctx := testAuthorActivityContext()
+					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 					in := newRunDispositionFixtureInput()
 					before := eventMutationSurfaceCounts(t, fixture.db, ctx)
 					_, _, err := appendAdmittedBoundaryFixture(ctx, fixture.store, test.make(in))
@@ -97,7 +97,7 @@ func TestExistingRunEventClassesNeverCreateOrReopenRunsParity(t *testing.T) {
 
 				t.Run("terminal_run", func(t *testing.T) {
 					fixture := backend.open(t)
-					ctx := testAuthorActivityContext()
+					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 					in := newRunDispositionFixtureInput()
 					seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
 					if test.needsSameRunParent {
@@ -115,7 +115,7 @@ func TestExistingRunEventClassesNeverCreateOrReopenRunsParity(t *testing.T) {
 				if test.exactDuplicate {
 					t.Run("exact_duplicate_after_terminal", func(t *testing.T) {
 						fixture := backend.open(t)
-						ctx := testAuthorActivityContext()
+						ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 						in := newRunDispositionFixtureInput()
 						seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
 						if test.needsSameRunParent {
@@ -171,7 +171,7 @@ func TestOnlyRootAndStandaloneAdmissionCreateRunsParity(t *testing.T) {
 				test := test
 				t.Run(test.name, func(t *testing.T) {
 					fixture := backend.open(t)
-					ctx := testAuthorActivityContext()
+					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 					before := eventMutationSurfaceCounts(t, fixture.db, ctx)
 					admitted, outcome, err := appendAdmittedBoundaryFixture(ctx, fixture.store, test.make(uuid.NewString(), time.Date(2026, 7, 19, 18, 30, 0, 0, time.UTC)))
 					if err != nil || outcome != runtimebus.EventAppendInserted {
@@ -201,7 +201,7 @@ func TestRunCreatingRootRejectsTerminalRunParity(t *testing.T) {
 		backend := backend
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			in := newRunDispositionFixtureInput()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
 			setRunDispositionFixtureStatus(t, fixture, ctx, in.RunID, "completed")
@@ -227,7 +227,7 @@ func TestDirectiveOperationRequiresExistingExactRunAuthorityParity(t *testing.T)
 		backend := backend
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			requireDefaultSourceArtifactForTest(t, ctx, fixture.store)
 			store := fixture.store.(runtimeagentcontrol.DirectiveOperationStore)
 			req := newRunDispositionDirectiveRequest(t)
@@ -301,7 +301,7 @@ func TestDirectiveOperationResolutionMustMatchAdmittedRunAuthorityParity(t *test
 			backend, test := backend, test
 			t.Run(backend.name+"/"+test.name, func(t *testing.T) {
 				fixture := backend.open(t)
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				req := newRunDispositionDirectiveRequest(t)
 				test.mutate(&req)
 				before := eventMutationSurfaceCounts(t, fixture.db, ctx)

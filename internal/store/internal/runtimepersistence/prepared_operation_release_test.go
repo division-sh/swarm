@@ -79,6 +79,7 @@ func TestPreparedProcessReleaseFencesMaterializationBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx, healthy := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			refusedCtx, refused := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
 			store := fixture.store.(forkWorkflowOwnershipStore)
 			materialized, err := store.MaterializeRunForkForSelectedContractExecution(ctx, healthy)

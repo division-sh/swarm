@@ -15,9 +15,11 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/construction"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -26,6 +28,14 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 		t.Run(backend, func(t *testing.T) {
 			ctx := context.Background()
 			writer, location, db := releaseInspectionWriter(t, backend)
+			process, err := agentfixture.ProcessCapability(t, ctx, writer.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
 			identity := runtimeflowidentity.RunScopedFlowInstance{
 				RunID: "b3c04b72-07f1-4097-a1f0-779955000001",
 				Route: runtimeflowidentity.DeriveRoute("inspect", "one"),

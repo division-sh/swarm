@@ -31,6 +31,9 @@ func TestFanOutServingM06GenerationRetirementOnBothBackends(t *testing.T) {
 					trigger := f.submit(t, 0, runID, "retired-caller")
 					turn := waitServingMatrixHeld(t, retiring)
 					waitServingMatrixTriggerReceipt(t, f.db, trigger)
+					if err := f.runtimes[0].manager.Shutdown(); err != nil {
+						t.Fatalf("settle fixture manager before deliberate grant retirement: %v", err)
+					}
 					before := readServingLifetimeState(t, f.db, runID)
 					assertServingLifetimeUnissued(t, before)
 					if stage.phase == servingMatrixCommit && (len(turn.command.Outcomes) != 1 || turn.command.Outcomes[0].Publication == nil) {
@@ -111,6 +114,9 @@ func TestFanOutServingM07ActualProcessLossJoinsHeldTurnOnBothBackends(t *testing
 			waitServingMatrixTriggerReceipt(t, f.db, trigger)
 			if len(turn.command.Outcomes) != 1 || turn.command.Outcomes[0].Publication == nil {
 				t.Fatal("process-loss gate lacks a real publication command")
+			}
+			if err := f.runtimes[0].manager.Shutdown(); err != nil {
+				t.Fatalf("settle fixture manager before deliberate process loss: %v", err)
 			}
 			before := readServingLifetimeState(t, f.db, runID)
 			assertServingLifetimeUnissued(t, before)

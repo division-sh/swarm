@@ -18,6 +18,7 @@ func TestNodeDeliveryTargetEncodingPreservesExactRecipientAndOriginalReadBothSto
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "node.target.encoding", "runtime", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: uuid.NewString()}.Normalized()
 			routes := []events.DeliveryRoute{

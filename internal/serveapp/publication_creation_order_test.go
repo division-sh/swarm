@@ -55,13 +55,14 @@ func TestPublicPublicationCreatingTurnOrderBothStores(t *testing.T) {
 				}
 			}
 			process, rt := start()
+			rt.Runtime = servedTestProcessRuntime(t, process)
 			t.Cleanup(func() {
 				unblock()
 				if code := process.stop(); code != 0 {
 					t.Errorf("held H1 diagnostic shutdown=%d", code)
 				}
 			})
-			ctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
+			ctx, cancel := context.WithTimeout(servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), servedEventPublishLifecycleProbeWaitTimeout)
 			defer cancel()
 			seed := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "hub.start",

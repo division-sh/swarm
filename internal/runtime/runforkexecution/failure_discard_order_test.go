@@ -3,12 +3,41 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 type failureDiscardProbe struct {
 	SelectedContractForkLifecycle
 	discard func(context.Context, string) error
+}
+
+func failureDiscardPreparation(t *testing.T, owner SelectedContractExecutionOwner, ctx context.Context) *PreparedSelectedFork {
+	t.Helper()
+	selected := storetest.StartSQLiteRuntimeStore(t)
+	native := selectedContractTestProcessCapability(t, runForkTestContext(t), selected)
+	evidence, err := native.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := contextLifetimePreparation(t, owner, ctx)
+	prepared.processOwner = native
+	prepared.preparationID, prepared.sourceRunID = uuid.NewString(), uuid.NewString()
+	prepared.processGeneration = evidence.AuthorityGeneration
+	prepared.declarationRevision = "sha256:" + strings.Repeat("1", 64)
+	prepared.forkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: uuid.NewString()}
+	prepared.actors = []runfork.SelectedForkPreparedActor{}
+	prepared.coordinates = managedcapabilities.SelectedForkPreparationCoordinates{
+		ProcessAuthorityID: evidence.AuthorityID, ProcessOwnerID: evidence.OwnerID, ProcessBootID: evidence.BootID,
+		BundleHash: runForkTestBundleHash, SourceFingerprint: strings.Repeat("1", 64), AdmittedPlanFingerprint: strings.Repeat("2", 64),
+		ConfigurationFingerprint: strings.Repeat("3", 64), CatalogFingerprint: strings.Repeat("4", 64),
+	}
+	return prepared
 }
 
 func (p failureDiscardProbe) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, runID string) error {
@@ -19,7 +48,7 @@ func TestFailedForkDiscardRetainsPreparationUntilSettlement(t *testing.T) {
 	for _, phase := range []string{"success", "retirement_fail_once", "retirement_persistent", "discard_fail_once", "discard_persistent"} {
 		t.Run(phase, func(t *testing.T) {
 			owner, process, ctx := contextLifetimeOwner(t)
-			prepared := contextLifetimePreparation(t, owner, ctx)
+			prepared := failureDiscardPreparation(t, owner, ctx)
 			bindContextLifetimePreparation(t, owner, prepared)
 			retirementCalls, discardCalls := 0, 0
 			repaired, retired := false, false
@@ -80,7 +109,7 @@ func TestFailedForkDiscardRetainsPreparationUntilSettlement(t *testing.T) {
 
 func TestFailedForkDiscardPreventsProcessRelease(t *testing.T) {
 	owner, process, ctx := contextLifetimeOwner(t)
-	prepared := contextLifetimePreparation(t, owner, ctx)
+	prepared := failureDiscardPreparation(t, owner, ctx)
 	bindContextLifetimePreparation(t, owner, prepared)
 	entered, release := make(chan struct{}), make(chan struct{})
 	store := failureDiscardProbe{discard: func(context.Context, string) error {

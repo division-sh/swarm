@@ -273,6 +273,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 			t.Run(tc.name+"/"+routeShape.name, func(t *testing.T) {
 				ctx := testAuthorActivityContext(context.Background())
 				f := tc.open(t, ctx)
+				ctx = originalAPIFixtureContext(t, ctx, f.store)
 				runID := uuid.NewString()
 				const agentID = "complete-replay-agent"
 				agentIdentity := runtimebustest.IdentityForRun(t, runID, agentID, "target-flow/instance")
@@ -497,6 +498,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			f := tc.open(t, ctx)
+			ctx = originalAPIFixtureContext(t, ctx, f.store)
 			runID := uuid.NewString()
 			const agentID = "route-sibling-replay-agent"
 			identity := runtimebustest.IdentityForRun(t, runID, agentID, "target-flow/instance")
@@ -1243,6 +1245,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		bus := eventReplayTestBus(t, pg)
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
+		ctx = originalAPIFixtureContext(t, ctx, pg)
 		storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: runStartTestBundleHash})
 		nodeOnlyEvent := eventtest.PersistedProjection(
 			eventID,
@@ -1619,6 +1622,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 
 func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status) operatorread.OperatorEventFull {
 	t.Helper()
+	ctx = originalAPIFixtureContext(t, ctx, pg)
 	eventID := uuid.NewString()
 	runID := operatorReplayRunID
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})

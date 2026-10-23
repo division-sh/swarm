@@ -451,7 +451,9 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				if err := f.topology.capability.Release(context.Background()); err != nil {
 					t.Fatal(err)
 				}
+				f.ctx = testAuthorActivityContextForBundle(context.Background(), f.runtime.sourceArtifactFact)
 				f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
+				f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
 				f.boot(t)
 				f.runtime.fanOutServing.Close()
 				restarted, recovered := deploymentForkOwner(t, f)

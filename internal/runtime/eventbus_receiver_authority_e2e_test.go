@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -67,6 +68,11 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), runID)
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+			ctx = originalRuntimeFixtureContext(t, ctx, selected)
+			original, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 				BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact,
@@ -113,7 +119,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewRuntime: %v", err)
 			}
-			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt)
+			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt, original)
 			t.Cleanup(func() {
 				if err := closeExternalRuntimeTestGeneration(rt, processOwner, capability); err != nil {
 					t.Errorf("close receiver authority generation: %v", err)

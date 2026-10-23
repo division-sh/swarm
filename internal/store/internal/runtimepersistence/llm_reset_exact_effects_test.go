@@ -161,6 +161,7 @@ func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, s exactFactStore) {
 		f := newLLMResetFixture(t, s)
 		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		ctx = originalStoreFixtureContext(t, ctx, s.selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(f.runs[0], "reset-active", "global"))
 		lease, err := s.selected.(sessions.Registry).Acquire(ctx, identity, "reset-worker")
 		if err != nil || lease == nil || lease.GrantID == "" {
@@ -185,7 +186,7 @@ func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 		var submitted []runlifecycle.Candidate
 		registerLLMResetSink(t, s, f.runs[0], &submitted)
 		reset := s.selected.(interface {
-			ResetAll(sessions.ResetMetadata) (sessions.ResetSummary, error)
+			ResetAll(context.Context, sessions.ResetMetadata) (sessions.ResetSummary, error)
 		})
 		if s.postgres {
 			if _, err := s.db.Exec(`CREATE FUNCTION fail_llm_reset_revision() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -200,7 +201,7 @@ func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 			WHEN NEW.family='agent_sessions' BEGIN SELECT RAISE(ABORT,'injected reset revision failure'); END`); err != nil {
 			t.Fatal(err)
 		}
-		failed, err := reset.ResetAll(sessions.ResetMetadata{Source: "exact-reset"})
+		failed, err := reset.ResetAll(ctx, sessions.ResetMetadata{Source: "exact-reset"})
 		if err == nil || !strings.Contains(err.Error(), "injected reset revision failure") || len(failed.OrphanedSessions) != 0 || len(submitted) != 0 {
 			t.Fatalf("rollback leaked summary/candidate: summary=%+v submitted=%+v err=%v", failed, submitted, err)
 		}
@@ -213,7 +214,7 @@ func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 		if _, err := s.db.Exec(drop); err != nil {
 			t.Fatal(err)
 		}
-		summary, err := reset.ResetAll(sessions.ResetMetadata{Source: "exact-reset"})
+		summary, err := reset.ResetAll(ctx, sessions.ResetMetadata{Source: "exact-reset"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -230,7 +231,7 @@ func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 		if len(submitted) != 2 || seen[f.runs[0]] != 1 || seen[f.runs[1]] != 1 {
 			t.Fatalf("completion handoff must deduplicate runs, not session effects: %+v", submitted)
 		}
-		replay, err := reset.ResetAll(sessions.ResetMetadata{Source: "exact-reset"})
+		replay, err := reset.ResetAll(ctx, sessions.ResetMetadata{Source: "exact-reset"})
 		if err != nil || len(replay.OrphanedSessions) != 0 || len(submitted) != 2 {
 			t.Fatalf("reset replay: summary=%+v candidates=%+v err=%v", replay, submitted, err)
 		}

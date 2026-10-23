@@ -55,6 +55,7 @@ func TestResourceCodecCompiledMapImportReceiptAndPinnedPublicAgentReadbackBothSt
 		}
 		declaration := catalog.Declarations[0]
 		ctx := testAuthorActivityContextForSource(context.Background(), mustAPITestSourceArtifactFact(catalog.BundleHash))
+		ctx = originalAPIFixtureContext(t, ctx, fixture.primary)
 		storetest.RequireBundleDataCatalog(t, ctx, fixture.primary, bundle)
 		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: fixture.primary})})
 		call := func(method string, params map[string]any) map[string]any {

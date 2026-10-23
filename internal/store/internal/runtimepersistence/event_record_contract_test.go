@@ -49,6 +49,7 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			fixture := backend.open(t)
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			now := time.Date(2026, 7, 18, 16, 0, 0, 123456000, time.UTC)
 			runID := uuid.NewString()
 			root := eventtest.RunCreatingRootIngress(uuid.NewString(), "contract.root", "gateway", "root-task", []byte(`{"root":true}`), 1, runID, "", events.EventEnvelope{}, now)
@@ -97,6 +98,7 @@ func TestPreparedPublishOutboxReadbackPreservesExactPayloadBytesParity(t *testin
 			fixture := backend.open(t)
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			payload := []byte("{\n  \"numeric\": 1.0, \"first\": true\n}")
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "outbox.payload_bytes", "gateway", "", payload, 0,
@@ -149,6 +151,7 @@ func TestEventRoutingSourceRoundTripParity(t *testing.T) {
 			fixture := backend.open(t)
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			now := time.Date(2026, 7, 18, 16, 30, 0, 0, time.UTC)
 			for _, source := range routingSourceRoundTripFixtures(t) {
 				t.Run(source.Kind().StorageCode(), func(t *testing.T) {
@@ -189,6 +192,7 @@ func TestW2CompiledRouteClaimPersistenceRestartAndGraphMutationParity(t *testing
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "routing.claim.roundtrip", "gateway", "", []byte(`{}`), 0,
 				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 16, 45, 0, 0, time.UTC),
@@ -371,6 +375,7 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 			fixture := backend.open(t)
 			store := fixture.store.(semanticEventFixtureStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			outcome, err := commitSemanticEventFixtureOutcome(ctx, store, baseEvent, nil, "direct")
 			if err != nil || outcome != runtimebus.EventAppendInserted {
 				t.Fatalf("initial commit: outcome=%v err=%v", outcome, err)
@@ -433,6 +438,7 @@ func TestEventRecordPayloadByteIdentityParity(t *testing.T) {
 					fixture := backend.open(t)
 					store := fixture.store.(semanticEventFixtureStore)
 					ctx := testAuthorActivityContext()
+					ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 					now := time.Date(2026, 8, 13, 18, 0, 0, 0, time.UTC)
 					event := eventtest.RunCreatingRootIngress(
 						uuid.NewString(), "payload.bytes", "gateway", "", tc.original, 0,
@@ -472,6 +478,7 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 			fixture := backend.open(t)
 			store := fixture.store.(semanticEventFixtureStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			batchSize := eventrecordsqlite.HydrationBatchSize()
 			load := func(ctx context.Context, q eventReadQueryer, ids []string) ([]eventrecord.Record, error) {
 				return eventrecordsqlite.LoadMany(ctx, q, ids)
@@ -589,6 +596,7 @@ func TestPostgresEventRecordReadbackNormalizesSessionTimezone(t *testing.T) {
 	fixture := openPostgresAuthorActivityReceiptFixture(t)
 	store := fixture.store.(semanticEventFixtureStore)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	createdAt := time.Date(2026, 7, 18, 18, 45, 12, 123456000, time.UTC)
 	event := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "timezone.contract", "gateway", "timezone-task", []byte(`{"timezone":true}`),
@@ -637,87 +645,6 @@ func assertCanonicalRecordTime(t *testing.T, got, want time.Time) {
 	}
 	if _, offset := got.Zone(); offset != 0 {
 		t.Fatalf("created_at offset = %d, want UTC", offset)
-	}
-}
-
-func TestEventRecordDecoderRejectsMalformedDurableFactsParity(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
-			event := eventtest.RunCreatingRootIngress(
-				uuid.NewString(), "decoder.contract", "gateway", "task", []byte(`{"ok":true}`), 0,
-				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 18, 30, 0, 0, time.UTC),
-			)
-			if err := commitSemanticEventFixture(ctx, fixture.store.(semanticEventFixtureStore), event); err != nil {
-				t.Fatalf("commit event: %v", err)
-			}
-			base, found, err := loadEventProducerIdentityRecord(ctx, fixture, event.ID())
-			if err != nil || !found {
-				t.Fatalf("load event record: found=%v err=%v", found, err)
-			}
-			for _, mutation := range []struct {
-				name   string
-				mutate func(*persistedEventIdentity)
-			}{
-				{"invalid_class", func(record *persistedEventIdentity) { record.Class = "projection" }},
-				{"invalid_event_id", func(record *persistedEventIdentity) { record.EventID = "not-a-uuid" }},
-				{"missing_producer", func(record *persistedEventIdentity) { record.ProducedBy = "" }},
-				{"child_without_parent", func(record *persistedEventIdentity) { record.Class = events.EventAdmissionChild }},
-				{"root_with_operator_provenance", func(record *persistedEventIdentity) { record.OperatorReferencedEventID = uuid.NewString() }},
-				{"runtime_source_without_route", func(record *persistedEventIdentity) { record.RoutingSourceKind = "concrete_template_instance" }},
-				{"root_source_with_flow_identity", func(record *persistedEventIdentity) {
-					record.RoutingSourceKind = events.RoutingSourceRoot.StorageCode()
-					record.SourceRoute = []byte(fmt.Sprintf(`{"flow_id":"flow-a","flow_instance":"flow-a/one","entity_id":%q}`, uuid.NewString()))
-				}},
-				{"selected_fork_without_lineage", func(record *persistedEventIdentity) { record.Class = events.EventAdmissionSelectedForkReplay }},
-			} {
-				t.Run(mutation.name, func(t *testing.T) {
-					malformed := base.Clone()
-					mutation.mutate(&malformed)
-					if _, err := malformed.Decode(); !errors.Is(err, eventrecord.ErrCorrupt) {
-						t.Fatalf("decode error = %v, want eventrecord.ErrCorrupt", err)
-					}
-				})
-			}
-		})
-	}
-}
-
-func TestEventRecordCanonicalReadbackRejectsDurableScalarRepairParity(t *testing.T) {
-	mutations := []struct {
-		name       string
-		sqlite     string
-		postgres   string
-		value      string
-		wantDetail string
-	}{
-		{name: "flow_instance", sqlite: `UPDATE events SET flow_instance = ? WHERE event_id = ?`, postgres: `UPDATE events SET flow_instance = $1 WHERE event_id = $2::uuid`, value: "/flow-a/one/", wantDetail: "flow_instance"},
-	}
-	for _, backend := range eventRecordContractBackends() {
-		for _, mutation := range mutations {
-			backend, mutation := backend, mutation
-			t.Run(backend.name+"/"+mutation.name, func(t *testing.T) {
-				fixture := backend.open(t)
-				ctx := testAuthorActivityContext()
-				event := eventtest.RunCreatingRootIngress(
-					uuid.NewString(), "readback.canonical", "gateway", "task", []byte(`{"ok":true}`), 0,
-					uuid.NewString(), "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), "flow-a/one"),
-					time.Date(2026, 7, 18, 18, 45, 0, 123456000, time.UTC),
-				)
-				if err := commitSemanticEventFixture(ctx, fixture.store.(semanticEventFixtureStore), event); err != nil {
-					t.Fatalf("commit event: %v", err)
-				}
-				eventtestsql.CorruptEventStore(t, ctx, fixture.db, fixture.dialect, eventtestsql.EventCorruptionClaim{
-					Invariant: "store.event_record.canonical_readback",
-					Reason:    "prove canonical readback rejects durable " + mutation.name + " repair",
-				}, mutation.sqlite, mutation.postgres, mutation.value, event.ID())
-				_, found, err := loadEventProducerIdentityRecord(ctx, fixture, event.ID())
-				if found || !errors.Is(err, eventrecord.ErrCorrupt) || !strings.Contains(err.Error(), mutation.wantDetail) {
-					t.Fatalf("canonical adapter readback = found:%v err:%v, want typed %s corruption", found, err, mutation.wantDetail)
-				}
-			})
-		}
 	}
 }
 

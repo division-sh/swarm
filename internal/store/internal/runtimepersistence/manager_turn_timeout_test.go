@@ -125,7 +125,7 @@ func TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores(t *t
 					scope, instanceID, path, _ := token.Identity.Route.Fields()
 					owner := flowidentity.RunScopedFlowInstance{RunID: directive.Event.RunID(), Route: flowidentity.StoredRoute(scope, instanceID, path)}
 					entity, at := uuid.NewString(), time.Now().UTC().Truncate(time.Microsecond)
-					record := seedTurnTerminationHeader(t, completionSettlementFixture{store: backend.store.(completionSettlementTestStore)}, owner, entity, at)
+					record := seedTurnTerminationHeader(t, completionSettlementFixture{store: backend.store.(completionSettlementTestStore), original: ctx}, owner, entity, at)
 					node, err := identity.AdmitExecutableNodeDeclaration(scope, "termination-router")
 					if err != nil {
 						t.Fatal(err)

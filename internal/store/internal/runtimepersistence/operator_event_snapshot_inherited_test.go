@@ -23,6 +23,7 @@ func TestOperatorEventSnapshotInheritedOwnerRefusalBothStores(t *testing.T) {
 		t.Run(fmt.Sprintf("postgres_%v", postgres), func(t *testing.T) {
 			f := newOperatorSnapshotFixture(t, postgres)
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
+			ctx = originalStoreFixtureContext(t, ctx, f.store)
 			defer cancel()
 			record, found, err := loadEventProducerIdentityRecord(ctx, f.authorActivityReceiptFixture, f.ids[1])
 			if err != nil || !found {

@@ -15,6 +15,7 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	t.Cleanup(cleanup)
 	ctx := testAuthorActivityContext()
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runA := "00000000-0000-0000-0000-0000000000a1"
 	runB := "00000000-0000-0000-0000-0000000000b1"

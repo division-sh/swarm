@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
+
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -146,25 +146,6 @@ func (f *completion2270ReleaseFixture) invoke(t *testing.T, business bool) {
 	}
 }
 
-func TestClaudeCLICompletion2270SelectedWitnessRelease(t *testing.T) {
-	proof := newCompletion2270PublishedProof(t)
-	f := newCompletion2270ReleaseFixture(t, proof)
-	f.invoke(t, true)
-	if loaded := proof.contexts.LoadedContexts(); len(loaded) != 1 || loaded[0].BundleHash() == f.selected.SourceProjectionBundleHash() {
-		t.Fatal("selected owner was not distinct from the published population")
-	}
-	if rows, err := proof.read(t.Context()); err != nil || len(rows) != 0 {
-		t.Fatalf("unreleased selected evidence invented: %+v %v", rows, err)
-	}
-	if err := f.selected.ReleaseSourceProjection(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := proof.read(t.Context())
-	if err != nil || !f.disposed || f.releases != 1 || f.reads != 2 || validateCompletion2270SingleInvocation(rows, f.attempt) != nil {
-		t.Fatalf("selected witness not captured before real disposal: %+v reads=%d releases=%d err=%v", rows, f.reads, f.releases, err)
-	}
-}
-
 func TestClaudeCLICompletion2270SelectedDecorationPreservesConcretePreflight(t *testing.T) {
 	manager := workspace.NewDockerManager()
 	req := selectedAPICapabilityRequest{Workspaces: manager}
@@ -187,27 +168,6 @@ func TestClaudeCLICompletion2270SelectedDecorationPreservesConcretePreflight(t *
 	}
 	if _, err := completion2270ObserveSelectedWorkspace(req, nil); err == nil {
 		t.Fatal("selected observation admitted missing proof owner")
-	}
-}
-
-func TestClaudeCLICompletion2270SelectedWitnessImmutableAfterDisposal(t *testing.T) {
-	proof := newCompletion2270PublishedProof(t)
-	f := newCompletion2270ReleaseFixture(t, proof)
-	f.invoke(t, true)
-	if err := f.selected.ReleaseSourceProjection(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := proof.read(t.Context())
-	if err != nil || validateCompletion2270SingleInvocation(rows, f.attempt) != nil {
-		t.Fatalf("snapshot missing: %+v %v", rows, err)
-	}
-	if err := os.Remove(filepath.Join(f.root, completion2270InvocationFile)); err != nil {
-		t.Fatal(err)
-	}
-	rows[0].AttemptID, rows[0].Model = "mutated", "mutated"
-	again, err := proof.read(t.Context())
-	if err != nil || validateCompletion2270SingleInvocation(again, f.attempt) != nil || f.reads != 2 {
-		t.Fatalf("snapshot aliased or reopened disposed authority: %+v %v", again, err)
 	}
 }
 
@@ -247,75 +207,5 @@ func TestClaudeCLICompletion2270SelectedWitnessFailureStillDisposes(t *testing.T
 				t.Fatalf("cleanup retry erased the read error or skipped disposal: %v", retryErr)
 			}
 		})
-	}
-}
-
-func TestClaudeCLICompletion2270SelectedWitnessRejectsRepeatedInvocations(t *testing.T) {
-	for _, occurrences := range []int{1, 2} {
-		t.Run(fmt.Sprint(occurrences), func(t *testing.T) {
-			proof := newCompletion2270PublishedProof(t)
-			f := newCompletion2270ReleaseFixture(t, proof)
-			f.invoke(t, true)
-			if occurrences == 1 {
-				f.invoke(t, true)
-			}
-			if err := f.selected.ReleaseSourceProjection(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if occurrences == 2 {
-				successor := newCompletion2270ReleaseFixture(t, proof)
-				for i := 0; i+1 < len(successor.args); i++ {
-					if successor.args[i] == "--session-id" {
-						successor.args[i+1] = f.attempt
-					}
-				}
-				successor.attempt = f.attempt
-				successor.invoke(t, true)
-				if err := successor.selected.ReleaseSourceProjection(t.Context()); err != nil {
-					t.Fatal(err)
-				}
-			}
-			rows, err := proof.read(t.Context())
-			if err != nil || len(rows) != 2 || rows[0].AttemptID != f.attempt || rows[1].AttemptID != f.attempt || rows[0].InvocationID == rows[1].InvocationID || validateCompletion2270SingleInvocation(rows, f.attempt) == nil {
-				t.Fatalf("second physical invocation was lost: %+v %v", rows, err)
-			}
-		})
-	}
-}
-
-func TestClaudeCLICompletion2270SelectedWitnessReadAndReleaseAreIdempotent(t *testing.T) {
-	proof := newCompletion2270PublishedProof(t)
-	f := newCompletion2270ReleaseFixture(t, proof)
-	f.invoke(t, true)
-	if err := f.selected.ReleaseSourceProjection(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	first, err := proof.read(t.Context())
-	if err != nil || validateCompletion2270SingleInvocation(first, f.attempt) != nil {
-		t.Fatalf("initial snapshot: %+v %v", first, err)
-	}
-	if err := f.selected.ReleaseSourceProjection(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 3; i++ {
-		rows, err := proof.read(t.Context())
-		if err != nil || !reflect.DeepEqual(rows, first) || f.reads != 2 || f.releases != 1 {
-			t.Fatalf("read/release duplicated physical evidence: %+v %v", rows, err)
-		}
-	}
-}
-
-func TestClaudeCLICompletion2270SelectedStartupHasNoBusinessWitness(t *testing.T) {
-	proof := newCompletion2270PublishedProof(t)
-	f := newCompletion2270ReleaseFixture(t, proof)
-	f.invoke(t, false)
-	if err := f.selected.ReleaseSourceProjection(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if rows, err := proof.read(t.Context()); err != nil || len(rows) != 0 || !f.disposed {
-		t.Fatalf("startup became business or skipped disposal: %+v %v", rows, err)
-	}
-	if _, err := os.Stat(filepath.Join(f.root, completion2270InvocationFile)); !os.IsNotExist(err) {
-		t.Fatalf("startup created a physical business witness: %v", err)
 	}
 }

@@ -26,9 +26,10 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			store := fixture.store.(runForkGateSelectedStore)
+			original := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, geometry := range []string{"current", "historical_closed", "foreign_first", "foreign_last", "missing_child", "wrong_activation", "wrong_cap", "wrong_run", "wrong_entity", "unknown_source", "duplicate_child", "missing_correspondence", "zero_correspondence", "wrong_destination"} {
 				t.Run(geometry, func(t *testing.T) {
-					ctx := testAuthorActivityContext()
+					ctx := original
 					now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 					sourceRun, childRun := uuid.NewString(), uuid.NewString()
 					requireRunningRunForTest(t, ctx, store, sourceRun, now)

@@ -21,6 +21,7 @@ func TestFanOutReadPaginationBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, reopened, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 64, time.Now().UTC())
 			for n := 0; n < 4; n++ {
 				seedFanOutOwnerIntent(t, ctx, db, base, 1, time.Now().UTC())
@@ -123,6 +124,7 @@ func TestFanOutReadDefaultLimitAndCurrentPagesBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, time.Now().UTC())
 			for n := 0; n < fanoutobligation.DefaultListLimit+1; n++ {
 				seedFanOutOwnerIntent(t, ctx, db, base, 1, time.Now().UTC())
@@ -187,6 +189,7 @@ func TestFanOutReadLeaseRetryAndRestartBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 64, time.Now().UTC())
 			reader := restarted.(operatorread.FanOutReader)
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "read-lease", BundleHash: base.bundleHash, Now: time.Now().UTC(), Lease: time.Minute})

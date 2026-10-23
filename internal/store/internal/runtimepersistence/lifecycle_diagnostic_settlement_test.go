@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -54,6 +55,7 @@ func TestLifecycleDiagnosticPayloadAdmissionFailureIsAtomicBothStores(t *testing
 		t.Run(fmt.Sprintf("sqlite=%t", sqlite), func(t *testing.T) {
 			store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			item := createLifecycleDiagnostic(t, ctx, store)
 			binder := store.(interface {
 				SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
@@ -101,6 +103,7 @@ func TestLifecycleDiagnosticSettlementFailureCuts(t *testing.T) {
 			t.Run(fmt.Sprintf("sqlite=%t/%s", sqlite, phase), func(t *testing.T) {
 				store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				item := createLifecycleDiagnostic(t, ctx, store)
 				recorder := runtimebus.NewEmittedEventsRecorder()
 				ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
@@ -316,6 +319,7 @@ func TestLifecycleDiagnosticSettlementOnBothStores(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store, db, reopen := newIndependentLifecycleDiagnosticStores(t, sqlite)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			identity := testAgentIdentity(t, "diagnostic-worker", "")
 			ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 				Owner: "diagnostic-producer", RunID: identity.RunID,
@@ -480,6 +484,7 @@ func TestLifecycleDiagnosticCompetingStartupManagersBeforeAdmission(t *testing.T
 			t.Run(fmt.Sprintf("sqlite=%t/same_manager=%t", sqlite, sameManager), func(t *testing.T) {
 				store, db, reopen := newIndependentLifecycleDiagnosticStores(t, sqlite)
 				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				defer cancel()
 				item := createLifecycleDiagnostic(t, ctx, store)
 				other, closeOther := reopen()
@@ -492,6 +497,9 @@ func TestLifecycleDiagnosticCompetingStartupManagersBeforeAdmission(t *testing.T
 					t.Helper()
 					bus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), runtimebus.EventBusOptions{
 						Logger: diagnosticRuntimeLoggerHook{runtimepkg.NewRuntimeLogger(selected, executionposture.Live, nil)},
+						MutationContext: func(command context.Context) (context.Context, error) {
+							return startupownership.CarryMutationAuthority(command, ctx), nil
+						},
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -553,6 +561,7 @@ func TestLifecycleDiagnosticDurablePageBoundaryAndReopen(t *testing.T) {
 		t.Run(fmt.Sprintf("sqlite=%t", sqlite), func(t *testing.T) {
 			store, db, reopen := newIndependentLifecycleDiagnosticStores(t, sqlite)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			item := createLifecycleDiagnostic(t, ctx, store)
 			for i := 0; i < 100; i++ {
 				state, found, err := store.LoadAgentLifecycleState(ctx, item.Identity)
@@ -639,6 +648,7 @@ func TestLifecycleDiagnosticResetHistoryOnBothStores(t *testing.T) {
 			t.Run(fmt.Sprintf("sqlite=%t/projected_before_reset=%t", sqlite, before), func(t *testing.T) {
 				store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				item := createLifecycleDiagnostic(t, ctx, store)
 				logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil)
 				if before {
