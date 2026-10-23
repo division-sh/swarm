@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -139,7 +140,57 @@ func readPreflightStatusCalls(t *testing.T, path string) []struct {
 	}
 }
 
+func provePreflightReceiptReuse(t *testing.T) {
+	for _, mode := range []string{"valid", "source", "build", "command", "child", "failed", "malformed", "incomplete", "missing"} {
+		t.Run("reuse-"+mode, func(t *testing.T) {
+			directory, receipt, _ := preflightStatusFixture(t)
+			plan := receipt.Plan
+			phase := preflightPackagePhase(plan.Packages[0])
+			pkg := phase.Package.Package
+			raw := []byte(fmt.Sprintf("{\"Action\":\"run\",\"Package\":%q,\"Test\":\"TestGuard\"}\n{\"Action\":\"pass\",\"Package\":%q,\"Test\":\"TestGuard\"}\n{\"Action\":\"pass\",\"Package\":%q}\n", pkg, pkg, pkg))
+			switch mode {
+			case "source":
+				plan.HeadSHA = strings.Repeat("b", 40)
+			case "build":
+				plan.BuildContext.GOVERSION = "go1.26.9"
+			case "command":
+				phase.Args = append(phase.Args, "-race")
+			case "child":
+				phase.Package.Required = []testplanning.RequiredTest{{TestRoot: phase.Package.Required[0].TestRoot, Children: []string{"required"}}}
+			case "failed":
+				raw = bytes.ReplaceAll(raw, []byte(`"pass"`), []byte(`"fail"`))
+			case "malformed":
+				raw = []byte("malformed\n")
+			case "incomplete":
+				receipt.Complete = false
+				writePreflightStatusFixtureReceipt(t, directory, receipt)
+			}
+			name := strings.ReplaceAll(phase.Name, "/", "_") + ".log"
+			if mode != "missing" {
+				if err := os.WriteFile(filepath.Join(directory, name), raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			destination := filepath.Join(filepath.Dir(directory), "new")
+			if err := os.Mkdir(destination, 0700); err != nil {
+				t.Fatal(err)
+			}
+			from, err := reusePreflightPhase(destination, plan, phase)
+			if err != nil || (from != "") != (mode == "valid") {
+				t.Fatalf("reuse=%q, err=%v", from, err)
+			}
+			if from != "" {
+				copied, err := os.ReadFile(filepath.Join(destination, name))
+				if err != nil || !bytes.Equal(raw, copied) {
+					t.Fatalf("reused proof not retained: %s / %v", copied, err)
+				}
+			}
+		})
+	}
+}
+
 func TestPreflightStatusPublishesOnlyCompletedExactHead(t *testing.T) {
+	provePreflightReceiptReuse(t)
 	directory, receipt, callsPath := preflightStatusFixture(t)
 	attempt := startPreflightStatusFixture(t, receipt)
 	statusID, err := attempt.finish(context.Background(), directory, receipt)

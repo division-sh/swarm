@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -37,6 +38,8 @@ type ProfilePolicy struct {
 }
 
 type UnitPolicy struct {
+	PreflightFast    bool                `yaml:"preflight_fast,omitempty"`
+	InputPaths       []string            `yaml:"input_paths,omitempty"`
 	Packable         bool                `yaml:"packable,omitempty"`
 	Packages         []string            `yaml:"packages"`
 	RequiredChildren map[string][]string `yaml:"required_children,omitempty"`
@@ -129,6 +132,7 @@ func (p Policy) Validate() error {
 		}
 	}
 	for name, unit := range p.Units {
+		problems = append(problems, unitPreflightProblems(name, unit)...)
 		if unit.Packable && (unit.BudgetClass == "soak" || unit.GoTimeout != "") {
 			problems = append(problems, fmt.Sprintf("units.%s cannot pack a soak or explicitly long command", name))
 		}
@@ -189,6 +193,19 @@ func (p Policy) Validate() error {
 		return fmt.Errorf("invalid proof policy: %s", strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func unitPreflightProblems(name string, unit UnitPolicy) []string {
+	var problems []string
+	if unit.PreflightFast && (unit.CountMode != "count-1" || unit.BudgetClass != "broad" || unit.Skip != "" || unit.GoTimeout != "") {
+		problems = append(problems, fmt.Sprintf("units.%s fast preflight requires an ordinary complete count-1 selection", name))
+	}
+	for _, input := range unit.InputPaths {
+		if input == "" || input == "." || path.IsAbs(input) || path.Clean(input) != input || strings.HasPrefix(input, "../") {
+			problems = append(problems, fmt.Sprintf("units.%s invalid input path %q", name, input))
+		}
+	}
+	return problems
 }
 
 func (p Policy) ResolveProfile(event string, prBody string, forced string) (string, string, error) {

@@ -53,6 +53,7 @@ type preflightPhaseReceipt struct {
 	ExecutionSeconds float64   `json:"execution_seconds"`
 	CleanupSeconds   float64   `json:"cleanup_seconds"`
 	Passed           bool      `json:"passed"`
+	ReusedFrom       string    `json:"reused_from,omitempty"`
 }
 
 func runPreflight(ctx context.Context) int {
@@ -193,7 +194,15 @@ func buildPreflightPlan(ctx context.Context, head, base string, comparison testp
 	if err != nil {
 		return testplanning.PreflightPlan{}, err
 	}
-	return testplanning.BuildPreflightPlan(".", base, inventory, native, comparison)
+	diff, err := exec.CommandContext(ctx, "git", "diff", "--name-status", "-z", "--find-renames", "--find-copies", base, head, "--").Output()
+	if err != nil {
+		return testplanning.PreflightPlan{}, fmt.Errorf("read preflight affected paths: %w", err)
+	}
+	affected, err := testplanning.AffectedFastRoots(".", policy, native, inventory, diff)
+	if err != nil {
+		return testplanning.PreflightPlan{}, err
+	}
+	return testplanning.BuildPreflightPlan(".", base, inventory, native, comparison, affected...)
 }
 
 func preflightPhases(plan testplanning.PreflightPlan) []preflightPhase {
@@ -255,12 +264,16 @@ func executePreflightPhases(ctx context.Context, directory string, receipt *pref
 			return err
 		}
 		started := time.Now()
-		timing, err := executePreflightPhase(ctx, directory, phase)
+		reused, err := reusePreflightPhase(directory, receipt.Plan, phase)
+		var timing preflightProcessTiming
+		if err == nil && reused == "" {
+			timing, err = executePreflightPhase(ctx, directory, phase)
+		}
 		err = errors.Join(err, checkPreflightSource(ctx, receipt.Plan))
 		receipt.Unstarted = receipt.Unstarted[1:]
 		completed := time.Now()
 		seconds := completed.Sub(started).Seconds()
-		receipt.Phases = append(receipt.Phases, preflightPhaseReceipt{Name: phase.Name, Args: phase.Args, Started: started.UTC(), Completed: completed.UTC(), Seconds: seconds, SetupSeconds: seconds - timing.ExecutionSeconds - timing.CleanupSeconds, ExecutionSeconds: timing.ExecutionSeconds, CleanupSeconds: timing.CleanupSeconds, Passed: err == nil})
+		receipt.Phases = append(receipt.Phases, preflightPhaseReceipt{Name: phase.Name, Args: phase.Args, Started: started.UTC(), Completed: completed.UTC(), Seconds: seconds, SetupSeconds: seconds - timing.ExecutionSeconds - timing.CleanupSeconds, ExecutionSeconds: timing.ExecutionSeconds, CleanupSeconds: timing.CleanupSeconds, Passed: err == nil, ReusedFrom: reused})
 		receipt.ExecutionSeconds += timing.ExecutionSeconds
 		receipt.CleanupSeconds += timing.CleanupSeconds
 		fmt.Fprintf(os.Stderr, "preflight %s: passed=%t %.3fs\n", phase.Name, err == nil, time.Since(started).Seconds())
@@ -270,6 +283,54 @@ func executePreflightPhases(ctx context.Context, directory string, receipt *pref
 	}
 	receipt.Complete = true
 	return nil
+}
+
+func reusePreflightPhase(directory string, plan testplanning.PreflightPlan, phase preflightPhase) (string, error) {
+	if phase.Package == nil || phase.DebtBase != "" {
+		return "", nil
+	}
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(directory), "*", "receipt.json"))
+	if err != nil {
+		return "", err
+	}
+	slices.Reverse(paths)
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		var previous preflightReceipt
+		if err != nil || json.Unmarshal(raw, &previous) != nil || previous.Plan.Digest != plan.Digest ||
+			previous.Plan.HeadSHA != plan.HeadSHA || previous.Plan.BuildContext != plan.BuildContext ||
+			validatePreflightStatusReceipt(filepath.Dir(path), previous) != nil {
+			continue
+		}
+		matched := false
+		for _, proof := range previous.Phases {
+			matched = matched || proof.Name == phase.Name && proof.Passed && slices.Equal(proof.Args, phase.Args)
+		}
+		if !matched {
+			continue
+		}
+		name := strings.ReplaceAll(phase.Name, "/", "_") + ".log"
+		source := filepath.Join(filepath.Dir(path), name)
+		raw, err = os.ReadFile(source)
+		if err != nil {
+			continue
+		}
+		report, err := testtiming.ParseReport(bytes.NewReader(raw))
+		if err != nil || testtiming.ValidatePreflightReport(*phase.Package, report) != nil {
+			continue
+		}
+		log, err := os.OpenFile(filepath.Join(directory, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			return "", err
+		}
+		_, err = log.Write(raw)
+		if err = errors.Join(err, log.Close()); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(os.Stderr, "preflight %s: reused exact-head proof %s\n", phase.Name, source)
+		return source, nil
+	}
+	return "", nil
 }
 
 func checkPreflightSource(ctx context.Context, plan testplanning.PreflightPlan) error {

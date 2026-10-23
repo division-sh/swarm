@@ -18,6 +18,8 @@ const unusedOrdinaryRoots = `^(?:Test(?:[^A].*|A(?:[^t].*|t(?:[^t].*|t(?:[^e].*|
 func unusedProofEnvelopes() map[string]UnitPolicy {
 	common := UnitPolicy{Packages: []string{unusedProofPackage}, CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "broad"}
 	controls, transport := common, common
+	controls.PreflightFast = true
+	controls.InputPaths = []string{"internal", "cmd", ".github"}
 	controls.Run = unusedOrdinaryRoots
 	transport.Run = "^" + unusedTransportRoot + "$"
 	transport.RequiredChildren = map[string][]string{unusedTransportRoot: {

@@ -6,9 +6,51 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/testchanged"
 )
 
+func proveAffectedFastSelection(t *testing.T) {
+	t.Run("affected-canonical-units", func(t *testing.T) {
+		policy := Policy{Units: map[string]UnitPolicy{
+			"fast": {PreflightFast: true, InputPaths: []string{"internal/source"}},
+		}}
+		root := TestRoot{Package: "module/check", Name: "TestGolden"}
+		native := RunPlan{Units: []ProofUnit{
+			{ID: "fast", Packages: []string{root.Package}, RequiredTests: []RequiredTest{{TestRoot: root}}},
+			{ID: "expensive", Packages: []string{"module/source"}, RequiredTests: []RequiredTest{{TestRoot: TestRoot{Package: "module/source", Name: "TestServer"}}}},
+		}}
+		inventory := RootInventory{ImpactPackages: []testchanged.Package{
+			{ImportPath: "module/source", RelDir: "internal/source"},
+			{ImportPath: "module/check", RelDir: "internal/check", XTestImports: []string{"module/dependency"}},
+			{ImportPath: "module/dependency", RelDir: "internal/dependency"},
+			{ImportPath: "module/unrelated", RelDir: "internal/unrelated"},
+		}}
+		for _, tc := range []struct {
+			diff string
+			want bool
+		}{
+			{"M\x00internal/check/check_test.go\x00", true},
+			{"M\x00internal/dependency/a.go\x00", true},
+			{"D\x00internal/source/removed.go\x00", true},
+			{"R100\x00internal/source/old.go\x00internal/unrelated/new.go\x00", true},
+			{"M\x00go.mod\x00", true},
+			{"M\x00internal/unrelated/a.go\x00", false},
+			{"", false},
+		} {
+			got, err := AffectedFastRoots(".", policy, native, inventory, []byte(tc.diff))
+			if err != nil || len(got) != 0 && !reflect.DeepEqual(got, []TestRoot{root}) || (len(got) == 1) != tc.want {
+				t.Fatalf("diff %q selected %+v: %v", tc.diff, got, err)
+			}
+		}
+		if _, err := AffectedFastRoots(".", policy, native, inventory, []byte("M\x00missing-terminator")); err == nil {
+			t.Fatal("incomplete diff was accepted")
+		}
+	})
+}
+
 func TestPreflightSelectionRefusesMissingDuplicateAndForeignRoots(t *testing.T) {
+	proveAffectedFastSelection(t)
 	root := TestRoot{Package: "github.com/division-sh/swarm/proof", Name: "TestGuard"}
 	build := BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1", GOVERSION: "go1.26.8"}
 	inventory := RootInventory{BuildContext: build, Packages: map[string]PackageRoots{
