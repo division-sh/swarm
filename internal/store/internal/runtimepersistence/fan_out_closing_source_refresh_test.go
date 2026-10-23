@@ -137,8 +137,14 @@ func TestFanOutClosingSourceHeadRefreshPreservesHealthyProgressBothStores(t *tes
 				t.Fatal("current B did not commit after source refresh")
 			}
 			b.Close()
-			if observed := read(); observed.Eligible == nil || *observed.Eligible || observed.Reason != "registration_closing" {
-				t.Fatalf("closed current B gained eligibility: %+v", observed)
+			if observed := read(); observed != fanoutobligation.UnavailableRuntimeReadback() {
+				t.Fatalf("joined current B retained a runtime observation: %+v", observed)
+			}
+			if permit, found, err := b.BeginTurn(ctx); err == nil || err.Error() != "fan-out serving registration is retired" || found || permit != nil {
+				if permit != nil {
+					permit.Done()
+				}
+				t.Fatalf("joined current B admitted a turn: found=%v err=%v", found, err)
 			}
 			if err := grants[0].ProveCurrent(ctx); err == nil {
 				t.Fatal("off-head A retained current execution authority")

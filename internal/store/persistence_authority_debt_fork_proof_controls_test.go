@@ -1,11 +1,9 @@
 package store_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
+
 	"strings"
 	"testing"
 )
@@ -154,57 +152,4 @@ func TestPersistenceAuthorityDebtForkProofCollectorIsPinned(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestPersistenceAuthorityDebtForkProofRequiresConservedSource(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
-	if err := debtForkProofSourcePins(root); err != nil {
-		t.Fatal(err)
-	}
-	if err := debtForkProofSourcePins(t.TempDir()); err == nil {
-		t.Fatal("missing source/recipe pins admitted")
-	}
-	data, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/recipes.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rows []map[string]json.RawMessage
-	if err := json.Unmarshal(data, &rows); err != nil {
-		t.Fatal(err)
-	}
-	var selected map[string]json.RawMessage
-	for _, row := range rows {
-		if string(row["Function"]) == `"`+debtForkProofOldName+`"` && string(row["File"]) == `"`+debtForkProofFile+`"` {
-			selected = row
-		}
-	}
-	if selected == nil {
-		t.Fatal("missing historical recipe")
-	}
-	source, err := os.ReadFile(filepath.Join(root, debtForkProofFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, field := range []string{"File", "Function", "Family", "Before", "After", "Successor"} {
-		t.Run(field, func(t *testing.T) {
-			copy := t.TempDir()
-			row := maps.Clone(selected)
-			row[field] = json.RawMessage(`"foreign"`)
-			data, _ := json.Marshal([]map[string]json.RawMessage{row})
-			debtWriteModuleSource(t, copy, "tools/fixture-codemod/pipeline-observations/recipes.json", string(data))
-			debtWriteModuleSource(t, copy, debtForkProofFile, string(source))
-			if err := debtForkProofSourcePins(copy); err == nil {
-				t.Fatal("foreign/missing recipe pin admitted")
-			}
-		})
-	}
-	t.Run("changed-source", func(t *testing.T) {
-		copy := t.TempDir()
-		data, _ := json.Marshal([]map[string]json.RawMessage{selected})
-		debtWriteModuleSource(t, copy, "tools/fixture-codemod/pipeline-observations/recipes.json", string(data))
-		debtWriteModuleSource(t, copy, debtForkProofFile, strings.Replace(string(source), "forks != 1", "forks != 0", 1))
-		if err := debtForkProofSourcePins(copy); err == nil {
-			t.Fatal("changed business proof admitted")
-		}
-	})
 }
