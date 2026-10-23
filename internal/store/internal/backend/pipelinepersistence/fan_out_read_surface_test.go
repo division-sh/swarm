@@ -23,13 +23,13 @@ func VerifyFanOutReadMixedOriginPaginationForTest(t *testing.T, prepare Statemen
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runID := uuid.NewString()
-			db := openFanOutReadbackTestDB(t, backend)
+			db, location := openFanOutReadbackTestDB(t, backend)
 			var owner runlifecycle.OperationOwner
 			var ctx context.Context
 			if backend == "postgres" {
-				owner, ctx = materializePostgresStatementRuns(t, db, true, prepare, runID)
+				owner, ctx = materializePostgresStatementRuns(t, db, location, true, prepare, runID)
 			} else {
-				owner, ctx = materializeSQLiteStatementRuns(t, db, true, prepare, runID)
+				owner, ctx = materializeSQLiteStatementRuns(t, db, location, true, prepare, runID)
 			}
 			if _, err := owner.TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: runlifecycle.StatePaused}); err != nil {
 				t.Fatal(err)

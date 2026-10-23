@@ -21,7 +21,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type StatementProcessFixtureForTest func(testing.TB, *sql.DB, bool, schemastore.SchemaBootstrapRequest) context.Context
+type StatementProcessFixtureForTest func(testing.TB, string, bool, schemastore.SchemaBootstrapRequest) context.Context
 
 func statementRunSchemaRequest(t testing.TB, snapshot bool) schemastore.SchemaBootstrapRequest {
 	t.Helper()
@@ -68,7 +68,7 @@ func requireStatementRun(t testing.TB, ctx context.Context, owner runlifecycle.O
 	}
 }
 
-func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, prepare StatementProcessFixtureForTest, ids ...string) (runlifecycle.OperationOwner, context.Context) {
+func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, location string, snapshot bool, prepare StatementProcessFixtureForTest, ids ...string) (runlifecycle.OperationOwner, context.Context) {
 	t.Helper()
 	backend, err := sqlitebackend.New(db)
 	if err != nil {
@@ -82,7 +82,7 @@ func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, pre
 	if err := schema.BootstrapSchema(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
-	ctx := prepare(t, db, false, request)
+	ctx := prepare(t, location, false, request)
 	owner, err := runstore.NewSQLite(backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator(), time.Now)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, pre
 	return owner, ctx
 }
 
-func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, prepare StatementProcessFixtureForTest, ids ...string) (runlifecycle.OperationOwner, context.Context) {
+func materializePostgresStatementRuns(t testing.TB, db *sql.DB, location string, snapshot bool, prepare StatementProcessFixtureForTest, ids ...string) (runlifecycle.OperationOwner, context.Context) {
 	t.Helper()
 	backend, err := postgresbackend.New(db)
 	if err != nil {
@@ -109,7 +109,7 @@ func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, p
 	if err := schema.BootstrapSchema(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
-	ctx := prepare(t, db, true, request)
+	ctx := prepare(t, location, true, request)
 	owner, err := runstore.NewPostgres(backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
 	if err != nil {
 		t.Fatal(err)
