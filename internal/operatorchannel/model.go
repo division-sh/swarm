@@ -417,6 +417,8 @@ type Operation struct {
 	PlannedProofID          string            `json:"-"`
 	PlannedProofRevision    int64             `json:"-"`
 	ProviderAuthority       ProviderAuthority `json:"-"`
+	ClaimProviderEventID    string            `json:"-"`
+	ClaimAuthorization      string            `json:"-"`
 }
 
 type Binding struct {

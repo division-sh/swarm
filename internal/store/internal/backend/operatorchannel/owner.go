@@ -981,7 +981,7 @@ func RequirePrincipalTx(ctx context.Context, tx *sql.Tx, principalID string, pos
 	return requirePrincipal(ctx, tx, d, principalID)
 }
 
-const operationSelect = `SELECT operation_id, operation_kind, principal_id, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_authority, onboarding_operation_id, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at FROM operator_channel_operations`
+const operationSelect = `SELECT operation_id, operation_kind, principal_id, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_authority, onboarding_operation_id, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at, claim_provider_event_id, claim_authorization FROM operator_channel_operations`
 
 func loadOperationByRequestKey(ctx context.Context, db queryer, d dialect, key string, forUpdate bool) (domain.Operation, bool, error) {
 	query := operationSelect + ` WHERE request_key_hash = ?`
@@ -1021,9 +1021,10 @@ func scanOperation(row scanner) (domain.Operation, error) {
 	var op domain.Operation
 	var kind, state, proofStatus string
 	var providerAuthority, onboardingOperationID, challenge, account, conversation, scope, presentation, disposition, plannedProofID, proofID sql.NullString
+	var claimEventID, claimAuthorization sql.NullString
 	var bindingRevision, plannedProofRevision, proofRevision sql.NullInt64
 	var requested, expires, claimed, completed any
-	if err := row.Scan(&op.OperationID, &kind, &op.PrincipalID, &op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration, &providerAuthority, &onboardingOperationID, &op.RequestHash, &op.ExpectedBindingRevision, &challenge, &state, &op.Revision, &bindingRevision, &account, &conversation, &scope, &presentation, &disposition, &op.SaveProof, &plannedProofID, &plannedProofRevision, &proofID, &proofRevision, &proofStatus, &requested, &expires, &claimed, &completed); err != nil {
+	if err := row.Scan(&op.OperationID, &kind, &op.PrincipalID, &op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration, &providerAuthority, &onboardingOperationID, &op.RequestHash, &op.ExpectedBindingRevision, &challenge, &state, &op.Revision, &bindingRevision, &account, &conversation, &scope, &presentation, &disposition, &op.SaveProof, &plannedProofID, &plannedProofRevision, &proofID, &proofRevision, &proofStatus, &requested, &expires, &claimed, &completed, &claimEventID, &claimAuthorization); err != nil {
 		return domain.Operation{}, err
 	}
 	op.Kind, op.State, op.ConversationScope, op.ProofStatus = domain.OperationKind(kind), domain.OperationState(state), domain.ConversationScope(scope.String), domain.ProofStatus(proofStatus)
@@ -1031,6 +1032,7 @@ func scanOperation(row scanner) (domain.Operation, error) {
 	op.BindingRevision, op.ProofRevision = bindingRevision.Int64, proofRevision.Int64
 	op.PlannedProofID, op.PlannedProofRevision = plannedProofID.String, plannedProofRevision.Int64
 	op.OnboardingOperationID = onboardingOperationID.String
+	op.ClaimProviderEventID, op.ClaimAuthorization = claimEventID.String, claimAuthorization.String
 	var err error
 	op.ProviderAuthority, err = decodeProviderAuthority(providerAuthority, op.Kind == domain.OperationUnbind)
 	if err != nil {

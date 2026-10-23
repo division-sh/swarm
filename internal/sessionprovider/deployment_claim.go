@@ -34,20 +34,50 @@ func PollDeploymentClaim(ctx context.Context, client *http.Client, operations ch
 	if err != nil {
 		return offset, err
 	}
+	valid := func() bool {
+		current, err := operations.GetChannelOnboarding(ctx, op.OperationID)
+		matches, credentialErr := currentness.CurrentValueMatchesSeal(ctx, evidence)
+		return err == nil && credentialErr == nil && matches && current.DeploymentRegistration && current.AccountConfirmed &&
+			current.Revision == op.Revision && current.PrincipalID == op.PrincipalID && current.Provider == op.Provider &&
+			current.AccountReference == op.AccountReference && current.IdentityOperationID == op.IdentityOperationID &&
+			current.Interface == op.Interface && current.FailureCode == ""
+	}
+	pollAuthorization := operatorchannel.Hash("authenticated-telegram-poll-v1", trigger.Generation().Diagnostic())
+	confirm := func(identity operatorchannel.Operation, eventID string) (int64, error) {
+		receipt, found, err := identities.LoadOperatorChannelClaimReceipt(ctx, operatorchannel.SessionClaimReceiptID(op.OperationID, eventID))
+		if err != nil || !found || receipt.OperationID != identity.OperationID || receipt.Provider != op.Provider ||
+			receipt.ProviderEventID != eventID || receipt.InterfaceKey != op.Interface.Key() || receipt.Challenge != identity.Challenge ||
+			receipt.ProviderAuthorization != pollAuthorization || receipt.NativeCaptureFingerprint == "" {
+			return offset, errors.Join(operatorchannel.ErrConflict, err)
+		}
+		if !valid() {
+			return offset, operatorchannel.ErrCredentialStale
+		}
+		next, err := trigger.ConfirmTelegramClaim(ctx, client, snapshot.CredentialValue(), eventID)
+		if err != nil {
+			return offset, err
+		}
+		return next, nil
+	}
 	for _, identity := range rows {
-		if identity.OperationID != op.IdentityOperationID || identity.OnboardingOperationID != op.OperationID || identity.State != operatorchannel.StateAwaitingClaim {
+		if identity.OperationID != op.IdentityOperationID || identity.OnboardingOperationID != op.OperationID {
+			continue
+		}
+		if identity.State == operatorchannel.StateAwaitingConfirmation && identity.ClaimAuthorization == pollAuthorization {
+			return confirm(identity, identity.ClaimProviderEventID)
+		}
+		if identity.State != operatorchannel.StateAwaitingClaim {
 			continue
 		}
 		claim, next, err := trigger.PollTelegramClaim(ctx, client, snapshot.CredentialValue(), channel, identity.Challenge, offset)
 		if err != nil || claim.Challenge == "" {
 			return next, err
 		}
-		valid := func() bool {
-			matches, credentialErr := currentness.CurrentValueMatchesSeal(ctx, evidence)
-			return credentialErr == nil && matches
-		}
 		err = settleDeploymentClaim(ctx, identities, op, claim, valid)
-		return next, err
+		if err != nil {
+			return offset, err
+		}
+		return confirm(identity, claim.ProviderEventID)
 	}
 	return offset, nil
 }

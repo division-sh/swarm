@@ -43,7 +43,7 @@ func (s *CatalogSnapshot) CompileRegistrationPolling(provider string) (InboundAd
 func (p InboundAdmissionPlan) PollTelegramClaim(ctx context.Context, client *http.Client, token string, channel packs.SatisfactionPlan, challenge string, offset int64) (operatorchannel.InboundClaim, int64, error) {
 	var absent operatorchannel.InboundClaim
 	if !p.Valid() || !p.registrationPolling || p.provider != "telegram" || p.manifest == nil || p.packIdentity == nil ||
-		channel.Provider() != p.provider || !operatorchannel.ValidChallenge(challenge) || token == "" || strings.ContainsAny(token, "/?#\r\n") {
+		channel.Provider() != p.provider || !operatorchannel.ValidChallenge(challenge) || offset < 0 || token == "" || strings.ContainsAny(token, "/?#\r\n") {
 		return absent, offset, fmt.Errorf("Telegram claim requires its admitted provider and exact challenge")
 	}
 	var webhook struct {
@@ -63,7 +63,7 @@ func (p InboundAdmissionPlan) PollTelegramClaim(ctx context.Context, client *htt
 		var identity struct {
 			ID int64 `json:"update_id"`
 		}
-		if err := json.Unmarshal(raw, &identity); err != nil || identity.ID < offset || identity.ID < 0 {
+		if err := json.Unmarshal(raw, &identity); err != nil || identity.ID < offset || identity.ID < 0 || identity.ID == 1<<63-1 {
 			return absent, offset, fmt.Errorf("Telegram update identity is invalid")
 		}
 		offset = identity.ID + 1
@@ -89,6 +89,19 @@ func (p InboundAdmissionPlan) PollTelegramClaim(ctx context.Context, client *htt
 		}
 	}
 	return absent, offset, nil
+}
+
+// ConfirmTelegramClaim acknowledges only the durably consumed update. Updates
+// returned by this read are deliberately left for their eventual consumer.
+func (p InboundAdmissionPlan) ConfirmTelegramClaim(ctx context.Context, client *http.Client, token, eventID string) (int64, error) {
+	id, err := strconv.ParseInt(eventID, 10, 64)
+	if !p.Valid() || !p.registrationPolling || p.provider != "telegram" || token == "" || strings.ContainsAny(token, "/?#\r\n") ||
+		err != nil || id < 0 || id == 1<<63-1 || strconv.FormatInt(id, 10) != eventID {
+		return 0, fmt.Errorf("Telegram confirmation requires its exact admitted update")
+	}
+	var later []json.RawMessage
+	err = readTelegramRegistration(ctx, client, token, "getUpdates", url.Values{"offset": {strconv.FormatInt(id+1, 10)}, "timeout": {"0"}, "limit": {"1"}}, &later)
+	return id + 1, err
 }
 
 // Both provider reads share the same response bound, redirect refusal and

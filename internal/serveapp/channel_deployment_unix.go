@@ -333,6 +333,9 @@ func (c *deploymentChannelSession) VerifyRegistration(ctx context.Context, op ch
 		if identity != op.AccountReference {
 			return false, channelonboarding.ErrConflict
 		}
+		if op.IdentityOperationID != "" {
+			return true, c.PollOperatorClaim(ctx, op)
+		}
 		return true, nil
 	}
 	if c.connection == nil {
