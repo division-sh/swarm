@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	onboarding "github.com/division-sh/swarm/internal/channelonboarding"
 	domain "github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 )
@@ -53,7 +54,7 @@ func settleSessionClaim(ctx context.Context, runner transactionRunner, fact auth
 			return err
 		}
 		var err error
-		settlement, err = settleInboundClaimTx(txctx, tx, runner.dialect(), claim, fact.ReceivedAt())
+		settlement, err = settleInboundClaimTx(txctx, tx, runner.dialect(), claim, fact.ReceivedAt(), fact.Scope())
 		if err != nil {
 			return err
 		}
@@ -134,29 +135,45 @@ func loadClaimReceipt(ctx context.Context, db queryer, d dialect, id string) (do
 	return receipt, true, nil
 }
 
-func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID string, admitted domain.ProviderAuthority) error {
+func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID, principal string, admitted domain.ProviderAuthority) error {
 	if err := admitted.RequireExecutable(); err != nil {
 		return err
 	}
 	originalID, originalRevision := admitted.SessionParent()
-	if originalID != parentID || parentID == "" {
+	if parentID == "" || admitted.Kind == domain.ProviderAuthoritySession && originalID != parentID {
 		return domain.ErrRevisionConflict
 	}
 	table, err := onboardingParentTable(admitted.Scope)
 	if err != nil {
 		return err
 	}
-	query := `SELECT operation_revision,phase FROM ` + table + ` WHERE operation_id=?`
+	approval := `TRUE,'[]'`
+	if admitted.Scope == authority.DeploymentParent {
+		approval = `account_confirmed,credential_admissions`
+	}
+	query := `SELECT operation_revision,phase,principal_id,` + approval + ` FROM ` + table + ` WHERE operation_id=?`
 	if d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
 	var revision int64
 	var phase string
-	if err := tx.QueryRowContext(ctx, d.bind(query), parentID).Scan(&revision, &phase); err != nil {
+	var owner, credentials string
+	var confirmed bool
+	if err := tx.QueryRowContext(ctx, d.bind(query), parentID).Scan(&revision, &phase, &owner, &confirmed, &credentials); err != nil {
 		return err
 	}
-	if revision != originalRevision || phase == "succeeded" || phase == "failed" || phase == "retired" {
+	if owner != principal || !confirmed || admitted.Kind == domain.ProviderAuthoritySession && revision != originalRevision ||
+		phase == "succeeded" || phase == "failed" || phase == "retired" {
 		return domain.ErrRevisionConflict
+	}
+	if admitted.Scope == authority.DeploymentParent && admitted.Kind == domain.ProviderAuthorityCredential {
+		admissions, err := onboarding.DecodeCredentialAdmissions(credentials)
+		if err != nil {
+			return err
+		}
+		if len(admissions) != 1 || admitted.Credential.Key != admissions[0].StoreKey || admitted.Credential.Seal != admissions[0].ValueSeal {
+			return domain.ErrRevisionConflict
+		}
 	}
 	return admitted.RequireExecutable()
 }

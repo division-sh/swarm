@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -40,6 +42,84 @@ func TestOperatorChannelSelectedStoreContractParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openOperatorChannelContractFixture(t, backend)
 			runOperatorChannelContract(t, fixture)
+			t.Run("runtime_entry_cannot_claim_deployment_registration", func(t *testing.T) {
+				ctx, now := t.Context(), time.Now().UTC()
+				principal, err := fixture.store.EnsureOperatorPrincipal(ctx, now)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parents := fixture.store.(interface {
+					DeploymentChannelOperations() channelonboarding.OperationStore
+				}).DeploymentChannelOperations()
+				identity := operatorChannelContractIdentity("deployment-claim-scope")
+				admitted := operatorChannelProviderAuthority()
+				admitted.Scope = authority.DeploymentParent
+				parentID := uuid.NewString()
+				parent, err := parents.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{DeploymentRegistration: true,
+					OperationID: parentID, PrincipalID: principal.ID, RequestKeyHash: parentID, RequestHash: parentID,
+					Verb: channelonboarding.VerbConnect, Provider: "telegram", Interface: identity,
+					Posture: channelonboarding.ActivationWebhookRegistration, Ceremony: channelonboarding.CeremonyAccountLink,
+					CredentialReservations: []channelonboarding.CredentialReservation{{Role: "bot_token", StoreKey: admitted.Credential.Key}}, RequestedAt: now})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity} {
+					advance := channelonboarding.AdvanceRequest{OperationID: parentID, ExpectedRevision: parent.Revision, Phase: phase, Now: now}
+					if phase == channelonboarding.PhaseCredentialsAdmitted {
+						advance.ReplaceCredentialAdmissions = true
+						advance.CredentialAdmissions = []channelonboarding.CredentialAdmission{{Role: "bot_token", StoreKey: admitted.Credential.Key, Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: admitted.Credential.Seal}}
+					}
+					if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+						advance.AccountReference = "420080"
+					}
+					parent, err = parents.AdvanceChannelOnboarding(ctx, advance)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				parent, err = parents.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: parentID, ExpectedRevision: parent.Revision, Phase: parent.Phase, ConfirmAccount: true, Now: now})
+				if err != nil {
+					t.Fatal(err)
+				}
+				id := uuid.NewString()
+				op, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{OperationID: id, Kind: operatorchannel.OperationConnect,
+					PrincipalID: principal.ID, Interface: identity, RequestKeyHash: id, RequestHash: id, OnboardingOperationID: parentID,
+					ProviderAuthority: admitted, RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				parent, err = parents.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: parentID, ExpectedRevision: parent.Revision, Phase: parent.Phase, IdentityOperationID: id, Now: now})
+				if err != nil {
+					t.Fatal(err)
+				}
+				claim := operatorChannelContractClaim(op, operatorchannel.ConversationScopeDirect, "claimant", "conversation", uuid.NewString())
+				if _, err := fixture.settle(ctx, claim, now); !errors.Is(err, operatorchannel.ErrConflict) {
+					t.Fatal("unscoped runtime entry did not refuse the deployment claim", err)
+				}
+				rows, err := fixture.store.ListOperatorChannelOperations(ctx, principal.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, row := range rows {
+					if row.OperationID == id {
+						found = true
+						if row.State != operatorchannel.StateAwaitingClaim || row.Revision != op.Revision || row.ExternalAccountRef != "" || !row.ClaimedAt.IsZero() {
+							t.Fatal("refused runtime claim changed the deployment identity")
+						}
+					}
+				}
+				if !found {
+					t.Fatal("refused runtime claim removed the pending identity")
+				}
+				if _, found, err := fixture.store.LoadOperatorChannelClaimReceipt(ctx, claim.PublicationID); err != nil || found {
+					t.Fatal("refused runtime claim left a receipt", found, err)
+				}
+				after, err := parents.GetChannelOnboarding(ctx, parentID)
+				if err != nil || after.Revision != parent.Revision || after.Phase != parent.Phase || !after.AccountConfirmed {
+					t.Fatal("refused runtime claim changed its confirmed parent", err)
+				}
+			})
 		})
 	}
 }

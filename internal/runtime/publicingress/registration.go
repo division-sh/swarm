@@ -1,10 +1,13 @@
 package publicingress
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -162,6 +166,91 @@ type admittedPair struct {
 	signing  runtimecredentials.AdmittedSnapshot
 	slotID   string
 	base     string
+}
+
+type PendingDeploymentClaim func(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func() (providertriggers.Delivery, error), func() bool) (bool, error)
+
+func (c *ProviderRegistrationController) OwnsAccountCallback(ctx context.Context, raw, account string) bool {
+	callback, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(strings.Trim(callback.Path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "webhooks" {
+		return false
+	}
+	target, current := c.callbackTargetCurrent(ctx, parts[1], parts[2], callback.Query().Get("swarm_callback_generation"))
+	for _, state := range c.snapshot.capture().registrations {
+		if current && state.Pair.Target == target && state.LastVerified != nil && state.LastVerified.CallbackURL == raw &&
+			state.SelectionSlotID == target.Provider+":"+state.Pair.Registration.SlotNamespace()+":"+account {
+			return true
+		}
+	}
+	return false
+}
+
+// Callback generation only selects the registration. Provider admission below
+// authenticates the payload before the deployment claim owner can consume it.
+func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *http.Request, plan providertriggers.InboundAdmissionPlan, consume PendingDeploymentClaim) (bool, error) {
+	target, selected := CurrentRegistrationTarget(request.Context())
+	if consume == nil || !selected || target.Provider != "telegram" {
+		return false, nil
+	}
+	if !plan.Valid() || !plan.Generation().Equal(target.AdmissionPlanGeneration) || plan.Provider() != target.Provider {
+		return false, channelonboarding.ErrConflict
+	}
+	snapshot := c.snapshot.capture()
+	for _, state := range snapshot.registrations {
+		if state.Pair.Target != target || state.LastVerified == nil {
+			continue
+		}
+		prefix := target.Provider + ":" + state.Pair.Registration.SlotNamespace() + ":"
+		account, err := channelonboarding.CanonicalAccount(target.Provider, strings.TrimPrefix(state.SelectionSlotID, prefix))
+		if err != nil || !strings.HasPrefix(state.SelectionSlotID, prefix) {
+			return false, channelonboarding.ErrConflict
+		}
+		provider, signing, err := c.admitCredentials(request.Context(), state.Pair)
+		if err != nil {
+			return false, err
+		}
+		credential := func(admission channelonboarding.CredentialAdmission) bool {
+			value, usable, err := c.opts.CredentialOwner.ObserveValueMatchingSeal(request.Context(), runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
+			for _, receiving := range provider {
+				if err == nil && usable && subtle.ConstantTimeCompare([]byte(value.CredentialValue()), []byte(receiving.CredentialValue())) == 1 {
+					return true
+				}
+			}
+			return false
+		}
+		current := func() bool {
+			credentialsCurrent, err := c.credentialObservationTokensCurrent(request.Context(), state.LastVerified.CredentialObservationTokens)
+			return request.Context().Err() == nil && c.snapshot.currentRevision(snapshot.revision) &&
+				err == nil && credentialsCurrent
+		}
+		admit := func() (providertriggers.Delivery, error) {
+			if request.Method != http.MethodPost {
+				return providertriggers.Delivery{}, providertriggers.Error{Status: http.StatusMethodNotAllowed, Message: "method not allowed"}
+			}
+			body, err := io.ReadAll(io.LimitReader(request.Body, (1<<20)+1))
+			request.Body = io.NopCloser(bytes.NewReader(body))
+			if err != nil || len(body) > 1<<20 {
+				return providertriggers.Delivery{}, providertriggers.Error{Status: http.StatusBadRequest, Message: "invalid webhook body"}
+			}
+			var payload any
+			if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+				return providertriggers.Delivery{}, err
+			}
+			admitted, err := plan.AdmitRequest(providertriggers.Request{Provider: target.Provider, Method: request.Method,
+				URL: request.URL.String(), Body: body, Headers: request.Header, Payload: payload, ContentType: request.Header.Get("Content-Type"),
+				Target: providertriggers.Target{WebhookSecret: signing.CredentialValue()}, Received: c.opts.Now()})
+			if err != nil {
+				return providertriggers.Delivery{}, err
+			}
+			return plan.ProjectDelivery(admitted)
+		}
+		return consume(request.Context(), account, credential, admit, current)
+	}
+	return false, channelonboarding.ErrConflict
 }
 
 // SlotCollisionError is a permanent physical ownership rejection, not a

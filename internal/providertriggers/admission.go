@@ -98,6 +98,7 @@ type InboundAdmissionPlan struct {
 	requiresSecret        bool
 	outputs               []OutputManifest
 	acknowledgedUnsigned  bool
+	registrationPolling   bool
 }
 
 // AdmittedRequest is the authenticated, retry-stable request identity. Its
@@ -556,6 +557,9 @@ func (p InboundAdmissionPlan) Accept(req Request) (Delivery, error) {
 // identity needed to consult the durable publication ledger. It deliberately
 // does not run normalized projection or construct executable output events.
 func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error) {
+	if p.registrationPolling {
+		return AdmittedRequest{}, unauthorized("registration polling accepts only its authenticated provider read, not a webhook request")
+	}
 	if !p.Valid() {
 		return AdmittedRequest{}, badRequest("compiled inbound admission plan is required")
 	}

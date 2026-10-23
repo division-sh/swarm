@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 type runtimeProcessInboundHandler struct {
 	contexts           *runtime.RuntimeContextManager
 	publicRegistration *runtimepublicingress.ProviderRegistrationController
+	pendingClaim       runtimepublicingress.PendingDeploymentClaim
 }
 
 func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -23,11 +25,28 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		http.Error(w, "expected /webhooks/{alias}/{provider}", http.StatusBadRequest)
 		return
 	}
-	use, lookup, acquireErr := h.contexts.AcquireIngress(r.Context(), alias, providertriggers.NormalizeProviderName(provider))
-	if use != nil {
-		defer func() { _ = use.Done() }()
-	}
+	lookup := h.contexts.LookupIngress(alias, provider)
 	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.pendingClaim != nil && h.publicRegistration != nil {
+			consumed, err := h.publicRegistration.ConsumePendingDeploymentClaim(r, lookup.Target.AdmissionPlan, h.pendingClaim)
+			if err != nil {
+				status := http.StatusServiceUnavailable
+				var refusal providertriggers.Error
+				if errors.As(err, &refusal) {
+					status = refusal.Status
+				}
+				http.Error(w, "deployment claim admission refused", status)
+				return
+			}
+			if consumed {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+		use, lookup, acquireErr := h.contexts.AcquireIngress(r.Context(), alias, provider)
+		if use != nil {
+			defer func() { _ = use.Done() }()
+		}
 		h.serveAcquiredIngress(w, r, use, lookup, acquireErr, alias, provider)
 	})
 	if h.publicRegistration != nil {
@@ -39,9 +58,6 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 			return
 		}
 		ctx := r.Context()
-		if use != nil {
-			ctx = use.WorkContext()
-		}
 		if !h.publicRegistration.ExposureCurrent(ctx) {
 			http.NotFound(w, r)
 			return
@@ -115,7 +131,7 @@ func sameRuntimeRegistrationTarget(registration runtimepublicingress.Registratio
 		strings.TrimSpace(registration.ServiceID) == strings.TrimSpace(target.ServiceID) &&
 		strings.TrimSpace(registration.FlowPath) == strings.TrimSpace(target.FlowPath) &&
 		registration.Alias == target.Alias &&
-		strings.TrimSpace(registration.Provider) == strings.TrimSpace(target.Provider) &&
+		registration.Provider == target.Provider &&
 		registration.Generation == target.Generation &&
 		registration.PublicationSequence == target.PublicationSequence &&
 		registration.AdmissionPlanGeneration.Equal(target.AdmissionPlan.Generation()) &&
@@ -128,6 +144,6 @@ func parseProcessWebhookPath(path string) (string, string, bool) {
 		return "", "", false
 	}
 	alias := parts[1]
-	provider := strings.TrimSpace(parts[2])
+	provider := parts[2]
 	return alias, provider, alias != "" && provider != ""
 }

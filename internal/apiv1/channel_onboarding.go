@@ -23,13 +23,14 @@ type ChannelOnboardingLifecycle interface {
 type ChannelOnboardingHandlerOptions struct {
 	Onboarding ChannelOnboardingLifecycle
 	Channels   *operatorchannel.Service
+	Deployment MethodHandler
 }
 
 func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]MethodHandler {
 	if opts.Onboarding == nil || opts.Channels == nil {
 		return nil
 	}
-	return map[string]MethodHandler{
+	handlers := map[string]MethodHandler{
 		"channel.onboarding_select": func(ctx context.Context, req Request) (any, error) {
 			if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
 				return nil, err
@@ -113,6 +114,44 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 			return result, nil
 		},
 	}
+	return scopedChannelHandlers(handlers, opts.Channels, opts.Deployment)
+}
+
+func scopedChannelHandlers(handlers map[string]MethodHandler, channels *operatorchannel.Service, deployment MethodHandler) map[string]MethodHandler {
+	for name, handler := range handlers {
+		handlers[name] = func(ctx context.Context, req Request) (any, error) {
+			if scope, exists := req.Params["scope"]; exists {
+				if scope != "deployment" || deployment == nil {
+					return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "deployment registration is unavailable"})
+				}
+				if err := requireOperatorPrincipal(req, channels); err != nil {
+					return nil, err
+				}
+				for _, field := range []string{"bundle", "interface", "target"} {
+					if _, exists := req.Params[field]; exists {
+						return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "deployment registration has no flow target"})
+					}
+				}
+				if _, exists := req.Params["expected_revision"]; exists {
+					revision, err := channelRevisionParam(req.Params, "expected_revision", false)
+					if err != nil {
+						return nil, err
+					}
+					req.Params["expected_revision"] = revision
+				}
+				result, err := deployment(ctx, req)
+				if err != nil {
+					return nil, channelOnboardingError(err)
+				}
+				return result, nil
+			}
+			if _, exists := req.Params["holder"]; exists {
+				return nil, NewInvalidParamsError(map[string]any{"field": "holder", "reason": "requires deployment scope"})
+			}
+			return handler(ctx, req)
+		}
+	}
+	return handlers
 }
 
 func channelOnboardingStartInput(params map[string]any) (channelonboarding.StartInput, error) {

@@ -127,9 +127,8 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 	}
 	fmt.Fprintln(out, "  swarm verify . --portable")
 	if name == "whatsapp-receptionist" {
-		fmt.Fprintln(out, "  swarm serve")
-		fmt.Fprintln(out, "\nIn a second terminal, from this same directory:")
 		fmt.Fprintln(out, "  swarm channel connect whatsapp")
+		fmt.Fprintln(out, "  swarm serve")
 		return nil
 	}
 	fmt.Fprintln(out, "  swarm test . tests/smoke.yaml")

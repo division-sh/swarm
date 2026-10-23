@@ -2,12 +2,44 @@ package channelonboarding
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
+
+// CredentialAdmissionRecord is the existing private durable codec, not a
+// public readback or executable credential. Currentness still requires its owner.
+type CredentialAdmissionRecord struct {
+	Role      string                  `json:"role"`
+	StoreKey  string                  `json:"store_key"`
+	Kind      CredentialAdmissionKind `json:"kind"`
+	Receipt   string                  `json:"receipt,omitempty"`
+	ValueSeal string                  `json:"value_seal"`
+}
+
+func DecodeCredentialAdmissions(raw string) ([]CredentialAdmission, error) {
+	var records []CredentialAdmissionRecord
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
+		return nil, err
+	}
+	admissions := make([]CredentialAdmission, 0, len(records))
+	for _, record := range records {
+		seal, err := runtimecredentials.ParseValueSeal(record.ValueSeal)
+		if err != nil {
+			return nil, fmt.Errorf("decode channel credential admission: %w", err)
+		}
+		admission := CredentialAdmission{Role: record.Role, StoreKey: record.StoreKey, Kind: record.Kind,
+			Receipt: record.Receipt, ValueSeal: seal}
+		if err := admission.Validate(); err != nil {
+			return nil, err
+		}
+		admissions = append(admissions, admission)
+	}
+	return admissions, nil
+}
 
 type CredentialWriteRequest struct {
 	StoreKey string

@@ -77,6 +77,7 @@ type channelConnectOptions struct {
 	resumeCredential string
 	clientLanguage   string
 	waitForPairing   bool
+	account          string
 }
 
 type channelStatusOptions struct {
@@ -117,10 +118,17 @@ func newChannelLogoutCommand(opts rootCommandOptions) *cobra.Command {
 	var output cliOutputOptions
 	var idempotencyKey string
 	cmd := &cobra.Command{
-		Use:   "logout <provider>",
+		Use:   "logout <provider> [account]",
 		Short: "Unlink one exact paired connection and delete its local pairing state.",
-		Args:  argcount.ExactArgs(1),
+		Args:  argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if commandOpts.channelRegistration != nil {
+				account := ""
+				if len(args) == 2 {
+					account = args[1]
+				}
+				return runDeploymentChannelLogout(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], account, commandOpts, output)
+			}
 			return runChannelLogout(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], idempotencyKey, commandOpts, output)
 		},
 	}
@@ -188,11 +196,14 @@ func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, i
 func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Command {
 	commandOpts := channelConnectOptions{apiOptions: opts, verb: verb}
 	cmd := &cobra.Command{
-		Use:   verb + " <provider>",
+		Use:   verb + " <provider> [account]",
 		Short: channelLifecycleShort(verb),
-		Args:  argcount.ExactArgs(1),
+		Args:  argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commandOpts.sourceSet = cmd.Flags().Changed("source")
+			if len(args) == 2 {
+				commandOpts.account = args[1]
+			}
 			return runChannelConnect(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
 		},
 	}
@@ -335,7 +346,7 @@ func newChannelProofRevokeCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider string, opts channelConnectOptions) error {
+func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider string, opts channelConnectOptions) (resultErr error) {
 	if err := opts.output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -355,9 +366,69 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 		}
 		bundleHash = sourceHash
 	}
-	client, err := newCLIAPIClient(opts.apiOptions)
-	if err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	var client channelControlClient
+	var begun channelOnboardingResult
+	if opts.apiOptions.channelRegistration != nil && opts.verb == "connect" {
+		if opts.sourceSet || opts.target != "" || opts.interfaceRef != "" {
+			return returnCLIValidationError(errOut, errors.New("connect registers a deployment account; do not select a flow, target or interface"))
+		}
+		local, err := openDeploymentChannelClient(ctx, provider, opts.apiOptions)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		defer func() { resultErr = errors.Join(resultErr, local.close(context.WithoutCancel(ctx))) }()
+		if opts.account != "" {
+			ref, err := channelonboarding.CanonicalAccount(provider, opts.account)
+			if err != nil {
+				return returnCLIValidationError(errOut, err)
+			}
+			local.expectedAccount = ref.Account
+			accounts, err := local.accounts(ctx)
+			if err != nil {
+				return returnCLIValidationError(errOut, err)
+			}
+			operation := ""
+			for _, account := range accounts {
+				if account.Operation.AccountReference == ref.Account {
+					if operation != "" {
+						return returnCLIValidationError(errOut, errors.New("account registration is ambiguous"))
+					}
+					operation = account.Operation.OperationID
+				}
+			}
+			if operation == "" {
+				return returnCLIValidationError(errOut, errors.New("account is not registered; run swarm channel connect <provider> to link it"))
+			}
+			err = local.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": operation, "reverify": true}, &begun)
+			if err != nil {
+				return returnCLIValidationError(errOut, err)
+			}
+			if begun.Operation.Phase == channelonboarding.PhaseRetired && begun.Operation.FailureCode == "native_account_revoked" {
+				fmt.Fprintln(out, "Account was logged out from the phone. Link it again:")
+				begun = channelOnboardingResult{}
+			}
+		} else {
+			accounts, err := local.accounts(ctx)
+			if err != nil {
+				return returnCLIValidationError(errOut, err)
+			}
+			if len(accounts) > 0 && !opts.yes {
+				for _, account := range accounts {
+					fmt.Fprintf(out, "Already linked: %s.\n", account.Operation.AccountReference)
+				}
+				approved, err := confirmChannelAccount(opts.apiOptions.input, errOut, "Link another? [y/N] ")
+				if err != nil || !approved {
+					return err
+				}
+			}
+		}
+		client = local
+	} else {
+		var err error
+		client, err = newCLIAPIClient(opts.apiOptions)
+		if err != nil {
+			return returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
 	}
 	params := map[string]any{
 		"provider": provider, "verb": opts.verb, "save_proof": !opts.noSave,
@@ -373,9 +444,12 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if strings.TrimSpace(opts.idempotencyKey) != "" {
 		params["idempotency_key"] = strings.TrimSpace(opts.idempotencyKey)
 	}
-	begun, err := startCLIChannelOnboarding(ctx, client, params, opts, errOut)
-	if err != nil {
-		return err
+	if begun.Operation.OperationID == "" {
+		var err error
+		begun, err = startCLIChannelOnboarding(ctx, client, params, opts, errOut)
+		if err != nil {
+			return err
+		}
 	}
 	if opts.waitForPairing && opts.apiOptions.input != nil {
 		opts.apiOptions.input = bufio.NewReader(opts.apiOptions.input)
@@ -390,6 +464,11 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	result, err := completeChannelOnboarding(ctx, client, begun, opts, progressOut, errOut)
 	if err != nil {
 		return err
+	}
+	if opts.account != "" && result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded &&
+		!opts.output.asJSON && !opts.output.asYAML && !opts.output.quiet {
+		fmt.Fprintf(out, "Reverified %s account %s.\n", result.Operation.Provider, result.Operation.AccountReference)
+		return nil
 	}
 	return renderChannelOnboardingResult(out, errOut, opts.output, result)
 }
@@ -484,7 +563,7 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 		if pending && !opts.waitForPairing && !advancePending && opts.resumeCredential == "" {
 			return result, nil
 		}
-		waitingForConnection := result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
+		waitingForConnection := !result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
 		if opts.waitForPairing {
 			if pending || waitingForConnection {
 				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, awaitLogin, progressOut, errOut)
@@ -513,6 +592,9 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 			observedAt := now()
 			switch {
 			case identity.State == "awaiting_claim" && (identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(observedAt)):
+				if result.Operation.DeploymentRegistration {
+					fmt.Fprintf(progressOut, "%s is this deployment's HITL channel.\n", result.Operation.AccountReference)
+				}
 				fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339))
 				var err error
 				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
@@ -671,11 +753,23 @@ func confirmCLIChannelAccount(ctx context.Context, client channelControlClient, 
 		paired.Connection == nil || !paired.Connection.Linked {
 		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the rejected account has no exact logout target"))
 	}
-	if err := runChannelLogout(ctx, out, errOut, current.Operation.OperationID, "", opts.apiOptions, opts.output); err != nil {
-		return channelOnboardingResult{}, false, err
+	if current.Operation.DeploymentRegistration {
+		var loggedOut channelOnboardingResult
+		if err := client.call(ctx, "channel.logout", map[string]any{"operation_id": paired.Operation.OperationID, "expected_revision": paired.Operation.Revision}, &loggedOut); err != nil {
+			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
+		}
+	} else {
+		if err := runChannelLogout(ctx, out, errOut, current.Operation.OperationID, "", opts.apiOptions, opts.output); err != nil {
+			return channelOnboardingResult{}, false, err
+		}
 	}
 	params := map[string]any{"provider": current.Operation.Provider, "verb": "connect", "save_proof": !opts.noSave,
 		"bundle": current.Operation.Coordinate.BundleHash, "interface": current.Operation.Interface.Selector, "target": current.Operation.TargetSelector}
+	if current.Operation.DeploymentRegistration {
+		delete(params, "bundle")
+		delete(params, "interface")
+		delete(params, "target")
+	}
 	next, err := startCLIChannelOnboarding(ctx, client, params, opts, errOut)
 	return next, true, err
 }
@@ -762,6 +856,9 @@ func waitForChannelOnboardingClaim(ctx context.Context, client channelControlCli
 func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
 	if err := output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
+	}
+	if opts.channelRegistration != nil {
+		return runDeploymentChannelList(ctx, out, errOut, opts, output)
 	}
 	client, err := newCLIAPIClient(opts)
 	if err != nil {

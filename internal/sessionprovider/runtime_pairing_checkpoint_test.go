@@ -117,7 +117,9 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				}
 				opts := DeploymentConnectionOptions{Directory: f.directory, OperationID: op.OperationID, Principal: f.principal,
 					Process: process, Operations: operations, Store: f.store, Plan: f.candidate.Plan, Trigger: f.trigger}
-				f.connection, err = OpenDeploymentConnection(ctx, opts)
+				request, requestDone := context.WithCancel(ctx)
+				f.connection, err = OpenDeploymentConnection(request, opts)
+				requestDone()
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -133,12 +135,37 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				if _, err := OpenDeploymentConnection(ctx, opts); err == nil {
 					t.Fatal("a second invocation obtained the same private device")
 				}
+				candidate := f.candidate
+				candidate.DeploymentRegistration, candidate.Ceremony = true, channelonboarding.CeremonyAccountLink
+				candidate.Coordinate, candidate.Target = channelonboarding.ChannelRuntimeContextCoordinate{}, channelonboarding.CandidateTarget{}
+				candidate.ConfirmationOperation = ""
+				catalog, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var operator *channelonboarding.AccountReference
+				if hitl {
+					operator = &channelonboarding.AccountReference{Provider: "whatsapp", Account: "+15550100123"}
+				}
+				service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, OperatorAccount: operator, Store: f.store,
+					Operations: operations, Identities: f.channels, Credentials: f.writer, Sessions: f,
+					Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil }})
+				if err != nil {
+					t.Fatal(err)
+				}
 				f.peer.attach(t, f.connection.state.currentOccurrence().client)
 				if err := f.connection.Connect(ctx); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := f.connection.PairingReadback(ctx, f.principal); err != nil {
 					t.Fatal("deployment QR readback demanded runtime authority", err)
+				}
+				initial, err := service.Get(ctx, op.OperationID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if pending, err := initial.SessionPairingPending(time.Now()); err != nil || !pending {
+					t.Fatal("initial deployment QR progress was not the original non-executable projection", pending, err)
 				}
 				if _, paired, err := f.connection.CheckpointPairing(ctx, op.Revision); err != nil || paired {
 					t.Fatal("unpaired invocation created an account", paired, err)
@@ -162,24 +189,6 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					checkpoint.AccountConfirmed || checkpoint.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) {
 					t.Fatal("deployment checkpoint lost account identity or manufactured activation", paired, err)
 				}
-				candidate := f.candidate
-				candidate.DeploymentRegistration, candidate.Ceremony = true, channelonboarding.CeremonyAccountLink
-				candidate.Coordinate, candidate.Target = channelonboarding.ChannelRuntimeContextCoordinate{}, channelonboarding.CandidateTarget{}
-				candidate.ConfirmationOperation = ""
-				catalog, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
-				if err != nil {
-					t.Fatal(err)
-				}
-				var operator *channelonboarding.AccountReference
-				if hitl {
-					operator = &channelonboarding.AccountReference{Provider: "whatsapp", Account: checkpoint.AccountReference}
-				}
-				service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, OperatorAccount: operator, Store: f.store,
-					Operations: operations, Identities: f.channels, Credentials: f.writer, Sessions: f,
-					Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil }})
-				if err != nil {
-					t.Fatal(err)
-				}
 				preview, err := service.Get(ctx, checkpoint.OperationID)
 				if err != nil || preview.Operation.AccountConfirmed || preview.Operation.Revision != checkpoint.Revision {
 					t.Fatal("readback approved the retained preview", err)
@@ -188,6 +197,33 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					t.Fatal("unconfirmed account granted operator authority")
 				}
 				registered, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID})
+				logout := func(op channelonboarding.Operation) channelonboarding.Result {
+					t.Helper()
+					type outcome struct {
+						result channelonboarding.Result
+						err    error
+					}
+					done := make(chan outcome, 1)
+					go func() {
+						result, err := service.LogoutDeployment(ctx, op.OperationID, op.Revision)
+						done <- outcome{result, err}
+					}()
+					unlink := f.peer.next(t)
+					if unlink.node.Tag != "iq" || unlink.node.Attrs["xmlns"] != "md" {
+						t.Fatal("deployment logout did not use the original unlink transport", unlink.node)
+					}
+					f.peer.acknowledge(t, unlink)
+					select {
+					case result := <-done:
+						if result.err != nil {
+							t.Fatal("deployment logout failed", result.err)
+						}
+						return result.result
+					case <-ctx.Done():
+						t.Fatal("deployment logout did not join", context.Cause(ctx))
+						return channelonboarding.Result{}
+					}
+				}
 				if hitl {
 					if err != nil || !registered.Operation.AccountConfirmed || registered.IdentityOperation == nil ||
 						registered.IdentityOperation.State != operatorchannel.StateAwaitingClaim ||
@@ -244,6 +280,10 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 						finished.Operation.ActivationRevision != 0 || finished.Readiness != nil {
 						t.Fatal("verified deployment ceremony required runtime activation", err)
 					}
+					loggedOut := logout(finished.Operation)
+					if !loggedOut.Operation.LogoutCompleted || loggedOut.Operation.Phase != channelonboarding.PhaseRetired {
+						t.Fatal("deployment HITL logout required runtime authority or failed unlink")
+					}
 					return
 				}
 				if err != nil || registered.Operation.Phase != channelonboarding.PhaseSucceeded || !registered.Operation.AccountConfirmed ||
@@ -262,6 +302,10 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				wrongScope := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: registered.Operation.SessionAccount}
 				if _, _, err := wrongScope.AdmitExecution(ctx, f.connection); err == nil {
 					t.Fatal("deployment possession granted runtime authority")
+				}
+				loggedOut := logout(registered.Operation)
+				if !loggedOut.Operation.LogoutCompleted || loggedOut.Operation.Phase != channelonboarding.PhaseRetired {
+					t.Fatal("deployment account logout required an operator or runtime authority")
 				}
 			})
 		}
