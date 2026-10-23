@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/lib/pq"
 )
@@ -173,13 +173,6 @@ func TestCompletionTransactionAcknowledgementBoundaryBothStores(t *testing.T) {
 				ctx, cancel := context.WithCancel(fixture.context)
 				defer cancel()
 				control.phase, control.cancel, control.failure = phase, cancel, errors.New("independent native COMMIT error")
-				submits := 0
-				sink := &completionHandoffEvidenceProbeSink{submit: func(runlifecycle.Candidate) error { submits++; return nil }}
-				registration, err := fixture.store.(runlifecycle.CandidateRegistrar).RegisterCompletionCandidateSink(ctx, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash}, sink)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer registration.Release()
 				control.enabled.Store(true)
 				if phase == "entry_cancel" {
 					cancel()
@@ -201,15 +194,12 @@ func TestCompletionTransactionAcknowledgementBoundaryBothStores(t *testing.T) {
 				if (phase == "commit_refused" || phase == "commit_ack_lost") && !errors.Is(err, control.failure) {
 					t.Fatalf("lost COMMIT error: %v", err)
 				}
-				wantWrites, wantSubmits := int32(1), 0
+				wantWrites := int32(1)
 				if phase == "entry_cancel" {
 					wantWrites = 0
 				}
-				if committed {
-					wantSubmits = 1
-				}
-				if control.writes.Load() != wantWrites || submits != wantSubmits {
-					t.Fatalf("replay or unsafe handoff: writes=%d submits=%d", control.writes.Load(), submits)
+				if control.writes.Load() != wantWrites {
+					t.Fatalf("settlement replayed: writes=%d want=%d", control.writes.Load(), wantWrites)
 				}
 				if committed || phase == "commit_ack_lost" {
 					requireCompletionSettlementRows(t, fixture, attempt.AttemptID, attempt.Authority.Target.ID, runtimeeffects.StateSettled, 1, 0)

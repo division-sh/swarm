@@ -50,19 +50,10 @@ func (e *captureFanOutExecutor) ReportFanOutServingError(_ context.Context, err 
 // grant binding and all mutations below use the production selected-store path.
 func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected selectedFanOutOwner, fixtures []fanOutOwnerFixture) (startupownership.ProcessCapability, []startupownership.LiveGenerationGrant, []*worklifetime.RuntimeOccurrence, agenttopology.SourceSetPlan) {
 	t.Helper()
-	store := selected.(interface {
-		AcquireProcessCapability(context.Context, startupownership.AcquireRequest) (startupownership.ProcessCapability, error)
-	})
 	request := testStartupAcquireRequest("fan-out-granted-store")
-	capability, err := store.AcquireProcessCapability(ctx, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := capability.Release(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
+	value, _ := storeTestWorkFixtures.Load(t)
+	capability := selectedMaterializationProcessForTest(t, value.(*storeTestWorkFixture), selected)
 	sources := make([]agenttopology.SourceCoordinate, len(fixtures))
 	for i, fixture := range fixtures {
 		sources[i] = agenttopology.SourceCoordinate{BundleHash: fixture.bundleHash}
@@ -75,6 +66,13 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 		t.Fatal(err)
 	}
 	work := worklifetime.NewProcess()
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := work.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		work.Retire()
 		deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)

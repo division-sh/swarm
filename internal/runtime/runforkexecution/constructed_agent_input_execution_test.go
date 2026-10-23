@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -356,6 +358,10 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	} else {
 		if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
+			var postgresErr *pq.Error
+			if errors.As(err, &postgresErr) {
+				t.Logf("selected child PostgreSQL phase failure: code=%s detail=%s where=%s", postgresErr.Code, postgresErr.Detail, postgresErr.Where)
+			}
 			report, reportErr := selected.(interface {
 				LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 			}).LoadRunDebugReport(ctx, result.Materialization.ForkRunID, operatorread.RunDebugQueryOptions{})
