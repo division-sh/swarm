@@ -152,6 +152,10 @@ func (s *Service) ReverifyDeployment(ctx context.Context, id string) (Result, er
 		}
 		return s.result(ctx, retired, &candidate)
 	}
+	return s.resumeDeploymentEnrollment(ctx, op, candidate)
+}
+
+func (s *Service) resumeDeploymentEnrollment(ctx context.Context, op Operation, candidate Candidate) (Result, error) {
 	enroll := op.Phase == PhaseSucceeded && op.IdentityOperationID == ""
 	if op.IdentityOperationID != "" {
 		identity, err := s.currentIdentityOperation(ctx, op.IdentityOperationID)
@@ -161,11 +165,12 @@ func (s *Service) ReverifyDeployment(ctx context.Context, id string) (Result, er
 		enroll = identity.State.Terminal() && identity.State != operatorchannel.StateBound
 	}
 	if s.operatorAccount != nil && *s.operatorAccount == (AccountReference{Provider: op.Provider, Account: op.AccountReference}) && enroll {
-		op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
+		next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 			BeginOperatorEnrollment: true, Phase: PhaseAwaitingExternalIdentity, Now: s.now().UTC()})
 		if err != nil {
 			return Result{}, err
 		}
+		op = next
 	}
 	return s.driveLocked(ctx, op, candidate, "", false)
 }
@@ -217,22 +222,6 @@ func (s *Service) DeploymentAccounts(ctx context.Context, provider string) ([]Re
 // Only operation persistence changes scope. Runtime activation/teardown ports
 // remain the original owner and are never traversed by deployment completion.
 type deploymentStore struct {
-	Store
-	operations OperationStore
-}
-
-func (s deploymentStore) ReserveChannelOnboarding(ctx context.Context, req StartRequest) (Operation, error) {
-	return s.operations.ReserveChannelOnboarding(ctx, req)
-}
-func (s deploymentStore) GetChannelOnboarding(ctx context.Context, id string) (Operation, error) {
-	return s.operations.GetChannelOnboarding(ctx, id)
-}
-func (s deploymentStore) ListChannelOnboardingOperations(ctx context.Context) ([]Operation, error) {
-	return s.operations.ListChannelOnboardingOperations(ctx)
-}
-func (s deploymentStore) AdvanceChannelOnboarding(ctx context.Context, req AdvanceRequest) (Operation, error) {
-	return s.operations.AdvanceChannelOnboarding(ctx, req)
-}
-func (s deploymentStore) SetChannelClientLocale(ctx context.Context, req SetClientLocaleRequest) (Operation, error) {
-	return s.operations.SetChannelClientLocale(ctx, req)
+	RuntimeStore
+	OperationStore
 }

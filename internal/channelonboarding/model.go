@@ -881,6 +881,10 @@ type OperationStore interface {
 
 type Store interface {
 	OperationStore
+	RuntimeStore
+}
+
+type RuntimeStore interface {
 	TeardownStore
 	ReconcileChannelOnboardingBinding(context.Context, ReconcileBindingRequest) (Operation, error)
 	SessionStandingBindingCurrent(context.Context, Operation) (bool, error)
