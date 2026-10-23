@@ -802,7 +802,7 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 		if materialized.ForkRunID == "" {
 			t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 		}
-		seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 
 		admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
 			t, sourceRunID, "agent-a", "flow-a/1", entityID, "post-t-source-timer", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
@@ -979,7 +979,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
 	if err != nil {
@@ -1081,8 +1081,8 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID, selectedEventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-		seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, selectedEventID, entityID, at)
+		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, selectedEventID, entityID, at)
 		mutateRunForkSessionExcludedColumns(t, db, sourceRunID, sessionID, at.Add(time.Minute))
 		var afterExcluded int64
 		if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, sourceRunID).Scan(&afterExcluded); err != nil {
@@ -1187,7 +1187,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			at := time.Unix(1700003620, 0).UTC()
 			ctx = testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
 			activate := selectedStoreActivationGateForTest(t, ctx, pg)
-			seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+			seedCanonicalSelectedContractExecutionStoreSource(t, ctx, db, sourceRunID, entityID, eventID, at)
 			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"), "active")
 
 			request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
@@ -1198,7 +1198,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
 			activationRequest.AllowedSourceEventIDs = []string{eventID}
 			activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-				seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+				seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 				if err := tc.seed(ctx, pg, db, sourceRunID, entityID, eventID, at); err != nil {
 					t.Fatalf("seed post-T %s: %v", tc.name, err)
 				}
@@ -1256,7 +1256,7 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
 	activationRequest.AllowedSourceEventIDs = []string{forkPointEventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, forkPointEventID, entityID, forkAt)
+		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, forkPointEventID, entityID, forkAt)
 
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
@@ -1300,7 +1300,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
+		seedPostTActiveConversationCoupling(t, ctx, db, sourceRunID, entityID, eventID, sessionID, at)
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
 	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
@@ -1334,7 +1334,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		forkEventID := seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		finishHistory := beginForkDeliveryHistoryFixture(t, ctx, pg, materialized.ForkRunID)
 		sessionID := uuid.NewString()
 		identity := mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "flow-a/1")
@@ -1450,7 +1450,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		forkEventID := seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		finishHistory := beginForkDeliveryHistoryFixture(t, ctx, pg, materialized.ForkRunID)
 		forkRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
 		forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
@@ -1492,7 +1492,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "platform.auth_required",
 			events.EventProducerPlatform, "runtime", entityID, "flow-a/1", at.Add(3*time.Second))
 
@@ -1526,7 +1526,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, "",
 			[]byte(`{"log_level":"warn","message":"uncorrelated diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}`), at.Add(3*time.Second))
 
@@ -1560,7 +1560,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, "",
 			[]byte(`{"log_level":"info","message":"Tool read_validation_case_business_brief executed successfully","details":{"component":"tool-executor","action":"tool_execution_succeeded","tool_name":"read_validation_case_business_brief"}}`), at.Add(3*time.Second))
 
@@ -1594,7 +1594,7 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+		forkEventID := seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		seedPostgresChildEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, forkEventID,
 			"platform.reset", events.EventProducerPlatform, "runtime", entityID, "flow-a/1", []byte(`{}`), at.Add(3*time.Second))
 
@@ -1967,7 +1967,7 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, ctx
 	return claimed.Claim
 }
 
-func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
+func seedPostTActiveConversationCoupling(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
 	t.Helper()
 	identity := mustTestAgentIdentityForRun(sourceRunID, "active-agent", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
