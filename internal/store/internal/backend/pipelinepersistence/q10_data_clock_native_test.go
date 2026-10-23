@@ -28,14 +28,14 @@ import (
 func VerifyQ10DataClockWriteTriggersForTest(t *testing.T, prepare StatementProcessFixtureForTest) {
 	for _, postgres := range []bool{false, true} {
 		t.Run(q10Dialect(postgres), func(t *testing.T) {
-			db := q10FreshDatabase(t, postgres)
+			db, location := q10FreshDatabase(t, postgres)
 			ctx := context.Background()
 			at := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 			runID, entityID, foreignRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			if postgres {
-				_, ctx = materializePostgresStatementRuns(t, db, false, prepare, runID, foreignRunID)
+				_, ctx = materializePostgresStatementRuns(t, db, location, false, prepare, runID, foreignRunID)
 			} else {
-				_, ctx = materializeSQLiteStatementRuns(t, db, false, prepare, runID, foreignRunID)
+				_, ctx = materializeSQLiteStatementRuns(t, db, location, false, prepare, runID, foreignRunID)
 			}
 			record := pipeline.WorkflowEngineStateRecord{
 				Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("work", "work", "work")},
@@ -231,7 +231,7 @@ func VerifyQ10DataClockWriteTriggersForTest(t *testing.T, prepare StatementProce
 	}
 }
 
-func q10FreshDatabase(t *testing.T, postgres bool) *sql.DB {
+func q10FreshDatabase(t *testing.T, postgres bool) (*sql.DB, string) {
 	t.Helper()
 	path := contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot())
 	source, err := yamlsource.LoadFile(path)
@@ -247,9 +247,10 @@ func q10FreshDatabase(t *testing.T, postgres bool) *sql.DB {
 		t.Fatal(err)
 	}
 	var db *sql.DB
+	var location string
 	var owner schemastore.SchemaBootstrapper
 	if postgres {
-		_, db, _ = testutil.StartEmptyPostgres(t)
+		location, db, _ = testutil.StartEmptyPostgres(t)
 		backend, err := postgresbackend.New(db)
 		if err != nil {
 			t.Fatal(err)
@@ -259,8 +260,8 @@ func q10FreshDatabase(t *testing.T, postgres bool) *sql.DB {
 			t.Fatal(err)
 		}
 	} else {
-		file := filepath.Join(t.TempDir(), "q10.db")
-		db, err = sql.Open("sqlite", file)
+		location = filepath.Join(t.TempDir(), "q10.db")
+		db, err = sql.Open("sqlite", location)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -273,7 +274,7 @@ func q10FreshDatabase(t *testing.T, postgres bool) *sql.DB {
 		if err != nil {
 			t.Fatal(err)
 		}
-		owner, err = schemastore.NewSQLiteWithBackend(backend, file)
+		owner, err = schemastore.NewSQLiteWithBackend(backend, location)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -281,5 +282,5 @@ func q10FreshDatabase(t *testing.T, postgres bool) *sql.DB {
 	if err := owner.BootstrapSchema(context.Background(), schemastore.SchemaBootstrapRequest{PlatformPlans: plans, Origin: schemastore.RuntimeStoreOrigin{SwarmVersion: "q10-proof", PlatformVersion: "q10-proof", CreatedAt: time.Now().UTC()}}); err != nil {
 		t.Fatal(err)
 	}
-	return db
+	return db, location
 }

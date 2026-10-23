@@ -2,28 +2,37 @@ package pipelinepersistence_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 )
 
 // Keep the production store assembly outside its private backend's import graph.
-func prepareStatementProcess(t testing.TB, db *sql.DB, postgres bool, request schemastore.SchemaBootstrapRequest) context.Context {
+func prepareStatementProcess(t testing.TB, location string, postgres bool, request schemastore.SchemaBootstrapRequest) context.Context {
 	t.Helper()
 	var selected interface {
 		agentfixture.Store
 		BootstrapSchema(context.Context, schemastore.SchemaBootstrapRequest) error
+		Close() error
 	}
+	var err error
 	if postgres {
-		selected = storetest.NewPostgresStoreForTest(db)
+		selected, err = construction.NewPostgres(location)
 	} else {
-		selected = storetest.NewSQLiteRuntimeStoreForTest(db)
+		selected, err = construction.NewSQLiteRuntime(location)
 	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := selected.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	ctx := context.Background()
 	if err := selected.BootstrapSchema(ctx, request); err != nil {
 		t.Fatal(err)
