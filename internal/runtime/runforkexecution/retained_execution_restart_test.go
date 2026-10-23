@@ -105,7 +105,13 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					retained := len(owner.ports.contexts.entries)
 					owner.ports.contexts.mu.Unlock()
 					leases := process.ActiveCount()
-					if cardinality == 1 && outputs == 1 && pending == 0 && settlement.Total == 1 && settlement.Delivered == 1 && found && header.CurrentState == "done" && availability.Status == "completed" && retained == 0 && leases == baselineLeases {
+					if cardinality == 1 && outputs == 1 && pending == 0 && settlement.Total == 1 && settlement.Delivered == 1 && found && header.CurrentState == "done" {
+						if err := retireQuiescentSelectedTestContext(wait, owner, checkpoint.ForkRun); err != nil {
+							t.Fatal(err)
+						}
+						if availability.Status != "running" || process.ActiveCount() != baselineLeases {
+							t.Fatalf("settled receiver changed live run or leaked shutdown work: status=%s leases=%d baseline=%d", availability.Status, process.ActiveCount(), baselineLeases)
+						}
 						break
 					}
 					select {

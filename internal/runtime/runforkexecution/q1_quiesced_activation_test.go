@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -55,22 +54,8 @@ func proveSelectedQ1QuiescedHistoricalAttachmentBothStores(t *testing.T) {
 				t.Fatalf("first child did not establish canonical freeze: %+v err=%v", first, err)
 			}
 			selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
-			for {
-				state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, first.Materialization.ForkRunID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				request.Owner.ports.contexts.mu.Lock()
-				joined := len(request.Owner.ports.contexts.entries) == 0
-				request.Owner.ports.contexts.mu.Unlock()
-				if state.State == "closed" && state.RunStatus == "completed" && joined {
-					break
-				}
-				select {
-				case <-ctx.Done():
-					t.Fatalf("first child did not finish before isolated attachment proof: %+v joined=%t err=%v", state, joined, ctx.Err())
-				case <-time.After(10 * time.Millisecond):
-				}
+			if observed, err := observeSelectedRetainedExecution(t, ctx, request.Owner, selected, first.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 {
+				t.Fatalf("first child did not settle before isolated attachment proof: %+v err=%v", observed, err)
 			}
 			headers := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
