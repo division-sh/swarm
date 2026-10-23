@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimerunstalled "github.com/division-sh/swarm/internal/runtime/runstalled"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -101,6 +102,7 @@ type requiredPorts struct {
 	data                   apiv1.DurableDataStore
 	dataAccess             durabledata.ResourceAccessStore
 	runBundleAvailability  runbundle.AvailabilityStore
+	liveRuns               runtimerunlifecycle.LiveRunReader
 	runStalled             runtimerunstalled.ProjectionReader
 	sourceArtifacts        SourceArtifactDataWriter
 	sourceArtifactReader   runtimerunforkexecution.SourceArtifactSelectedContractSourceStore
@@ -393,7 +395,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
-			testSetup: selected, runBundleContext: selected, data: selected, dataAccess: selected, runBundleAvailability: selected,
+			testSetup: selected, runBundleContext: selected, data: selected, dataAccess: selected, runBundleAvailability: selected, liveRuns: selected,
 			runStalled: selected, sourceArtifacts: selected, sourceArtifactReader: selected,
 		},
 		products: productPorts{
@@ -450,7 +452,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
-			testSetup: selected, runBundleContext: selected, data: selected, dataAccess: selected, runBundleAvailability: selected,
+			testSetup: selected, runBundleContext: selected, data: selected, dataAccess: selected, runBundleAvailability: selected, liveRuns: selected,
 			runStalled: selected, sourceArtifacts: selected, sourceArtifactReader: selected,
 		},
 		products: productPorts{

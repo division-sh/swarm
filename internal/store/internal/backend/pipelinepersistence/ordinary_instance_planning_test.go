@@ -68,7 +68,7 @@ func TestOrdinaryPlanningMemoKeepsLaterReadFailuresAndCancellation(t *testing.T)
 	owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(source, "empty"), "receiver", "empty/receiver")}
 	timerFailure := errors.New("independent initial timer read failure")
 	query = workflowTimerActivationSelect(true, true) + " AND t.status = 'active' ORDER BY t.created_at, t.timer_id"
-	mock.ExpectQuery(query).WithArgs(runID, runID, "entity", "entity", "running", "paused").WillReturnError(timerFailure)
+	mock.ExpectQuery(query).WithArgs(runID, runID, "entity", "entity", "running", "paused", "live").WillReturnError(timerFailure)
 	if timers, err := reader.ListFlowInstancePlanningInitialTimers(ctx, owner, "entity"); !errors.Is(err, timerFailure) || len(timers) != 0 {
 		t.Fatalf("index memo hid the independent timer-owner refusal: %+v err=%v", timers, err)
 	}

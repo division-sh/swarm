@@ -210,6 +210,9 @@ func TestRunLifecyclePauseResumeSuccessorRaceParity(t *testing.T) {
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
+			t.Run("live_selection", func(t *testing.T) {
+				requireLiveRunControlSelection(t, fixture, ctx)
+			})
 			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
 				t.Fatalf("materialize terminal entity: %v", err)
 			}

@@ -214,13 +214,13 @@ func TestRunAdmissionCanonicalSourceRevisionReloads(t *testing.T) {
 			mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestRevisedBundle).
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 			if postgres {
-				mock.ExpectExec("UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused')").
+				mock.ExpectExec("UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused', 'live')").
 					WithArgs(admissionTestRunID, admissionTestRevisedBundle).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectQuery("SELECT LOWER(status), bundle_hash, completion_due_at, completion_revision, clock_timestamp() FROM runs WHERE run_id = $1::uuid FOR UPDATE").
 					WithArgs(admissionTestRunID).WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "completion_due_at", "completion_revision", "now"}).
 					AddRow("paused", admissionTestRevisedBundle, nil, 0, selectedNow))
 			} else {
-				mock.ExpectExec("UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused')").
+				mock.ExpectExec("UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused', 'live')").
 					WithArgs(admissionTestRevisedBundle, admissionTestRunID).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectQuery("SELECT LOWER(status), bundle_hash, completion_due_at, completion_revision FROM runs WHERE run_id = ?").
 					WithArgs(admissionTestRunID).WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "completion_due_at", "completion_revision"}).

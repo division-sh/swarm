@@ -801,7 +801,7 @@ methods:
   - method: run.continue
     transport: http
     required_params: [run_id]
-    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, RUN_NOT_FOUND, RUN_NOT_PAUSED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, RUN_NOT_FOUND, RUN_NOT_PAUSED, RUN_FLOW_ALREADY_LIVE, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -921,7 +921,7 @@ methods:
   - method: run.stop
     transport: http
     required_params: [run_id]
-    declared_errors: [RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT]
+    declared_errors: [RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, RUN_NOT_PAUSED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}

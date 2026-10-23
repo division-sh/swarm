@@ -43,6 +43,7 @@ const (
 	RunNeverCompletesCode                  = "RUN_NEVER_COMPLETES"
 	RunNotPausedCode                       = "RUN_NOT_PAUSED"
 	RunAlreadyPausedCode                   = "RUN_ALREADY_PAUSED"
+	RunFlowAlreadyLiveCode                 = "RUN_FLOW_ALREADY_LIVE"
 	MailboxNotFoundCode                    = "MAILBOX_NOT_FOUND"
 	MailboxAlreadyDecidedCode              = "MAILBOX_ALREADY_DECIDED"
 	InvalidDeferUntilCode                  = "INVALID_DEFER_UNTIL"

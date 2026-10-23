@@ -1,15 +1,99 @@
 package runtimepersistence
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateParityFixture, ctx context.Context) {
+	t.Helper()
+	owner := selectedAdmissionLifecycleWriter(fixture.store).(interface {
+		runtimerunlifecycle.LiveRunReader
+		CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
+		PauseRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
+		ContinueRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
+		StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
+		SelectLiveRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time) (string, error)
+		RunDispatchBlocked(context.Context, string) (bool, error)
+	})
+	reader := fixture.store.(runtimerunlifecycle.LiveRunReader)
+	scope := runtimerunlifecycle.LiveRunScope{Deployment: "run-control-fixture", FlowPath: "."}
+	source, _ := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	first, second := uuid.NewString(), uuid.NewString()
+	request := runtimerunlifecycle.CreateRequest{RunID: first, Source: source, Origin: runtimerunlifecycle.DeploymentRunOrigin(), StartedAt: time.Now().UTC(), LiveScope: scope}
+	if _, err := owner.CreateRun(ctx, request); err != nil {
+		t.Fatalf("create live run: %v", err)
+	}
+	if disposition, err := owner.CreateRun(ctx, request); err != nil || disposition != runtimerunlifecycle.MutationExactNoop {
+		t.Fatalf("exact live creation replay: %s/%v", disposition, err)
+	}
+	request.RunID = second
+	var conflict *runtimerunlifecycle.LiveRunConflictError
+	if _, err := owner.CreateRun(ctx, request); !errors.As(err, &conflict) || conflict.LiveRunID != first {
+		t.Fatalf("competing live creation did not name the current run: %v", err)
+	}
+	if _, err := owner.PauseRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: first}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.CreateRun(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: first}); !errors.As(err, &conflict) || conflict.LiveRunID != second {
+		t.Fatalf("continue ignored its live sibling: %v", err)
+	}
+	if _, err := owner.PauseRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: second}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: first}); err != nil {
+		t.Fatal(err)
+	}
+	rollback := errors.New("rollback live switch")
+	err := runSelectedFixtureMutation(ctx, fixture.store, "live switch rollback", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		if previous, err := owner.SelectLiveRunTx(ctx, attempt, second, time.Now().UTC()); err != nil || previous != first {
+			return errors.Join(err, errors.New("live switch lost outgoing selection"))
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatal(err)
+	}
+	if live, found, err := reader.LoadLiveRun(ctx, scope); err != nil || !found || live.RunID != first {
+		t.Fatalf("rolled-back switch changed selection: %+v/%v/%v", live, found, err)
+	}
+	for runID, want := range map[string]bool{first: false, second: true} {
+		if blocked, err := owner.RunDispatchBlocked(ctx, runID); err != nil || blocked != want {
+			t.Fatalf("rolled-back switch changed dispatch gate %s: blocked=%v, want %v; err=%v", runID, blocked, want, err)
+		}
+	}
+	err = runSelectedFixtureMutation(ctx, fixture.store, "live switch", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		_, err := owner.SelectLiveRunTx(ctx, attempt, second, time.Now().UTC())
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live, found, err := reader.LoadLiveRun(ctx, scope); err != nil || !found || live.RunID != second {
+		t.Fatalf("committed switch lost selection: %+v/%v/%v", live, found, err)
+	}
+	for runID, want := range map[string]bool{first: true, second: false} {
+		if blocked, err := owner.RunDispatchBlocked(ctx, runID); err != nil || blocked != want {
+			t.Fatalf("committed switch dispatch gate %s: blocked=%v, want %v; err=%v", runID, blocked, want, err)
+		}
+	}
+	if _, err := owner.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: second}); !errors.Is(err, runtimeruncontrol.ErrNotPaused) {
+		t.Fatalf("live stop did not require pause: %v", err)
+	}
+}
 
 func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)

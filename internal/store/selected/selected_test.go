@@ -155,7 +155,7 @@ func TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce(t *testing.T) 
 		t.Fatalf("OpenRuntime: %v", err)
 	}
 	t.Cleanup(func() { _ = owner.CloseUnactivated() })
-	if owner.Schema() == nil || owner.OperatorChannels() == nil || owner.TestSetup() == nil || owner.RunBundleAvailability() == nil || owner.SourceArtifactWriter() == nil || owner.SourceArtifactStore() == nil {
+	if owner.Schema() == nil || owner.OperatorChannels() == nil || owner.TestSetup() == nil || owner.RunBundleAvailability() == nil || owner.SourceArtifactWriter() == nil || owner.SourceArtifactStore() == nil || owner.LiveRuns() == nil {
 		t.Fatal("SQLite required selected-store projections are incomplete")
 	}
 	if _, available := owner.ConversationFork(); !available {
@@ -182,7 +182,7 @@ func TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce(t *test
 		t.Fatalf("OpenRuntime: %v", err)
 	}
 	t.Cleanup(func() { _ = owner.CloseUnactivated() })
-	if owner.SourceArtifactWriter() == nil || owner.SourceArtifactStore() == nil || owner.RunBundleAvailability() == nil {
+	if owner.SourceArtifactWriter() == nil || owner.SourceArtifactStore() == nil || owner.RunBundleAvailability() == nil || owner.LiveRuns() == nil {
 		t.Fatal("PostgreSQL required selected-store projections are incomplete")
 	}
 }
