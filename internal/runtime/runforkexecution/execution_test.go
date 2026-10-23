@@ -543,7 +543,15 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					t.Fatalf("construct state-only joined receiver: %+v %v", committed, err)
 				}
 			} else if test.stateOnly {
-				seedSelectedExecutionStateOnlySourceRun(t, db, sourceRunID, sourceEventID, test.eventName, at, loaded.RootedSource)
+				writeCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
+				writeCtx = runtimeauthoractivity.WithScope(writeCtx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+				storetest.RequireRun(t, writeCtx, pg, storetest.RunFixture{
+					Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute),
+					BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(),
+				})
+				event := eventtest.ExistingRunRootIngress(sourceEventID, events.EventType(test.eventName), "source-runtime", "", json.RawMessage(`{}`), 0,
+					sourceRunID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
+				storetest.CommitSemanticEventWithRoutes(t, writeCtx, pg, event, nil, runtimepipelineobligation.ScopeSubscribed)
 			} else {
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: sourceRunID, EntityID: sourceRunID})
