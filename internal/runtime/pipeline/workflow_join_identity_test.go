@@ -306,6 +306,10 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 			}
 			readback := eventtest.RuntimeControlWithRoutingSource(tc.event.ID(), tc.event.Type(), tc.event.Producer().ID(), tc.event.TaskID(),
 				spaced.Bytes(), tc.event.ChainDepth(), tc.event.RunID(), tc.event.ParentEventID(), tc.event.NormalizedEnvelope(), tc.event.RoutingSource(), tc.event.CreatedAt())
+			readback, err = events.ResolveEnvelope(readback, events.EnvelopeForTargetRoute(readback.NormalizedEnvelope(), target))
+			if err != nil {
+				t.Fatal(err)
+			}
 			readbackAdmission, err := events.NewPayloadAdmission(spaced.Bytes(), restored)
 			if err != nil {
 				t.Fatal(err)

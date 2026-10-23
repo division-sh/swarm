@@ -225,7 +225,7 @@ func JoinOccurrencePayloadDigest(event Event) (string, error) {
 	source := event.RoutingSource()
 	raw, err := canonicaljson.Bytes(map[string]any{
 		"reference": JoinOccurrencePayloadReference, "run_id": event.RunID(), "task_id": event.TaskID(),
-		"event": string(event.Type()), "flow_instance": event.FlowInstance(), "entity_id": event.EntityID(),
+		"event":        string(event.Type()),
 		"routing_kind": string(source.Kind()), "routing_flow": source.Route().FlowID,
 		"routing_instance": source.Route().FlowInstance, "routing_entity": source.Route().EntityID,
 		"payload": payload,
