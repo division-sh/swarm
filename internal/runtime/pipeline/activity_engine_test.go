@@ -680,10 +680,10 @@ func VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcros
 			}))
 			defer server.Close()
 			store := fixture.Persistence.store
-			store.activityJournal = fixture.CaptureActivityJournal()
 			if err := fixture.RequireRun(ctx, runID); err != nil {
 				t.Fatal(err)
 			}
+			store.activityJournal = fixture.CaptureActivityJournal()
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
 			}})

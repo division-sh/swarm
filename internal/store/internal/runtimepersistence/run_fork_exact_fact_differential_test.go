@@ -44,6 +44,9 @@ func newExactFactFixture(t *testing.T, s exactFactStore) runForkRevisionMatrixFi
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: f.runID, StartedAt: f.at,
 	})
 	seedTestAgentRow(t, ctx, s.db, s.postgres, mustTestAgentIdentityForRun(f.runID, "revision-matrix-agent", ""), "active")
+	if err := s.db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1`, f.runID).Scan(&f.initialRevision); err != nil {
+		t.Fatalf("read native constructor revision: %v", err)
+	}
 	return f
 }
 
@@ -177,9 +180,9 @@ func TestRunForkExactFactsThirteenFamilyDifferentialBothStores(t *testing.T) {
 		refs := exactMatrixRefs(t, f)
 		exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 			seedRunForkRevisionMatrixFacts(t, ctx, tx, f, true, s.postgres)
-			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, refs...), 1, true)
+			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, refs...), f.initialRevision+1, true)
 		})
-		assertRunForkRevisionMatrixShape(t, loadRunForkRevisionMatrixFacts(t, testAuthorActivityContext(), s.db, f.runID, 1), true)
+		assertRunForkRevisionMatrixShape(t, loadRunForkRevisionMatrixFacts(t, testAuthorActivityContext(), s.db, f.runID, f.initialRevision+1), true)
 		t.Run("duplicate_union_and_excluded_churn", func(t *testing.T) {
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				// Metadata excludes authored fields, but owns their data clocks.
@@ -189,7 +192,7 @@ func TestRunForkExactFactsThirteenFamilyDifferentialBothStores(t *testing.T) {
 				if err := effects.AddFacts(f.runID, refs...); err != nil {
 					t.Fatal(err)
 				}
-				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, 1, false)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, f.initialRevision+1, false)
 			})
 		})
 		t.Run("partial_update_preserves_unselected_facts", func(t *testing.T) {
@@ -197,14 +200,14 @@ func TestRunForkExactFactsThirteenFamilyDifferentialBothStores(t *testing.T) {
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET name='Exact Updated' WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID)
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE event_receipts SET reason_code='exact_update' WHERE receipt_id=$1`, f.receiptID)
 				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID,
-					exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID), exactFactRef(t, runforkrevision.FamilyEventReceipts, f.receiptID)), 2, true)
+					exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID), exactFactRef(t, runforkrevision.FamilyEventReceipts, f.receiptID)), f.initialRevision+2, true)
 			})
 		})
 		generatedReceipt := uuid.NewString()
 		t.Run("generated_receipt_and_sibling", func(t *testing.T) {
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_receipts (receipt_id,event_id,subscriber_type,subscriber_id,outcome,side_effects,processed_at) VALUES ($1,$2,'platform','exact-generated','success',$3,$4)`, generatedReceipt, f.eventID, `{}`, f.at)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEventReceipts, generatedReceipt)), 3, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEventReceipts, generatedReceipt)), f.initialRevision+3, true)
 			})
 		})
 		refs = append(refs, exactFactRef(t, runforkrevision.FamilyEventReceipts, generatedReceipt))
@@ -227,25 +230,25 @@ func TestRunForkExactFactsThirteenFamilyDifferentialBothStores(t *testing.T) {
 					if !wholeFirst {
 						addWhole()
 					}
-					compareExactWithWhole(t, ctx, tx, s, f.runID, effects, 3, false)
+					compareExactWithWhole(t, ctx, tx, s, f.runID, effects, f.initialRevision+3, false)
 				})
 			}
 		})
 		t.Run("authored_data_clock_is_tracked", func(t *testing.T) {
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET updated_at=$1 WHERE run_id=$2 AND entity_id=$3`, f.at.Add(time.Second), f.runID, f.entityID)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), 4, true)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), 4, false)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), f.initialRevision+4, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), f.initialRevision+4, false)
 			})
 		})
 		t.Run("retained_run_tombstones_and_repeat_noop", func(t *testing.T) {
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				deleteRunForkRevisionMatrixFacts(t, ctx, tx, f)
 				effects := exactEffects(t, f.runID, refs...)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, 5, true)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, 5, false)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, f.initialRevision+5, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, f.initialRevision+5, false)
 			})
-			facts := loadRunForkRevisionMatrixFacts(t, testAuthorActivityContext(), s.db, f.runID, 5)
+			facts := loadRunForkRevisionMatrixFacts(t, testAuthorActivityContext(), s.db, f.runID, f.initialRevision+5)
 			if len(facts) != 14 {
 				t.Fatalf("tombstones=%d, want thirteen families plus generated sibling", len(facts))
 			}

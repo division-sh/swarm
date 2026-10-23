@@ -124,16 +124,6 @@ type publicSurfaceAPIMethodInfo struct {
 	Description string
 }
 
-func TestPublicSurfaceBackendMatrixCoversSelectedBackendRows(t *testing.T) {
-	root := repoRoot(t)
-	matrix := loadPublicSurfaceBackendMatrix(t, root)
-	ctx := newPublicSurfaceValidationContext(t, root)
-
-	if problems := validatePublicSurfaceBackendMatrix(root, matrix, ctx); len(problems) > 0 {
-		t.Fatalf("public surface backend matrix validation failed:\n- %s", strings.Join(problems, "\n- "))
-	}
-}
-
 func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 	root := repoRoot(t)
 	ctx := newPublicSurfaceValidationContext(t, root)

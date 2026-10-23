@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -212,11 +211,10 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID, "allow_source_freeze": true, "idempotency_key": "recipient-fork"}
 			var fork, replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 1 {
+			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 0 {
 				t.Fatalf("fork lost exact source/child work identity: %+v", fork)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-			childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, plan.ForkPoint.EventID)
+			childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, plan.ForkPoint.EventID)
 			t.Logf("checking fork child: source_run=%s fork_run=%s child_event=%s", seed.RunID, fork.ForkRunID, childEvent)
 			requireServedForkConsumerAuthority(t, rt, fork.ForkRunID, childEvent)
 			childBeforeRetry := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)

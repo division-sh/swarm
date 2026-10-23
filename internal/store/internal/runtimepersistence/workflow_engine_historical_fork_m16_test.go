@@ -129,7 +129,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 				if cut.id == postFork.ForkRunID {
 					request = postRequest
 				}
-				again, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, request)
+				again, err := owner.RequireMaterializedRunForkForSelectedContractExecution(ctx, cut.id, request)
 				if err != nil || again.ForkRunID != cut.id || again.ForkPoint != plan.ForkPoint {
 					t.Fatalf("exact fork replay wrote a different cut: %+v %v", again, err)
 				}
