@@ -86,24 +86,20 @@ func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime
 	t.Fatalf("source pipeline completion did not finish: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
 }
 
-func waitServedSelectedForkFrontier(t *testing.T, rt servedControlProofRuntime, child, frontier string) string {
+func waitServedSelectedForkFrontier(t *testing.T, reader receiverProofStateReader, deliveries servedRunDeliveryReader, child, frontier string) string {
 	t.Helper()
+	if reader == nil {
+		t.Fatal("selected frontier requires its original native reader")
+	}
 	eventID := activityidentity.ForkLineageEventID(child, frontier)
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var outcome string
-		var err error
-		if rt.ReceiverStateReader != nil {
-			err = rt.ReceiverStateReader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
-				var readErr error
-				outcome, _, readErr = storetest.ReadPipelineReceiptOutcomeStorage(ctx, rt.ReceiverStateReader, eventID)
-				return readErr
-			})
-		} else if rt.Postgres != nil {
-			outcome, _, err = storetest.ReadPipelineReceiptOutcomeStorage(t.Context(), rt.Postgres, eventID)
-		} else {
-			outcome, _, err = storetest.ReadPipelineReceiptOutcomeStorage(t.Context(), rt.SQLite, eventID)
-		}
+		err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+			var readErr error
+			outcome, _, readErr = storetest.ReadPipelineReceiptOutcomeStorage(ctx, reader, eventID)
+			return readErr
+		})
 		if err == nil && outcome == "success" {
 			break
 		}
@@ -112,8 +108,21 @@ func waitServedSelectedForkFrontier(t *testing.T, rt servedControlProofRuntime, 
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, child)
-	waitForkReceiverSourceCompletion(t, rt, child)
+	waitServedRunDeliveryQuiescence(t, deliveries, child)
+	deadline = time.Now().Add(servedProofPollDeadline)
+	for {
+		incomplete, err := storetest.ReadServedIncompletePipelineHandoffCount(t.Context(), reader, child)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if incomplete == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("selected frontier pipeline completion did not finish: run=%s incomplete=%d", child, incomplete)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	return eventID
 }
 
@@ -716,8 +725,10 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
 		t.Fatalf("fork identity: %+v", fork)
 	}
-	childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier)
-	requireLifecycleEventCount(t, rt, fork.ForkRunID, producerEvidence.Name, 1)
+	childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
+	if count, err := storetest.ReadLifecycleEventCardinality(t.Context(), rt.ReceiverStateReader, fork.ForkRunID, producerEvidence.Name); err != nil || count != 1 {
+		t.Fatalf("selected frontier event cardinality=%d, want 1: %v", count, err)
+	}
 	childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
 	// This persisted child event has passed backend source-event loading and
 	// container preparation/publication. Compare their composition, not helpers.
@@ -1166,8 +1177,10 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
 					t.Fatalf("business fork identity: %+v", fork)
 				}
-				childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier)
-				requireLifecycleEventCount(t, rt, fork.ForkRunID, sourceEvidence.Name, 1)
+				childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
+				if count, err := storetest.ReadLifecycleEventCardinality(t.Context(), rt.ReceiverStateReader, fork.ForkRunID, sourceEvidence.Name); err != nil || count != 1 {
+					t.Fatalf("selected frontier event cardinality=%d, want 1: %v", count, err)
+				}
 				childRoute := requireForkReceiverBusinessMutation(t, rt, fork.ForkRunID, childEvent, consumer.ID)
 				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("business fork changed compiled consumer or immutable producer evidence")

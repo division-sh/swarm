@@ -214,7 +214,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 0 {
 				t.Fatalf("fork lost exact source/child work identity: %+v", fork)
 			}
-			childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, plan.ForkPoint.EventID)
+			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, plan.ForkPoint.EventID)
 			t.Logf("checking fork child: source_run=%s fork_run=%s child_event=%s", seed.RunID, fork.ForkRunID, childEvent)
 			requireServedForkConsumerAuthority(t, rt, fork.ForkRunID, childEvent)
 			childBeforeRetry := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)

@@ -81,7 +81,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			var fixedGate gateruntime.Activation
 			if gate {
-				fixedGate = readLifecycleTemplateGate(t, rt, seed.RunID, entityID, ".")
+				fixedGate = readLifecycleTemplateGateFromReader(t, rt.ReceiverStateReader, seed.RunID, entityID, ".")
 			}
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
@@ -91,9 +91,9 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 || !reflect.DeepEqual(fork, duplicate) {
 				t.Fatalf("fork=%#v duplicate=%#v", fork, duplicate)
 			}
-			waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier.EventID)
+			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier.EventID)
 			if gate {
-				requireLifecycleFrozenGateControlRefusal(t, rt, seed.RunID, parentCard, fixedGate, fork.ForkRunID)
+				requireLifecycleFrozenGateControlRefusal(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, parentCard, fixedGate, fork.ForkRunID)
 			} else {
 				requireLifecycleRootLoopForkRevision(t, rt, seed.RunID, entityID, frontier.EventID, fork.ForkRunID)
 			}
@@ -138,15 +138,20 @@ func advanceLifecycleForkSourceHistory(t *testing.T, ctx context.Context, select
 	}
 }
 
-func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProofRuntime, parentRun string, parentParams map[string]any, parentGate gateruntime.Activation, runID string) {
+func requireLifecycleFrozenGateControlRefusal(t *testing.T, endpoint string, reader receiverProofStateReader, parentRun string, parentParams map[string]any, parentGate gateruntime.Activation, runID string) {
 	t.Helper()
-	entity := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", "review")
-	childParams := lifecycleGateDecisionParams(t, rt, runID, "approve")
+	_, instance := requireSingleReceiverTargetState(t, reader, runID, ".")
+	entity := instance.EntityID
+	if entity == "" || instance.CurrentState != "review" {
+		t.Fatalf("fork gate entity/state: %+v", instance)
+	}
+	childGate := readLifecycleTemplateGateFromReader(t, reader, runID, entity, ".")
+	childParams := lifecycleDecisionParamsFromEndpoint(t, endpoint, childGate.CardID, "approve")
 	readCard := func(id any) map[string]any {
 		var detail struct {
 			Card map[string]any `json:"decision_card"`
 		}
-		requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": id}, &detail)
+		requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": id}, &detail)
 		if detail.Card == nil {
 			t.Fatal("missing public card")
 		}
@@ -170,10 +175,9 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if !ok || parentEntity == "" {
 		t.Fatal("parent gate has no exact entity anchor")
 	}
-	if current := readLifecycleTemplateGate(t, rt, parentRun, parentEntity, "."); current.Status != "superseded" || current.SupersededReason != "run_forked" {
+	if current := readLifecycleTemplateGateFromReader(t, reader, parentRun, parentEntity, "."); current.Status != "superseded" || current.SupersededReason != "run_forked" {
 		t.Fatalf("frozen source gate lost its terminal disposition: %+v", current)
 	}
-	childGate := readLifecycleTemplateGate(t, rt, runID, entity, ".")
 	if childGate.ActivationID != ca["stage_activation_id"] || childGate.CardID != child["card_id"] ||
 		childGate.RoutesJSON != parentGate.RoutesJSON || childGate.BundleHash != parentGate.BundleHash ||
 		childGate.DecisionID != parentGate.DecisionID || childGate.Stage != parentGate.Stage ||
@@ -204,17 +208,64 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if !reflect.DeepEqual(ca["routing_source"], expected) {
 		t.Fatalf("fork source=%#v want=%#v", ca["routing_source"], expected)
 	}
-	var bindingID string
-	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&bindingID); err != nil {
+	readSnapshot := func() map[string]storetest.SelectedForkStorageTableSnapshot {
+		var snapshot map[string]storetest.SelectedForkStorageTableSnapshot
+		if err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+			var err error
+			snapshot, err = storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, reader)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot
+	}
+	bindings, err := storetest.DecodeSelectedForkSnapshotRows(readSnapshot()["run_fork_selected_contract_bindings"])
+	if err != nil {
 		t.Fatal(err)
+	}
+	var bindingID string
+	for _, row := range bindings {
+		fork, err := row["fork_run_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fork == runID {
+			if bindingID != "" {
+				t.Fatal("fork has duplicate selected bindings")
+			}
+			bindingID, err = row["binding_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if bindingID == "" {
+		t.Fatal("fork has no exact selected binding")
 	}
 	// Await legitimate completion maintenance before attributing a snapshot delta
 	// to refusal. No application table or completion-candidate column is excluded.
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
-		var settled bool
-		if err := rt.DB.QueryRow(`SELECT completion_due_at IS NULL FROM runs WHERE run_id=$1`, runID).Scan(&settled); err != nil {
+		runs, err := storetest.DecodeSelectedForkSnapshotRows(readSnapshot()["runs"])
+		if err != nil {
 			t.Fatal(err)
+		}
+		var found, settled bool
+		for _, row := range runs {
+			id, err := row["run_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id == runID {
+				candidate, exists := row["completion_due_at"]
+				if !exists {
+					t.Fatal("fork run has no completion-candidate column")
+				}
+				found, settled = true, string(candidate.Value) == "null"
+			}
+		}
+		if !found {
+			t.Fatal("fork run disappeared before refusal")
 		}
 		if settled {
 			break
@@ -224,16 +275,16 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	before := snapshotForkReceiverApplication(t, rt)
+	before := readSnapshot()
 	for attempt := 0; attempt < 2; attempt++ {
-		refusal := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", childParams)
+		refusal := requireServedJSONRPCError(t, endpoint, "mailbox.decide", childParams)
 		details, ok := refusal.Data["details"].(map[string]any)
 		if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || refusal.Data["retryable"] != false || !ok ||
 			details["operation"] != "mailbox.decide" || details["run_id"] != runID || details["binding_id"] != bindingID ||
 			details["required_capability"] != "selected_fork_deferred_execution" {
 			t.Fatalf("wrong selected refusal: %+v", refusal)
 		}
-		after := snapshotForkReceiverApplication(t, rt)
+		after := readSnapshot()
 		if !reflect.DeepEqual(before, after) {
 			for table, rows := range before {
 				if !reflect.DeepEqual(rows, after[table]) {
@@ -246,8 +297,11 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if !reflect.DeepEqual(parent, readCard(parentParams["card_id"])) || !reflect.DeepEqual(child, readCard(childParams["card_id"])) {
 		t.Fatal("refusal changed either frozen card")
 	}
-	requireLifecycleEventCount(t, rt, runID, "work.completed", 0)
-	requireLifecycleEventCount(t, rt, parentRun, "work.completed", 0)
+	for _, id := range []string{runID, parentRun} {
+		if count, err := storetest.ReadLifecycleEventCardinality(t.Context(), reader, id, "work.completed"); err != nil || count != 0 {
+			t.Fatalf("run %s work.completed count=%d, want 0: %v", id, count, err)
+		}
+	}
 }
 
 func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRuntime, parentRun, parentEntity, frontierID, runID string) {
