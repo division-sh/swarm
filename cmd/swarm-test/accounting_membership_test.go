@@ -35,7 +35,7 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 	// graph small. The separate real-source closure test covers the complete graph.
 	for path, name := range map[string]string{
 		"cmd/swarm-test": "main", "cmd/swarm-openrpc-gen": "main", "cmd/swarm-complexity": "main",
-		"scripts/rewrite-stages-2566": "main", "internal/testplanning": "testplanning",
+		"scripts/rewrite-stages-2566/formatproof": "formatproof", "internal/testplanning": "testplanning",
 		"internal/testtiming": "testtiming", "internal/store": "store",
 	} {
 		put(path+"/main.go", []byte("package "+name+"\n"))
@@ -47,7 +47,7 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 	for _, path := range []string{
 		".github/test-proof-plan.yaml", ".github/test-proof-history-inputs.json", ".github/scripts/prepare-proof-history.sh",
 		testplanning.GeneratedWeightModelPath, ".github/flake-ledger.json", "internal/apiv1/testdata/public_surface_backend_matrix.yaml",
-		formatproof.Ledger, "scripts/rewrite-stages-2566/intent.json", "scripts/rewrite-stages-2566/entries.json",
+		formatproof.Ledger,
 		"scripts/rewrite-stages-2566/formatproof/testdata/original.go.txt",
 	} {
 		body, err := os.ReadFile(filepath.Join(root, path))
