@@ -353,7 +353,15 @@ func proveNativeConstructedActorSourceSetRebind(t *testing.T, ctx context.Contex
 	}
 	spareRunID := uuid.NewString()
 	seedStartupRecoverySourceRun(t, startupRecoverySourceContext(spareFact, spareRunID), selected, spareFact, spareArtifact, spareRunID)
-	plan, err := agenttopology.NewSourceSetPlan(append(current.Sources, agenttopology.SourceCoordinate{BundleHash: spareArtifact.BundleHash()}), current.Agents)
+	spareRoot, err := spareArtifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spareCoordinate, err := agenttopology.NewSourceCoordinate(spareRoot.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan(append(current.Sources, spareCoordinate), current.Agents)
 	if err != nil || plan.Revision == current.Revision {
 		t.Fatalf("changed source-set plan: err=%v", err)
 	}

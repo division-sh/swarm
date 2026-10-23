@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packmodel"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -40,6 +42,23 @@ func seedCapturedProviderTarget(t *testing.T, ctx context.Context, persistence r
 	default:
 		t.Fatalf("unsupported provider fixture store %T", persistence)
 	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(boundedProviderFlowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.AdmissionPlan, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: target.Alias, Provider: provider, SigningSecret: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.Provider, target.SigningSecret = provider, secret
 	return boundedInboundTargetContext(t, ctx, target), target
 }
 

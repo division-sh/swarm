@@ -773,9 +773,11 @@ func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFi
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(),
 		StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	})
-	fixture.activityJournal.once.Do(func() {
-		fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, ctx, fixture.store)
-	})
+	if fixture.activityJournal != nil {
+		fixture.activityJournal.once.Do(func() {
+			fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, ctx, fixture.store)
+		})
+	}
 	return ctx
 }
 

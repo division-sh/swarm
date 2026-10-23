@@ -70,6 +70,13 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runti
 func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, target runtimepkg.InboundTarget, w http.ResponseWriter, r *http.Request, provider, signingSecret string) {
 	t.Helper()
 	_ = bus
+	if target.AdmissionPlan.Valid() {
+		if target.Provider != provider || target.SigningSecret != signingSecret {
+			t.Fatal("captured provider target contradicts delivery credentials")
+		}
+		gateway.HandleResolvedWebhook(w, r, target, nil)
+		return
+	}
 	plan, err := testProviderTriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: target.Alias, Provider: provider, SigningSecret: signingSecret,
 	})

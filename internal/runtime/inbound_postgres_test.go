@@ -41,6 +41,8 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
@@ -61,7 +63,23 @@ func boundedInboundTestSource(t *testing.T) semanticview.Source {
 
 func newBoundedInboundTestEventBus(t *testing.T, selected runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
-	opts.ContractBundle = boundedInboundTestSource(t)
+	owner, ok := selected.(interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	})
+	if !ok {
+		t.Fatal("bounded bus requires the exact run-root owner")
+	}
+	runID, _ := boundedInboundTestCoordinates()
+	rooted, err := owner.LoadRunRootedSource(t.Context(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.ContractBundle = semanticview.Wrap(bundle)
 	fact := runtimeTestSourceArtifactFact(t, opts.ContractBundle)
 	if opts.SourceArtifactFact.Validate() == nil && opts.SourceArtifactFact != fact {
 		t.Fatal("bounded bus fixture source contradicts its selected artifact")
