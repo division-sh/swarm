@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -105,7 +106,7 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			newBus := func(probe *lifecycleprobe.Probe) *runtimebus.EventBus {
 				t.Helper()
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-					ContractBundle: source, SourceArtifactFact: fact, TestLifecycleProbe: probe, Logger: logger,
+					ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: swarmruntime.NewRuntimePayloadAdmitter(nil, source, fact), TestLifecycleProbe: probe, Logger: logger,
 				}, "platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatalf("new same-commit EventBus: %v", err)

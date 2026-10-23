@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -274,10 +275,11 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 				t.Fatalf("join payload admission: found=%v err=%v", found, err)
 			}
 			binding := admission.Binding()
-			restored, err := events.RestoreEventPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+			bindingInput := events.PayloadSchemaBindingInput{
 				BundleHash: binding.BundleHash(), FlowID: binding.FlowID(), EventKey: binding.EventKey(),
 				SchemaDigest: binding.SchemaDigest(), SchemaClass: binding.SchemaClass(),
-			}, tc.event.AdmissionClass(), tc.event.Type(), tc.event.Producer())
+			}
+			restored, err := events.RestoreEventPayloadSchemaBinding(bindingInput, tc.event.AdmissionClass(), tc.event.Type(), tc.event.Producer())
 			if err != nil || !restored.Equal(binding) || binding.Reference() != events.JoinOccurrencePayloadReference {
 				t.Fatalf("restored join binding = %#v err=%v", restored, err)
 			}
@@ -287,6 +289,29 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 			}
 			if _, err := events.ApplyPayloadAdmission(tc.event, restoredAdmission); err != nil {
 				t.Fatalf("apply restored join binding: %v", err)
+			}
+			wrongProducer, err := events.NewProducerIdentity(events.EventProducerPlatform, "runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := events.RestoreEventPayloadSchemaBinding(bindingInput, tc.event.AdmissionClass(), tc.event.Type(), wrongProducer); err == nil {
+				t.Fatal("restored join binding accepted a foreign producer")
+			}
+			if _, err := events.RestoreEventPayloadSchemaBinding(bindingInput, events.EventAdmissionChild, tc.event.Type(), tc.event.Producer()); err == nil {
+				t.Fatal("restored join binding accepted a foreign event class")
+			}
+			var spaced bytes.Buffer
+			if err := json.Indent(&spaced, admission.Payload(), "", "  "); err != nil {
+				t.Fatal(err)
+			}
+			readback := eventtest.RuntimeControlWithRoutingSource(tc.event.ID(), tc.event.Type(), tc.event.Producer().ID(), tc.event.TaskID(),
+				spaced.Bytes(), tc.event.ChainDepth(), tc.event.RunID(), tc.event.ParentEventID(), tc.event.NormalizedEnvelope(), tc.event.RoutingSource(), tc.event.CreatedAt())
+			readbackAdmission, err := events.NewPayloadAdmission(spaced.Bytes(), restored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := events.ApplyPayloadAdmission(readback, readbackAdmission); err != nil {
+				t.Fatalf("join binding depends on durable JSON formatting: %v", err)
 			}
 			wrongEntity := target
 			wrongEntity.EntityID = eventtest.UUID("wrong-stamped-join-entity")
@@ -455,7 +480,7 @@ func VerifyNativeSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothSt
 					files[name] = strings.Replace(files[name], expectedField,
 						"  expected: {type: '[text]', initial: ['a', 'b']}\n", 1)
 				}
-				for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
+				for _, name := range []string{"manifest.yaml", "schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 					for _, flowID := range []string{"a", "b"} {
 						files[flowID+"/"+name] = files["orders/"+name]
 					}

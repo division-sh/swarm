@@ -41,9 +41,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const mutatingRuntimeProbeTestName = "TestOpenRPCMutatingHTTPRuntimeProbes"
@@ -796,7 +798,10 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		sourceArtifactFact:          mustAPITestPersistedSourceArtifactFact(runStartTestBundleHash),
 	}
 	state.runForkOperations = newRecordingRunForkOperations()
-	state.runFork = &mutatingProbeRunForkExecutor{state: state}
+	forkTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runStartTestArtifact("scan.requested"))
+	state.runFork = &mutatingProbeRunForkExecutor{state: state, SelectedContractSourceInspector: &recordingRunForkExecutor{
+		selectedSource: forkTarget,
+	}}
 	state.runForkAvailability = &recordingRunForkAvailability{
 		rows: map[string]runbundle.Availability{
 			runID:                  runForkAvailable(runID, apiArtifactRoot(t, runStartTestArtifact("scan.requested"))),
@@ -1217,6 +1222,7 @@ func (s *mutatingProbeTestSetupStore) SetupScenarioEntities(_ context.Context, r
 }
 
 type mutatingProbeRunForkExecutor struct {
+	runforkexecution.SelectedContractSourceInspector
 	state *mutatingRuntimeProbeState
 	err   error
 }

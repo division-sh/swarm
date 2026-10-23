@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -62,13 +63,18 @@ func TestOperatorRunForkEventlessDeploymentPointReadback(t *testing.T) {
 		ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointDeploymentRevision),
 		ForkRevision: 4, ForkRunStatus: runfork.RunForkActivatedStatus,
 	}}
-	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
+	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
 		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
-	}}, executor)
+	}}
+	handler := runForkTestHandler(t, availability, executor)
 	request := fmt.Sprintf(`{"jsonrpc":"2.0","id":"deployment","method":"run.fork","params":{"source_run_id":%q,"allow_source_freeze":true,"idempotency_key":"deployment-point"}}`, runForkTestSourceRunID)
 	response := rpcCall(t, handler, request)
 	if response.Error != nil {
 		t.Fatalf("eventless deployment fork: %#v", response.Error)
+	}
+	if executor.last.ForkOperation.TargetRootReference != executor.selectedSource.Admission().Reference() ||
+		executor.last.ForkOperation.TargetRootReference == availability.rows[runForkTestSourceRunID].RootReference {
+		t.Fatal("fork operation did not retain its independently selected target root")
 	}
 	result := asMap(t, response.Result)
 	if result["fork_point_kind"] != string(runfork.RunForkPointDeploymentRevision) || result["fork_revision"] != float64(4) {
@@ -274,6 +280,7 @@ func runForkTestHandler(t *testing.T, availability RunForkAvailabilityStore, exe
 	operations := newRecordingRunForkOperations()
 	if recording, ok := executor.(*recordingRunForkExecutor); ok {
 		recording.operations = operations
+		recording.selectedSource, _ = sourceartifactfixture.Rooted(t, "selected-target", runForkTestArtifact)
 	}
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -338,6 +345,7 @@ func (s *recordingRunForkAvailability) LoadRunBundleAvailability(_ context.Conte
 }
 
 type recordingRunForkExecutor struct {
+	selectedSource sourceartifact.RootedSource
 	calls          int
 	last           RunForkExecutionRequest
 	result         RunForkExecutionResult
@@ -345,6 +353,16 @@ type recordingRunForkExecutor struct {
 	execute        func(context.Context, RunForkExecutionRequest) (RunForkExecutionResult, error)
 	operations     *recordingRunForkOperations
 	persistOnError bool
+}
+
+func (e *recordingRunForkExecutor) InspectRunForkSelectedContractSourceForRequest(_ context.Context, req runforkexecution.SelectedContractSourceLoadRequest) (runforkexecution.LoadedSelectedContractSource, error) {
+	if err := e.selectedSource.Validate(); err != nil {
+		return runforkexecution.LoadedSelectedContractSource{}, err
+	}
+	if e.selectedSource.Admission().BundleHash() != req.BundleHash {
+		return runforkexecution.LoadedSelectedContractSource{}, fmt.Errorf("fixture selected source differs from requested target")
+	}
+	return runforkexecution.LoadedSelectedContractSource{RootedSource: e.selectedSource, Selection: req.Selection}, nil
 }
 
 func (e *recordingRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {

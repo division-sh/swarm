@@ -458,7 +458,8 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 	}
 
 	operations := newRecordingRunForkOperations()
-	executor := &recordingRunForkExecutor{operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
+	selectedTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runtimeContextTestSourceArtifactC)
+	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -520,7 +521,8 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 	}
 
 	operations := newRecordingRunForkOperations()
-	executor := &recordingRunForkExecutor{operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
+	selectedTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runtimeContextTestSourceArtifactB)
+	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -591,8 +593,10 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 	}
 
 	operations := newRecordingRunForkOperations()
+	selectedTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runtimeContextTestSourceArtifactB)
 	executor := &recordingRunForkExecutor{
-		operations: operations,
+		selectedSource: selectedTarget,
+		operations:     operations,
 		result: RunForkExecutionResult{
 			Owner:              "runtime.run_fork.selected_contract_execution",
 			SourceRunID:        runForkTestSourceRunID,

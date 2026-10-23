@@ -79,12 +79,15 @@ func NewPlatformPayloadSchemaBinding(input PayloadSchemaBindingInput, producer P
 // RestoreEventPayloadSchemaBinding uses the complete durable producer/class
 // tuple. An empty flow column or platform schema label alone selects nothing.
 func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class EventAdmissionClass, eventType EventType, producer ProducerIdentity) (PayloadSchemaBinding, error) {
+	p := PayloadProducer{kind: "platform", producer: producer, class: class, event: eventType}
+	if joinOccurrenceEventType(eventType) && !joinOccurrencePayloadIdentity(p) {
+		return PayloadSchemaBinding{}, fmt.Errorf("join occurrence payload contradicts its persisted producer or class")
+	}
 	binding, err := RestorePayloadSchemaBinding(input)
 	if err != nil {
 		return PayloadSchemaBinding{}, err
 	}
 	if input.SchemaClass == PayloadSchemaPlatform && platformPayloadIdentity(class, eventType, producer) {
-		p := PayloadProducer{kind: "platform", producer: producer, class: class, event: eventType}
 		reference := ""
 		if eventType == EventTypePlatformRuntimeLog {
 			reference = RuntimeLogSchemaReference
@@ -202,7 +205,11 @@ func (a PayloadAdmission) Valid() bool                   { return json.Valid(a.p
 func joinOccurrencePayloadIdentity(producer PayloadProducer) bool {
 	return producer.IsPlatform() && producer.class == EventAdmissionRuntimeControl &&
 		producer.producer.Type() == EventProducerPlatform && producer.producer.ID() == "runtime.generic_schedule" &&
-		(producer.event == "platform.join_complete" || producer.event == "platform.join_timeout")
+		joinOccurrenceEventType(producer.event)
+}
+
+func joinOccurrenceEventType(eventType EventType) bool {
+	return eventType == "platform.join_complete" || eventType == "platform.join_timeout"
 }
 
 // JoinOccurrencePayloadDigest binds the occurrence's exact durable identity and
@@ -211,13 +218,17 @@ func JoinOccurrencePayloadDigest(event Event) (string, error) {
 	if !joinOccurrencePayloadIdentity(PlatformPayloadProducer(event)) {
 		return "", fmt.Errorf("join payload identity requires its platform occurrence producer")
 	}
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
+		return "", err
+	}
 	source := event.RoutingSource()
 	raw, err := canonicaljson.Bytes(map[string]any{
 		"reference": JoinOccurrencePayloadReference, "run_id": event.RunID(), "task_id": event.TaskID(),
 		"event": string(event.Type()), "flow_instance": event.FlowInstance(), "entity_id": event.EntityID(),
 		"routing_kind": string(source.Kind()), "routing_flow": source.Route().FlowID,
 		"routing_instance": source.Route().FlowInstance, "routing_entity": source.Route().EntityID,
-		"payload": string(event.Payload()),
+		"payload": payload,
 	})
 	if err != nil {
 		return "", err
@@ -233,6 +244,9 @@ func ApplyPayloadAdmission(event Event, admission PayloadAdmission) (Event, erro
 	}
 	if err := admission.binding.producer.ValidateForEvent(event); err != nil {
 		return Event{}, err
+	}
+	if joinOccurrenceEventType(event.Type()) && admission.binding.reference != JoinOccurrencePayloadReference {
+		return Event{}, fmt.Errorf("join occurrence payload requires typed declaration admission")
 	}
 	if admission.binding.reference == JoinOccurrencePayloadReference {
 		digest, err := JoinOccurrencePayloadDigest(event)

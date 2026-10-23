@@ -86,11 +86,9 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			}
 			return events.PayloadAdmission{}, err
 		}
-		if producer.IsPlatform() {
-			admission, found, err := runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(source, event, bundleHash)
-			if err != nil || found {
-				return admission, err
-			}
+		admission, found, err := runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(source, event, bundleHash)
+		if err != nil || found {
+			return admission, err
 		}
 		resolution, err := semanticview.ResolveProducerEventSchema(source, producer, event)
 		if err != nil {
@@ -193,7 +191,7 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 				return events.PayloadAdmission{}, err
 			}
 		}
-		admission, err := events.NewPayloadAdmission(normalizedBytes, binding)
+		admission, err = events.NewPayloadAdmission(normalizedBytes, binding)
 		if err != nil {
 			return events.PayloadAdmission{}, err
 		}

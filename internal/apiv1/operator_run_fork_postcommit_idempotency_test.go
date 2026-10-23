@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *testing.T) {
@@ -37,7 +38,8 @@ func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *tes
 		},
 	}
 	operations := newRecordingRunForkOperations()
-	executor := &recordingRunForkExecutor{execute: selected.ExecuteRunFork, operations: operations, persistOnError: true}
+	selectedTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runForkTestArtifact)
+	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, execute: selected.ExecuteRunFork, operations: operations, persistOnError: true}
 	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
 		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}
@@ -101,7 +103,8 @@ func TestSelectedForkEventlessRevisionAcknowledgementRequiresExactPoint(t *testi
 
 func TestOperatorRunForkKeyedLookupPrecedesMutableAvailabilityAndConflictsWithoutMutation(t *testing.T) {
 	operations := newRecordingRunForkOperations()
-	executor := &recordingRunForkExecutor{operations: operations, result: runForkActivatedTestResult()}
+	selectedTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runForkTestArtifact)
+	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: runForkActivatedTestResult()}
 	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
 		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}
@@ -128,7 +131,8 @@ func TestOperatorRunForkKeyedLookupPrecedesMutableAvailabilityAndConflictsWithou
 
 func TestOperatorRunForkMaterializedOperationResumesBeforeAvailability(t *testing.T) {
 	operations := newRecordingRunForkOperations()
-	executor := &recordingRunForkExecutor{operations: operations, result: runForkActivatedTestResult()}
+	selectedTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runForkTestArtifact)
+	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: runForkActivatedTestResult()}
 	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
 		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}
@@ -160,7 +164,8 @@ func TestOperatorRunForkRequiresDurableActivatedRecord(t *testing.T) {
 	for _, status := range []string{"absent", "materialized"} {
 		t.Run(status, func(t *testing.T) {
 			operations := newRecordingRunForkOperations()
-			executor := &recordingRunForkExecutor{result: runForkActivatedTestResult()}
+			selectedTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runForkTestArtifact)
+			executor := &recordingRunForkExecutor{selectedSource: selectedTarget, result: runForkActivatedTestResult()}
 			if status == "materialized" {
 				executor.execute = func(_ context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
 					canonical, hash, err := req.ForkOperation.Canonical()
@@ -196,7 +201,8 @@ func TestOperatorRunForkKeylessReadsExactOperationIDAfterCleanup(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			operations := newRecordingRunForkOperations()
-			executor := &recordingRunForkExecutor{operations: operations, result: runForkActivatedTestResult()}
+			selectedTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runForkTestArtifact)
+			executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: runForkActivatedTestResult()}
 			if cleanupFailure {
 				executor.err = errors.New("post-activation cleanup failed")
 				executor.persistOnError = true
