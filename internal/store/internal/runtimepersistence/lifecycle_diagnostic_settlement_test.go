@@ -32,6 +32,7 @@ import (
 
 type lifecycleDiagnosticTestStore interface {
 	agentfixture.Store
+	rootedRunStore
 	runtimepkg.RuntimeLogPersistence
 	runtimemanager.AgentLifecycleDiagnosticPersistence
 	ApplyDestructiveResetQuiescence(context.Context, destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error)
