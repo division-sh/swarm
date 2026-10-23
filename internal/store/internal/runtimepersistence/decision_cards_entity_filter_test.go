@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
@@ -21,6 +22,8 @@ func TestDecisionCardEntityFilterParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			store, runID := decisionCardTestStore(t, backend)
+			rooted := decisionCardTestRootedSource(t, ctx, store, runID)
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			otherRun, entityID, otherEntity := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 			if err := ensureEphemeralRunForTest(ctx, store, otherRun, now.Add(-time.Hour)); err != nil {

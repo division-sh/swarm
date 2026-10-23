@@ -1,4 +1,4 @@
-name: golden-agent-scout
+# fixture: golden-agent-scout
 stages:
   pending: {}
   active: {}

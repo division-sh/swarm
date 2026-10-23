@@ -28,7 +28,8 @@ const (
 func CopySingletonCoordinatorPilot(t testing.TB, variant SingletonCoordinatorPilotVariant) string {
 	t.Helper()
 	root := t.TempDir()
-	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\n")
+	writeSingletonCoordinatorFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "stages: []\n# fixture: singleton-coordinator-pilot\n")
 	writeSingletonCoordinatorFlow(t, root, variant)
 	return root
 }
@@ -39,10 +40,12 @@ func CopySingletonCoordinatorPilot(t testing.TB, variant SingletonCoordinatorPil
 func CopyDuplicateScopedSingletonDemand(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: duplicate-scoped-singleton-demand\n")
+	writeSingletonCoordinatorFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "stages: []\n# fixture: duplicate-scoped-singleton-demand\n")
 	for _, flowID := range []string{"a", "b"} {
+		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "schema.yaml"), `
-name: `+flowID+`
+# fixture: `+flowID+`
 pins:
   inputs:
     - item.received
@@ -77,6 +80,7 @@ shared-node:
 
 func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonCoordinatorPilotVariant) {
 	t.Helper()
+	writeSingletonCoordinatorFile(t, root, "coordinator/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	if variant == SingletonCoordinatorPilotRetiredFanIn {
 		writeRetiredFanInSingletonCoordinatorFlow(t, root)
 		return
@@ -85,8 +89,8 @@ func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonC
 		writeStatelessCountJoinSingletonCoordinatorFlow(t, root)
 		return
 	}
-	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\npins:\n  inputs:\n    - lead.observed\n  outputs:\n    - lead.observed\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
-	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "# fixture: singleton-coordinator-pilot\npins:\n  inputs:\n    - lead.observed\n  outputs:\n    - lead.observed\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
+	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `# fixture: coordinator
 stages: []
 pins:
   inputs:
@@ -146,10 +150,10 @@ coordinator-indexer:
 
 func writeStatelessCountJoinSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
-	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: stateless-count-join\npins:\n  inputs: [job.received]\nconnect:\n  - {event: job.received, from: ., to: coordinator}\n")
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "# fixture: stateless-count-join\npins:\n  inputs: [job.received]\nconnect:\n  - {event: job.received, from: ., to: coordinator}\n")
 	writeSingletonCoordinatorFile(t, root, "types.yaml", singletonCoordinatorTypesYAMLForFixture())
 	writeSingletonCoordinatorFile(t, root, "events.yaml", "job.received:\n  vertical_id: text\n  job: Job\n")
-	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
+	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `# fixture: coordinator
 stages:
   active: {}
   done: {final: true}
@@ -197,7 +201,7 @@ func writeRetiredFanInSingletonCoordinatorFlow(t testing.TB, root string) {
 // RetiredFanInCoordinatorSchema exposes the exact rejection specimen for
 // admission and syntax-guard proof; it is not a supported coordinator shape.
 func RetiredFanInCoordinatorSchema() string {
-	return `name: coordinator
+	return `# fixture: coordinator
 pins:
   inputs:
     - event: job.received

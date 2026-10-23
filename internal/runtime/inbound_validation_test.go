@@ -41,9 +41,9 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 	var submittedEvent events.Event
 	logs := &runtimeLogPersistenceCapture{}
 	logger := NewRuntimeLogger(logs, executionposture.Live, canonical)
-	bus, err := newInboundTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
+	bus, _, err := newInboundTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
 		ContractBundle: source,
-		PayloadAdmitter: func(ctx context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(ctx context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
 			if strings.HasPrefix(string(event.Type()), "inbound.") {
 				submittedCtx, submittedEvent = ctx, event
 				var violation *eventschema.Violation
@@ -52,7 +52,7 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 				}
 				return events.PayloadAdmission{}, failure
 			}
-			return canonical(ctx, event, flow)
+			return canonical(ctx, event, producer)
 		},
 	})
 	if err != nil {

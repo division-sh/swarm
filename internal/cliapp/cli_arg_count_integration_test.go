@@ -40,7 +40,7 @@ func TestCLIArgCountPromotedCommandsUseSharedDiagnostic(t *testing.T) {
 		{name: "entity view missing id", args: []string{"entity", "view"}, want: "'swarm entity view' requires <entity-id>."},
 		{name: "mailbox view missing id", args: []string{"mailbox", "view"}, want: "'swarm mailbox view' requires <mailbox-id>."},
 		{name: "mailbox defer missing id", args: []string{"mailbox", "defer"}, want: "'swarm mailbox defer' requires <card-id>."},
-		{name: "packs show missing id", args: []string{"packs", "show"}, want: "'swarm packs show' requires <pack-id>."},
+		{name: "packs show missing id", args: []string{"packs", "show"}, want: "'swarm packs show' requires <provider>."},
 		{name: "forkchat new missing source", args: []string{"forkchat", "new"}, want: "'swarm forkchat new' requires <source-session-id>."},
 		{name: "forkchat resume missing fork", args: []string{"forkchat", "resume"}, want: "'swarm forkchat resume' requires <fork-id>."},
 		{name: "forkchat view missing fork", args: []string{"forkchat", "view"}, want: "'swarm forkchat view' requires <fork-id>."},

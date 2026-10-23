@@ -131,7 +131,11 @@ func TestRunForkGenericSourceAdvancedFanOutConsumersBothStores(t *testing.T) {
 					frontier = event.ID()
 				}
 				original := originalCarriageForRun(t, owner, fixture.runID)
-				fork, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: frontier, OriginalLoopCarriage: original})
+				rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fork, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: frontier, RootAdmission: rooted.Admission(), OriginalLoopCarriage: original})
 				if err != nil {
 					t.Fatal(err)
 				}

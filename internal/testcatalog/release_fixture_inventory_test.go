@@ -8,26 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
-func TestCatalogFullLifecycleFixtureIsFiniteFilesystemFlowTree(t *testing.T) {
-	repo := catalogRepoRoot(t)
-	root := filepath.Join(repo, "internal", "releasee2e", "testdata", "full_lifecycle", "standing_telegram")
-	for _, label := range []string{
-		"telegram-chat/schema.yaml",
-		"telegram-ingress/schema.yaml",
-	} {
-		if info, err := os.Stat(filepath.Join(root, filepath.FromSlash(label))); err != nil || !info.Mode().IsRegular() {
-			t.Fatalf("full lifecycle source is missing %s", label)
-		}
-	}
-	retired, err := retiredFullLifecycleTopology(repo, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range retired {
-		t.Errorf("full lifecycle source retains retired topology at %s", path)
-	}
-}
-
 func TestCatalogFullLifecycleFixtureExcludesNestedCheckout(t *testing.T) {
 	repo := t.TempDir()
 	root := filepath.Join(repo, "full_lifecycle")

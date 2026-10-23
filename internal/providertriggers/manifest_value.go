@@ -3,6 +3,7 @@ package providertriggers
 import (
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -16,9 +17,10 @@ type Manifest struct {
 }
 
 type manifestValue struct {
-	definition manifestDefinition
-	source     yamlsource.Value
-	body       []byte
+	definition   manifestDefinition
+	source       yamlsource.Value
+	body         []byte
+	providerBody packartifact.ProviderBody
 }
 
 func (m Manifest) Validate() error {
@@ -105,6 +107,9 @@ func (m Manifest) ProjectNormalizedPayload(body []byte) ([]DeliveryEvent, error)
 func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 	if err := m.Validate(); err != nil {
 		return manifestAdmission{}, err
+	}
+	if req.Provider != "" && req.Provider != m.Provider() {
+		return manifestAdmission{}, badRequest(fmt.Sprintf("provider trigger %q does not match request provider %q; use its exact directory key", m.Provider(), req.Provider))
 	}
 	if m.Transport() != packs.ChannelTransportWebhook {
 		return manifestAdmission{}, unauthorized("session trigger requires its retained account and activation authority, not a webhook request")

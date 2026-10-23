@@ -13,7 +13,8 @@ import (
 func TestCompiledEventSchemasOwnOptionalityAndCanonicalSchema(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: compiled-events\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: compiled-events\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string?
@@ -96,9 +97,11 @@ func TestCompileCurrentEventDeclarationRejectsNoncanonicalIdentity(t *testing.T)
 func TestCompiledEventSchemasPreserveFilesystemFlowOwner(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: event-owner-root\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: event-owner-root\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "root.started:\n")
-	writeFixtureFile(t, filepath.Join(root, "orders", "schema.yaml"), "name: orders\n")
+	writeFixtureFile(t, filepath.Join(root, "orders", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "orders", "schema.yaml"), "stages: []\n# fixture: orders\n")
 	writeFixtureFile(t, filepath.Join(root, "orders", "events.yaml"), "ready:\n  order_id: text\n")
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -122,8 +125,10 @@ func TestCompiledEventSchemasPreserveFilesystemFlowOwner(t *testing.T) {
 func TestCompiledEventSchemasExcludeGeneratedEvents(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: generated-event-exclusion\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: generated-event-exclusion\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "source.requested:\n  url: text\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 scanner:
   execution_type: system_node

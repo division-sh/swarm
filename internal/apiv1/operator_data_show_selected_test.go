@@ -496,7 +496,7 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, runCatalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)

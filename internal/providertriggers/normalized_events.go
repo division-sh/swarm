@@ -102,7 +102,7 @@ func (m manifestDefinition) OutputManifest() []OutputManifest {
 }
 
 func (m manifestDefinition) validateNormalizedEvents() error {
-	provider := NormalizeProviderName(m.Provider)
+	provider := m.Provider
 	seen := map[string]struct{}{}
 	branches := make([]OutputManifest, 0, len(m.NormalizedEvents))
 	for index, item := range m.NormalizedEvents {

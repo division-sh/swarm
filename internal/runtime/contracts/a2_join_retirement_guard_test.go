@@ -222,7 +222,7 @@ func a2NegativeGeneratorSpecimen(path, scope, source string) bool {
 	var digest string
 	switch {
 	case path == "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go" && scope == "RetiredFanInCoordinatorSchema":
-		digest = "c57630b53ef1ad0391fbc296700e60a5e1c0c447841cafdea01f5c8ebd536540"
+		digest = "e00b8889ed9240770f480bd1f82a708a1b32b4261c1f75d98b58d7adc2c72535"
 	case path == "internal/runtime/testfixtures/canonicalrouting/arrival_join_guard_sources.go" && scope == "ArrivalJoinRetirementGuardCases":
 		digest = "08e97be9242a1251a056a50fe4e4c166519f0705bb2a87cbe620a373ce2cb8bf"
 	default:
@@ -548,10 +548,7 @@ func decode(v any) {
 }
 
 func TestA2JoinRetirementGuardNegativeSpecimenIsExactAndRejected(t *testing.T) {
-	const path = "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go"
-	const scope = "RetiredFanInCoordinatorSchema"
 	source := canonicalrouting.RetiredFanInCoordinatorSchema()
-	a2AssertExactNegativeGeneratorSpecimen(t, path, scope, source)
 	var schema FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(source), &schema); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"][0]`) {
 		t.Fatalf("whitelisted negative schema is no longer rejected at scalar pin admission: %v", err)

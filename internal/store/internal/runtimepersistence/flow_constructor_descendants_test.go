@@ -24,10 +24,10 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+shape, func(t *testing.T) {
 				documents := map[string]string{
-					"schema.yaml":                "name: root-construction\nstages:\n  pending: {}\n",
-					"scout/schema.yaml":          "name: scout\nstages:\n  pending: {}\n",
-					"scout/detail/schema.yaml":   "name: detail\n",
-					"scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n",
+					"schema.yaml":                "stages:\n  pending: {}\n",
+					"scout/schema.yaml":          "stages:\n  pending: {}\n",
+					"scout/detail/schema.yaml":   "stages: []\n",
+					"scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "scout/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "scout/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if keyed {
 					documents["schema.yaml"] = "name: root-construction\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n"
@@ -72,16 +72,16 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 func newEagerFlowConstructorFixture(t *testing.T, backend string) receiverConfigActivationFixture {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":                       "name: eager-construction\n",
-		"review/schema.yaml":                "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+		"schema.yaml":                       "stages: []\n",
+		"review/schema.yaml":                "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
 		"review/entities.yaml":              "review_item:\n  request_id: text\n",
 		"review/events.yaml":                "task.started:\n",
-		"review/scout/schema.yaml":          "name: scout\nstages:\n  pending: {}\n",
-		"review/scout/detail/schema.yaml":   "name: detail\n",
+		"review/scout/schema.yaml":          "stages:\n  pending: {}\n",
+		"review/scout/detail/schema.yaml":   "stages: []\n",
 		"review/scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n",
-		"review/deferred/schema.yaml":       "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",
+		"review/deferred/schema.yaml":       "instance: job_id\npins:\n  inputs:\n    - job.started\n",
 		"review/deferred/events.yaml":       "job.started:\n",
-		"review/deferred/entities.yaml":     "job:\n  job_id: text\n",
+		"review/deferred/entities.yaml":     "job:\n  job_id: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/scout/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/scout/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/deferred/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

@@ -388,13 +388,13 @@ func TestRunExecutionObservationCannotMintNativeAdmissionBothDialects(t *testing
 					if current, err := owner.ObserveRunExecution(ctx, tx, selectedCompletionRunID); err != nil || !current {
 						t.Fatalf("first native observation: current=%t err=%v", current, err)
 					}
-					if _, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, selectedCompletionRunID); err != nil || cached {
+					if _, _, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, selectedCompletionRunID); err != nil || cached {
 						t.Fatalf("observation minted mutable source admission: cached=%t err=%v", cached, err)
 					}
 					if err := owner.RequireRunExecutionTx(ctx, tx, selectedCompletionRunID); err != nil {
 						return err
 					}
-					if fact, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, selectedCompletionRunID); err != nil || !cached || fact.BundleHash() != selectedCompletionBundle {
+					if fact, _, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, selectedCompletionRunID); err != nil || !cached || fact.BundleHash() != selectedCompletionBundle {
 						t.Fatalf("canonical mutable source was not attributed to native transaction: cached=%t err=%v", cached, err)
 					}
 					if current, err := owner.ObserveRunExecution(ctx, tx, selectedCompletionRunID); err != nil || !current {

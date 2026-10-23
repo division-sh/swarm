@@ -1,4 +1,4 @@
-name: ingress
+# fixture: ingress
 pins:
   inputs:
     - operating.report.triggered

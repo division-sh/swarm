@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -59,6 +60,11 @@ func TestReadProofFactoringCompiledAgentScopeBothStores(t *testing.T) {
 			}
 			instanceID := uuid.NewString()
 			ctx := correlation.WithSourceArtifactFact(correlation.WithRuntimeInstanceID(context.Background(), instanceID), fact)
+			rooted, _ := sourceartifactfixture.Rooted(t, "read-proof", sourceartifactfixture.Artifact())
+			if _, err := selected.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(instanceID, fact.BundleHash()))
 			runID := uuid.NewString()
 			profile, err := selection.ResolveLiveBackend(selection.BackendAnthropic)

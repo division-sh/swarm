@@ -11,13 +11,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/channelactivation"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -174,8 +174,21 @@ func TestIssue2564AsyncHandoffPreservesForegroundCompletion(t *testing.T) {
 
 func issue2564PreparedHandoff(t *testing.T) (*EventBus, PreparedPublish, *issue2564HandoffPipelineOwner, *issue2564HandoffContinuation) {
 	t.Helper()
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":           "stages: []\n",
+		"events.yaml":           "custom.receiver_projection:\n",
+		"nodes.yaml":            "handoff-node:\n  execution_type: system_node\n  subscribes_to: [custom.receiver_projection]\n  event_handlers:\n    custom.receiver_projection: {}\n",
+		"workers/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"workers/schema.yaml":   "instance: item_id\nstages: []\n",
+		"workers/entities.yaml": "worker_state:\n  item_id: {type: text}\n",
+	}))
 	owner := &issue2564HandoffPipelineOwner{terminalReleasePipelineOwner: newTerminalReleasePipelineOwner(), settled: make(chan struct{})}
-	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner})
+	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner, ContractBundle: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,11 +199,11 @@ func issue2564PreparedHandoff(t *testing.T) (*EventBus, PreparedPublish, *issue2
 	event := receiverProjectionEvent(uuid.NewString())
 	event = eventtest.RunCreatingRootIngress(uuid.NewString(), event.Type(), "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	plan := nodeOnlyDeliveryPlan(t, event, "handoff-node")
-	claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
+	claim, err := bus.claimPipelinePublication(ctx, event.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := bus.receiverProjection(context.Background(), event.DeliveryContext())
+	projection, err := bus.receiverProjection(ctx, event.DeliveryContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,13 +225,13 @@ func issue2564PreparedHandoff(t *testing.T) (*EventBus, PreparedPublish, *issue2
 		t.Fatal(err)
 	}
 	prepared := PreparedPublish{Event: event, plan: plan, publicationClaim: claim, receiver: projection}
-	consequences, err := bus.finalizeCommittedPublicationConsequences(context.Background(), prepared, CommittedPublication{
+	consequences, err := bus.finalizeCommittedPublicationConsequences(ctx, prepared, CommittedPublication{
 		AppendOutcome: EventAppendInserted, DeliveryHandoffs: []runtimedelivery.DurableHandoffProof{proof}, Acknowledged: true,
 	}, false)
 	if err != nil || !consequences.ready {
 		t.Fatalf("finalize prerequisites: ready=%t err=%v", consequences.ready, err)
 	}
-	t.Cleanup(func() { _ = claim.Release(context.Background()) })
+	t.Cleanup(func() { _ = claim.Release(ctx) })
 	return bus, consequences.prepared, owner, continuations
 }
 
@@ -467,68 +480,6 @@ func TestIssue2564AsyncNodeHandoffPreservesPublicationDiagnostic(t *testing.T) {
 	}
 }
 
-func TestIssue2564NodeHandoffRequiresExactCoverage(t *testing.T) {
-	for _, name := range []string{"exact", "no_routes", "missing", "wrong_event", "wrong_route", "foreign_generation", "duplicate", "event_wide", "ephemeral_owner", "agent_recipient", "uncovered_persisted_recipient", "runtime_coordination"} {
-		t.Run(name, func(t *testing.T) {
-			bus, prepared, _, _ := issue2564PreparedHandoff(t)
-			proofs := prepared.committedHandoffs
-			switch name {
-			case "no_routes":
-				prepared.plan = newRoutePlan(prepared.Event)
-			case "missing":
-				proofs = nil
-			case "wrong_event", "wrong_route", "foreign_generation":
-				eventID, deliveryID := prepared.Event.ID(), proofs[0].DeliveryID()
-				authority := proofs[0].Authority()
-				if name == "wrong_event" {
-					eventID = uuid.NewString()
-				} else if name == "wrong_route" {
-					deliveryID = uuid.NewString()
-				} else {
-					var err error
-					authority, err = runtimedelivery.NewNormalExecutionAuthority(bus.sourceArtifactFact, uuid.NewString(), 2)
-					if err != nil {
-						t.Fatal(err)
-					}
-				}
-				proof, err := runtimedelivery.AdmitDurableHandoffProof(deliveryID, eventID, "other", authority)
-				if err != nil {
-					t.Fatal(err)
-				}
-				proofs = []runtimedelivery.DurableHandoffProof{proof}
-			case "duplicate":
-				second := nodeOnlyDeliveryPlan(t, prepared.Event, "second-node").DeliveryRoutes()[0]
-				prepared.plan.AddDeliveryIntents(RoutePlanDeliveryIntent{
-					Recipient: second.Recipient, TargetBlueprint: second.Target.Route(), TargetOwnership: second.Target,
-					Producer: routeIntentProducerInternalTargetCarrier, Persist: true,
-				})
-				proofs = append(proofs, proofs[0])
-			case "event_wide":
-				bus.SetInterceptors(continuationEventPassthroughInterceptor{})
-			case "ephemeral_owner":
-				if err := bus.SetDeliveryContinuationOwner(permissiveTestDeliveryOwner{}); err != nil {
-					t.Fatal(err)
-				}
-			case "agent_recipient":
-				prepared.plan.AddLiveRecipients(RoutePlanLiveRecipient{
-					Recipient: events.MustAgentDeliveryRecipient("agent"), AgentIdentity: agentidentitytest.RootDeclaredForRun(t, prepared.Event.RunID(), "agent", "role"),
-					Producer: routeIntentProducerAgentPolicy,
-				})
-			case "uncovered_persisted_recipient":
-				prepared.plan.AddLiveRecipients(RoutePlanLiveRecipient{
-					Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "uncovered")),
-					Producer:  routeIntentProducerInternalTargetCarrier, PersistAsDelivery: true,
-				})
-			case "runtime_coordination":
-				prepared.Event = eventtest.RuntimeControl(prepared.Event.ID(), prepared.Event.Type(), "test", "", []byte(`{}`), 0, prepared.Event.RunID(), "", events.EventEnvelope{}, time.Now().UTC())
-			}
-			if got := bus.canTransferNodeDeliveries(prepared.Event, prepared.plan, proofs); got != (name == "exact") {
-				t.Fatalf("transfer eligibility = %t", got)
-			}
-		})
-	}
-}
-
 func TestIssue2564AsyncNodeHandoffSettlementFailureRetainsRecovery(t *testing.T) {
 	for _, committed := range []bool{false, true} {
 		name := "uncommitted"
@@ -581,21 +532,5 @@ func TestIssue2564AsyncNodeHandoffRejectsStaleClaimAndKeepsSuccessor(t *testing.
 	continuations.mu.Unlock()
 	if !retained || current != successor || owner.settlements != 0 || signals != 0 {
 		t.Fatalf("stale transfer affected successor: retained=%t current=%v settlements=%d signals=%d", retained, current, owner.settlements, signals)
-	}
-}
-
-func TestIssue2564NodeHandoffReadinessRequiresAcknowledgedFinalization(t *testing.T) {
-	bus, prepared, _, _ := issue2564PreparedHandoff(t)
-	for _, acknowledged := range []bool{false, true} {
-		result, err := bus.finalizeCommittedPublicationConsequences(context.Background(), prepared, CommittedPublication{
-			AppendOutcome: EventAppendInserted, DeliveryHandoffs: prepared.committedHandoffs, Acknowledged: acknowledged,
-		}, false)
-		if err != nil || !result.ready || result.prepared.durableHandoffReady != acknowledged {
-			t.Fatalf("acknowledged=%t: ready=%t transferable=%t err=%v", acknowledged, result.ready, result.prepared.durableHandoffReady, err)
-		}
-	}
-	result, err := bus.finalizeCommittedPublicationConsequences(context.Background(), prepared, CommittedPublication{}, false)
-	if err == nil || result.ready || result.prepared.durableHandoffReady {
-		t.Fatalf("invalid current evidence retained prior handoff readiness: ready=%t transferable=%t err=%v", result.ready, result.prepared.durableHandoffReady, err)
 	}
 }

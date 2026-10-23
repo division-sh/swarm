@@ -33,11 +33,14 @@ func FlowScopes(source Source) []FlowScope {
 }
 
 func FlowScopeByID(source Source, flowID string) (FlowScope, bool) {
-	flowID = strings.TrimSpace(flowID)
 	if source == nil || flowID == "" {
 		return FlowScope{}, false
 	}
-	return source.FlowScopeByID(flowID)
+	scope, found := source.FlowScopeByID(flowID)
+	if !found || scope.ID != flowID {
+		return FlowScope{}, false
+	}
+	return scope, true
 }
 
 // RootExecutionFlowID returns the canonical selected-root flow identity.
@@ -88,7 +91,7 @@ func (c RootExecutionCoordinate) RunID() string {
 }
 
 func (c RootExecutionCoordinate) Matches(flowID, runID string) bool {
-	return c.Valid() && strings.TrimSpace(flowID) == c.flowID && strings.TrimSpace(runID) == c.runID
+	return c.Valid() && flowID == c.flowID && strings.TrimSpace(runID) == c.runID
 }
 
 func flowModeFromView(view runtimecontracts.FlowContractView) string {

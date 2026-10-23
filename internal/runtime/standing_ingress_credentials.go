@@ -155,7 +155,7 @@ func (rt *Runtime) standingCredentials(ctx context.Context) (*standingCredential
 
 func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCredentialAdmission, error) {
 	source := rt.Options.WorkflowModule.SemanticSource()
-	declarations, err := ResolveStandingTargetDeclarations(source, rt.Options.ProviderTriggerCatalog)
+	declarations, err := ResolveStandingTargetDeclarations(source, rt.Options.ProviderTriggerCatalog, rt.Options.TriggerEntries)
 	if err != nil {
 		return nil, err
 	}
@@ -606,10 +606,11 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 		if plan.serviceID != candidate.Target.ServiceID {
 			continue
 		}
-		current, found, err := rt.Pipeline.LoadReconciledStandingService(ctx, runtimepipeline.StandingServiceCandidate{
-			BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason, ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
-			Source: rt.Options.SourceArtifactFact,
-		})
+		declaration, err := rt.standingServiceCandidate(plan)
+		if err != nil {
+			return nil, nil, err
+		}
+		current, found, err := rt.Pipeline.LoadReconciledStandingService(ctx, declaration)
 		if err != nil {
 			return nil, nil, err
 		}

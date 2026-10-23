@@ -86,16 +86,15 @@ func TestPlatformPackDirsResolveFromSelectedFile(t *testing.T) {
 	base := packfixture.EmbeddedBase(t)
 	wantPlatformDirs := make([]string, 0, len(base.Entries()))
 	for index, entry := range base.Entries() {
-		relative := fmt.Sprintf("platform-%02d", index)
+		relative := filepath.Join(fmt.Sprintf("platform-%02d", index), entry.ID())
 		target := filepath.Join(localDir, relative)
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(target, packartifact.EnvelopeFileName), entry.EnvelopeBody(), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(target, packartifact.ManifestFileNameForType(entry.Type())), entry.ManifestBody(), 0o644); err != nil {
-			t.Fatal(err)
+		for name, body := range entry.Provider().Members() {
+			if err := os.WriteFile(filepath.Join(target, name), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 		platformConfig = append(platformConfig, "      - ./"+relative)
 		wantPlatformDirs = append(wantPlatformDirs, target)

@@ -291,7 +291,7 @@ func TestCreatingPredecessorNoInputBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, shape := range []string{"fieldless", "fielded"} {
 			t.Run(backend+"/"+shape, func(t *testing.T) {
-				documents := map[string]string{"schema.yaml": "name: creating-no-input\n", "service/schema.yaml": "name: service\n"}
+				documents := map[string]string{"schema.yaml": "stages: []\n", "service/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "service/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 				if shape == "fielded" {
 					documents["service/entities.yaml"] = "receipt:\n  marker: {type: text, initial: unchanged}\n"
 				}

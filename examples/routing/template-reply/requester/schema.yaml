@@ -1,4 +1,4 @@
-name: requester
+# fixture: requester
 instance: account_id
 pins:
   inputs:

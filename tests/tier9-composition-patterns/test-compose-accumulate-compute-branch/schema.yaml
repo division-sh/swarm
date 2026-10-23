@@ -1,4 +1,4 @@
-name: test-compose-accumulate-compute-branch
+# fixture: test-compose-accumulate-compute-branch
 stages:
   collecting: {}
   high: {final: true}

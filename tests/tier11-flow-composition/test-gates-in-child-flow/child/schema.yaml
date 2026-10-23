@@ -6,4 +6,4 @@ pins:
     - validate.start
   outputs:
     - validation.done
-name: child
+# fixture: child

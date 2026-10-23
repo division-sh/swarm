@@ -20,7 +20,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -116,7 +118,7 @@ type catalogEntryValue struct {
 }
 
 type LoadedPack struct {
-	Envelope     packs.Envelope
+	Identity     packs.PackIdentity
 	Manifest     Manifest
 	ManifestBody []byte
 	Directory    string
@@ -135,75 +137,98 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 	sort.Strings(ids)
 	out := make([]packs.TriggerPackDescriptor, 0, len(ids))
 	for _, id := range ids {
-		entry := s.byID[id]
-		events := map[string]packs.TriggerEvent{}
-		for _, output := range entry.manifest.OutputManifest() {
-			if output.Kind != OutputKindNormalized {
-				continue
-			}
-			fields := make(map[string]packs.TriggerEventField, len(output.Fields))
-			for name, projection := range output.Fields {
-				projection = projection.normalized()
-				fields[name] = packs.TriggerEventField{Schema: projection.Schema, Required: !projection.Optional}
-			}
-			events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
-		}
-		out = append(out, packs.TriggerPackDescriptor{
-			Identity:  entry.identity,
-			Transport: entry.manifest.Transport(),
-			Provider:  entry.manifest.Provider(), Generation: s.generation, Events: events,
-		})
+		out = append(out, triggerPackDescriptor(s.byID[id], s.generation))
 	}
 	return out
 }
 
-func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
-	snapshot := &CatalogSnapshot{
-		byProvider: make(map[string]catalogEntryValue, len(entries)),
-		byID:       make(map[string]catalogEntryValue, len(entries)),
+func (s *CatalogSnapshot) PackDescriptorForProvider(provider string) (packs.TriggerPackDescriptor, bool) {
+	if s == nil {
+		return packs.TriggerPackDescriptor{}, false
 	}
-	normalizedEntries := make([]catalogEntryValue, 0, len(entries))
-	for _, entry := range entries {
-		if err := entry.Manifest.Validate(); err != nil {
-			return nil, fmt.Errorf(
-				"validate provider trigger pack %q version=%s manifest_hash=%s: %w",
-				strings.TrimSpace(entry.Identity.ID), strings.TrimSpace(entry.Identity.Version),
-				strings.TrimSpace(entry.Identity.ManifestHash), err,
-			)
-		}
-		provider := entry.Manifest.Provider()
-		entry.Identity.Provenance = strings.TrimSpace(entry.Identity.Provenance)
-		entry.SourcePath = strings.TrimSpace(entry.SourcePath)
-		entry.Source = firstNonEmpty(entry.Source, "unknown")
-		if entry.Identity.ID == "" || entry.Identity.Version == "" || entry.Identity.ManifestHash == "" || entry.Identity.Provenance == "" {
-			return nil, fmt.Errorf("provider trigger catalog entry for %q requires pack id, version, manifest_hash, and provenance", provider)
-		}
-		source, err := packs.NewPackSource(entry.Identity.Provenance, entry.SourcePath)
-		if err != nil {
-			return nil, fmt.Errorf("provider trigger catalog entry for %q %w", provider, err)
-		}
-		identity, err := packs.NewPackIdentity(
-			entry.Identity.ID,
-			entry.Identity.Version,
-			entry.Identity.ManifestHash,
-			packs.TypeTrigger,
-			source,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("provider trigger catalog entry for %q %w", provider, err)
-		}
-		value := catalogEntryValue{identity: identity, manifest: entry.Manifest, source: entry.Source}
-		if existing, exists := snapshot.byProvider[provider]; exists {
-			return nil, fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existing.source, entry.Source)
-		}
-		if existing, exists := snapshot.byID[identity.ID()]; exists {
-			return nil, fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", identity.ID(), existing.source, entry.Source)
-		}
-		snapshot.byProvider[provider] = value
-		snapshot.byID[identity.ID()] = value
-		normalizedEntries = append(normalizedEntries, value)
+	entry, present := s.byProvider[provider]
+	if !present {
+		return packs.TriggerPackDescriptor{}, false
 	}
-	generation, err := catalogGeneration(normalizedEntries)
+	return triggerPackDescriptor(entry, s.generation), true
+}
+
+func triggerPackDescriptor(entry catalogEntryValue, generation triggergeneration.Generation) packs.TriggerPackDescriptor {
+	events := map[string]packs.TriggerEvent{}
+	for _, output := range entry.manifest.OutputManifest() {
+		if output.Kind != OutputKindNormalized {
+			continue
+		}
+		fields := make(map[string]packs.TriggerEventField, len(output.Fields))
+		for name, projection := range output.Fields {
+			projection = projection.normalized()
+			fields[name] = packs.TriggerEventField{Schema: projection.Schema, Required: !projection.Optional}
+		}
+		events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
+	}
+	return packs.TriggerPackDescriptor{Identity: entry.identity, Transport: entry.manifest.Transport(), Provider: entry.manifest.Provider(), Generation: generation, Events: events}
+}
+
+// NewCatalogSnapshotFromAdmittedBodies consumes frozen typed BODY admission.
+// Byte-only manifests and reconstructed catalog readbacks cannot mint it.
+func NewCatalogSnapshotFromAdmittedBodies(manifests ...Manifest) (*CatalogSnapshot, error) {
+	snapshot := &CatalogSnapshot{byProvider: map[string]catalogEntryValue{}, byID: map[string]catalogEntryValue{}}
+	entries := make([]catalogEntryValue, 0, len(manifests))
+	for _, manifest := range manifests {
+		if err := manifest.Validate(); err != nil {
+			return nil, err
+		}
+		body := manifest.value.providerBody
+		if !body.Valid() || body.SourceValue() != manifest.value.source || body.ProviderKey() != manifest.Provider() {
+			return nil, fmt.Errorf("provider trigger catalog requires captured BODY admission")
+		}
+		identity, err := packs.NewProviderBodyIdentity(body)
+		if err != nil {
+			return nil, err
+		}
+		value := catalogEntryValue{identity: identity, manifest: manifest, source: body.Label()}
+		if err := recordCatalogEntry(snapshot, value); err != nil {
+			return nil, err
+		}
+		entries = append(entries, value)
+	}
+	return freezeCatalogSnapshot(snapshot, entries)
+}
+
+// ComposeCatalogSnapshots combines immutable admitted entries without repeating
+// BODY admission or reconstructing identities from readback.
+func ComposeCatalogSnapshots(catalogs ...*CatalogSnapshot) (*CatalogSnapshot, error) {
+	snapshot := &CatalogSnapshot{byProvider: map[string]catalogEntryValue{}, byID: map[string]catalogEntryValue{}}
+	var entries []catalogEntryValue
+	for _, catalog := range catalogs {
+		if catalog == nil || !catalog.Generation().Valid() {
+			return nil, fmt.Errorf("catalog composition requires admitted snapshots")
+		}
+		for _, entry := range catalog.byProvider {
+			if err := recordCatalogEntry(snapshot, entry); err != nil {
+				return nil, err
+			}
+			entries = append(entries, entry)
+		}
+	}
+	return freezeCatalogSnapshot(snapshot, entries)
+}
+
+func recordCatalogEntry(snapshot *CatalogSnapshot, entry catalogEntryValue) error {
+	provider := entry.manifest.Provider()
+	if existing, exists := snapshot.byProvider[provider]; exists {
+		return fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existing.source, entry.source)
+	}
+	if existing, exists := snapshot.byID[entry.identity.ID()]; exists {
+		return fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", entry.identity.ID(), existing.source, entry.source)
+	}
+	snapshot.byProvider[provider] = entry
+	snapshot.byID[entry.identity.ID()] = entry
+	return nil
+}
+
+func freezeCatalogSnapshot(snapshot *CatalogSnapshot, entries []catalogEntryValue) (*CatalogSnapshot, error) {
+	generation, err := catalogGeneration(entries)
 	if err != nil {
 		return nil, err
 	}
@@ -215,14 +240,14 @@ func NewCatalogSnapshotFromInventory(inventory *packartifact.EffectivePackInvent
 	if inventory == nil {
 		return nil, nil, fmt.Errorf("effective pack inventory is required")
 	}
-	entries := inventory.EntriesByType(packartifact.TypeTrigger)
+	entries := inventory.Entries()
 	loaded := make([]LoadedPack, 0, len(entries))
 	for _, entry := range entries {
-		admitted, err := entry.Loaded(runningPlatformVersion)
-		if err != nil {
-			return nil, nil, err
+		body, present := entry.Provider().Body(packmodel.BodyTrigger)
+		if !present {
+			continue
 		}
-		pack, err := loadPackBody(admitted)
+		pack, err := loadPackBody(body)
 		if err != nil {
 			return nil, nil, fmt.Errorf("load effective provider trigger pack %q: %w", entry.ID(), err)
 		}
@@ -234,7 +259,11 @@ func NewCatalogSnapshotFromInventory(inventory *packartifact.EffectivePackInvent
 	if err := validateLoadedPackIdentities(loaded); err != nil {
 		return nil, nil, err
 	}
-	snapshot, err := NewCatalogSnapshot(CatalogEntriesFromLoadedPacks(loaded...)...)
+	manifests := make([]Manifest, 0, len(loaded))
+	for _, pack := range loaded {
+		manifests = append(manifests, pack.Manifest)
+	}
+	snapshot, err := NewCatalogSnapshotFromAdmittedBodies(manifests...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -244,10 +273,10 @@ func NewCatalogSnapshotFromInventory(inventory *packartifact.EffectivePackInvent
 func validateLoadedPackIdentities(loaded []LoadedPack) error {
 	seen := map[string]LoadedPack{}
 	for _, pack := range loaded {
-		id := pack.Envelope.ID
+		id := pack.Identity.ID()
 		if previous, ok := seen[id]; ok {
-			if previous.Envelope.Version == pack.Envelope.Version && previous.Envelope.ManifestHash != pack.Envelope.ManifestHash {
-				return fmt.Errorf("competing immutable provider trigger pack identity (%q, %q) from %s and %s has manifest hashes %q and %q", id, pack.Envelope.Version, loadedPackSource(previous), loadedPackSource(pack), previous.Envelope.ManifestHash, pack.Envelope.ManifestHash)
+			if previous.Identity.Version() == pack.Identity.Version() && previous.Identity.ManifestHash() != pack.Identity.ManifestHash() {
+				return fmt.Errorf("competing immutable provider trigger pack identity (%q, %q) from %s and %s has manifest hashes %q and %q", id, pack.Identity.Version(), loadedPackSource(previous), loadedPackSource(pack), previous.Identity.ManifestHash(), pack.Identity.ManifestHash())
 			}
 			return fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", id, loadedPackSource(previous), loadedPackSource(pack))
 		}
@@ -257,7 +286,7 @@ func validateLoadedPackIdentities(loaded []LoadedPack) error {
 }
 
 func loadedPackSource(pack LoadedPack) string {
-	provenance := strings.TrimSpace(pack.Envelope.Provenance.Source)
+	provenance := strings.TrimSpace(pack.Identity.Source().Provenance())
 	if provenance == "" {
 		provenance = "unknown"
 	}
@@ -268,7 +297,7 @@ func loadedPackSource(pack LoadedPack) string {
 	if sourcePath == "" {
 		sourcePath = "unknown"
 	}
-	return fmt.Sprintf("provenance=%s path=%q pack=%q", provenance, sourcePath, strings.TrimSpace(pack.Envelope.ID))
+	return fmt.Sprintf("provenance=%s path=%q pack=%q", provenance, sourcePath, strings.TrimSpace(pack.Identity.ID()))
 }
 
 func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
@@ -276,8 +305,8 @@ func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
 	for _, pack := range loaded {
 		entries = append(entries, CatalogEntry{
 			Identity: PackIdentity{
-				ID: pack.Envelope.ID, Version: pack.Envelope.Version,
-				ManifestHash: pack.Envelope.ManifestHash, Provenance: pack.Envelope.Provenance.Source,
+				ID: pack.Identity.ID(), Version: pack.Identity.Version(),
+				ManifestHash: pack.Identity.ManifestHash(), Provenance: pack.Identity.Source().Provenance(),
 			},
 			Manifest: pack.Manifest, SourcePath: strings.TrimSpace(pack.SourcePath),
 			Source: firstNonEmpty(pack.Source, loadedPackSource(pack)),
@@ -287,36 +316,33 @@ func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
 }
 
 func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, error) {
-	loaded, err := packs.Load(fsys, dir, runningPlatformVersion)
+	provider, err := packartifact.LoadProviderFS(fsys, dir, runningPlatformVersion)
 	if err != nil {
 		return LoadedPack{}, err
 	}
-	return loadPackBody(loaded)
+	body, present := provider.Body(packmodel.BodyTrigger)
+	if !present {
+		return LoadedPack{}, fmt.Errorf("provider %q has no trigger.yaml BODY", provider.Key())
+	}
+	return loadPackBody(body)
 }
 
-func loadPackBody(loaded packs.Loaded) (LoadedPack, error) {
-	manifest, err := parseManifestAt(loaded.ManifestBody, path.Join(loaded.Directory, packs.TriggerManifestFileName))
+func loadPackBody(body packartifact.ProviderBody) (LoadedPack, error) {
+	manifest, err := AdmitBody(body)
 	if err != nil {
-		return LoadedPack{}, fmt.Errorf("parse trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
+		return LoadedPack{}, err
 	}
-	if err := manifest.Validate(); err != nil {
-		return LoadedPack{}, fmt.Errorf("validate trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
-	}
-	expectedCapabilities := DerivedCapabilities(manifest)
-	if !packs.CapabilitiesEqual(loaded.Envelope.Capabilities, expectedCapabilities) {
-		return LoadedPack{}, fmt.Errorf("pack %q capabilities do not match trigger manifest", loaded.Envelope.ID)
-	}
-	expectedRequires := DerivedRequires(manifest)
-	if !packs.RequiresEqual(loaded.Envelope.Requires, expectedRequires) {
-		return LoadedPack{}, fmt.Errorf("pack %q requires do not match trigger manifest", loaded.Envelope.ID)
+	identity, err := packs.NewProviderBodyIdentity(body)
+	if err != nil {
+		return LoadedPack{}, err
 	}
 	return LoadedPack{
-		Envelope:     loaded.Envelope,
+		Identity:     identity,
 		Manifest:     manifest,
-		ManifestBody: loaded.ManifestBody,
-		Directory:    loaded.Directory,
-		SourcePath:   loaded.Directory,
-		Source:       fmt.Sprintf("provenance=%s path=%q pack=%q", loaded.Envelope.Provenance.Source, loaded.Directory, loaded.Envelope.ID),
+		ManifestBody: body.Bytes(),
+		Directory:    path.Dir(body.Label()),
+		SourcePath:   body.Label(),
+		Source:       body.Label(),
 	}, nil
 }
 
@@ -342,7 +368,7 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 		httpsRoute, sessionEvents = "", provider
 	}
 	if manifest.RequiresSecret() {
-		verifySecret = "webhook_signing." + provider
+		verifySecret = provider + ".webhook_signing_secret"
 	}
 	return packs.Capabilities{
 		Can: packs.CanCapabilities{
@@ -363,7 +389,7 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 func DerivedRequires(manifest Manifest) packs.Requires {
 	provider := manifest.Provider()
 	if manifest.RequiresSecret() {
-		return packs.Requires{Secrets: []string{"webhook_signing." + provider}}
+		return packs.Requires{Secrets: []string{provider + ".webhook_signing_secret"}}
 	}
 	return packs.Requires{}
 }
@@ -371,11 +397,11 @@ func DerivedRequires(manifest Manifest) packs.Requires {
 func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
 	capabilities := DerivedCapabilities(p.Manifest)
 	subject := packs.Subject{
-		ID:            strings.TrimSpace(p.Envelope.ID),
+		ID:            strings.TrimSpace(p.Identity.ID()),
 		Kind:          packs.SubjectProviderTrigger,
 		Provider:      p.Manifest.Provider(),
 		Source:        "trigger_pack",
-		Provenance:    strings.TrimSpace(p.Envelope.Provenance.Source),
+		Provenance:    strings.TrimSpace(p.Identity.Source().Provenance()),
 		SourcePath:    strings.TrimSpace(p.SourcePath),
 		Applicability: "installed",
 		TriggerEvents: triggerEventDescriptors(p.Manifest),
@@ -508,7 +534,7 @@ func (s *CatalogSnapshot) entryValueByProvider(provider string) (catalogEntryVal
 	if s == nil {
 		return catalogEntryValue{}, false
 	}
-	entry, ok := s.byProvider[NormalizeProviderName(provider)]
+	entry, ok := s.byProvider[provider]
 	return entry, ok
 }
 
@@ -769,16 +795,8 @@ func (m manifestDefinition) validate() error {
 			return err
 		}
 	}
-	eventNameLiteral := strings.TrimSpace(m.EventName.Literal)
-	eventNameTemplate := strings.TrimSpace(m.EventName.Template)
-	if eventNameLiteral == "" && eventNameTemplate == "" {
-		return fmt.Errorf("%s manifest event_name is required", provider)
-	}
-	if eventNameLiteral != "" && eventNameTemplate != "" {
-		return fmt.Errorf("%s manifest event_name must use literal or template, not both", provider)
-	}
-	if eventNameTemplate != "" && provider != "github" && provider != "slack" {
-		return fmt.Errorf("%s manifest event_name template is reserved for grandfathered GitHub/Slack compatibility", provider)
+	if err := validateRawEventName(provider, m.EventName); err != nil {
+		return err
 	}
 	switch strings.TrimSpace(m.Ack.Mode) {
 	case "", "durable_before_dispatch":
@@ -802,9 +820,9 @@ func (m manifestDefinition) validate() error {
 }
 
 func (m manifestDefinition) validateProviderTransport() (string, error) {
-	provider := NormalizeProviderName(m.Provider)
-	if provider == "" {
-		return "", fmt.Errorf("provider is required")
+	provider := m.Provider
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return "", fmt.Errorf("provider requires its exact portable directory key: %w", err)
 	}
 	if m.Transport != packs.ChannelTransportSession {
 		return provider, nil
@@ -829,7 +847,7 @@ type manifestAdmission struct {
 }
 
 func (m manifestDefinition) admitRequest(req Request) (manifestAdmission, error) {
-	provider := NormalizeProviderName(m.Provider)
+	provider := m.Provider
 	secret := strings.TrimSpace(req.Target.WebhookSecret)
 	if m.Secret.Required && secret == "" {
 		return manifestAdmission{}, unauthorized(provider + " webhook signing secret is required")
@@ -845,7 +863,7 @@ func (m manifestDefinition) admitRequest(req Request) (manifestAdmission, error)
 func (m manifestDefinition) validatePayloadObject(payload any) error {
 	if m.PayloadObjectRequired {
 		if _, ok := payload.(map[string]any); !ok {
-			return badRequest(firstNonEmpty(m.PayloadObjectError, NormalizeProviderName(m.Provider)+" payload object is required"))
+			return badRequest(firstNonEmpty(m.PayloadObjectError, m.Provider+" payload object is required"))
 		}
 	}
 	return nil
@@ -854,7 +872,7 @@ func (m manifestDefinition) validatePayloadObject(payload any) error {
 // Transport authentication precedes this shared BODY entry. It is private so
 // structural request data cannot mint an admitted request or publication grant.
 func (m manifestDefinition) admitAuthenticatedPayload(req Request) (manifestAdmission, error) {
-	provider := NormalizeProviderName(m.Provider)
+	provider := m.Provider
 	if err := m.validatePayloadObject(req.Payload); err != nil {
 		return manifestAdmission{}, err
 	}
@@ -925,7 +943,7 @@ func (m manifestDefinition) projectAdmission(admitted manifestAdmission) (Delive
 
 func (m manifestDefinition) verifySignature(secret string, req Request) error {
 	if strings.TrimSpace(secret) == "" {
-		return unauthorized(NormalizeProviderName(m.Provider) + " webhook signing secret is required")
+		return unauthorized(m.Provider + " webhook signing secret is required")
 	}
 	if strings.TrimSpace(m.Signature.Type) == signatureTypeTokenEquality {
 		return m.verifyTokenEquality(secret, req)
@@ -1156,7 +1174,7 @@ func (m manifestDefinition) buildPublishPayload(provider, deliveryID, eventType 
 		}
 	}
 	return map[string]any{
-		"provider":             strings.TrimSpace(provider),
+		"provider":             provider,
 		"event_type":           strings.TrimSpace(eventType),
 		"provider_event_type":  strings.TrimSpace(eventType),
 		"provider_event_id":    strings.TrimSpace(deliveryID),
@@ -1386,14 +1404,6 @@ func (p headerParams) Values(key string) []string {
 		}
 	}
 	return out
-}
-
-func NormalizeProviderName(raw string) string {
-	token := strings.TrimSpace(strings.ToLower(raw))
-	token = strings.ReplaceAll(token, ".", "_")
-	token = strings.ReplaceAll(token, "-", "_")
-	token = strings.ReplaceAll(token, " ", "_")
-	return token
 }
 
 func NormalizeEventToken(raw string) string {

@@ -129,6 +129,7 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t testing.TB, ctx 
 
 func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agentfixture.Store) {
 	t.Helper()
+	ctx = requireDefaultSourceArtifactForTest(t, ctx, store)
 	intent := selectedStoreIntent(t)
 	prompt, err := runtimeagentintent.ContractCriteriaPrompt(intent, []string{"hostile-replacement"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
 		"hostile-replacement": {

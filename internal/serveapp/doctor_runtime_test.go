@@ -73,6 +73,9 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 
 func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelection(t *testing.T) {
 	configDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(configDir, "packs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	configPath := filepath.Join(configDir, "swarm.yaml")
 	writeRuntimeConfigText(t, configPath, strings.Join([]string{
 		"runtime:",

@@ -30,8 +30,10 @@ func CopyReceiverInitializationGeometry(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"manifest.yaml": "name: receiver-initialization-geometry\nversion: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml": `name: receiver-initialization-geometry
+		"worker/leaf/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"worker/manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":             "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: receiver-initialization-geometry
 pins:
   inputs:
     - work.requested
@@ -63,7 +65,7 @@ worker.requested:
           label: payload.label
           count: payload.count
 `,
-		"worker/schema.yaml": `name: worker
+		"worker/schema.yaml": `# fixture: worker
 instance: worker_id
 auto_emit_on_create:
   event: worker.ready
@@ -105,7 +107,7 @@ leaf.requested:
                    'leaf-' + payload.label
           count: payload.count + 1
 `,
-		"worker/leaf/schema.yaml": `name: leaf
+		"worker/leaf/schema.yaml": `# fixture: leaf
 instance: worker_id
 auto_emit_on_create:
   event: leaf.ready

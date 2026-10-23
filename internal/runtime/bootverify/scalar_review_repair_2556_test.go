@@ -17,7 +17,8 @@ import (
 func scalar2556SourceBundle(t *testing.T, handler string) (*contracts.WorkflowContractBundle, string, error) {
 	t.Helper()
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: diagnostic\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n  items: [text]\nproof.done:\n  value: text?\n  inherited: text?\n")
 	nodes := "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n" + handler
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
@@ -191,7 +192,8 @@ func TestScalar2556LoadedPredicatesRefuseBeforeExecution(t *testing.T) {
 		for _, sentinel := range []string{"else", "ELSE", "eLsE"} {
 			t.Run(tc.slot+"/"+sentinel, func(t *testing.T) {
 				root := t.TempDir()
-				writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: diagnostic\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 				handler := "      " + strings.ReplaceAll(fmt.Sprintf(tc.handler, sentinel), "\n", "\n      ") + "\n"
 				writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n"+handler)
 				repo := repoRootForBootverifyTest(t)

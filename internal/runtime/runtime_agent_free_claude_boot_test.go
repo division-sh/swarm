@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,10 +63,12 @@ func TestNewRuntime_AgentPresentRequiresSelectedBackendCredential(t *testing.T) 
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeAgentMemorySource(t)}
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:           false,
 		WorkflowModule:      module,
+		SourceArtifactFact:  fact,
 		ProviderCredentials: testProviderCredentialStore(t, "", ""),
 	}})
 
@@ -86,14 +87,16 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeAgentMemorySource(t)}
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	if got := len(semanticview.AgentDeclarations(module.SemanticSource())); got == 0 {
 		t.Fatal("agent-present fixture unexpectedly has zero semantic agents")
 	}
 
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     claudeNoopLLMRuntime{},
+	_, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: cfg, Options: RuntimeOptions{
+		SelfCheck:          false,
+		WorkflowModule:     module,
+		LLMRuntime:         claudeNoopLLMRuntime{},
+		SourceArtifactFact: fact,
 	}})
 
 	if err == nil {
@@ -110,10 +113,13 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
-		LLMRuntime:     claudeNoopLLMRuntime{},
+	module := loadAgentFreeRuntimeWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: cfg, Options: RuntimeOptions{
+		SelfCheck:          false,
+		WorkflowModule:     module,
+		SourceArtifactFact: fact,
+		LLMRuntime:         claudeNoopLLMRuntime{},
 		WorkspaceLifecycle: claudeStartupWorkspaceStub{
 			target: &workspace.Target{Container: "swarm-agent-recovered-agent", Workdir: "/workspace"},
 		},
@@ -129,7 +135,7 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	err = rt.Start(testAuthorActivityContext(context.Background()))
+	err = rt.Start(ctx)
 	if err == nil || !strings.Contains(err.Error(), "claude runtime startup validation failed") || !strings.Contains(err.Error(), "tool gateway binding workspace endpoint") {
 		t.Fatalf("Start error = %v, want startup validation failure for missing workspace gateway binding", err)
 	}
@@ -139,9 +145,12 @@ func TestNewRuntimeToolGatewayRequiresBindingToken(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
+	module := loadAgentFreeRuntimeWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
+	_, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:          false,
-		WorkflowModule:     loadAgentFreeRuntimeWorkflowModule(t),
+		WorkflowModule:     module,
+		SourceArtifactFact: fact,
 		LLMRuntime:         claudeNoopLLMRuntime{},
 		EnableToolGateway:  true,
 		ToolGatewayBinding: testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", ""),
@@ -156,9 +165,9 @@ func loadAgentFreeRuntimeWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntim
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: agent-free-runtime
 stages: []
 `)
 

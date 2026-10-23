@@ -1,4 +1,4 @@
-name: claude-cli-release-worker
+# fixture: claude-cli-release-worker
 stages:
   pending: {}
   active: {}

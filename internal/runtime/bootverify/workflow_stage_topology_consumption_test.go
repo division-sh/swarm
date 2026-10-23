@@ -16,9 +16,10 @@ import (
 func TestRunAcceptsTimerOnlyReachableTerminalStage(t *testing.T) {
 	root := t.TempDir()
 
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
-name: support
 stages:
   active:
     timers:
@@ -26,7 +27,8 @@ stages:
         advances_to: closed
   closed:
     final: true
-`)
+`,
+	)
 	repoRoot := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	report := Run(context.Background(), compileBootverifySchemasPreservingPlans(bundle), Options{})

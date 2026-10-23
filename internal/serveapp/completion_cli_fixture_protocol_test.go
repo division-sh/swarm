@@ -148,6 +148,9 @@ func TestClaudeCLICompletion2270InvocationReaderUsesPublishedProjectionWorkspace
 	var selectedOwner *worklifetime.RuntimeOccurrence
 	for _, name := range []string{"original", "selected"} {
 		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: "+name+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

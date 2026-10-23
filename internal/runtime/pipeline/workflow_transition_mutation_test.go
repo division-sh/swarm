@@ -23,7 +23,8 @@ import (
 func transitionMutationSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: transition-proof\nstages:\n  ready: {}\n  other: {}\n  done: {final: true}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  ready: {}\n  other: {}\n  done: {final: true}\n",
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "advance:\nforeign:\n",
 		"nodes.yaml": `router:

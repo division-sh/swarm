@@ -10,20 +10,124 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 
+func newLifecycleCacheFixture(t *testing.T) (context.Context, PersistedAgent, *lifecyclePersistenceProbe) {
+	t.Helper()
+	return newLifecycleCacheFixtureForSource(t, loadRootAndFlowStaticAgentSource(t))
+}
+
+func newLifecycleCacheFixtureForSource(t *testing.T, source semanticview.Source) (context.Context, PersistedAgent, *lifecyclePersistenceProbe) {
+	t.Helper()
+	options, coordinate, binding := sourceSetFixtureAdmission(t, source)
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		t.Fatal("cache fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := correlation.WithSourceArtifactFact(context.Background(), options.SourceArtifactFact)
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(binding.RuntimeInstanceID, coordinate.BundleHash))
+	record := PersistedAgent{
+		Config: managerTestAgentConfig(runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: "agent-lifecycle-test", Role: "worker", Type: "sonnet", Model: "regular", FlowID: semanticview.RootExecutionFlowID(source),
+			Identity: runtimeagentidentitytest.RootRuntime(t, "agent-lifecycle-test", "lifecycle-test"),
+		}),
+		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
+		Topology: managerTestTopologyAdmissionForSource(t, source), ProcessBinding: binding,
+	}
+	return ctx, record, newLifecyclePersistenceProbeWithBinding(binding)
+}
+
 func TestManagerFixtureRowOwnerSelectionIsExplicit(t *testing.T) {
+	t.Run("flow_activation_source_construction_preserves_retained_readiness", func(t *testing.T) {
+		source := loadRootAndFlowStaticAgentSource(t)
+		options, _, _ := sourceSetFixtureAdmission(t, source)
+		prior := runtimepipeline.DynamicFlowRuntimeReadiness{
+			InstancePath: "retained/instance", OwningRunSource: authorActivityTestSourceArtifactFact,
+			Phase: runtimepipeline.FlowAttachmentReady, PlanHash: "frozen-plan", AttemptOrdinal: 3,
+		}
+		if prior.OwningRunSource.BundleHash() == options.SourceArtifactFact.BundleHash() {
+			t.Fatal("retained readiness control must belong to a different captured source")
+		}
+		instances := &flowActivationTestInstanceStore{readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{"retained": prior}}
+		manager, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, source)
+		fact, found := correlation.SourceArtifactFactFromContext(ctx)
+		if !found || fact.BundleHash() != options.SourceArtifactFact.BundleHash() || manager.semanticSource != source || manager.semanticReadinessSource.fact.BundleHash() != fact.BundleHash() {
+			t.Fatal("flow activation construction lost its exact captured source")
+		}
+		binding, err := manager.lifecycle.persistence().(processExecutionBindingProvider).ProcessExecutionBinding()
+		if err != nil || binding.BundleHash != fact.BundleHash() {
+			t.Fatalf("flow activation construction lost its source-bound process: %+v err=%v", binding, err)
+		}
+		if len(instances.readiness) != 1 || !reflect.DeepEqual(instances.readiness["retained"], prior) {
+			t.Fatal("flow activation construction retargeted retained readiness evidence")
+		}
+	})
+	t.Run("native_panic_candidate_requires_selected_admission", func(t *testing.T) {
+		record := TerminalPanicFixture(t)
+		if !reflect.DeepEqual(record.Topology, runtimeagenttopology.Admission{}) || record.ProcessBinding != (ProcessExecutionBinding{}) || record.LifecycleGeneration != 0 || record.LifecycleEpoch != 0 || record.LifecyclePhase != "" {
+			t.Fatalf("native panic candidate already carries execution authority: %+v", record)
+		}
+	})
 	unit := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{})
 	model, ok := unit.lifecycle.persistence().(*ephemeralLifecyclePersistenceProbe)
 	if !ok || unit.lifecycle.stateReader != model || unit.lifecycle.outcomeReader != model {
 		t.Fatal("storeless unit fixture did not select its explicit typed row/outcome model")
 	}
 	owner := newLifecyclePersistenceProbe()
+	if binding, err := owner.ProcessExecutionBinding(); err != nil || !binding.Equal(lifecycleProbeProcessBinding()) {
+		t.Fatalf("default lifecycle probe changed its binding: %+v err=%v", binding, err)
+	}
+	ctx, record, bound := newLifecycleCacheFixture(t)
+	if binding, err := bound.ProcessExecutionBinding(); err != nil || !binding.Equal(record.ProcessBinding) || binding.Equal(lifecycleProbeProcessBinding()) {
+		t.Fatalf("source-bound lifecycle probe lost its explicit binding: %+v err=%v", binding, err)
+	}
+	t.Run("aggregate_members_retain_captured_binding", func(t *testing.T) {
+		aggregate := &terminalSetPersistenceProbe{AgentLifecyclePersistence: bound, agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
+		if binding, err := aggregate.ProcessExecutionBinding(); err != nil || !binding.Equal(record.ProcessBinding) {
+			t.Fatalf("aggregate lost its owner binding: %+v err=%v", binding, err)
+		}
+		coordinator := newAgentLifecycleCoordinator(aggregate, nil, nil, nil)
+		if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, true); err != nil {
+			t.Fatal(err)
+		}
+		state, found, err := aggregate.LoadAgentLifecycleState(ctx, record.Config.Identity)
+		if err != nil || !found || !state.ProcessBinding.Equal(record.ProcessBinding) {
+			t.Fatalf("aggregate member changed its captured binding: %+v found=%t err=%v", state.ProcessBinding, found, err)
+		}
+	})
+	for name, owner := range map[string]AgentLifecyclePersistence{
+		"missing_binding_provider": struct{ AgentLifecyclePersistence }{bound},
+		"invalid_binding":          lifecycleReintroductionBindingProbe{lifecyclePersistenceProbe: bound},
+	} {
+		t.Run(name, func(t *testing.T) {
+			aggregate := &terminalSetPersistenceProbe{AgentLifecyclePersistence: owner, agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
+			if binding, err := aggregate.ProcessExecutionBinding(); err == nil {
+				t.Fatalf("unbound aggregate acquired a binding: %+v", binding)
+			}
+			if _, err := aggregate.CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{Identity: record.Config.Identity}); err == nil || len(aggregate.agents) != 0 {
+				t.Fatalf("unbound aggregate constructed member state: members=%d err=%v", len(aggregate.agents), err)
+			}
+		})
+	}
 	supplied := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LifecycleStore: owner, PersistenceRoles: PersistenceRoles{LifecycleState: owner, LifecycleOutcome: owner}})
 	if supplied.lifecycle.persistence() != owner || supplied.lifecycle.stateReader != owner || supplied.lifecycle.outcomeReader != owner {
 		t.Fatal("fixture constructor replaced the supplied row/outcome roles")
@@ -88,8 +192,7 @@ func TestAgentCurrentnessHasOneMutationAndReadOwner(t *testing.T) {
 }
 
 func TestAgentRowCacheRequiresDurableOwnerAndExactHydration(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	record := lifecycleTestPersistedAgent(t)
+	ctx, record, probe := newLifecycleCacheFixture(t)
 	for _, persist := range []bool{false, true} {
 		coordinator := newAgentLifecycleCoordinator(nil, nil, nil, nil)
 		if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, persist); err == nil {
@@ -99,7 +202,6 @@ func TestAgentRowCacheRequiresDurableOwnerAndExactHydration(t *testing.T) {
 			t.Fatal("missing durable owner published a cell")
 		}
 	}
-	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, probe, nil)
 	coordinator.outcomeReader = nil
 	if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, true); err == nil || len(probe.views) != 0 || len(coordinator.cells) != 0 {
@@ -129,9 +231,7 @@ func TestAgentRowCacheRequiresDurableOwnerAndExactHydration(t *testing.T) {
 }
 
 func TestAgentRegistrationCandidateIsBoundToObservedRow(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	record := lifecycleTestPersistedAgent(t)
-	probe := newLifecyclePersistenceProbe()
+	ctx, record, probe := newLifecycleCacheFixture(t)
 	coordinator := newAgentLifecycleCoordinator(probe, nil, probe, nil)
 	builds := 0
 	build := func() (Agent, error) {
@@ -172,10 +272,8 @@ func TestAgentRegistrationCandidateIsBoundToObservedRow(t *testing.T) {
 }
 
 func TestAgentRowCacheHistoricalReplayCannotResurrectExecution(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	probe := newLifecyclePersistenceProbe()
+	ctx, record, probe := newLifecycleCacheFixture(t)
 	coordinator := newAgentLifecycleCoordinator(probe, nil, probe, nil)
-	record := lifecycleTestPersistedAgent(t)
 	if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, true); err != nil {
 		t.Fatal(err)
 	}
@@ -215,10 +313,8 @@ func TestAgentRowCacheHistoricalReplayCannotResurrectExecution(t *testing.T) {
 }
 
 func TestAgentRowCacheFailedJoinDoesNotInventDurablePhase(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	probe := newLifecyclePersistenceProbe()
+	ctx, record, probe := newLifecycleCacheFixture(t)
 	coordinator := newAgentLifecycleCoordinator(probe, nil, probe, nil)
-	record := lifecycleTestPersistedAgent(t)
 	if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, true); err != nil {
 		t.Fatal(err)
 	}
@@ -242,10 +338,8 @@ func TestAgentRowCacheFailedJoinDoesNotInventDurablePhase(t *testing.T) {
 }
 
 func TestAgentRowCacheLostAckFinalizerCannotMutateSuccessor(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	probe := newLifecyclePersistenceProbe()
+	ctx, record, probe := newLifecycleCacheFixture(t)
 	coordinator := newAgentLifecycleCoordinator(probe, nil, probe, nil)
-	record := lifecycleTestPersistedAgent(t)
 	if err := coordinator.registerExecution(ctx, record, true, reconfigureTestAgent{id: record.Config.ID}, testManagerSubscriptionAdmission(t, record.Config)); err != nil {
 		t.Fatal(err)
 	}

@@ -44,8 +44,8 @@ func TestSelectedContractLoadersRejectRetiredDynamicAgentTools(t *testing.T) {
 				},
 			}
 			_, err = loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{
-				SourceRunID: sourceRunID,
-				BundleHash:  record.BundleHash,
+				Responsibility: FreshSelectedSource(record.BundleHash),
+				BundleHash:     record.BundleHash,
 				Selection: runfork.RunForkContractSelection{
 					Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash,
 				},
@@ -58,7 +58,8 @@ func TestSelectedContractLoadersRejectRetiredDynamicAgentTools(t *testing.T) {
 func writeRetiredSelectedContractFixture(t *testing.T, name string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-retired-tool\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), `worker:
   role: worker
   intent:

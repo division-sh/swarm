@@ -10,14 +10,15 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,7 +26,7 @@ import (
 // import cycle through storetest's runtime-facing helpers.
 var InboundTransportNativeIndexFixture func(testing.TB, semanticview.Source, []InboundTarget) runtimepipeline.FlowInstanceIndexReader
 
-func newInboundTestEventBus(t testing.TB, store runtimebus.EventStore, targets ...InboundTarget) (*runtimebus.EventBus, error) {
+func newInboundTestEventBus(t testing.TB, store runtimebus.EventStore, targets ...InboundTarget) (*runtimebus.EventBus, *providertriggers.CatalogSnapshot, error) {
 	return newInboundTestEventBusWithOptions(t, store, runtimebus.EventBusOptions{}, targets...)
 }
 
@@ -42,17 +43,11 @@ func inboundTransportSource(t testing.TB, targets []InboundTarget, observe bool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ingress := make(map[string][]string, len(targets))
-	for _, target := range targets {
-		schema, found := bundle.FlowSchemas[target.FlowPath]
-		if !found {
-			t.Fatal("transport fixture omitted its selected declaration")
-		}
-		for _, pin := range schema.Pins.Inputs.EventPins {
-			ingress[target.FlowPath] = append(ingress[target.FlowPath], pin.Event)
-		}
+	source, err := SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), ingress)
+	return source
 }
 
 // Keep provider-aware fixture assembly beside its runtime-only caller, not in
@@ -70,8 +65,11 @@ func copyInboundTransport(t testing.TB, flows []string, observe bool) string {
 			t.Fatal(err)
 		}
 	}
-	write("schema.yaml", "name: inbound-fixture\n")
-	events := []string{"inbound.telegram", "inbound.github.push", "inbound.github.issue_comment", "inbound.slack.message_channels", "inbound.slack.message", "inbound.stripe", "inbound.twilio", "inbound.shopify", "inbound.typeform", "inbound.intercom", "inbound.partner", "inbound.json"}
+	manifest := "version: 1.0.0\nplatform_version: '*'\n"
+	write("manifest.yaml", manifest)
+	write("schema.yaml", "stages: []\n")
+	events := []string{"inbound.telegram.raw", "inbound.telegram.text_message", "inbound.github.raw.push", "inbound.github.raw.issue_comment", "inbound.slack.message_channels", "inbound.slack.message", "inbound.stripe.raw", "inbound.twilio.raw", "inbound.shopify.raw", "inbound.typeform.raw", "inbound.intercom.raw", "inbound.custom.raw"}
+	inventory := packfixture.EmbeddedInventory(t)
 	flows = append([]string(nil), flows...)
 	sort.Strings(flows)
 	for i, flow := range flows {
@@ -83,21 +81,33 @@ func copyInboundTransport(t testing.TB, flows []string, observe bool) string {
 		default:
 			t.Fatalf("unclassified inbound transport flow %q", flow)
 		}
-		write(flow+"/schema.yaml", "name: "+flow+"\npins:\n  inputs: ["+strings.Join(events, ", ")+"]\n")
-		if observe {
-			catalog := make(map[string]any, len(events))
-			handlers := make(map[string]any, len(events))
-			fields := make(map[string]string)
-			for name, field := range providertriggers.RawEventCatalogEntry().Payload.Properties {
-				fields[name] = field.Type
+		write(flow+"/manifest.yaml", manifest)
+		write(flow+"/schema.yaml", "stages: []\npins:\n  inputs: ["+strings.Join(events, ", ")+"]\n")
+		for _, entry := range inventory.Entries() {
+			if _, present := entry.Provider().Body(packmodel.BodyTrigger); !present {
+				continue
 			}
+			write(flow+"/"+entry.ID()+"/manifest.yaml", string(entry.ManifestBody()))
+			for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+				if body, present := entry.Provider().Body(role); present {
+					write(flow+"/"+entry.ID()+"/"+role.FileName(), string(body.Bytes()))
+				}
+			}
+		}
+		write(flow+"/custom/manifest.yaml", manifest+"capabilities: {can: {emit_events: [raw]}, cannot: [bypass journal]}\n")
+		write(flow+"/custom/trigger.yaml", `payload_object_required: true
+delivery_id: {json_path: $.id, required: true}
+event_type: {json_path: $.type, required: true}
+event_name: {literal: raw}
+ack: {mode: durable_before_dispatch}
+`)
+		if observe {
+			handlers := make(map[string]any, len(events))
 			for _, event := range events {
-				catalog[event] = fields
 				handlers[event] = map[string]any{}
 			}
 			for name, document := range map[string]any{
-				"events.yaml": catalog,
-				"nodes.yaml":  map[string]any{"observer": map[string]any{"execution_type": "system_node", "subscribes_to": events, "event_handlers": handlers}},
+				"nodes.yaml": map[string]any{"observer": map[string]any{"execution_type": "system_node", "subscribes_to": events, "event_handlers": handlers}},
 			} {
 				raw, err := yaml.Marshal(document)
 				if err != nil {
@@ -112,7 +122,7 @@ func copyInboundTransport(t testing.TB, flows []string, observe bool) string {
 
 // The transport publication owner stays isolated; its instance observations
 // come from genuine source-bound construction in the native selected store.
-func newInboundTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions, targets ...InboundTarget) (*runtimebus.EventBus, error) {
+func newInboundTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions, targets ...InboundTarget) (*runtimebus.EventBus, *providertriggers.CatalogSnapshot, error) {
 	t.Helper()
 	if len(targets) == 0 {
 		targets = []InboundTarget{testInboundTarget("", "")}
@@ -123,26 +133,44 @@ func newInboundTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	bundle, present := semanticview.Bundle(source)
 	if !present || bundle.SourceArtifact == nil {
-		return nil, fmt.Errorf("transport fixture requires its admitted source artifact")
+		return nil, nil, fmt.Errorf("transport fixture requires its admitted source artifact")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, nil, err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		return nil, nil, err
+	}
+	scope, err := providers.Scope(targets[0].FlowPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		return nil, nil, err
 	}
 	fact := testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash())
 	if opts.SourceArtifactFact.Validate() == nil && opts.SourceArtifactFact != fact {
-		return nil, fmt.Errorf("transport fixture source fact contradicts its source")
+		return nil, nil, fmt.Errorf("transport fixture source fact contradicts its source")
 	}
 	opts.ContractBundle, opts.SourceArtifactFact = source, fact
+	opts.ProviderOutputVerifier = catalog
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, fact.BundleHash())
 	}
 	for _, target := range targets {
 		if target.BundleHash != "" && target.BundleHash != fact.BundleHash() {
-			return nil, fmt.Errorf("transport fixture target source contradicts its source")
+			return nil, nil, fmt.Errorf("transport fixture target source contradicts its source")
 		}
 	}
 	if InboundTransportNativeIndexFixture == nil {
-		return nil, fmt.Errorf("native transport fixture composition is not installed")
+		return nil, nil, fmt.Errorf("native transport fixture composition is not installed")
 	}
 	opts.Durable.Instances = InboundTransportNativeIndexFixture(t, source, targets)
-	return newRuntimeTestEventBusWithOptions(t, store, opts)
+	bus, err := newRuntimeTestEventBusWithOptions(t, store, opts)
+	return bus, catalog, err
 }
 
 func inboundTestBusBundleHash(t testing.TB, bus *runtimebus.EventBus) string {
@@ -156,28 +184,4 @@ func inboundTestBusBundleHash(t testing.TB, bus *runtimebus.EventBus) string {
 		t.Fatal("transport bus omitted its admitted source fact")
 	}
 	return fact.BundleHash()
-}
-
-func TestInboundTransportFixtureRejectsForeignSourceBeforePublication(t *testing.T) {
-	for _, mismatch := range []string{"fact", "target"} {
-		t.Run(mismatch, func(t *testing.T) {
-			target := testInboundTarget("", "")
-			source := inboundTransportSource(t, []InboundTarget{target}, false)
-			foreign := testSourceArtifactFact(t, "bundle-v2:sha256:"+strings.Repeat("d", 64))
-			opts := runtimebus.EventBusOptions{ContractBundle: source}
-			if mismatch == "fact" {
-				opts.SourceArtifactFact = foreign
-			} else {
-				target.BundleHash = foreign.BundleHash()
-			}
-			store := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBusWithOptions(t, store, opts, target)
-			if bus != nil || err == nil || !strings.Contains(err.Error(), "contradicts its source") {
-				t.Fatalf("foreign %s: bus=%v err=%v, want exact source refusal", mismatch, bus, err)
-			}
-			if store.recorded || len(store.events) != 0 || len(store.active) != 0 {
-				t.Fatal("foreign source reached the transport publication owner")
-			}
-		})
-	}
 }

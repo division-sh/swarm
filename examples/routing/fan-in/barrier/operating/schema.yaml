@@ -1,4 +1,4 @@
-name: operating
+# fixture: operating
 instance: operating_instance_id
 pins:
   inputs:

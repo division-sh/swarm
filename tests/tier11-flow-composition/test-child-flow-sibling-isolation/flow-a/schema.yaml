@@ -1,4 +1,4 @@
-name: flow-a
+# fixture: flow-a
 stages:
   waiting: {}
   working: {}

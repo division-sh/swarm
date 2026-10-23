@@ -221,7 +221,7 @@ func (h *nativeExactWorkflowJoinHarness) replay(event events.Event) error {
 		return err
 	}
 	counts := h.fixture.Transactions()
-	if err := h.fixture.PublishNode(h.ctx, event, before.Route); err != nil {
+	if _, err := nativeWorkflowJoinPublicationContextForTest(h.t, h.fixture, h.pc, h.ctx, event, before.Route, false); err != nil {
 		return err
 	}
 	after, err := h.fixture.Store.Snapshot(h.ctx, before.DeliveryID)

@@ -72,6 +72,7 @@ func TestAdmissionFactoringCompiledCapabilitySurfacesBothStores(t *testing.T) {
 	t.Run("source-free-doctor", func(t *testing.T) {
 		// Source-free doctor receives hostile source bytes. No provider launch or
 		// paid credential probe is provisioned or credited.
+		writeReleaseFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "not: valid: source\n")
 		_, env := clockReleaseConfig(t, root, "sqlite")
 		result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "doctor", "--backend", "claude_cli", "--workspace-backend", "host", "--json")

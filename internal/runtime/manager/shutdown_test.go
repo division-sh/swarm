@@ -60,19 +60,19 @@ func ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testin
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
+	}, AgentManagerOptions{DeliveryStore: native, SemanticSource: native.SemanticSource, SourceArtifactFact: native.Authority.SourceArtifact()})
+	if err := am.spawnAgentInternal(native.Context, PersistedAgent{
+		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmissionForSource(t, native.SemanticSource),
 	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	am.Run(native.normalRunContext(t))
 	event := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{event})
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
+	if err := bus.Publish(native.Context, event); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -149,19 +149,19 @@ func ProveNativeShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopCo
 
 	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
+	}, AgentManagerOptions{DeliveryStore: native, SemanticSource: native.SemanticSource, SourceArtifactFact: native.Authority.SourceArtifact()})
+	if err := am.spawnAgentInternal(native.Context, PersistedAgent{
+		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmissionForSource(t, native.SemanticSource),
 	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	am.Run(native.normalRunContext(t))
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+	if err := bus.Publish(native.Context, inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -246,19 +246,19 @@ func ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T, ne
 
 	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
+	}, AgentManagerOptions{DeliveryStore: native, SemanticSource: native.SemanticSource, SourceArtifactFact: native.Authority.SourceArtifact()})
+	if err := am.spawnAgentInternal(native.Context, PersistedAgent{
+		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmissionForSource(t, native.SemanticSource),
 	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	am.Run(native.normalRunContext(t))
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+	if err := bus.Publish(native.Context, inbound); err != nil {
 		t.Fatalf("Publish(first): %v", err)
 	}
 
@@ -280,7 +280,7 @@ func ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T, ne
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-2"),
+	if err := bus.Publish(native.Context, eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-2"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())); err == nil {
 		t.Fatal("Publish(after retirement) succeeded")
@@ -336,14 +336,14 @@ func ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *
 
 	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
+	}, AgentManagerOptions{DeliveryStore: native, SemanticSource: native.SemanticSource, SourceArtifactFact: native.Authority.SourceArtifact()})
+	if err := am.spawnAgentInternal(native.Context, PersistedAgent{
+		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmissionForSource(t, native.SemanticSource),
 	}, true); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	am.Run(native.normalRunContext(t))
 	initialRunCtx, _, _ := am.lifecycle.runSnapshot()
 	if initialRunCtx == nil {
 		t.Fatal("expected initial run context")
@@ -353,7 +353,7 @@ func ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+	if err := bus.Publish(native.Context, inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -377,7 +377,7 @@ func ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	am.Run(native.normalRunContext(t))
 
 	currentRunCtx, _, running := am.lifecycle.runSnapshot()
 	shuttingDown := am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown

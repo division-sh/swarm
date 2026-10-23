@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
@@ -23,6 +24,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -158,8 +160,8 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":          "name: constructed-target-transition\n",
-		"review/schema.yaml":   "name: review\ninstance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\npins:\n  inputs: [review.created]\n",
+		"schema.yaml":          "stages: []\n",
+		"review/schema.yaml":   "instance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\npins:\n  inputs: [review.created]\n",
 		"review/entities.yaml": "review_item:\n  account_id: text\n  handled: {type: boolean, initial: false}\n",
 		"review/events.yaml":   "review.created:\n  account_id: text\nfinish.requested:\nsettle.requested:\n",
 		"review/nodes.yaml": `progress:
@@ -170,7 +172,7 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
       advances_to: done
     settle.requested:
       advances_to: settled
-`,
+`, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	f.ctx = runtimecorrelation.WithSourceArtifactFact(f.ctx, sourceartifactfixture.FactFor(f.bundle.SourceArtifact))
 	f.constructKeylessRoot(t)
@@ -335,6 +337,7 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 		runtimepipeline.WorkflowEngineMutationOwner
 		runtimerunlifecycle.OperationOwner
 		sourceartifactfixture.Writer
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 		SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -353,13 +356,29 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 					if !ok || bundle.SourceArtifact == nil {
 						t.Fatal("state-only producer source artifact is required")
 					}
-					sourceartifactfixture.RequireArtifact(t, ctx, store, bundle.SourceArtifact)
-					if _, err := store.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
-						RunID: runID, Source: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+					rooted, err := bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					priorRoot, err := store.LoadRunRootedSource(ctx, runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := runtimecorrelation.CheckRootAdmissionContext(ctx, priorRoot.Admission().Reference()); err != nil {
+						t.Fatal(err)
+					}
+					priorCtx := runtimecorrelation.WithRootAdmission(ctx, priorRoot.Admission())
+					sourceartifactfixture.RequireArtifact(t, priorCtx, store, bundle.SourceArtifact)
+					if _, err := store.ReviseRunSource(priorCtx, runtimerunlifecycle.SourceRevisionRequest{
+						RunID: runID, Source: sourceartifactfixture.FactFor(bundle.SourceArtifact), RootAdmission: rooted.Admission(),
 					}); err != nil {
 						t.Fatalf("bind state-only producer source: %v", err)
 					}
-					ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact))
+					scope, err := authoractivity.BundleScopeForTarget(ctx, bundle.SourceArtifact.BundleHash())
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx = authoractivity.WithScope(runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), rooted.Admission()), scope)
 					entityID := uuid.NewString()
 					createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					fields := map[string]any{"account_id": "preserved", "instance_key": "receiver"}

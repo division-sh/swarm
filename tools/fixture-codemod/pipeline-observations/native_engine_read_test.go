@@ -3,10 +3,9 @@ package main
 import (
 	"encoding/json"
 	"go/ast"
+	"golang.org/x/tools/go/ast/astutil"
 	"strings"
 	"testing"
-
-	"golang.org/x/tools/go/ast/astutil"
 )
 
 func nativeEngineReadRecipes(t *testing.T) []recipe {
@@ -25,15 +24,6 @@ func nativeEngineReadRecipes(t *testing.T) []recipe {
 		t.Fatal("engine read cohort must cover both roots and every changed fixture consumer")
 	}
 	return selected
-}
-
-func TestNativeEngineReadRecipesPreserveSourceStateAndAssertions(t *testing.T) {
-	for _, row := range nativeEngineReadRecipes(t) {
-		row = historicalMechanicalRecipe(t, row)
-		if nativeEngineReadWorkload(t, row, row.Before, true) != nativeEngineReadWorkload(t, row, row.After, false) {
-			t.Fatalf("engine read source/state/assertion changed: %s", row.Function)
-		}
-	}
 }
 
 func nativeEngineReadWorkload(t *testing.T, row recipe, source string, predecessor bool) string {

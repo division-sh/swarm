@@ -2,16 +2,14 @@ package canonicalrouting
 
 import "testing"
 
-// CopyProviderReceiverInitialization keeps the checked Telegram schema import
+// CopyProviderReceiverInitialization keeps the captured Telegram declaration
 // and enters the private receiver through the selected root's connect edge.
 func CopyProviderReceiverInitialization(t testing.TB) string {
 	t.Helper()
 	root := CopyTelegramChatWithoutIngress(t)
 	removeClosedVariantFiles(t, root, "telegram-chat/agents.yaml", "telegram-chat/tools.yaml")
-	writeClosedVariantFile(t, root, "telegram-chat/schema.yaml", `name: telegram-chat
-imports:
-  provider_trigger_events:
-    - {provider: telegram, event: inbound.telegram.text_message}
+	writeClosedVariantFile(t, root, "telegram-chat/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "telegram-chat/schema.yaml", `# fixture: telegram-chat
 instance: conversation_reference
 auto_emit_on_create:
   event: chat.initialized

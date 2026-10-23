@@ -24,7 +24,11 @@ func TestRunStallAttributionAfterCompletionBothStores(t *testing.T) {
 				t.Run(phase, func(t *testing.T) {
 					eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 						fixture := newCompletionSettlementFixture(t, selected.selected.(completionSettlementTestStore), selected.db, !selected.postgres)
-						bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", sourceartifactfixture.Artifact(), platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
+						rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(fixture.context, fixture.origin.RunID())
+						if err != nil {
+							t.Fatal(err)
+						}
+						bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
 						if err != nil {
 							t.Fatal(err)
 						}

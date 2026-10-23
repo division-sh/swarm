@@ -36,13 +36,16 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 		t.Fatalf("unsupported selected pending-input variant %d", variant)
 	}
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "a_finished/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "on_demand/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	scopes := []string{"", "child"}
 	if variant == PendingInputConnectedSiblings {
 		scopes = append(scopes, "sibling")
 	}
 	for _, scope := range scopes {
 		files := map[string]string{
-			"schema.yaml":   "name: fork-input\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.seeded\n    - " + eventName + "\n",
+			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":   "# fixture: fork-input\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.seeded\n    - " + eventName + "\n",
 			"events.yaml":   "work.seeded:\n  seed: boolean\n" + eventName + ":\n  token: " + tokenType + "\n",
 			"entities.yaml": "work: {}\n",
 			"nodes.yaml":    "controller:\n  execution_type: system_node\n  subscribes_to: [work.seeded, " + eventName + "]\n  event_handlers:\n    work.seeded:\n      advances_to: ready\n    " + eventName + ":\n      advances_to: done\n",
@@ -77,12 +80,12 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 		}
 	}
 	if variant == PendingInputMixedCompletion {
-		writeClosedVariantFile(t, root, "a_finished/schema.yaml", "name: finished\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.seeded\n    - work.first\n")
+		writeClosedVariantFile(t, root, "a_finished/schema.yaml", "# fixture: finished\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.seeded\n    - work.first\n")
 		writeClosedVariantFile(t, root, "a_finished/entities.yaml", "work: {}\n")
 		writeClosedVariantFile(t, root, "a_finished/nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.seeded, work.first]\n  event_handlers:\n    work.seeded:\n      advances_to: ready\n    work.first:\n      advances_to: done\n")
 	}
 	if variant == PendingInputConnectedSiblings {
-		writeClosedVariantFile(t, root, "on_demand/schema.yaml", "name: on_demand\ninstance: token\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.first\n")
+		writeClosedVariantFile(t, root, "on_demand/schema.yaml", "# fixture: on_demand\ninstance: token\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.first\n")
 		writeClosedVariantFile(t, root, "on_demand/entities.yaml", "work:\n  token: {type: text, indexed: true, _unused_reason: receiver instance identity}\n")
 		writeClosedVariantFile(t, root, "on_demand/nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.first]\n  event_handlers:\n    work.first:\n      advances_to: done\n")
 	}
@@ -93,12 +96,14 @@ func CopySelectedInputValidationProbe(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for name, body := range map[string]string{
-		"schema.yaml":       "name: selected-input\npins:\n  inputs:\n    - thing.created\n",
-		"events.yaml":       "thing.created:\n",
-		"nodes.yaml":        "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
-		"child/schema.yaml": "name: child\npins:\n  inputs:\n    - thing.created\n",
-		"child/events.yaml": "thing.created:\n",
-		"child/nodes.yaml":  "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":         "# fixture: selected-input\npins:\n  inputs:\n    - thing.created\n",
+		"events.yaml":         "thing.created:\n",
+		"nodes.yaml":          "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"child/schema.yaml":   "# fixture: child\npins:\n  inputs:\n    - thing.created\n",
+		"child/events.yaml":   "thing.created:\n",
+		"child/nodes.yaml":    "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
 	} {
 		writeClosedVariantFile(t, root, name, body)
 	}

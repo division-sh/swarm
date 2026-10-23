@@ -1,4 +1,4 @@
-name: validator
+# fixture: validator
 instance: validation_case_id
 pins:
   inputs:

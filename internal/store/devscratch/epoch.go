@@ -30,7 +30,6 @@ type Coordinate struct {
 
 // Resolve derives the one scratch coordinate owned by a canonical project.
 func Resolve(projectRoot string) (Coordinate, error) {
-	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
 		return Coordinate{}, errors.New("dev scratch requires a canonical project root")
 	}

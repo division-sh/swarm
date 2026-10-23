@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +22,7 @@ func TestDurableDataEmptyHeadAdvancePreservesReceiptsAndPinsBothStores(t *testin
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
 			ctx := context.Background()
+			rooted, _ := sourceartifactfixture.Rooted(t, "durable-data-test", testDataSourceArtifact)
 			catalog, ref := durableDataTestCatalog(t)
 			if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 				t.Fatal(err)
@@ -70,6 +72,7 @@ func TestDurableDataEmptyHeadAdvancePreservesReceiptsAndPinsBothStores(t *testin
 					for _, id := range []string{sourceRun, pinnedRun} {
 						storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 							RunID: id, BundleHash: testDataBundle, Origin: storetest.ScenarioSetupOrigin(),
+							Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 						})
 					}
 					pins, err := storetest.MaterializeDataForkPins(ctx, selected, sourceRun, pinnedRun, testDataBundle,

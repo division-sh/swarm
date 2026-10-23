@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"gopkg.in/yaml.v3"
 )
@@ -69,8 +70,11 @@ func (f CatalogConformanceFixture) Validate() error {
 	if strings.TrimSpace(f.SchemaVersion) != CatalogSchemaVersion {
 		return fmt.Errorf("catalog conformance schema_version must be %q", CatalogSchemaVersion)
 	}
-	if normalizeToken(f.Provider) == "" || strings.TrimSpace(f.OperationID) == "" || strings.TrimSpace(f.ToolID) == "" {
+	if f.Provider == "" || strings.TrimSpace(f.OperationID) == "" || strings.TrimSpace(f.ToolID) == "" {
 		return fmt.Errorf("catalog conformance provider, operation_id, and tool_id are required")
+	}
+	if err := runtimepaths.ValidateFlowSegment(f.Provider); err != nil {
+		return fmt.Errorf("catalog conformance provider requires an exact portable directory key: %w", err)
 	}
 	if err := validateSHA256("catalog conformance source", f.SourceSHA256); err != nil {
 		return err
@@ -84,6 +88,10 @@ func (f CatalogConformanceFixture) Validate() error {
 	if strings.TrimSpace(f.FixtureStatus) != GenerationFixturePassing || strings.TrimSpace(f.ReviewStatus) != GenerationReviewApproved {
 		return fmt.Errorf("catalog conformance fixture_status/review_status must be passing/approved")
 	}
+	return f.validateExpectedRequest()
+}
+
+func (f CatalogConformanceFixture) validateExpectedRequest() error {
 	if f.Input == nil || f.Credentials == nil || f.ManagedCredentials == nil || strings.TrimSpace(f.Expected.Method) == "" || strings.TrimSpace(f.Expected.URL) == "" || f.Expected.Headers == nil || f.Expected.Body == nil {
 		return fmt.Errorf("catalog conformance input, credentials, managed_credentials, and expected method/url/headers/body are required, including declared-empty maps")
 	}
@@ -183,10 +191,10 @@ func ValidateCatalogConformance(fsys fs.FS, artifacts []GeneratedCatalogArtifact
 }
 
 func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation GenerationOperationEvidence, fixture CatalogConformanceFixture) error {
-	if normalizeToken(fixture.Provider) != normalizeToken(artifact.Manifest.Provider) || strings.TrimSpace(fixture.OperationID) != strings.TrimSpace(operation.OperationID) || strings.TrimSpace(fixture.ToolID) != strings.TrimSpace(operation.ToolID) {
+	if fixture.Provider != artifact.Manifest.Provider || strings.TrimSpace(fixture.OperationID) != strings.TrimSpace(operation.OperationID) || fixture.ToolID != operation.ToolID {
 		return fmt.Errorf("provider/operation/tool identity does not match generated evidence")
 	}
-	if normalizeSHA(fixture.SourceSHA256) != normalizeSHA(artifact.SourceHash) || normalizeSHA(fixture.ProfileSHA256) != normalizeSHA(artifact.ProfileHash) || normalizeSHA(fixture.ManifestSHA256) != normalizeSHA(artifact.PackEnvelope.ManifestHash) {
+	if normalizeSHA(fixture.SourceSHA256) != normalizeSHA(artifact.SourceHash) || normalizeSHA(fixture.ProfileSHA256) != normalizeSHA(artifact.ProfileHash) || normalizeSHA(fixture.ManifestSHA256) != normalizeSHA(sha256String(artifact.ConnectorBody)) {
 		return fmt.Errorf("source/profile/manifest freshness binding does not match generated output")
 	}
 	if strings.TrimSpace(fixture.FixtureStatus) != strings.TrimSpace(operation.FixtureStatus) || strings.TrimSpace(fixture.ReviewStatus) != strings.TrimSpace(operation.ReviewStatus) {
@@ -203,7 +211,7 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 	if !fixturePolicy.Equal(operationPolicy) {
 		return fmt.Errorf("response_success does not match generated evidence")
 	}
-	tool, exists := artifact.Manifest.Tools[strings.TrimSpace(operation.ToolID)]
+	tool, exists := artifact.Manifest.Tools[operation.ToolID]
 	httpExecution, hasHTTP := tool.HTTPExecution()
 	if !exists || !hasHTTP {
 		return fmt.Errorf("generated tool is unavailable or lacks HTTP declaration")
@@ -311,7 +319,7 @@ func catalogFixturePath(id string) (string, error) {
 }
 
 func catalogConformanceKey(provider, operationID, toolID string) string {
-	return normalizeToken(provider) + "|" + strings.TrimSpace(operationID) + "|" + strings.TrimSpace(toolID)
+	return provider + "|" + strings.TrimSpace(operationID) + "|" + toolID
 }
 
 func normalizeSHA(raw string) string {

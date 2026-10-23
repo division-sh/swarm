@@ -22,7 +22,7 @@ func TestActivityAttemptStorageUsesOriginalSnapshotAndPhysicalInventoryBothStore
 			for _, run := range []string{runID, otherRun} {
 				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			}
-			journal := activityNativeJournalForFixture(t, fixture)
+			journal := activityNativeJournalForFixture(t, fixture, runID)
 			at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 			var want []ActivityAttemptStorageEvidence
 			for index, identity := range []struct{ run, tool, source string }{

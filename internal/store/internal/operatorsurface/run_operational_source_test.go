@@ -16,6 +16,7 @@ import (
 
 type operationalSourceReader struct {
 	stored sourceartifact.Persisted
+	rooted sourceartifact.RootedSource
 	err    error
 	reads  atomic.Int64
 	onRead func()
@@ -32,20 +33,35 @@ func (s *operationalSourceReader) GetSourceArtifact(ctx context.Context, _ strin
 	return s.stored, s.err
 }
 
+func (s *operationalSourceReader) GetRootedSource(ctx context.Context, reference sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error) {
+	if err := ctx.Err(); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	if _, err := s.stored.Decode(); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	if reference != s.rooted.Admission().Reference() {
+		return sourceartifact.RootedSource{}, errors.New("operational fixture root mismatch")
+	}
+	return s.rooted, s.err
+}
+
 // Invariant: polling reuses only the exact validated immutable source, not live facts.
 func TestRunOperationalSourceMemoRetainsOnlyValidatedImmutableSemantics(t *testing.T) {
-	stored, err := sourceartifact.PersistedFromArtifact(sourceartifactfixture.Artifact(), time.Now().UTC())
+	rooted, _ := sourceartifactfixture.Rooted(t, "operational", sourceartifactfixture.Artifact())
+	root := rooted.Admission().Reference()
+	stored, err := sourceartifact.PersistedFromArtifact(rooted.Artifact(), time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader := &operationalSourceReader{stored: stored}
+	reader := &operationalSourceReader{stored: stored, rooted: rooted}
 	header := operatorread.RunHeader{BundleHash: stored.BundleHash}
 	memo := newRunOperationalSourceMemo()
-	first, err := memo.load(context.Background(), reader, header)
+	first, err := memo.load(context.Background(), reader, header, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := memo.load(context.Background(), reader, header)
+	second, err := memo.load(context.Background(), reader, header, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,51 +87,69 @@ func TestRunOperationalSourceMemoRetainsOnlyValidatedImmutableSemantics(t *testi
 			t.Run(tc.name, func(t *testing.T) {
 				reader.stored = stored
 				tc.change(&reader.stored)
-				if got, err := memo.load(context.Background(), reader, header); got != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
+				if got, err := memo.load(context.Background(), reader, header, root); got != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("warm invalid row returned semantics: %v / %v, want %s", got, err, tc.want)
 				}
 			})
 		}
 		reader.stored, reader.err = stored, sourceartifact.ErrNotFound
-		if got, err := memo.load(context.Background(), reader, header); got != nil || !errors.Is(err, sourceartifact.ErrNotFound) {
+		if got, err := memo.load(context.Background(), reader, header, root); got != nil || !errors.Is(err, sourceartifact.ErrNotFound) {
 			t.Fatalf("warm missing row returned semantics: %v / %v", got, err)
 		}
 		reader.err = nil
 		// The caller's row bytes must not alias the successfully validated memo.
 		reader.stored.SourceBlob[0] ^= 1
-		got, err := memo.load(context.Background(), reader, header)
+		got, err := memo.load(context.Background(), reader, header, root)
 		reader.stored.SourceBlob[0] ^= 1
 		if got != nil || err == nil {
 			t.Fatal("caller mutation changed cached identity and concealed corruption")
 		}
 	})
 	t.Run("changed_source_validation_and_restart", func(t *testing.T) {
-		changed, err := sourceartifact.PersistedFromArtifact(sourceartifactfixture.New("global/schema.yaml", []byte("name: changed\nstages:\n  ready: {}\n")), stored.CreatedAt)
+		changedArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+			"manifest.yaml":        []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"global/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"global/schema.yaml":   []byte("stages:\n  ready: {}\n"),
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		reader.stored = changed
+		changedRoot, _ := sourceartifactfixture.Rooted(t, "changed", changedArtifact)
+		changed, err := sourceartifact.PersistedFromArtifact(changedRoot.Artifact(), stored.CreatedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader.stored, reader.rooted = changed, changedRoot
 		changedHeader := operatorread.RunHeader{BundleHash: changed.BundleHash}
-		if got, err := memo.load(context.Background(), reader, header); got != nil || err == nil || err.Error() != "operational source contradicts exact run bundle" {
+		if got, err := memo.load(context.Background(), reader, header, root); got != nil || err == nil || err.Error() != "operational source contradicts exact run bundle" {
 			t.Fatalf("changed source answered old run: %v / %v", got, err)
 		}
-		changedSource, err := memo.load(context.Background(), reader, changedHeader)
+		changedSource, err := memo.load(context.Background(), reader, changedHeader, changedRoot.Admission().Reference())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if changedBundle, _ := semanticview.Bundle(changedSource); changedBundle == firstBundle || len(changedSource.FlowStates("global")) != 1 {
 			t.Fatal("changed source reused an unrelated stage catalog")
 		}
-		invalid, err := sourceartifact.PersistedFromArtifact(sourceartifactfixture.New("global/schema.yaml", []byte("name: invalid\nnot_a_schema_field: true\n")), stored.CreatedAt)
+		invalidArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+			"manifest.yaml":        []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"global/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"global/schema.yaml":   []byte("not_a_schema_field: true\n"),
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		reader.stored = invalid
-		if got, err := memo.load(context.Background(), reader, operatorread.RunHeader{BundleHash: invalid.BundleHash}); got != nil || err == nil || !strings.Contains(err.Error(), "not_a_schema_field") {
+		invalidRoot, _ := sourceartifactfixture.Rooted(t, "invalid", invalidArtifact)
+		invalid, err := sourceartifact.PersistedFromArtifact(invalidRoot.Artifact(), stored.CreatedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader.stored, reader.rooted = invalid, invalidRoot
+		if got, err := memo.load(context.Background(), reader, operatorread.RunHeader{BundleHash: invalid.BundleHash}, invalidRoot.Admission().Reference()); got != nil || err == nil || !strings.Contains(err.Error(), "not_a_schema_field") {
 			t.Fatalf("changed source bypassed contract validation: %v / %v", got, err)
 		}
-		reader.stored = stored
-		restarted, err := newRunOperationalSourceMemo().load(context.Background(), reader, header)
+		reader.stored, reader.rooted = stored, rooted
+		restarted, err := newRunOperationalSourceMemo().load(context.Background(), reader, header, root)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +166,10 @@ func TestRunOperationalSourceMemoRetainsOnlyValidatedImmutableSemantics(t *testi
 		}
 		results := make(chan result, 8)
 		for range cap(results) {
-			go func() { source, err := cold.load(context.Background(), reader, header); results <- result{source, err} }()
+			go func() {
+				source, err := cold.load(context.Background(), reader, header, root)
+				results <- result{source, err}
+			}()
 		}
 		var shared semanticview.Source
 		for range cap(results) {
@@ -150,7 +187,7 @@ func TestRunOperationalSourceMemoRetainsOnlyValidatedImmutableSemantics(t *testi
 		reader.onRead = func() { close(read) }
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go func() { source, err := cold.load(ctx, reader, header); results <- result{source, err} }()
+		go func() { source, err := cold.load(ctx, reader, header, root); results <- result{source, err} }()
 		<-read
 		cancel()
 		got := <-results
@@ -159,7 +196,7 @@ func TestRunOperationalSourceMemoRetainsOnlyValidatedImmutableSemantics(t *testi
 		if got.source != nil || !errors.Is(got.err, context.Canceled) {
 			t.Fatalf("cancelled waiter acquired cached semantics: %v / %v", got.source, got.err)
 		}
-		if after, err := cold.load(context.Background(), reader, header); err != nil || after != shared {
+		if after, err := cold.load(context.Background(), reader, header, root); err != nil || after != shared {
 			t.Fatalf("cancelled waiter replaced validated semantics: %v / %v", after, err)
 		}
 	})

@@ -38,6 +38,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -392,9 +393,14 @@ func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.Workf
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	ctx = effects.WithDifferentOwner(ctx, effects.OwnerBuildTestInfrastructure)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, entityToolTestRunID), fact)
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	runner, ok := selected.(storetest.RunFixtureStore)
 	if !ok {
 		t.Fatalf("entity test store %T has no selected run lifecycle owner", selected)
@@ -418,7 +424,7 @@ func TestEntitySparseGeneratedToolMutation(t *testing.T) {
 			actor := models.AgentConfig{ExecutionMode: "live", ID: "writer", Role: "writer"}
 			bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 				"work": {
-					SchemaYAML: "name: work\ninstance: fixture_key\nstages:\n  queued: {}\n  done: {final: true}\n",
+					SchemaYAML: "instance: fixture_key\nstages:\n  queued: {}\n  done: {final: true}\n",
 					TypesYAML:  "types:\n  Profile:\n    name: text\n    note: text?\n",
 					EntitiesYAML: `
 work:
@@ -461,14 +467,19 @@ writer:
 			ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 			ctx = effects.WithDifferentOwner(ctx, effects.OwnerBuildTestInfrastructure)
 			ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), fact)
-			if _, err := persistence.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+			if _, err := persistence.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, rooted); err != nil {
 				t.Fatal(err)
 			}
 			runner, ok := persistence.(storetest.RunFixtureStore)
 			if !ok {
 				t.Fatal("sparse entity fixture requires selected run lifecycle owner")
 			}
-			if err := storetest.MaterializeRun(ctx, runner, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash()}); err != nil {
+			if err := storetest.MaterializeRun(ctx, runner, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash(), RootAdmission: rooted.Admission()}); err != nil {
 				t.Fatal(err)
 			}
 			source := semanticview.Wrap(bundle)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -26,16 +27,11 @@ func inboundOperatorProofPlan(t *testing.T) packs.SatisfactionPlan {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := packs.NewInterfaceRegistry(spec)
+	projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plans, err := packs.CompileChannelInventory(registry, packfixture.ChannelPacks(t),
-		packfixture.TriggerCatalog(t).PackDescriptors(), packfixture.ConnectorRegistry(t).PackDescriptors())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return packfixture.ChannelPlanByID(t, plans, "provider.telegram.hitl_channel")
+	return packfixture.ChannelPlanByID(t, projection.ChannelPlans, "telegram")
 }
 
 // Persistence tests supply only external Telegram bytes. Compiled trigger and

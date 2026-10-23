@@ -31,7 +31,15 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 			if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.sourceRun).Scan(&hash); err != nil {
 				t.Fatal(err)
 			}
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			rooted, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, fixture.sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,8 +125,14 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 				inspect(t, ctx, uuid.NewString(), 0, "load run execution binding", 1, 2)
 			})
 			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("# other execution source\nagents: {}\n"))
+			otherRooted, _ := sourceartifactfixture.Rooted(t, "other", otherArtifact)
+			otherArtifact = otherRooted.Artifact()
 			otherHash := otherArtifact.BundleHash()
-			otherPlan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: otherHash}}, nil)
+			otherCoordinate, err := agenttopology.NewSourceCoordinate(otherRooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherPlan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{otherCoordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

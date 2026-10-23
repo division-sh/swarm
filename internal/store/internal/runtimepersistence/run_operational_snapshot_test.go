@@ -18,9 +18,16 @@ type operationalSnapshotPipeline struct {
 }
 
 type operationalSnapshotSources struct {
-	sourceartifact.Reader
+	Reader interface {
+		sourceartifact.Reader
+		GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
+	}
 	mode  string
 	reads int
+}
+
+func (s *operationalSnapshotSources) GetRootedSource(ctx context.Context, reference sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error) {
+	return s.Reader.GetRootedSource(ctx, reference)
 }
 
 func (s *operationalSnapshotSources) GetSourceArtifact(ctx context.Context, hash string) (sourceartifact.Persisted, error) {

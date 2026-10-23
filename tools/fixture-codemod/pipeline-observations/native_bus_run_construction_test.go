@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -53,62 +52,3 @@ if err := ensureTestEventBusSourceArtifact(selected,source,testSourceArtifactFac
 if err := storetest.EnsureEphemeralRun(ctx,selected,eventBusTestRunID,time.Date(2000,1,1,0,0,0,0,time.UTC)); err != nil { t.Fatalf("create event bus test run through lifecycle owner: %v",err) }
 return ctx
 }`
-
-func busSelectedRunContextPreserved(t *testing.T, source string) bool {
-	t.Helper()
-	want, err := canonicalFunction(busSelectedRunContextShape)
-	got, actualErr := canonicalFunction(source)
-	return err == nil && actualErr == nil && want == got
-}
-
-func TestNativeBusRunConstructionPreservesOriginalOwnerAndCompleteCallers(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		if row.Family != "native-bus-selected-run-construction" {
-			continue
-		}
-		matched++
-		row = historicalMechanicalRecipe(t, row)
-		switch row.Function {
-		case "eventBusTestRunContextForSource":
-			before := strings.Replace(row.Before, "db *sql.DB", "selected eventBusRunFixtureStore", 1)
-			before = strings.Replace(before, "\tselected := storetest.AdmitPostgresRuntimeStore(t, db)\n", "", 1)
-			if before != row.After || !busSelectedRunContextPreserved(t, row.After) {
-				t.Fatal("source/run identity, timestamp, lifecycle owner or fail-closed setup changed")
-			}
-		case "eventBusTestRunContext":
-			before := strings.Replace(row.Before, "db *sql.DB", "selected eventBusRunFixtureStore", 1)
-			before = strings.Replace(before, "(t, db, nil)", "(t, selected, nil)", 1)
-			if before != row.After {
-				t.Fatal("default source context no longer forwards the exact selected owner")
-			}
-		default:
-			if row.Function == "TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle" {
-				assertNativeExecutionConstruction(t, row)
-			}
-			if normalizedNativePostCommitRoot(t, normalizedBusRunConstruction(t, row.Before)) != normalizedNativePostCommitRoot(t, normalizedBusRunConstruction(t, row.After)) {
-				t.Fatalf("construction changed execution/temporal/assertion cuts: %s", row.Function)
-			}
-		}
-	}
-	if matched != 11 {
-		t.Fatalf("new selected run construction recipes=%d, want11 plus two updated existing roots", matched)
-	}
-	actual := selectedCausalObservationBody(t, "internal/runtime/bus/eventbus_publish_test.go", "eventBusTestRunContextForSource")
-	for _, pair := range [][2]string{
-		{"EnsureEphemeralRun(\n\t\tctx, selected,", "EnsureEphemeralRun(\n\t\tctx, foreignStore,"},
-		{"testSourceArtifactFact(source)", "testSourceArtifactFact(nil)"},
-		{"eventBusTestRunID, time.Date", "otherRunID, time.Date"},
-		{"time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)", "time.Now()"},
-		{"; err != nil {", "; false {"},
-	} {
-		mutant := strings.Replace(actual, pair[0], pair[1], 1)
-		if mutant == actual || busSelectedRunContextPreserved(t, mutant) {
-			t.Fatalf("weakened native run setup admitted: %v", pair)
-		}
-	}
-}

@@ -20,6 +20,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -46,6 +49,7 @@ type inboundPublicationProofStore interface {
 	storeTestDurableEventBusStore
 	workflowTestSelectedStore
 	sourceartifact.Reader
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 }
 
 type inboundPublicationProofMutation interface {
@@ -143,21 +147,27 @@ func inboundPublicationProofBus(t *testing.T, store inboundPublicationProofStore
 	if !ok {
 		return nil, empty, errors.New("inbound publication proof bundle source fact is required")
 	}
-	persisted, err := store.GetSourceArtifact(ctx, fact.BundleHash())
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
 	if err != nil {
 		return nil, empty, err
 	}
-	artifact, err := persisted.Decode()
+	if !present || root.BundleHash() != fact.BundleHash() {
+		return nil, empty, errors.New("inbound publication proof requires its selected rooted context")
+	}
+	rooted, err := store.GetRootedSource(ctx, root.Reference())
 	if err != nil {
 		return nil, empty, err
+	}
+	if rooted.Admission().Reference() != root.Reference() {
+		return nil, empty, errors.New("inbound publication proof crossed its selected rooted source")
 	}
 	repo := runtimepipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		return nil, empty, err
 	}
-	catalog, plan, authenticated := inboundPublicationProofProvider(t, request, outputCount)
-	source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), catalog)
+	catalog, plan, authenticated := inboundPublicationProofProvider(t, rooted, request, outputCount)
+	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})
 	if err != nil {
 		return nil, empty, err
 	}
@@ -165,7 +175,7 @@ func inboundPublicationProofBus(t *testing.T, store inboundPublicationProofStore
 	if err != nil {
 		return nil, empty, err
 	}
-	bus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{SourceArtifactFact: fact, ProviderOutputVerifier: catalog, ContractBundle: source})
+	bus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{SourceArtifactFact: fact, ProviderOutputVerifier: catalog, ContractBundle: projection.Source()})
 	return bus, admission, err
 }
 
@@ -215,11 +225,16 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 				}
 				candidate := f.candidate("credential-ineligible-inbound")
 				bundle := inboundPublicationProofBundle(t, candidate.FlowPath)
+				rooted, err := bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
 				candidate.Source = mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-				seedStoreTestPersistedArtifact(t, f.db, bundle.SourceArtifact)
-				ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
-				registrar := store.(testAuthorActivityCatalogRegistrar)
-				registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
+				candidate.RootAdmission = rooted.Admission()
+				ctx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source), rooted.Admission())
+				if _, err := store.(selectedSourceArtifactStore).EnsureRootedSource(ctx, rooted); err != nil {
+					t.Fatal(err)
+				}
 				standing, err := f.workflow.ReconcileStandingService(ctx, candidate)
 				if err != nil {
 					t.Fatal(err)
@@ -231,7 +246,7 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 				}
 				publish := func(request runtimeinbound.Request) (runtimeinbound.Record, error) {
 					return runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
-						publications, evidence := inboundPublicationProofEvents(t, request)
+						publications, evidence := inboundPublicationProofEvents(t, rooted, request)
 						for index := range publications {
 							if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 								return err
@@ -254,7 +269,7 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 					t.Fatalf("ineligible inbound reached durable commit: %v", err)
 				}
 				assertInboundPublicationProofCount(t, f.db, backend == "sqlite", `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, request.ProviderEventID, 0)
-				publications, _ := inboundPublicationProofEvents(t, request)
+				publications, _ := inboundPublicationProofEvents(t, rooted, request)
 				for ordinal := range publications {
 					id, err := runtimeinbound.DeterministicEventID(request.PublicationID, ordinal)
 					if err != nil {
@@ -272,21 +287,23 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	flowPath := "publication-proof/ingress"
 	bundle := inboundPublicationProofBundle(t, flowPath)
 	artifact := bundle.SourceArtifact
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: flowPath,
-		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), RootAdmission: rooted.Admission(),
 	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(
 		testAuthorActivityContextForBundle(candidate.Source.BundleHash()),
 		candidate.Source,
 	)
-	seedStoreTestPersistedArtifact(t, db, artifact)
-	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
-	if !ok {
-		t.Fatalf("inbound publication proof store %T cannot register author activity catalog", store)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	if _, err := store.(selectedSourceArtifactStore).EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
 	}
-	registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
 	standing, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatalf("ReconcileStandingService: %v", err)
@@ -302,7 +319,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	record, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 		callbackCalls++
 		var evidence events.Event
-		publications, evidence = inboundPublicationProofEvents(t, request)
+		publications, evidence = inboundPublicationProofEvents(t, rooted, request)
 		for index := range publications {
 			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 				return err
@@ -339,7 +356,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	}
 
 	failedRequest := inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "delivery-failure")
-	failedPublications, _ := inboundPublicationProofEvents(t, failedRequest)
+	failedPublications, _ := inboundPublicationProofEvents(t, rooted, failedRequest)
 	injected := errors.New("injected publication failure")
 	if _, err := runInboundPublicationProofMutation(t, store, ctx, failedRequest, func(mutation inboundPublicationProofMutation) error {
 		if err := commitInboundPublicationTestEvent(t, store, mutation, &failedPublications[0]); err != nil {
@@ -359,9 +376,9 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	assertInboundEvidenceProducedByPlatform(t, db, sqlite, request.MarkerEventID)
 	assertInboundEvidenceRouteSettlement(t, ctx, db, sqlite, request.MarkerEventID)
 
-	runInboundPublicationRawOnlyProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
-	runInboundPublicationOrdinalRollbackProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
-	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+	runInboundPublicationRawOnlyProof(t, ctx, db, sqlite, store, rooted, candidate, standing.RunID, standing.Generation, sequence)
+	runInboundPublicationOrdinalRollbackProof(t, ctx, db, sqlite, store, rooted, candidate, standing.RunID, standing.Generation, sequence)
+	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, rooted, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOperatorChannelClaimProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOperatorChannelActionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOperatorChannelTextProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
@@ -370,7 +387,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	}
 	blocked := inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "delivery-suspended")
 	if _, err := runInboundPublicationProofMutation(t, store, ctx, blocked, func(mutation inboundPublicationProofMutation) error {
-		publications, evidence := inboundPublicationProofEvents(t, blocked)
+		publications, evidence := inboundPublicationProofEvents(t, rooted, blocked)
 		for index := range publications {
 			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 				return err
@@ -392,7 +409,24 @@ func constructInboundPublicationProofTree(t *testing.T, ctx context.Context, sto
 		t.Fatal("inbound constructor requires its exact admitted source")
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	source := semanticview.Wrap(bundle)
+	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := projection.Source()
+	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, present := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !present {
+		t.Fatal("inbound constructor requires its author activity scope")
+	}
+	lease, err := store.(testAuthorActivityCatalogRegistrar).RegisterAuthorActivityEventCatalog(scope, descriptors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(lease.Release)
 	options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
 	options.SourceArtifactFact = fact
 	options.Module = sqliteFlowActivationWorkflowModule{source: source, guards: runtimepipeline.NewContractGuardRegistry(source)}
@@ -781,11 +815,11 @@ func assertInboundEvidenceProducedByPlatform(t *testing.T, db *sql.DB, sqlite bo
 	}
 }
 
-func runInboundPublicationRawOnlyProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
+func runInboundPublicationRawOnlyProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, rooted sourceartifact.RootedSource, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
 	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-raw-only")
 	before := inboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE run_id = `, runID)
-	record := commitInboundPublicationProof(t, ctx, store, request, 1)
+	record := commitInboundPublicationProof(t, ctx, store, rooted, request, 1)
 	if !record.Created || record.OutputCount != 1 || len(record.Events) != 1 || record.Events[0].Kind != runtimeprovideroutput.KindRaw {
 		t.Fatalf("raw-only record = %#v", record)
 	}
@@ -804,12 +838,12 @@ func runInboundPublicationRawOnlyProof(t *testing.T, ctx context.Context, db *sq
 	}
 }
 
-func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
+func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, rooted sourceartifact.RootedSource, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
 	for stage := 0; stage < 4; stage++ {
 		providerEventID := fmt.Sprintf("delivery-rollback-%d", stage)
 		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, providerEventID)
-		publications, evidence := inboundPublicationProofEvents(t, request)
+		publications, evidence := inboundPublicationProofEvents(t, rooted, request)
 		injected := fmt.Errorf("injected rollback stage %d", stage)
 		_, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 			appendCount := stage
@@ -840,7 +874,7 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 	}
 
 	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-invalid-evidence")
-	publications, evidence := inboundPublicationProofEvents(t, request)
+	publications, evidence := inboundPublicationProofEvents(t, rooted, request)
 	evidence = eventtest.DiagnosticDirect(
 		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", []byte(`{}`), 0,
 		request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt,
@@ -858,9 +892,9 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, request.ProviderEventID, 0)
 }
 
-func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inboundPublicationProofStore, request runtimeinbound.Request, outputCount int) runtimeinbound.Record {
+func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inboundPublicationProofStore, rooted sourceartifact.RootedSource, request runtimeinbound.Request, outputCount int) runtimeinbound.Record {
 	t.Helper()
-	publications, evidence := inboundPublicationProofEventsCount(t, request, outputCount)
+	publications, evidence := inboundPublicationProofEventsCount(t, rooted, request, outputCount)
 	record, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 		for index := range publications {
 			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
@@ -875,7 +909,7 @@ func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inbo
 	return record
 }
 
-func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
+func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, rooted sourceartifact.RootedSource, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
 	corruptions := []struct {
 		name   string
@@ -943,7 +977,7 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 	for index, corruption := range corruptions {
 		t.Run(corruption.name, func(t *testing.T) {
 			request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, fmt.Sprintf("delivery-corrupt-%d", index))
-			commitInboundPublicationProof(t, ctx, store, request, 2)
+			commitInboundPublicationProof(t, ctx, store, rooted, request, 2)
 			corruption.mutate(t, request)
 			if _, _, err := store.LoadInboundPublicationByIdentity(context.Background(), request.Identity()); err == nil {
 				t.Fatal("LoadInboundPublicationByIdentity error = nil, want corruption refusal")
@@ -953,7 +987,7 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 
 	t.Run("duplicate ordinal rejected by schema", func(t *testing.T) {
 		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-duplicate-ordinal")
-		commitInboundPublicationProof(t, ctx, store, request, 2)
+		commitInboundPublicationProof(t, ctx, store, rooted, request, 2)
 		if _, err := db.Exec(inboundPublicationProofQuery(sqlite,
 			`INSERT INTO inbound_publication_events (publication_id, ordinal, event_id, event_name, output_kind, event_integrity_fingerprint, recipient_manifest_fingerprint, recipient_count) VALUES ($1::uuid, 0, $2::uuid, 'platform.inbound_recorded', 'raw', $3, $4, 0)`,
 			`INSERT INTO inbound_publication_events (publication_id, ordinal, event_id, event_name, output_kind, event_integrity_fingerprint, recipient_manifest_fingerprint, recipient_count) VALUES (?, 0, ?, 'platform.inbound_recorded', 'raw', ?, ?, 0)`),
@@ -964,7 +998,7 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 
 	t.Run("extra child rejected on read", func(t *testing.T) {
 		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-extra-child")
-		commitInboundPublicationProof(t, ctx, store, request, 2)
+		commitInboundPublicationProof(t, ctx, store, rooted, request, 2)
 		_, recipientFingerprint, _, err := runtimeinbound.CanonicalRecipientManifest(nil)
 		if err != nil {
 			t.Fatal(err)
@@ -1025,34 +1059,48 @@ func inboundPublicationProofRequest(t *testing.T, candidate runtimepipeline.Stan
 	}
 }
 
-func inboundPublicationProofEvents(t *testing.T, request runtimeinbound.Request) ([]runtimeinbound.EventFinalization, events.Event) {
-	return inboundPublicationProofEventsCount(t, request, 2)
+func inboundPublicationProofEvents(t *testing.T, rooted sourceartifact.RootedSource, request runtimeinbound.Request) ([]runtimeinbound.EventFinalization, events.Event) {
+	return inboundPublicationProofEventsCount(t, rooted, request, 2)
 }
 
 func inboundPublicationProofBundle(t *testing.T, flowPath string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	rootSchema := `name: inbound-publication-proof
-imports:
-  provider_trigger_events:
-    - provider: github
-      event: inbound.github.push.normalized
-pins:
+	const manifest = "version: 1.0.0\nplatform_version: '*'\n"
+	rootSchema := `pins:
   outputs: [inbound.github.push.normalized]
 `
-	leafSchema := `name: ingress
-ingress:
-  alias: github
-  providers:
-    - provider: github
-      signing_secret: proof-secret
-pins:
+	leafSchema := `pins:
+  inputs: [inbound.github.push, inbound.github.push.normalized]
   outputs: [inbound.github.push.normalized]
 `
-	files := map[string]string{"schema.yaml": rootSchema + fmt.Sprintf("connect:\n  - event: inbound.github.push.normalized\n    from: %s\n    to: .\n", flowPath), flowPath + "/schema.yaml": leafSchema}
+	files := map[string]string{
+		"manifest.yaml":             manifest,
+		"schema.yaml":               rootSchema + fmt.Sprintf("connect:\n  - event: inbound.github.push.normalized\n    from: %s\n    to: .\n", flowPath),
+		flowPath + "/manifest.yaml": manifest,
+		flowPath + "/schema.yaml":   leafSchema,
+		"github/manifest.yaml":      manifest + "capabilities: {can: {emit_events: [push, push.normalized]}, cannot: [bypass journal]}\n",
+		"github/trigger.yaml": `secret: {required: true}
+signature: {type: hmac_sha256, header: X-Signature, prefix: "sha256=", signed_payload: raw_body}
+delivery_id: {json_path: "$.delivery_id", required: true}
+event_type: {literal: push}
+event_name: {literal: push}
+ack: {mode: durable_before_dispatch}
+normalized_events:
+  - event: push.normalized
+    when: {exists: [normalize]}
+    fields:
+      value:
+        from: value
+        schema: {type: object, properties: {z: {type: integer}, a: {type: integer}}, required: [z, a], additionalProperties: false}
+      provider: {from: provider, schema: {type: string}}
+`,
+	}
 	parts := strings.Split(flowPath, "/")
 	for index := 1; index < len(parts); index++ {
-		files[strings.Join(parts[:index], "/")+"/schema.yaml"] = "name: " + parts[index-1] + "\n"
+		directory := strings.Join(parts[:index], "/")
+		files[directory+"/manifest.yaml"] = manifest
+		files[directory+"/schema.yaml"] = "stages: []\n"
 	}
 	for label, body := range files {
 		path := filepath.Join(root, label)
@@ -1064,40 +1112,28 @@ pins:
 		}
 	}
 	repo := runtimepipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return bundle
 }
 
-func inboundPublicationProofProvider(t *testing.T, request runtimeinbound.Request, outputCount int) (*providertriggers.CatalogSnapshot, providertriggers.InboundAdmissionPlan, providertriggers.AdmittedRequest) {
+func inboundPublicationProofProvider(t *testing.T, rooted sourceartifact.RootedSource, request runtimeinbound.Request, outputCount int) (*providertriggers.CatalogSnapshot, providertriggers.InboundAdmissionPlan, providertriggers.AdmittedRequest) {
 	t.Helper()
-	const body = `provider: github
-secret: {required: true}
-signature: {type: hmac_sha256, header: X-Signature, prefix: "sha256=", signed_payload: raw_body}
-delivery_id: {json_path: "$.delivery_id", required: true}
-event_type: {literal: push}
-event_name: {literal: inbound.github.push}
-ack: {mode: durable_before_dispatch}
-normalized_events:
-  - event: inbound.github.push.normalized
-    when: {exists: [normalize]}
-    fields:
-      value:
-        from: value
-        schema: {type: object, properties: {z: {type: integer}, a: {type: integer}}, required: [z, a], additionalProperties: false}
-      provider: {from: provider, schema: {type: string}}
-`
-	manifest, err := providertriggers.ParseManifest([]byte(body))
+	provider, err := packartifact.ProviderFromRootedSource(rooted, "github")
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := sha256.Sum256([]byte(body))
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-		Manifest: manifest, Source: "inbound-publication-proof",
-		Identity: providertriggers.PackIdentity{ID: "provider.github", Version: "1.0.0", ManifestHash: "sha256:" + hex.EncodeToString(hash[:]), Provenance: "test"},
-	})
+	body, present := provider.Body(packmodel.BodyTrigger)
+	if !present {
+		t.Fatal("captured inbound provider has no trigger BODY")
+	}
+	manifest, err := providertriggers.AdmitBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1125,7 +1161,7 @@ normalized_events:
 	return catalog, plan, admitted
 }
 
-func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Request, outputCount int) ([]runtimeinbound.EventFinalization, events.Event) {
+func inboundPublicationProofEventsCount(t *testing.T, rooted sourceartifact.RootedSource, request runtimeinbound.Request, outputCount int) ([]runtimeinbound.EventFinalization, events.Event) {
 	t.Helper()
 	if outputCount < 1 || outputCount > 2 {
 		t.Fatalf("unsupported inbound publication proof output count %d", outputCount)
@@ -1134,7 +1170,7 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, providerPlan, authenticated := inboundPublicationProofProvider(t, request, outputCount)
+	_, providerPlan, authenticated := inboundPublicationProofProvider(t, rooted, request, outputCount)
 	delivery, err := providerPlan.ProjectDelivery(authenticated)
 	if err != nil || len(delivery.Events) != outputCount {
 		t.Fatalf("admitted provider output count=%d want=%d err=%v", len(delivery.Events), outputCount, err)

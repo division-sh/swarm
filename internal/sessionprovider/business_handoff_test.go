@@ -67,7 +67,7 @@ func (f *activeInputFixture) republishBusinessStanding(t *testing.T) {
 func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
 	t.Helper()
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source),
+	f.ctx = authoractivity.WithScope(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.rooted.Admission()),
 		authoractivity.BundleScope(f.operation.Coordinate.RuntimeInstanceID, source.BundleHash()))
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.operation.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})
@@ -382,7 +382,7 @@ func TestWhatsAppRecoveredBusinessStandingRefusalsBothStores(t *testing.T) {
 				if change == "replacement_run_generation" {
 					source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
 					replacement, err := f.selected.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
-						ServiceID: f.standing.ServiceID, FlowPath: f.standing.FlowPath, BindingEnabled: true, Source: source})
+						ServiceID: f.standing.ServiceID, FlowPath: f.standing.FlowPath, BindingEnabled: true, Source: source, RootAdmission: f.rooted.Admission()})
 					if err != nil || replacement.RunID == f.standing.RunID || replacement.Generation == f.standing.Generation {
 						t.Fatal("reset did not produce a distinct run and generation", err)
 					}

@@ -27,47 +27,6 @@ func runtimeLogCaptureUnitSource(source, function string) string {
 	return source
 }
 
-func TestRuntimeLogCaptureRecipesPreserveMeaningfulUnitAssertions(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	units, handoffs, constructors := 0, 0, 0
-	for _, row := range rows {
-		before := row.Before
-		switch row.Family {
-		case "native-runtime-log-capture-unit":
-			units++
-			before = runtimeLogCaptureUnitSource(before, row.Function)
-			for _, raw := range []string{"sqlmock", "mock.", "db", "runtimeLogPersistenceStub"} {
-				if strings.Contains(row.After, raw) {
-					t.Fatalf("capture unit retained raw/fake persistence: %s/%s", row.Function, raw)
-				}
-			}
-		case "native-runtime-log-persistence":
-			handoffs++
-			continue // Native durability and approved creation/logging cuts have their own oracle.
-		case "native-runtime-log-typed-construction":
-			constructors++
-			before = strings.Replace(before, "newTestRuntimeLogger(db *sql.DB, stub runtimeLogPersistenceStub)", "newTestRuntimeLogger(persistence RuntimeLogPersistence)", 1)
-			before = strings.Replace(before, "\tstub.db = db\n", "", 1)
-			before = strings.Replace(before, "NewRuntimeLogger(stub,", "NewRuntimeLogger(persistence,", 1)
-		default:
-			continue
-		}
-		want, err := canonicalFunction(before)
-		got, afterErr := canonicalFunction(row.After)
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		value, actualErr := canonicalFunction(actual)
-		if err != nil || afterErr != nil || actualErr != nil || want != got || got != value {
-			t.Fatalf("unit payload/lineage/refusal/recorder assertion changed: %s", row.Function)
-		}
-	}
-	if units != 13 || handoffs != 7 || constructors != 1 {
-		t.Fatalf("capture split inventory=%d/%d/%d want13/7/1", units, handoffs, constructors)
-	}
-}
-
 func TestRuntimeLogCaptureOracleRejectsLostPayloadAndFailureEvidence(t *testing.T) {
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {

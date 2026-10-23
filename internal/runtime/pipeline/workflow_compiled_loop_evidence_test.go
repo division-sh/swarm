@@ -22,8 +22,8 @@ import (
 func compiledLoopEvidenceSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml": `name: loop-evidence
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   waiting: {}
   drafting: {}
   review: {}
