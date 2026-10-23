@@ -2409,6 +2409,7 @@ func newNotifyAllChildrenRuntime(
 		t.Fatalf("bind notify-all-children delivery authority: %v", err)
 	}
 	continuationCtx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	continuationCtx = worklifetime.WithProcess(continuationCtx, conformanceTestProcessOwner(t))
 	if err := backend.ActivateDeliveryAuthority(continuationCtx, authority); err != nil {
 		t.Fatalf("activate notify-all-children delivery authority: %v", err)
 	}
