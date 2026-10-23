@@ -19,6 +19,9 @@ func TestFanOutServingM06SameBundleGenerationReplacementOnBothBackends(t *testin
 			trigger := f.submit(t, 0, runID, "same-bundle-successor")
 			turn := waitServingMatrixHeld(t, old)
 			waitServingMatrixTriggerReceipt(t, f.db, trigger)
+			if err := f.runtimes[0].manager.Shutdown(); err != nil {
+				t.Fatalf("settle fixture manager before the deliberate grant replacement: %v", err)
+			}
 			before := readServingLifetimeState(t, f.db, runID)
 			assertServingLifetimeUnissued(t, before)
 			oldGrant := f.topology.grants[f.runtimes[0].sourceArtifactFact.BundleHash()]

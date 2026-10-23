@@ -3,7 +3,6 @@ package runforkexecution
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/binary"
 	"sync"
 	"testing"
@@ -49,11 +48,10 @@ func mustRunForkTestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
 }
 
 type runForkTestWorkFixture struct {
-	process      *worklifetime.Process
-	runtime      *worklifetime.RuntimeOccurrence
-	mu           sync.Mutex
-	capabilities map[*sql.DB]startupownership.ProcessCapability
-	owners       map[startupownership.Store]SelectedContractExecutionOwner
+	process *worklifetime.Process
+	runtime *worklifetime.RuntimeOccurrence
+	mu      sync.Mutex
+	owners  map[startupownership.Store]SelectedContractExecutionOwner
 }
 
 var runForkTestWorkFixtures sync.Map

@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -726,9 +725,7 @@ func textFileTwoBundleOperator2456(t *testing.T, f *deploymentResourceFixture, o
 		if err != nil {
 			t.Fatal(err)
 		}
-		selected := &swruntime.Runtime{Bus: runtime.bus, ExecutionPosture: executionposture.Live}
-		selected.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
-		selected.Options.SourceArtifactFact = runtime.sourceArtifactFact
+		selected := runtime.contextRuntime
 		return swruntime.BundleContext{
 			SourceArtifactFact: runtime.sourceArtifactFact, BundleIdentity: identity,
 			Source: source, Runtime: selected, WorkOwner: runtime.workOwner,
@@ -965,7 +962,13 @@ func TestFileRow2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 			}
 			f.ctx = testAuthorActivityContextForBundle(context.Background(), fact)
 			f.topology.completeSources = []semanticview.Source{oldSource, f.source}
+			retireNotifyAllChildrenRuntimeForReplacement(t, oldRuntime)
 			f.boot(t)
+			retained := *f
+			retained.source = oldSource
+			retained.ctx = testAuthorActivityContextForBundle(context.Background(), oldRuntime.sourceArtifactFact)
+			retained.boot(t)
+			oldRuntime = retained.runtime
 			server = textFileTwoBundleOperator2456(t, f, oldSource, oldRuntime)
 			beforeImport := textFileSnapshot2456(t, f, importRunID)
 			beforePin := textFileSnapshot2456(t, f, pinRunID)
