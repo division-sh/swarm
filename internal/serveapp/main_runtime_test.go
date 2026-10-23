@@ -1473,7 +1473,7 @@ func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProof
 	return servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
 }
 
-func servedRuntimeProofAuthorActivityContext(t *testing.T, rt *runtimepkg.Runtime, bundleHash string) context.Context {
+func servedRuntimeProofAuthorActivityContext(t *testing.T, rt *runtimepkg.Runtime, bundleHash string, process ...runtimestartupownership.ProcessCapability) context.Context {
 	t.Helper()
 	if rt == nil {
 		t.Fatal("served control proof runtime is required for exact author activity scope")
@@ -1494,7 +1494,15 @@ func servedRuntimeProofAuthorActivityContext(t *testing.T, rt *runtimepkg.Runtim
 	}
 	ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
 	ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-	ctx, err := rt.Bus.AdmitSourceArtifactFact(ctx)
+	var err error
+	switch len(process) {
+	case 0:
+		ctx, err = rt.Bus.AdmitSourceArtifactFact(ctx)
+	case 1:
+		ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process[0])
+	default:
+		t.Fatal("served proof requires one exact captured process owner")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

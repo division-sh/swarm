@@ -197,6 +197,7 @@ type claudeAttemptProofBackend struct {
 	process  startupownership.ProcessCapability
 	name     string
 	store    claudeAttemptProofStore
+	fixture  claudeAttemptProofStore
 	db       *sql.DB
 	sessions runtimesessions.Registry
 	source   runtimecorrelation.SourceArtifactFact
@@ -567,7 +568,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 			}, runtimemanager.AgentManagerOptions{
 				ExecutionPosture: executionposture.Live,
 				BaseContext:      backend.context(),
-				LifecycleStore:   storetest.AgentLifecycleFixture(t, backend.store),
+				LifecycleStore:   storetest.AgentLifecycleFixture(t, backend.fixture),
 				DeliveryStore:    backend.store,
 				Sessions:         backend.sessions,
 				SessionResetter:  backend.store,
@@ -620,6 +621,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		t.Fatalf("unknown Claude proof backend %q", name)
 		return claudeAttemptProofBackend{}
 	}
+	backend.fixture = backend.store
 	backend.source = requireServeTestSourceArtifactFact(t, backend.store)
 	backend.original = serveFixtureProcessContext(t, backend.context(), backend.store)
 	process, err := agentfixture.ProcessCapability(t, backend.original, backend.store)
@@ -677,7 +679,7 @@ func newClaudeAttemptProofManagerForGeneration(
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
 		BaseContext:      backend.context(),
-		LifecycleStore:   storetest.AgentLifecycleFixture(t, backend.store),
+		LifecycleStore:   storetest.AgentLifecycleFixture(t, backend.fixture),
 		DeliveryStore:    backend.store,
 		SemanticSource:   claudeAttemptProofSemanticSource(),
 		Sessions:         backend.sessions,
@@ -692,7 +694,7 @@ func newClaudeAttemptProofManagerForGeneration(
 
 func installClaudeAttemptProofManagerTopology(t testing.TB, backend claudeAttemptProofBackend, manager *runtimemanager.AgentManager, eventBus *runtimebus.EventBus, cfg runtimeactors.AgentConfig) {
 	t.Helper()
-	registerServeTestDurableAgent(t, backend.context(), backend.store, manager, cfg, backend.source)
+	registerServeTestDurableAgent(t, backend.context(), backend.fixture, manager, cfg, backend.source)
 	identity, err := cfg.ConcreteIdentity()
 	if err != nil {
 		t.Fatalf("resolve Claude attempt proof identity: %v", err)

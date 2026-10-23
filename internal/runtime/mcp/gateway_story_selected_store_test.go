@@ -246,11 +246,28 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 				// The same authority must still refuse redispatch from durable evidence.
 				transport.Close()
 				registry.Reset()
+				if err := process.Release(context.Background()); err != nil {
+					t.Fatal(err)
+				}
 				if err := selected.close(); err != nil {
 					t.Fatal(err)
 				}
 				reopened := selected.reopen()
-				reopenedCtx := runtimeeffects.WithController(lostCtx, runtimeeffects.NewController(reopened.backend).WithExecutionPosture(executionposture.Live))
+				reopenedCtx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
+				reopenedProcess, err := agentfixture.ProcessCapability(t, reopenedCtx, reopened.backend)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reopenedCtx, err = startupownership.WithProcessMutationAuthority(reopenedCtx, reopenedProcess)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reopenedCtx = gatewayStoryManagedTurnContext(reopenedCtx, reopened, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-lost-reply")
+				inbound, ok := runtimecorrelation.InboundEventFromContext(lostCtx)
+				if !ok {
+					t.Fatal("original managed turn lacks its inbound event")
+				}
+				reopenedCtx = runtimebus.WithInboundEvent(reopenedCtx, inbound)
 				freshRegistry := runtimemcp.NewTurnContextRegistry(models.ActorFromContext)
 				freshGateway := newGateway(freshRegistry)
 				freshToken := freshRegistry.RegisterTurnContextWithCapabilitySurface(reopenedCtx, time.Hour, surface)
