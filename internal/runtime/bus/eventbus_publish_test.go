@@ -3383,14 +3383,13 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatalf("SettleSuccess(%s): %v", tc.eventType, err)
 			}
-			executeStandaloneCompletionCandidate(t, ctx, pg, tc.eventID)
 
 			deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, pg, tc.eventID, agentID)
 			if deliveryStatus != "delivered" {
 				t.Fatalf("delivery status for %s = %q, want delivered", tc.eventType, deliveryStatus)
 			}
-			if runStatus != "completed" {
-				t.Fatalf("run status for %s = %q, want completed", tc.eventType, runStatus)
+			if runStatus != "running" {
+				t.Fatalf("agent receipt changed run status for %s = %q, want running", tc.eventType, runStatus)
 			}
 		})
 	}

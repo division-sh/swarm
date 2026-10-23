@@ -113,8 +113,6 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/startupownership/process_capability.go:terminalize:http_do:1":                                                       ownerRuntimeDependency,
 	"internal/runtime/startupownership/process_capability.go:retireLocal:http_do:1":                                                       ownerRuntimeDependency,
 	"internal/runtime/runtime_claude_startup.go:startupCallMCP:http_do:1":                                                                 ownerRuntimeDependency,
-	"internal/runtime/runlifecycle/executor.go:Cancel:http_do:1":                                                                          ownerRuntimeDependency,
-	"internal/runtime/runlifecycle/executor.go:Submit:http_do:1":                                                                          ownerRuntimeDependency,
 	"internal/runtime/runforkexecution/runtime_container.go:Publish:http_do:1":                                                            ownerRuntimeDependency,
 	"internal/runtime/runforkexecution/agent_runtime_materialization.go:Close:http_do:1":                                                  ownerRuntimeDependency,
 	"internal/runtime/runforkexecution/control_lifetime.go:Done:http_do:1":                                                                ownerRuntimeDependency,

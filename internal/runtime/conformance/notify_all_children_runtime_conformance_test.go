@@ -1760,6 +1760,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			runID := uuid.NewString()
 			fixedEngineNow := time.Date(2026, time.July, 12, 12, 0, 0, 1, time.UTC)
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
+			ctx = worklifetime.WithProcess(ctx, conformanceTestProcessOwner(t))
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 			processTopology := newNotifyAllChildrenProcessTopology(
 				t,
