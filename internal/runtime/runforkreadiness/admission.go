@@ -28,6 +28,7 @@ type MaterializeRequest struct {
 	ForkOperation           *runfork.ForkOperationRequest
 	Preparation             runfork.SelectedForkPreparation
 	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`
+	OriginalRootAdmission   sourceartifact.RootAdmission      `json:"-"`
 	SourceRunID             string
 	At                      string
 	ContractSelection       runfork.RunForkContractSelection
