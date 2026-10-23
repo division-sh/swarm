@@ -311,6 +311,10 @@ func (s *standingServiceAdapter) requireStandingRunSourceTx(
 	if s == nil || !s.validRunLifecycleMutation(tx) {
 		return runtimecorrelation.SourceArtifactFact{}, errors.New("standing run lifecycle owner is required")
 	}
+	// W1 deletes this with the file.
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, current.RunID, true); err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, err
+	}
 	if requireActive {
 		fact, err = s.requireActiveRunSource(ctx, tx, current.RunID)
 	} else {
@@ -1636,6 +1640,10 @@ func (s *standingServiceAdapter) loadStandingOperationTx(ctx context.Context, tx
 	}
 	if !found {
 		return standingServiceRow{}, &runtimepipeline.StandingServiceError{ServiceID: operation.ServiceID, Err: runtimepipeline.ErrStandingServiceNotFound}
+	}
+	// W1 deletes this with the file.
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, current.RunID, true); err != nil {
+		return standingServiceRow{}, err
 	}
 	if _, err := s.requirePresentRunSource(ctx, tx, current.RunID); err != nil {
 		return standingServiceRow{}, err
