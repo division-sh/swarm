@@ -359,6 +359,9 @@ func (o runCommandOptions) validate() error {
 }
 
 func (o runCommandOptions) withLocalForegroundServeAuth(root InvocationRoot) (runCommandOptions, error) {
+	if strings.TrimSpace(o.apiOptions.apiTokenFile) != "" {
+		return o, nil
+	}
 	serveOpts := DefaultServeOptions()
 	serveOpts.ConfigPath = o.configPath
 	auth, err := ResolveServeAPIAuth(root, serveOpts)
