@@ -944,7 +944,6 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm run list", "flag:since"):                        true,
 	cliIdentifierRegistryKey("swarm run list", "flag:status"):                       true,
 	cliIdentifierRegistryKey("swarm run list", "flag:until"):                        true,
-	cliIdentifierRegistryKey("swarm run start", "flag:backend"):                     true,
 	cliIdentifierRegistryKey("swarm run start", "flag:connect"):                     true,
 	cliIdentifierRegistryKey("swarm run start", "flag:event"):                       true,
 	cliIdentifierRegistryKey("swarm run start", "flag:payload"):                     true,
