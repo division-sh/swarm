@@ -170,7 +170,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
 					t.Fatalf("supplemental acquisition fork identity: %+v", fork)
 				}
-				childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier)
+				childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
 				childRoute := requireSupplementalForkAcquisitionSettlement(t, rt, fork.ForkRunID, childEvent, tc.policy)
 				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("acquisition fork changed compiled handler or immutable producer")

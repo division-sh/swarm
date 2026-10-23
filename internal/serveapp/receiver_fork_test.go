@@ -268,7 +268,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				if forkRunID == "" || forkRunID == request.RunID {
 					t.Fatalf("fork did not execute selected receiver: %s", forkRunID)
 				}
-				waitServedSelectedForkFrontier(t, rt, forkRunID, forkPoint)
+				waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, forkRunID, forkPoint)
 				checkSource("after supported fork")
 				rootType, childType, rootState := "work", "receipt", "done"
 				var rootFields, childFields map[string]any = map[string]any{}, map[string]any{}

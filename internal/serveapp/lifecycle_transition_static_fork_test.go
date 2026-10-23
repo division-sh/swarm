@@ -39,7 +39,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
 				t.Fatalf("invalid static fork result: %+v", fork)
 			}
-			childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier.EventID)
+			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier.EventID)
 			var storedChildEvent string
 			if err := rt.DB.QueryRow(`SELECT fork_event_id FROM run_fork_selected_contract_executions WHERE fork_run_id=$1 AND source_event_id=$2`, fork.ForkRunID, frontier.EventID).Scan(&storedChildEvent); err != nil {
 				t.Fatal(err)
