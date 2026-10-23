@@ -59,6 +59,42 @@ func TestRunCommandRequiresRunningServe(t *testing.T) {
 	}
 }
 
+func TestRunCommandRejectsUnverifiableLocalSelectorsBeforePublication(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	setCLIAPITestToken(t, "test-token")
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "must not contact an unrelated deployment", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
+	for _, selector := range [][]string{
+		{"other-dir"},
+		{"--backend", "claude_cli"},
+		{"--backend="},
+		{"--mcp-port", "9000"},
+		{"other-dir", "--api-port", strings.TrimPrefix(server.URL, "http://127.0.0.1:")},
+	} {
+		t.Run(strings.Join(selector, " "), func(t *testing.T) {
+			args := append([]string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, selector...)
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRunCommandOptions(server))
+			if code != 2 || stdout.Len() != 0 {
+				t.Fatalf("code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+			}
+			for _, want := range []string{"local hosting is no longer supported", "--connect", "--api-port"} {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr=%q, want %q", stderr.String(), want)
+				}
+			}
+			if got := requests.Load(); got != 0 {
+				t.Fatalf("unverifiable selector contacted an unrelated deployment: %d requests", got)
+			}
+		})
+	}
+}
+
 func TestRunCommandUsesRunningServeAPITokenFile(t *testing.T) {
 	for _, explicit := range []bool{false, true} {
 		name := "serve_config_fallback"

@@ -77,8 +77,6 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 		ctx,
 		binaryPath,
 		"run", "start",
-		contracts,
-		"--backend", "claude_cli",
 		"--api-port", fmt.Sprint(apiPort),
 		"--event", "task.assigned",
 		"--payload", filepath.Join(releaseRoot, "payload.json"),
