@@ -322,7 +322,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 						outcomes := []fanoutobligation.Outcome{}
 						if tc.rows {
 							for i := 0; i < 2; i++ {
-								outcomes = append(outcomes, fanoutobligation.Outcome{Ordinal: i, Kind: fanoutobligation.OutcomeCommitted, EventID: "00000000-0000-4000-8000-000000000002", CreatedAt: time.Now().UTC()})
+								outcomes = append(outcomes, fanoutobligation.Outcome{Ordinal: i, Kind: fanoutobligation.OutcomeCommitted, EventID: []string{"00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-000000000003"}[i], CreatedAt: time.Now().UTC()})
 							}
 							if tc.reject {
 								failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
@@ -336,7 +336,9 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 								outcomes[1].Kind, outcomes[1].EventID, outcomes[1].Failure = fanoutobligation.OutcomeSemanticRejected, "", raw
 							}
 						}
-						return map[string]any{"run_id": runID, "run_status": "completed", "observed_at": time.Now().UTC(), "order": fanoutobligation.ListIdentityOrder, "intents": []any{},
+						at := time.Now().UTC()
+						return map[string]any{"run_id": runID, "run_status": "completed", "observed_at": at, "order": fanoutobligation.ListIdentityOrder,
+							"intents":             []fanoutobligation.IntentReadback{{Key: fanoutobligation.IntentKey{RunID: runID, DeploymentFeedID: feedID}, BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), Status: fanoutobligation.StatusClosed, DurableState: "closed", Cardinality: len(outcomes), Cursor: len(outcomes), NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: at, UpdatedAt: at, Runtime: fanoutobligation.UnavailableRuntimeReadback()}},
 							"deployment_outcomes": fanoutobligation.DeploymentOutcomePage{RunID: runID, DeploymentFeedID: feedID, Outcomes: outcomes, NextOrdinal: len(outcomes), More: new(bool)},
 						}
 					default:
@@ -467,7 +469,7 @@ func TestRunStartRemoteModesDoNotAcquireLocalOwnership(t *testing.T) {
 		})
 	}
 	methods := runCommandMethodNames(*calls)
-	if !reflect.DeepEqual(methods, []string{"health.check", "run.start", "run.diagnose"}) {
+	if !reflect.DeepEqual(methods, []string{"health.check", "run.start", "run.get"}) {
 		t.Fatalf("methods = %v, want remote API-only execution", methods)
 	}
 }
