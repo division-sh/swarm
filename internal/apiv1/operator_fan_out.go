@@ -12,6 +12,9 @@ import (
 
 func runFanOutListHandler(opts RunReadHandlerOptions) MethodHandler {
 	return func(ctx context.Context, req Request) (any, error) {
+		if raw, present := req.Params["outcome_from_ordinal"]; present && raw == nil {
+			return nil, NewInvalidParamsError(map[string]any{"field": "outcome_from_ordinal", "reason": "must be a non-negative integer"})
+		}
 		if raw, present := req.Params["filter"]; present {
 			filter, ok := raw.(map[string]any)
 			if !ok {
@@ -19,7 +22,7 @@ func runFanOutListHandler(opts RunReadHandlerOptions) MethodHandler {
 			}
 			for key, value := range filter {
 				switch key {
-				case "status", "triggering_delivery_id", "flow_path", "semantic_path":
+				case "status", "triggering_delivery_id", "flow_path", "semantic_path", "deployment_feed_id":
 				default:
 					return nil, NewInvalidParamsError(map[string]any{"field": "filter." + key, "reason": "unknown filter"})
 				}
@@ -70,6 +73,7 @@ func runFanOutListHandler(opts RunReadHandlerOptions) MethodHandler {
 			// The process owner enriches only runtime evidence; durable facts
 			// remain the selected store's bounded observation.
 			input := page
+			input.DeploymentOutcomes = nil
 			input.Intents = append([]fanoutobligation.IntentReadback(nil), page.Intents...)
 			observed, err := opts.FanOutRuntime(ctx, input)
 			if err != nil {

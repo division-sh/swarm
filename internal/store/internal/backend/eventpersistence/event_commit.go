@@ -554,6 +554,7 @@ func bindRunCreationCompletion(completion apiidempotency.Completion, record runt
 		return apiidempotency.Completion{}, fmt.Errorf("decode run creation API completion")
 	}
 	response["data_binding"] = record.Binding
+	response["deployment_feed_ids"] = record.DeploymentFeedIDs()
 	raw, err := canonicaljson.Bytes(response)
 	if err != nil {
 		return apiidempotency.Completion{}, err

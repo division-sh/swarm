@@ -2,11 +2,16 @@ package pipelinepersistence
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/google/uuid"
 )
 
 func TestDeploymentFanOutSummaryUsesFeedIdentityBothStores(t *testing.T) {
@@ -18,6 +23,12 @@ func TestDeploymentFanOutSummaryUsesFeedIdentityBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			request := deploymentStoreRequest(1)
+			feed := durabledata.DeploymentFeed{RunID: request.Key.RunID, Declaration: request.Deployment.Declaration, SourceInvocationID: uuid.NewString()}
+			firstID := deploymentFeedID(feed)
+			feed.SourceInvocationID = uuid.NewString()
+			if firstID == deploymentFeedID(feed) {
+				t.Fatal("independent imports into the same run/declaration share a feed identity")
+			}
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			tx, err := db.BeginTx(ctx, nil)
 			if err != nil {
@@ -62,6 +73,32 @@ func TestDeploymentFanOutSummaryUsesFeedIdentityBothStores(t *testing.T) {
 				summary.SemanticRejectionSample.DeploymentFeedID != request.Key.DeploymentFeedID ||
 				summary.SemanticRejectionSample.TriggeringDeliveryID != "" {
 				t.Fatalf("rejected deployment summary: %+v err=%v", summary, err)
+			}
+			query := fanoutobligation.DeploymentOutcomeQuery{RunID: request.Key.RunID, DeploymentFeedID: request.Key.DeploymentFeedID, Limit: 1}
+			page, err := readDeploymentFanOutOutcomes(ctx, db, query)
+			if err != nil || len(page.Outcomes) != 1 || page.Outcomes[0].Kind != fanoutobligation.OutcomeSemanticRejected || page.NextOrdinal != 1 || *page.More {
+				t.Fatalf("semantic row readback: %+v err=%v", page, err)
+			}
+			eventID := uuid.NewString()
+			if _, err := db.ExecContext(ctx, `INSERT INTO fan_out_outcomes (run_id,deployment_feed_id,ordinal,outcome_kind,event_id,created_at)
+				VALUES ($1,$2,1,'committed',$3,$4)`, query.RunID, query.DeploymentFeedID, eventID, now); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET cardinality=2,cursor=2 WHERE run_id=$1 AND deployment_feed_id=$2`, query.RunID, query.DeploymentFeedID); err != nil {
+				t.Fatal(err)
+			}
+			page, err = readDeploymentFanOutOutcomes(ctx, db, query)
+			if err != nil || !*page.More || page.NextOrdinal != 1 {
+				t.Fatalf("bounded first page: %+v err=%v", page, err)
+			}
+			query.FromOrdinal = page.NextOrdinal
+			page, err = readDeploymentFanOutOutcomes(ctx, db, query)
+			if err != nil || len(page.Outcomes) != 1 || page.Outcomes[0].EventID != eventID || *page.More || page.NextOrdinal != 2 {
+				t.Fatalf("committed second page: %+v err=%v", page, err)
+			}
+			query.RunID = uuid.NewString()
+			if _, err := readDeploymentFanOutOutcomes(ctx, db, query); !errors.Is(err, sql.ErrNoRows) {
+				t.Fatalf("foreign run consumed feed outcomes: %v", err)
 			}
 		})
 	}

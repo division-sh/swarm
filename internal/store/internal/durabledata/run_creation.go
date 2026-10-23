@@ -194,7 +194,8 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 		})
 		plan.feeds = append(plan.feeds, runtimedata.DeploymentFeed{
 			RunID: canonical.RunID, BundleHash: canonical.BundleHash, Declaration: evaluation.command.Declaration,
-			SchemaDigest: evaluation.declaration.SchemaDigest, VersionID: evaluation.compiled.VersionID,
+			SourceInvocationID: evaluation.command.SourceInvocationID,
+			SchemaDigest:       evaluation.declaration.SchemaDigest, VersionID: evaluation.compiled.VersionID,
 			RowCount: evaluation.compiled.Manifest.RowCount,
 		})
 	}

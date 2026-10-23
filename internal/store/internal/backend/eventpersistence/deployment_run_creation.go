@@ -214,10 +214,11 @@ func deploymentRunCompletion(record runtimedata.RunCreationOperationRecord) (api
 		return apiidempotency.Completion{}, fmt.Errorf("rejected run creation has no success completion")
 	}
 	response, err := canonicaljson.Bytes(struct {
-		RunID       string                  `json:"run_id"`
-		Status      string                  `json:"status"`
-		DataBinding runtimedata.DataBinding `json:"data_binding"`
-	}{RunID: record.Summary.RunID, Status: record.Summary.Status, DataBinding: record.Binding})
+		RunID             string                  `json:"run_id"`
+		Status            string                  `json:"status"`
+		DataBinding       runtimedata.DataBinding `json:"data_binding"`
+		DeploymentFeedIDs []string                `json:"deployment_feed_ids"`
+	}{RunID: record.Summary.RunID, Status: record.Summary.Status, DataBinding: record.Binding, DeploymentFeedIDs: record.DeploymentFeedIDs()})
 	if err != nil {
 		return apiidempotency.Completion{}, err
 	}

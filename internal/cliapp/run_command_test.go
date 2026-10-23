@@ -16,12 +16,22 @@ import (
 	"testing"
 	"time"
 
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/gorilla/websocket"
 )
 
 func TestRunCommandRequiresRunningServe(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_API_TOKEN", "")
+	if err := os.Unsetenv("SWARM_API_TOKEN"); err != nil {
+		t.Fatal(err)
+	}
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("SWARM_API_TOKEN=must-not-load\nBROKEN\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
 	server := httptest.NewServer(http.NotFoundHandler())
 	server.Close()
@@ -34,12 +44,15 @@ func TestRunCommandRequiresRunningServe(t *testing.T) {
 			}
 			args := append([]string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, extra...)
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
+			code := executeRootCommandWithOptions(context.Background(), repo, args, &stdout, &stderr, opts)
 			if code != 6 || !strings.Contains(stderr.String(), "No serve running for this deployment: start `swarm serve` first") {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			if stdout.Len() != 0 {
 				t.Fatalf("absent serve produced a start receipt: %s", stdout.String())
+			}
+			if got := os.Getenv("SWARM_API_TOKEN"); got != "" {
+				t.Fatalf("run start loaded credential authority from .env: %q", got)
 			}
 		})
 	}
@@ -61,13 +74,13 @@ func TestRunCommandUsesRunningServeAPITokenFile(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-token-file", "running")
-			case "run.get":
+				return runStartCommandResult("9d4ee136-7965-50e5-9111-821facf546b7", "running")
+			case "run.get", "run.diagnose":
 				awaitRunCommandTraceRequest(t, requestRead)
-				run := validDiagnosticRunHeader("run-token-file")
+				run := validDiagnosticRunHeader("9d4ee136-7965-50e5-9111-821facf546b7")
 				run["status"] = "completed"
 				run["ended_at"] = "2026-05-13T10:01:00Z"
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -94,8 +107,8 @@ func TestRunCommandUsesRunningServeAPITokenFile(t *testing.T) {
 	if serveCalled.Load() != 0 {
 		t.Fatalf("serve called = %d, want 0", serveCalled.Load())
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.get"})
-	assertRunCommandTraceSubscription(t, wsRequests, "run-token-file", true)
+	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.diagnose"})
+	assertRunCommandTraceSubscription(t, wsRequests, "9d4ee136-7965-50e5-9111-821facf546b7", true)
 }
 
 func awaitRunCommandTraceRequest(t *testing.T, requestRead <-chan struct{}) {
@@ -242,23 +255,33 @@ func TestRunStartInitiationRequiresEventPairOrData(t *testing.T) {
 
 func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		flag  string
-		value func(string) string
-		field string
+		name   string
+		flag   string
+		value  func(string) string
+		field  string
+		rows   bool
+		reject bool
 	}{
-		{"import", "--data", func(path string) string { return "records.loaded=" + path }, "imports"},
-		{"pin", "--pin", func(string) string { return "records.loaded@head" }, "pins"},
+		{"import", "--data", func(path string) string { return "records.loaded=" + path }, "imports", false, false},
+		{"pin", "--pin", func(string) string { return "records.loaded@head" }, "pins", false, false},
+		{"row_receipts", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
+		{"row_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
 			root := t.TempDir()
 			input := filepath.Join(root, "rows.jsonl")
-			if err := os.WriteFile(input, []byte(""), 0o600); err != nil {
+			content := ""
+			if tc.rows {
+				content = "{\"id\":\"one\"}\n{\"id\":\"two\"}\n"
+			}
+			if err := os.WriteFile(input, []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			declaration := map[string]any{"flow_path": ".", "event": "records.loaded"}
 			versionID := "resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			feedID := "00000000-0000-4000-8000-000000000001"
+			var runID string
 			server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 				rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 					switch req.Method {
@@ -288,7 +311,34 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 						if req.Params["run_id"] == "" || !ok || len(data[tc.field].([]any)) != 1 {
 							t.Fatalf("feed-only run.start omitted durable run identity or %s: %#v", tc.field, req.Params)
 						}
-						return runStartCommandResult(req.Params["run_id"].(string), "completed")
+						runID = req.Params["run_id"].(string)
+						result := runStartCommandResult(runID, "completed")
+						result["deployment_feed_ids"] = []string{feedID}
+						return result
+					case "run.fan_out.list":
+						if req.Params["run_id"] != runID || req.Params["filter"].(map[string]any)["deployment_feed_id"] != feedID {
+							t.Fatalf("wrong outcome scope: %#v", req.Params)
+						}
+						outcomes := []fanoutobligation.Outcome{}
+						if tc.rows {
+							for i := 0; i < 2; i++ {
+								outcomes = append(outcomes, fanoutobligation.Outcome{Ordinal: i, Kind: fanoutobligation.OutcomeCommitted, EventID: "00000000-0000-4000-8000-000000000002", CreatedAt: time.Now().UTC()})
+							}
+							if tc.reject {
+								failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
+									Event: "records.loaded", Kind: runtimeengine.EmitPayloadSchemaMismatch, Path: "$.id", Constraint: "type", Expected: "string", Actual: "integer",
+									Detail: "invalid input row",
+								}, "test", "commit")
+								raw, err := runtimefailures.MarshalEnvelope(failure.Failure)
+								if err != nil {
+									t.Fatal(err)
+								}
+								outcomes[1].Kind, outcomes[1].EventID, outcomes[1].Failure = fanoutobligation.OutcomeSemanticRejected, "", raw
+							}
+						}
+						return map[string]any{"run_id": runID, "run_status": "completed", "observed_at": time.Now().UTC(), "order": fanoutobligation.ListIdentityOrder, "intents": []any{},
+							"deployment_outcomes": fanoutobligation.DeploymentOutcomePage{RunID: runID, DeploymentFeedID: feedID, Outcomes: outcomes, NextOrdinal: len(outcomes), More: new(bool)},
+						}
 					default:
 						t.Fatalf("unexpected method %q", req.Method)
 						return nil
@@ -300,14 +350,25 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 			code := executeRootCommandWithOptions(context.Background(), root,
 				[]string{"run", "start", "--connect", server.URL, tc.flag, tc.value(input), "--no-follow"},
 				&stdout, &stderr, testRunCommandOptions(server))
-			if code != 0 {
+			wantCode := 0
+			if tc.reject {
+				wantCode = 6
+			}
+			if code != wantCode {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			want := []string{"health.check", "data.show", "run.start"}
 			if tc.name == "pin" {
 				want = []string{"health.check", "data.show", "data.show", "run.start"}
 			}
+			want = append(want, "run.fan_out.list")
 			assertRunCommandMethods(t, calls, want)
+			if tc.rows && (!strings.Contains(stdout.String(), "row 0 committed") || !strings.Contains(stdout.String(), "feed published: deployment_feed_id="+feedID)) {
+				t.Fatalf("missing row/receipt readout: %s", stdout.String())
+			}
+			if tc.reject && !strings.Contains(stdout.String(), "row 1 semantic_rejected") {
+				t.Fatalf("missing row refusal: %s", stdout.String())
+			}
 			if len(*wsRequests) != 0 {
 				t.Fatalf("feed-only --no-follow opened websocket: %#v", *wsRequests)
 			}
@@ -335,7 +396,9 @@ func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 				if got := req.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
 				}
-				return runStartCommandResult("run-no-follow", "running")
+				result := runStartCommandResult("9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355", "running")
+				result["event_id"] = "00000000-0000-4000-8000-000000000003"
+				return result
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -354,7 +417,7 @@ func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	if len(*wsRequests) != 0 {
 		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
 	}
-	for _, want := range []string{"run started: run_id=run-no-follow", "reattach: swarm run start --reattach run-no-follow"} {
+	for _, want := range []string{"run started: run_id=9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355", "input published: event_id=00000000-0000-4000-8000-000000000003", "reattach: swarm run start --reattach 9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -370,12 +433,12 @@ func TestRunStartRemoteModesDoNotAcquireLocalOwnership(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-remote", "running")
-			case "run.get":
-				run := validDiagnosticRunHeader("run-remote")
+				return runStartCommandResult("7d4fb15d-b64e-578e-8769-d215bd7ca0ab", "running")
+			case "run.get", "run.diagnose":
+				run := validDiagnosticRunHeader("7d4fb15d-b64e-578e-8769-d215bd7ca0ab")
 				run["status"] = "completed"
 				run["ended_at"] = "2026-05-13T10:01:00Z"
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -394,7 +457,7 @@ func TestRunStartRemoteModesDoNotAcquireLocalOwnership(t *testing.T) {
 		args []string
 	}{
 		{name: "connected start", args: []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}},
-		{name: "reattach", args: []string{"run", "start", "--connect", server.URL, "--reattach", "run-remote"}},
+		{name: "reattach", args: []string{"run", "start", "--connect", server.URL, "--reattach", "7d4fb15d-b64e-578e-8769-d215bd7ca0ab"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -404,7 +467,7 @@ func TestRunStartRemoteModesDoNotAcquireLocalOwnership(t *testing.T) {
 		})
 	}
 	methods := runCommandMethodNames(*calls)
-	if !reflect.DeepEqual(methods, []string{"health.check", "run.start", "run.get"}) {
+	if !reflect.DeepEqual(methods, []string{"health.check", "run.start", "run.diagnose"}) {
 		t.Fatalf("methods = %v, want remote API-only execution", methods)
 	}
 }
@@ -418,13 +481,13 @@ func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				if got := req.Params["run_id"]; got != "run-explicit" {
-					t.Fatalf("run_id = %#v, want run-explicit", got)
+				if got := req.Params["run_id"]; got != "310857e1-51d0-5d06-bce8-25778a85b448" {
+					t.Fatalf("run_id = %#v, want 310857e1-51d0-5d06-bce8-25778a85b448", got)
 				}
 				if got := req.Params["idempotency_key"]; got != "idem-start" {
 					t.Fatalf("idempotency_key = %#v, want idem-start", got)
 				}
-				return runStartCommandResult("run-explicit", "running")
+				return runStartCommandResult("310857e1-51d0-5d06-bce8-25778a85b448", "running")
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -434,7 +497,7 @@ func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--run-id", "run-explicit", "--idempotency-key", "idem-start", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--run-id", "310857e1-51d0-5d06-bce8-25778a85b448", "--idempotency-key", "idem-start", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -606,7 +669,7 @@ func TestRunCommandStartRendersRootInputRejectionFromServerFacts(t *testing.T) {
 	}
 }
 
-func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *testing.T) {
+func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	tracePrinted := make(chan struct{})
@@ -616,16 +679,18 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-foreground", "running")
-			case "run.get":
-				run := validDiagnosticRunHeader("run-foreground")
+				return runStartCommandResult("09c3d378-ceed-5289-b4b3-028de530bb72", "running")
+			case "run.get", "run.diagnose":
+				run := validDiagnosticRunHeader("09c3d378-ceed-5289-b4b3-028de530bb72")
+				result := runCommandReadResult(req.Method, run)
+				work := result["test_quiescence"].(map[string]any)
 				select {
 				case <-tracePrinted:
-					run["status"] = "completed"
-					run["ended_at"] = "2026-05-13T10:01:00Z"
+					work["ready"] = true
+					work["active_deliveries"] = 0
 				default:
 				}
-				return map[string]any{"run": run}
+				return result
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -643,21 +708,21 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 	var stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--timeout", "0"}, stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	methods := runCommandMethodNames(*calls)
 	if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" {
-		t.Fatalf("methods = %v, want health.check, run.start, then one or more run.get calls", methods)
+		t.Fatalf("methods = %v, want health.check, run.start, then run.diagnose", methods)
 	}
 	for i, method := range methods[2:] {
-		if method != "run.get" {
-			t.Fatalf("method[%d] = %q, want run.get; all=%v", i+2, method, methods)
+		if method != "run.diagnose" {
+			t.Fatalf("method[%d] = %q, want run.diagnose; all=%v", i+2, method, methods)
 		}
 	}
-	assertRunCommandTraceSubscription(t, wsRequests, "run-foreground", true)
-	for _, want := range []string{"id=evt-foreground", "delivery=in progress", "run terminal: run_id=run-foreground status=completed"} {
+	assertRunCommandTraceSubscription(t, wsRequests, "09c3d378-ceed-5289-b4b3-028de530bb72", true)
+	for _, want := range []string{"id=evt-foreground", "delivery=in progress", "run settled: run_id=09c3d378-ceed-5289-b4b3-028de530bb72", "settled,"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -669,7 +734,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 				case "health.check":
 					return runCommandHealthResult()
 				case "run.start":
-					return runStartCommandResult("run-timeout", "running")
+					return runStartCommandResult("7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab", "running")
 				default:
 					t.Errorf("timeout must not mutate work; unexpected method %s", req.Method)
 					return nil
@@ -683,7 +748,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 			"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--timeout", "10ms",
 		}, &stdout, &stderr, opts)
-		if code != 8 || !strings.Contains(stderr.String(), "swarm run status run-timeout") || !strings.Contains(stderr.String(), "work continues") {
+		if code != 8 || !strings.Contains(stderr.String(), "swarm run status 7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab") || !strings.Contains(stderr.String(), "work continues") {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
 		assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
@@ -723,17 +788,17 @@ func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
 			if req.Method != "run.get" {
 				t.Fatalf("method = %q, want run.get", req.Method)
 			}
-			run := validDiagnosticRunHeader("run-terminal")
+			run := validDiagnosticRunHeader("5b767b3b-aaf2-52f3-9581-0427cb7ee620")
 			run["status"] = "failed"
 			run["ended_at"] = "2026-05-13T10:01:00Z"
 			run["failure"] = testRuntimeFailureClass(runtimefailures.ClassInternalFailure, "workflow_failed")
-			return map[string]any{"run": run}
+			return runCommandReadResult(req.Method, run)
 		},
 	})
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "run-terminal"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "5b767b3b-aaf2-52f3-9581-0427cb7ee620"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 7 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -741,7 +806,7 @@ func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
 	if len(*wsRequests) != 0 {
 		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
 	}
-	if !strings.Contains(stdout.String(), "run terminal: run_id=run-terminal status=failed") || !strings.Contains(stdout.String(), "platform.internal_failure/workflow_failed") {
+	if !strings.Contains(stdout.String(), "run terminal: run_id=5b767b3b-aaf2-52f3-9581-0427cb7ee620 status=failed") || !strings.Contains(stdout.String(), "platform.internal_failure/workflow_failed") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
@@ -757,7 +822,7 @@ func TestRunCommandReattachActiveCtrlCDetachesWithoutRunStop(t *testing.T) {
 			if req.Method != "run.get" {
 				t.Fatalf("method = %q, want run.get", req.Method)
 			}
-			return map[string]any{"run": validDiagnosticRunHeader("run-active")}
+			return map[string]any{"run": validDiagnosticRunHeader("0f53ca25-54c3-5dfb-81d3-aa0ba702d418")}
 		},
 		wsSubscribed: wsSubscribed,
 	})
@@ -771,12 +836,12 @@ func TestRunCommandReattachActiveCtrlCDetachesWithoutRunStop(t *testing.T) {
 	opts := testRunCommandOptions(server)
 	opts.runStatusPoll = time.Hour
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "run-active"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "0f53ca25-54c3-5dfb-81d3-aa0ba702d418"}, &stdout, &stderr, opts)
 	if code != 130 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	assertRunCommandMethods(t, calls, []string{"run.get"})
-	assertRunCommandTraceSubscription(t, wsRequests, "run-active", false)
+	assertRunCommandTraceSubscription(t, wsRequests, "0f53ca25-54c3-5dfb-81d3-aa0ba702d418", false)
 	if !strings.Contains(stderr.String(), "detached from run trace") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
@@ -792,9 +857,9 @@ func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-interrupt", "running")
+				return runStartCommandResult("922697b4-366d-515c-976b-cd77b98f7ecd", "running")
 			case "run.stop":
-				if got := req.Params["run_id"]; got != "run-interrupt" {
+				if got := req.Params["run_id"]; got != "922697b4-366d-515c-976b-cd77b98f7ecd" {
 					t.Fatalf("run.stop run_id = %#v", got)
 				}
 				return map[string]any{"ok": true}
@@ -867,16 +932,16 @@ func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return runStartCommandResult("run-closed-ws", "running")
-			case "run.get":
-				run := validDiagnosticRunHeader("run-closed-ws")
+				return runStartCommandResult("8895c771-b861-5ee7-80d6-097af0895c0a", "running")
+			case "run.get", "run.diagnose":
+				run := validDiagnosticRunHeader("8895c771-b861-5ee7-80d6-097af0895c0a")
 				select {
 				case <-warning.notify:
 					run["status"] = "completed"
 					run["ended_at"] = "2026-05-13T10:01:00Z"
 				default:
 				}
-				return map[string]any{"run": run}
+				return runCommandReadResult(req.Method, run)
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -891,14 +956,14 @@ func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), warning.String())
 	}
 	methods := runCommandMethodNames(*calls)
-	if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" || methods[len(methods)-1] != "run.get" {
+	if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" || methods[len(methods)-1] != "run.diagnose" {
 		t.Fatalf("methods = %v", methods)
 	}
-	if !strings.Contains(stdout.String(), "run terminal: run_id=run-closed-ws status=completed") {
+	if !strings.Contains(stdout.String(), "run terminal: run_id=8895c771-b861-5ee7-80d6-097af0895c0a status=completed") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	fact := requireSingleRunTraceDetachFact(t, warning.String())
-	assertRunTraceDetachFact(t, fact, runTraceDetachStreamClosed, "run-closed-ws", "swarm run start --connect "+server.URL+" --reattach run-closed-ws")
+	assertRunTraceDetachFact(t, fact, runTraceDetachStreamClosed, "8895c771-b861-5ee7-80d6-097af0895c0a", "swarm run start --connect "+server.URL+" --reattach 8895c771-b861-5ee7-80d6-097af0895c0a")
 }
 
 func TestRunCommandMalformedWebSocketFailuresDetachAndUseTerminalStatus(t *testing.T) {
@@ -929,7 +994,7 @@ func TestRunCommandMalformedWebSocketFailuresDetachAndUseTerminalStatus(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			warning := &notifyingBuffer{needle: string(tc.wantReason), notify: make(chan struct{})}
-			tc.serverOpts.rpcResponder = observerTerminalAfterWarningResponder(t, "run-bad-ws", warning.notify)
+			tc.serverOpts.rpcResponder = observerTerminalAfterWarningResponder(t, "2483d957-8a36-5465-9e77-e7de976898b6", warning.notify)
 			server, _, _ := newRunCommandServer(t, tc.serverOpts)
 			defer server.Close()
 
@@ -939,7 +1004,7 @@ func TestRunCommandMalformedWebSocketFailuresDetachAndUseTerminalStatus(t *testi
 				t.Fatalf("code = %d, want 0 stdout=%s stderr=%s", code, stdout.String(), warning.String())
 			}
 			fact := requireSingleRunTraceDetachFact(t, warning.String())
-			assertRunTraceDetachFact(t, fact, tc.wantReason, "run-bad-ws", "swarm run start --connect "+server.URL+" --reattach run-bad-ws")
+			assertRunTraceDetachFact(t, fact, tc.wantReason, "2483d957-8a36-5465-9e77-e7de976898b6", "swarm run start --connect "+server.URL+" --reattach 2483d957-8a36-5465-9e77-e7de976898b6")
 		})
 	}
 }
@@ -949,7 +1014,7 @@ func TestRunCommandWebSocketHandshakeHTTPErrorDetachesObserver(t *testing.T) {
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	warning := &notifyingBuffer{needle: string(runTraceDetachAttachFailed), notify: make(chan struct{})}
 	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: observerTerminalAfterWarningResponder(t, "run-ws-auth", warning.notify),
+		rpcResponder: observerTerminalAfterWarningResponder(t, "390fe346-7ec6-58f0-a6a8-5f85cf7e384e", warning.notify),
 		wsHTTPStatus: http.StatusUnauthorized,
 		wsHTTPBody:   "invalid bearer token",
 	})
@@ -961,7 +1026,7 @@ func TestRunCommandWebSocketHandshakeHTTPErrorDetachesObserver(t *testing.T) {
 		t.Fatalf("code = %d, want 0 stdout=%s stderr=%s", code, stdout.String(), warning.String())
 	}
 	fact := requireSingleRunTraceDetachFact(t, warning.String())
-	assertRunTraceDetachFact(t, fact, runTraceDetachAttachFailed, "run-ws-auth", "swarm run start --connect "+server.URL+" --reattach run-ws-auth")
+	assertRunTraceDetachFact(t, fact, runTraceDetachAttachFailed, "390fe346-7ec6-58f0-a6a8-5f85cf7e384e", "swarm run start --connect "+server.URL+" --reattach 390fe346-7ec6-58f0-a6a8-5f85cf7e384e")
 }
 
 func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
@@ -1238,6 +1303,20 @@ func testRunCommandOptions(server *httptest.Server) rootCommandOptions {
 		return 0
 	}
 	return opts
+}
+
+func runCommandReadResult(method string, run map[string]any) map[string]any {
+	if method != "run.diagnose" {
+		return map[string]any{"run": run}
+	}
+	result := validDiagnosticRunDiagnosis(run["run_id"].(string), run["status"].(string), "none", "none", []any{})
+	result["run"] = run
+	if run["status"] == "running" {
+		work := result["test_quiescence"].(map[string]any)
+		work["ready"] = false
+		work["active_deliveries"] = 1
+	}
+	return result
 }
 
 func writeRunCommandPayloadFile(t *testing.T, payload map[string]any) string {
