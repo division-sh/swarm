@@ -105,10 +105,11 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 
 func TestFreshRootActivityLineageSeparatesProducerAndReceiverCoordinates(t *testing.T) {
 	source := semanticview.Wrap(loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "name: root-activity-lineage\nstages: []\n",
-		"events.yaml": "request:\n",
-		"nodes.yaml":  "scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: fetch, tool: source_scrape, input: {}}\n",
-		"tools.yaml":  "source_scrape:\n  description: Read-only lineage control.\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: 'https://proof.invalid'}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "request:\n",
+		"nodes.yaml":    "scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: fetch, tool: source_scrape, input: {}}\n",
+		"tools.yaml":    "source_scrape:\n  description: Read-only lineage control.\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: 'https://proof.invalid'}\n",
 	}))
 	runID := uuid.NewString()
 	parent := eventtest.ExistingRunRootIngress(uuid.NewString(), "request", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())

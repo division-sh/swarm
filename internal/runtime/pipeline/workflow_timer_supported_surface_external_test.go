@@ -890,7 +890,8 @@ func workflowTimerTestParseTime(raw string) (time.Time, error) {
 func workflowTimerServedLifecycleBundle(t *testing.T, recurring bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":   "name: timer-proof\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 40ms, advances_to: done}\n  done: {final: true}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 40ms, advances_to: done}\n  done: {final: true}\n",
 		"entities.yaml": "test_entity: {}\n",
 	})
 	// Recurrence is a runtime scheduler variant; the admitted timer transition stays exact.

@@ -36,6 +36,7 @@ func VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t 
 			target, advance = "done", "      advances_to: done\n"
 		}
 		files := map[string]string{
+			"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 			"schema.yaml":   "stages:\n  ready: {}\n  " + target + ": {final: true}\npins:\n  inputs: [kill]\n",
 			"events.yaml":   "kill:\n",
 			"entities.yaml": "test_entity:\n  marker: text\n",

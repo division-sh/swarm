@@ -118,9 +118,11 @@ func VerifyNativeWorkflowInstanceStoreLoadRouteRecoveryProjectionRejectsTerminat
 func nativeRouteRecoveryFixtureForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) (*PipelineDeliveryNativeFixtureForTest, *PipelineCoordinator, context.Context, WorkflowInstance) {
 	t.Helper()
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":          "name: native-route-recovery\nstages:\n  active: {}\n",
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":          "stages:\n  active: {}\n",
 		"entities.yaml":        "test_entity: {}\n",
-		"review/schema.yaml":   "name: review\nstages:\n  active: {}\n",
+		"review/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"review/schema.yaml":   "stages:\n  active: {}\n",
 		"review/entities.yaml": "test_entity: {}\n",
 	})
 	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)

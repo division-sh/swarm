@@ -58,7 +58,8 @@ func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semantic
 		_ = json.NewEncoder(w).Encode(map[string]any{"origin": origin})
 	}))
 	defer server.Close()
-	files := map[string]string{"schema.yaml": "stages: []\n"}
+	files := map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": "stages: []\n"}
 	for _, flow := range []string{"research", "research2"} {
 		files[flow+"/schema.yaml"] = "stages: []\n"
 		files[flow+"/events.yaml"] = "request:\n"

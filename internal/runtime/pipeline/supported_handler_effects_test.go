@@ -19,7 +19,8 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
 		for _, outcome := range []string{"accepted", "rejected", "outbox_failure"} {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				source := loadWorkflowTempSource(t, map[string]string{
-					"schema.yaml":   "name: findings\nstages:\n  active: {}\n  done: {final: true}\n",
+					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+					"schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
 					"types.yaml":    "types:\n  Finding:\n    summary: text\n",
 					"entities.yaml": "work:\n  findings: {type: '[Finding]', initial: []}\n  status: {type: text, initial: pending}\n",
 					"events.yaml":   "finding.received:\n  summary: text\n  status: text\nfinding.recorded:\n  status: text\n",

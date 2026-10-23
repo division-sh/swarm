@@ -1001,8 +1001,10 @@ func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCre
 	defer server.Close()
 	credentialStore := testActivityCredentialStore(t, "provider.token", "provider-secret")
 	source := semanticview.Wrap(loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":          "stages: []\n",
-		"research/schema.yaml": "stages: []\n",
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":            "stages: []\n",
+		"research/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"research/schema.yaml":   "stages: []\n",
 		"tools.yaml": fmt.Sprintf(`provider_write:
   handler_type: http
   effect_class: non_idempotent_write

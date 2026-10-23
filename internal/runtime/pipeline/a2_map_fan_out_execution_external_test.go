@@ -82,8 +82,8 @@ type a2MapFanOutExecution struct {
 
 func a2MapFanOutFiles(gather bool) map[string]string {
 	files := map[string]string{
-		"schema.yaml": `name: a2-map-fan-out
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   active: {}
   awaiting: {}
   ready: {final: true}

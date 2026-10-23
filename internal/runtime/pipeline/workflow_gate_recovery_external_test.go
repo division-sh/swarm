@@ -1562,7 +1562,8 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposal bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":   "name: support\nstages:\n  drafting: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  drafting: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "support.reply_drafted:\n  chat_id: text\n  text: text\n",
 		"nodes.yaml": `support:
@@ -1722,8 +1723,8 @@ func loadGateRecoveryContractBundle(t *testing.T, terminal bool) *runtimecontrac
 		outcome = "          advances_to: completed\n  completed: {final: true}\n"
 	}
 	files := map[string]string{
-		"schema.yaml": `name: launch
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   awaiting_review:
     gate:
       decision: launch_review

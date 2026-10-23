@@ -364,7 +364,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("load proof policy: %v", err)
 	}
 	assertCoreStructuralGuardTimingInventory(t, policy)
-	for _, id := range []string{"codemod-owner-guards", "codemod-pipeline-mutation", "codemod-bus-mutation", "codemod-candidate-overlay"} {
+	for _, id := range []string{"codemod-owner-guards", "codemod-bus-mutation", "codemod-candidate-overlay"} {
 		unit, ok := policy.Units[id]
 		if !ok || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations"}) || unit.CountMode != "count-1" || unit.BudgetClass != "broad" {
 			t.Fatalf("invalid codemod timing owner %s: %+v", id, unit)

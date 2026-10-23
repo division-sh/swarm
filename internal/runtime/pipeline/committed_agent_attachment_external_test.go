@@ -56,9 +56,11 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 				first = "a-" + first
 				missing = "z-" + missing
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, map[string]string{
-					"schema.yaml":          "name: attachment-cut\nstages:\n  active: {}\n",
+					"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+					"schema.yaml":          "stages:\n  active: {}\n",
 					"events.yaml":          "work.requested:\n  order_id: text\n",
-					"orders/schema.yaml":   "name: orders\ninstance: order_id\npins:\n  inputs: [order.created, work.requested]\nstages:\n  active: {}\n",
+					"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+					"orders/schema.yaml":   "instance: order_id\npins:\n  inputs: [order.created, work.requested]\nstages:\n  active: {}\n",
 					"orders/events.yaml":   "order.created:\n  order_id: text\nwork.requested:\n  order_id: text\n",
 					"orders/entities.yaml": "work:\n  order_id: {type: text, indexed: true}\n",
 					"orders/agents.yaml":   fmt.Sprintf("a-installed:\n  id: %s\n  model: regular\n  intent: {inline: Observe work.}\n  subscriptions: [work.requested]\nz-held:\n  id: %s\n  model: regular\n  intent: {inline: Observe work.}\n  subscriptions: [work.requested]\n", first, missing),

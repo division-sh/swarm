@@ -54,12 +54,16 @@ func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testi
 
 func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *testing.T) {
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":                    "name: storage-identity\nstages:\n  created: {}\n",
-		"operating/schema.yaml":          "name: operating\ninstance: instance_key\nstages:\n  created: {}\n",
+		"manifest.yaml":                  "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":                    "stages:\n  created: {}\n",
+		"operating/manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"operating/schema.yaml":          "instance: instance_key\nstages:\n  created: {}\n",
 		"operating/entities.yaml":        "test_entity:\n  instance_key: text\n",
-		"operating/review/schema.yaml":   "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"operating/review/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"operating/review/schema.yaml":   "instance: instance_key\nstages:\n  created: {}\n",
 		"operating/review/entities.yaml": "test_entity:\n  instance_key: text\n",
-		"review/schema.yaml":             "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"review/manifest.yaml":           "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"review/schema.yaml":             "instance: instance_key\nstages:\n  created: {}\n",
 		"review/entities.yaml":           "test_entity:\n  instance_key: text\n",
 	})
 	source := semanticview.Wrap(bundle)

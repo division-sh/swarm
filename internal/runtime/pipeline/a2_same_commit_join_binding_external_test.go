@@ -314,8 +314,8 @@ func a2SameCommitWitnessState(t *testing.T, witness a2SameCommitMutationWitness)
 
 func a2SameCommitJoinBindingFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml": `name: a2-same-commit-join-binding
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   dispatching: {}
   awaiting: {}
   ready: {final: true}
