@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -59,37 +60,64 @@ func TestRunCommandRequiresRunningServe(t *testing.T) {
 	}
 }
 
-func TestRunCommandRejectsUnverifiableLocalSelectorsBeforePublication(t *testing.T) {
+func TestRunCommandPositionalSourceUsesCanonicalBundleIdentity(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		http.Error(w, "must not contact an unrelated deployment", http.StatusInternalServerError)
-	}))
-	defer server.Close()
+	root := t.TempDir()
+	source := filepath.Join(RepoRoot(), "examples", "routing", "root-ingress")
+	_, bundle, _, err := loadConfiguredCLIWorkflowModule(root, CLISourcePathOptions{SourceRoot: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directoryHash := bundle.SourceArtifact.BundleHash()
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
-	for _, selector := range [][]string{
-		{"other-dir"},
-		{"--backend", "claude_cli"},
-		{"--backend="},
-		{"--mcp-port", "9000"},
-		{"other-dir", "--api-port", strings.TrimPrefix(server.URL, "http://127.0.0.1:")},
-	} {
-		t.Run(strings.Join(selector, " "), func(t *testing.T) {
-			args := append([]string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, selector...)
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRunCommandOptions(server))
-			if code != 2 || stdout.Len() != 0 {
-				t.Fatalf("code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+	for _, mismatch := range []bool{false, true} {
+		t.Run(fmt.Sprint(mismatch), func(t *testing.T) {
+			servedHash := directoryHash
+			if mismatch {
+				servedHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
 			}
-			for _, want := range []string{"local hosting is no longer supported", "--connect", "--api-port"} {
-				if !strings.Contains(stderr.String(), want) {
-					t.Fatalf("stderr=%q, want %q", stderr.String(), want)
+			var starts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				if req.Method == "health.check" {
+					health := runCommandHealthResult()
+					health["bundle"].(map[string]any)["bundle_hash"] = servedHash
+					writeJSONRPCResult(t, w, req.ID, health)
+					return
+				}
+				starts.Add(1)
+				if req.Method != "run.start" || req.Params["bundle_hash"] != directoryHash {
+					t.Errorf("request=%+v, want run.start with directory hash %s", req, directoryHash)
+				}
+				if mismatch {
+					writeRunCommandJSONRPCError(t, w, req.ID, "BUNDLE_MISMATCH")
+					return
+				}
+				writeJSONRPCResult(t, w, req.ID, runStartCommandResult("9d4ee136-7965-50e5-9111-821facf546b7", "running"))
+			}))
+			defer server.Close()
+			args := []string{"run", "start", source, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}
+			if mismatch {
+				args = append(args, "--connect", server.URL)
+			}
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), root, args, &stdout, &stderr, testRunCommandOptions(server))
+			wantCode := 0
+			if mismatch {
+				wantCode = 6
+				for _, want := range []string{directoryHash, servedHash, "BUNDLE_MISMATCH", "restart swarm serve", "re-admit edited source"} {
+					if !strings.Contains(stderr.String(), want) {
+						t.Fatalf("stderr=%q, want %q", stderr.String(), want)
+					}
 				}
 			}
-			if got := requests.Load(); got != 0 {
-				t.Fatalf("unverifiable selector contacted an unrelated deployment: %d requests", got)
+			if code != wantCode || starts.Load() != 1 {
+				t.Fatalf("code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 			}
 		})
 	}
@@ -275,9 +303,14 @@ func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"--data", "Fused immutable data import", "--pin", "Exact data version pin", "--backend", "openai_responses", "--timeout", "10m0s", "0 waits indefinitely"} {
+	for _, want := range []string{"--data", "Fused immutable data import", "--pin", "Exact data version pin", "--timeout", "10m0s", "0 waits indefinitely"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("run help missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, retired := range []string{"--backend", "--mcp-port"} {
+		if strings.Contains(stdout.String(), retired) {
+			t.Fatalf("run help retains retired flag %q", retired)
 		}
 	}
 }
@@ -1221,22 +1254,20 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "retired bundle flag rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, retiredBundleIdentityFlag(), "sha256:BAD"}, wantCode: 2, wantStderr: "unknown flag"},
 		{name: "reattach rejects bundle hash", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "unknown flag: --bundle-hash"},
 		{name: "reattach refuses missing config before effects", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "read swarm.yaml config"},
-		{name: "reattach rejects backend flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --backend"},
+		{name: "reattach rejects retired backend flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "unknown flag: --backend"},
 		{name: "reattach rejects local source", token: "test-token", args: []string{"run", "start", "contracts", "--connect", "http://127.0.0.1:1", "--reattach", "run-1"}, wantCode: 2, wantStderr: "a source directory cannot be used with --reattach"},
 		{name: "reattach rejects data flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--data", "reference-data"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --data"},
 		{name: "platform spec retired on reattach", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "unknown flag: --platform-spec"},
 		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
 		{name: "blank data rejected", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--data", " "}, wantCode: 2, wantStderr: "--data must be name=file.jsonl"},
 		{name: "api port zero rejected when explicit", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "0"}, wantCode: 2, wantStderr: "--api-port must be between 1 and 65535"},
-		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with MCP listener 127.0.0.1:8082"},
-		{name: "mcp port zero rejected when explicit", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "0"}, wantCode: 2, wantStderr: "--mcp-port must be between 1 and 65535"},
-		{name: "api port rejects custom mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "9000", "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--api-port 9000 conflicts with MCP listener 127.0.0.1:9000"},
+		{name: "retired mcp port rejected", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "0"}, wantCode: 2, wantStderr: "unknown flag: --mcp-port"},
+		{name: "api target rejects retired mcp selector", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "9000", "--mcp-port", "9000"}, wantCode: 2, wantStderr: "unknown flag: --mcp-port"},
 		{name: "connect refuses missing config before effects", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "read swarm.yaml config"},
-		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
-		{name: "connect rejects local source", token: "test-token", args: []string{"run", "start", "contracts", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "a source directory requires local foreground mode"},
+		{name: "connect rejects retired backend flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "unknown flag: --backend"},
 		{name: "platform spec retired on connect", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "unknown flag: --platform-spec"},
 		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
-		{name: "connect rejects mcp port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port requires local foreground mode"},
+		{name: "connect rejects retired mcp port flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "unknown flag: --mcp-port"},
 		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},
 		{name: "connect rejects unsupported scheme", token: "test-token", args: []string{"run", "start", "--connect", "ftp://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect must use http or https"},
 		{name: "missing explicit token for non-loopback exits four", args: []string{"run", "start", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "API token source is required"},

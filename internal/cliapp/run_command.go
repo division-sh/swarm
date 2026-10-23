@@ -60,23 +60,24 @@ const (
 )
 
 type runCommandOptions struct {
-	apiOptions     rootCommandOptions
-	eventName      string
-	payloadPath    string
-	connectURL     string
-	noFollow       bool
-	timeout        time.Duration
-	reattachRunID  string
-	configPath     string
-	backend        string
-	sourceRoot     string
-	dataImports    []string
-	dataPins       []string
-	idempotencyKey string
-	runID          string
-	apiPort        int
-	mcpPort        int
-	changedFlags   map[string]bool
+	apiOptions       rootCommandOptions
+	eventName        string
+	payloadPath      string
+	connectURL       string
+	noFollow         bool
+	timeout          time.Duration
+	reattachRunID    string
+	configPath       string
+	backend          string
+	sourceRoot       string
+	sourceBundleHash string
+	dataImports      []string
+	dataPins         []string
+	idempotencyKey   string
+	runID            string
+	apiPort          int
+	mcpPort          int
+	changedFlags     map[string]bool
 }
 
 type runStartResult struct {
@@ -199,14 +200,12 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", defaultRunCommandTimeout, "Maximum time to follow after publication; 0 waits indefinitely; expiry never cancels work")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", deploymentConfigFlagHelp)
-	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Fused immutable data import and pin: name=file.jsonl (repeatable)")
 	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Exact data version pin: name@head, name@vN, or name@ResourceVersionID (repeatable)")
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
-	cmd.Flags().IntVar(&opts.apiPort, "api-port", 0, "Local API listener port for local foreground startup")
-	cmd.Flags().IntVar(&opts.mcpPort, "mcp-port", 0, "Reserved local MCP port for local foreground startup")
+	cmd.Flags().IntVar(&opts.apiPort, "api-port", 0, "API port of the running serve to target")
 	return cmd
 }
 
@@ -253,6 +252,13 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
 	}
+	if strings.TrimSpace(opts.sourceRoot) != "" {
+		_, bundle, _, err := loadConfiguredCLIWorkflowModule(root.Path(), CLISourcePathOptions{SourceRoot: opts.sourceRoot, ConfigPath: opts.configPath})
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		opts.sourceBundleHash = bundle.SourceArtifact.BundleHash()
+	}
 
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
@@ -271,6 +277,13 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 	traceReplaySince := time.Now().UTC()
 	start, err := runCommandStart(ctx, root, client, health, opts, payload)
 	if err != nil {
+		var rpcErr *jsonRPCError
+		if opts.sourceBundleHash != "" && errors.As(err, &rpcErr) {
+			switch applicationErrorCode(rpcErr.Data) {
+			case "BUNDLE_MISMATCH", "BUNDLE_UNAVAILABLE", "BUNDLE_DATA_INTEGRITY_ERROR":
+				err = fmt.Errorf("source directory %q requested bundle hash %s; served bundle hash %s: %w; restart swarm serve with that directory to re-admit edited source, or select the matching serve with --connect/--api-port", opts.sourceRoot, opts.sourceBundleHash, health.Bundle.BundleHash, err)
+			}
+		}
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
@@ -297,9 +310,6 @@ func (o runCommandOptions) validate() error {
 	if o.apiPort < 0 || o.apiPort > 65535 || (o.changedFlags["api-port"] && o.apiPort == 0) {
 		return fmt.Errorf("--api-port must be between 1 and 65535")
 	}
-	if o.mcpPort < 0 || o.mcpPort > 65535 || (o.changedFlags["mcp-port"] && o.mcpPort == 0) {
-		return fmt.Errorf("--mcp-port must be between 1 and 65535")
-	}
 	for _, value := range o.dataImports {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("--data must be name=file.jsonl")
@@ -308,19 +318,6 @@ func (o runCommandOptions) validate() error {
 	for _, value := range o.dataPins {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("--pin must be name@head, name@vN, or name@ResourceVersionID")
-		}
-	}
-	if o.changedFlags["api-port"] {
-		effectiveMCPAddr := defaultMCPListenAddr
-		if o.changedFlags["mcp-port"] {
-			effectiveMCPAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(o.mcpPort))
-		}
-		_, mcpPort, err := net.SplitHostPort(effectiveMCPAddr)
-		if err != nil {
-			return fmt.Errorf("MCP listener address %q is invalid: %w", effectiveMCPAddr, err)
-		}
-		if strconv.Itoa(o.apiPort) == mcpPort {
-			return fmt.Errorf("--api-port %d conflicts with MCP listener %s", o.apiPort, effectiveMCPAddr)
 		}
 	}
 	if o.noFollow && strings.TrimSpace(o.reattachRunID) != "" {
@@ -333,7 +330,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"backend", "data", "pin", "api-port", "mcp-port"} {
+		for _, flag := range []string{"data", "pin", "api-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -341,16 +338,11 @@ func (o runCommandOptions) validate() error {
 		return nil
 	}
 	if strings.TrimSpace(o.connectURL) != "" {
-		if strings.TrimSpace(o.sourceRoot) != "" {
-			return fmt.Errorf("a source directory requires local foreground mode and cannot be used with --connect")
-		}
-		for _, flag := range []string{"backend", "api-port", "mcp-port"} {
+		for _, flag := range []string{"api-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}
 		}
-	} else if strings.TrimSpace(o.sourceRoot) != "" || o.changedFlags["backend"] || o.changedFlags["mcp-port"] {
-		return fmt.Errorf("local hosting is no longer supported by run start; omit the source directory, --backend and --mcp-port, and use --connect or --api-port to target a running serve")
 	}
 	hasEvent := strings.TrimSpace(o.eventName) != ""
 	hasPayload := strings.TrimSpace(o.payloadPath) != ""
@@ -652,6 +644,9 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 	bundleHash := strings.TrimSpace(health.Bundle.BundleHash)
 	if binding != nil {
 		bundleHash = binding.BundleHash
+	}
+	if opts.sourceBundleHash != "" {
+		bundleHash = opts.sourceBundleHash
 	}
 	if bundleHash != "" {
 		params["bundle_hash"] = bundleHash
