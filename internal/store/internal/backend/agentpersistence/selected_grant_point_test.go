@@ -30,6 +30,9 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 				t.Cleanup(func() { _ = db.Close() })
 			}
 			db.SetMaxOpenConns(1)
+			if backend == "postgres" {
+				db.SetMaxOpenConns(2)
+			}
 			for _, ddl := range []string{
 				`CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)`,
 				`CREATE TABLE run_fork_selected_contract_bindings (
@@ -86,15 +89,17 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 						t.Fatalf("exact %s point refused: row=%+v err=%v", arm.kind, row, err)
 					}
 					if want && backend == "postgres" {
-						reader, err := db.BeginTx(ctx, nil)
+						readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+						defer cancel()
+						reader, err := db.BeginTx(readCtx, nil)
 						if err != nil {
 							t.Fatal(err)
 						}
 						defer reader.Rollback()
-						if _, err := reader.ExecContext(ctx, `SET LOCAL lock_timeout='250ms'`); err != nil {
+						if _, err := reader.ExecContext(readCtx, `SET LOCAL lock_timeout='250ms'`); err != nil {
 							t.Fatal(err)
 						}
-						if _, err := loadSelectedForkGrantExecutionTx(ctx, reader, binding, false); err != nil {
+						if _, err := loadSelectedForkGrantExecutionTx(readCtx, reader, binding, false); err != nil {
 							t.Fatalf("concurrent selected generation proof required an exclusive lock: %v", err)
 						}
 					}

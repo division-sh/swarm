@@ -508,7 +508,7 @@ func loadSelectedForkGrantExecutionTx(ctx context.Context, tx *sql.Tx, binding s
 		query += ` AND execution.lease_expires_at > $2`
 		args = append(args, time.Now().UTC())
 	} else {
-		query += ` AND execution.lease_expires_at > CURRENT_TIMESTAMP FOR UPDATE OF execution, binding, run`
+		query += ` AND execution.lease_expires_at > CURRENT_TIMESTAMP FOR SHARE OF execution, binding, run`
 	}
 	row := selectedForkGrantExecutionRow{Binding: startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}}
 	err := tx.QueryRowContext(ctx, query, args...).Scan(
