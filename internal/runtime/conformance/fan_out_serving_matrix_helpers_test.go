@@ -300,9 +300,11 @@ func (f *servingMatrixFixture) startRun(t *testing.T, runtimeIndex int) (context
 	runID := uuid.NewString()
 	ctx := correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), rt.sourceArtifactFact), runID)
 	if !f.started[runtimeIndex] {
-		if err := rt.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-serving-matrix", rt.sourceArtifactFact)); err != nil {
+
+		if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-serving-matrix", rt.sourceArtifactFact), rt.bus, rt.manager); err != nil {
 			t.Fatalf("run serving matrix manager: %v", err)
 		}
+
 		f.started[runtimeIndex] = true
 	}
 	publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, f.sources[runtimeIndex], runID, "portfolio.opened", map[string]any{"portfolio_id": runID, "threshold": 75})

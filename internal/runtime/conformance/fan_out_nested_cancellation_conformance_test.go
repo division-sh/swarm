@@ -82,9 +82,11 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			rt.bus.SetRunDispatchGate(controller)
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), rt.sourceArtifactFact), runID)
-			if err := rt.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "nested-held-child-stop", rt.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "nested-held-child-stop", rt.sourceArtifactFact), rt.bus, rt.manager); err != nil {
 				t.Fatal(err)
 			}
+
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
 			accounts := []string{"sibling-c", "sibling-a", "sibling-b"}
 			publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})
