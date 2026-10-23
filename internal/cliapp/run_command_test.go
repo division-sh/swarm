@@ -1348,6 +1348,7 @@ func TestRunCommandMapsRPCAndMalformedFailures(t *testing.T) {
 type runCommandServerOptions struct {
 	rpcResponder         func(jsonRPCRequest, int) map[string]any
 	wsRows               []map[string]any
+	wsRowsReady          <-chan struct{}
 	wsSubscribed         chan struct{}
 	wsRequestRead        chan struct{}
 	wsClosed             chan struct{}
@@ -1462,6 +1463,13 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 			if opts.wsAbruptClose {
 				_ = conn.UnderlyingConn().Close()
 				return
+			}
+			if opts.wsRowsReady != nil {
+				select {
+				case <-opts.wsRowsReady:
+				case <-r.Context().Done():
+					return
+				}
 			}
 			for _, row := range opts.wsRows {
 				method := opts.wsNotificationMethod

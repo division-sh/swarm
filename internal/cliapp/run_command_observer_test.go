@@ -844,6 +844,87 @@ func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T
 	}
 }
 
+func TestRunCommandBlockedForegroundCannotHideObserverOverflow(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	payload := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	const runID = "a310030f-840b-59b7-b13c-e7d56e8c355c"
+	for _, blockedAt := range []string{"diagnosis", "settled_summary"} {
+		t.Run(blockedAt, func(t *testing.T) {
+			stdout := newBlockingRunWriter("Run " + runID + ":")
+			if blockedAt == "diagnosis" {
+				stdout = newBlockingTraceWriter()
+			}
+			warning := newBlockingRunWriter(string(runTraceDetachQueueOverflow))
+			diagnosisEntered, releaseDiagnosis := make(chan struct{}), make(chan struct{})
+			releaseRows := make(chan struct{})
+			rows := make([]map[string]any, 64)
+			for i := range rows {
+				rows[i] = validRunCommandTraceRow(fmt.Sprintf("evt-blocked-foreground-%03d", i))
+			}
+			server, _, _ := newRunCommandServer(t, runCommandServerOptions{
+				rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+					switch req.Method {
+					case "health.check":
+						return runCommandHealthResult()
+					case "run.start":
+						return runStartCommandResult(runID, "running")
+					case "run.stop":
+						return map[string]any{"ok": true}
+					case "run.diagnose":
+						if blockedAt == "diagnosis" {
+							close(diagnosisEntered)
+							<-releaseDiagnosis
+						}
+						result := runCommandReadResult(req.Method, validDiagnosticRunHeader(runID))
+						work := result["test_quiescence"].(map[string]any)
+						work["ready"], work["active_deliveries"] = true, 0
+						return result
+					default:
+						t.Errorf("unexpected method %s", req.Method)
+						return nil
+					}
+				},
+				wsRows: rows, wsRowsReady: releaseRows,
+			})
+			defer server.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			finished := make(chan struct{})
+			code := -1
+			go func() {
+				defer close(finished)
+				code = executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payload}, stdout, warning, testRunCommandOptions(server))
+			}()
+			defer func() {
+				cancel()
+				for _, signal := range []chan struct{}{releaseRows, releaseDiagnosis, stdout.release, warning.release} {
+					select {
+					case <-signal:
+					default:
+						close(signal)
+					}
+				}
+				requireSignal(t, finished, "foreground command cleanup")
+			}()
+			if blockedAt == "diagnosis" {
+				requireSignal(t, diagnosisEntered, "blocked diagnosis")
+			} else {
+				requireSignal(t, stdout.blocked, "blocked final summary")
+			}
+			close(releaseRows)
+			requireSignal(t, warning.blocked, "overflow while foreground is blocked")
+			close(releaseDiagnosis)
+			close(stdout.release)
+			close(warning.release)
+			requireSignal(t, finished, "foreground command completion")
+			if code != 0 {
+				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), warning.String())
+			}
+			fact := requireSingleRunTraceDetachFact(t, warning.String())
+			assertRunTraceDetachFact(t, fact, runTraceDetachQueueOverflow, runID, "swarm run start --connect "+server.URL+" --reattach "+runID)
+		})
+	}
+}
+
 func TestRunTraceObserverDetachedFactTTYAndNonTTYParity(t *testing.T) {
 	fact := runTraceObserverDetachedFact{
 		Type:            runTraceObserverDetachedType,

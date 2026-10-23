@@ -153,7 +153,6 @@ type foregroundRunTraceObserver struct {
 }
 
 type foregroundRunTraceRenderer struct {
-	detached     chan runTraceObserverDetachedFact
 	rowsStop     chan struct{}
 	rowsDone     chan struct{}
 	rowsStopOnce sync.Once
@@ -794,35 +793,18 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		replaySince,
 		opts.apiOptions.runTraceAttachTimeout,
 	)
-	renderer := startForegroundRunTraceRenderer(out, errOut, observer.rows)
-	defer func() {
-		observer.stop()
-		renderer.stop()
-	}()
-	detached := observer.detached
-	reportDetach := func(det runTraceDetach) {
-		renderer.enqueueDetached(runTraceObserverDetachedFact{
-			Type:            runTraceObserverDetachedType,
-			Severity:        runTraceObserverWarning,
-			ReasonCode:      det.reason,
-			RunID:           runID,
-			RunContinues:    true,
-			ReattachCommand: runCommandReattachGuidance(runID, client),
-			Message:         det.message,
-		})
-		detached = nil
-	}
+	renderer := startForegroundRunTraceRenderer(out, errOut, observer, runTraceObserverDetachedFact{
+		Type:            runTraceObserverDetachedType,
+		Severity:        runTraceObserverWarning,
+		RunID:           runID,
+		RunContinues:    true,
+		ReattachCommand: runCommandReattachGuidance(runID, client),
+	})
 	settleObservation := func() {
-		// Keep transport overflow observable until the current output write joins.
-		renderer.stopRows(detached, reportDetach)
 		observer.stop()
-		select {
-		case det := <-detached:
-			reportDetach(det)
-		default:
-		}
 		renderer.stop()
 	}
+	defer settleObservation()
 	var lastDiagnosis *DiagnosticRunDiagnosisResult
 	timeout := func() error {
 		settleObservation()
@@ -833,19 +815,11 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	}
 	for {
 		select {
-		case det := <-detached:
-			reportDetach(det)
-			continue
-		default:
-		}
-		select {
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return timeout()
 			}
 			return interruptRunCommand(errOut, client, runID, stopOnInterrupt, settleObservation)
-		case det := <-detached:
-			reportDetach(det)
 		case <-pollTimer.C:
 			pollTimer.Reset(poll)
 			run, diagnosis, ready, err := readRunCommandFollowState(ctx, client, opts, runID)
@@ -861,7 +835,8 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 			if !ready {
 				continue
 			}
-			settleObservation()
+			// Keep transport/error observation alive until final output has joined.
+			renderer.stopRows()
 			err = writeRunCommandFollowResult(ctx, out, errOut, client, run, diagnosis, publication)
 			if errors.Is(err, context.DeadlineExceeded) {
 				return timeout()
@@ -953,9 +928,8 @@ func writeRunCommandStageCounts(out io.Writer, diagnosis DiagnosticRunDiagnosisR
 	fmt.Fprintf(out, "Run %s: %s\n", diagnosis.Run.RunID, strings.Join(parts, " | "))
 }
 
-func startForegroundRunTraceRenderer(out, errOut io.Writer, rows <-chan diagnosticRunTraceRow) *foregroundRunTraceRenderer {
+func startForegroundRunTraceRenderer(out, errOut io.Writer, observer *foregroundRunTraceObserver, fact runTraceObserverDetachedFact) *foregroundRunTraceRenderer {
 	renderer := &foregroundRunTraceRenderer{
-		detached: make(chan runTraceObserverDetachedFact, 1),
 		rowsStop: make(chan struct{}),
 		rowsDone: make(chan struct{}),
 	}
@@ -973,7 +947,7 @@ func startForegroundRunTraceRenderer(out, errOut io.Writer, rows <-chan diagnost
 			select {
 			case <-renderer.rowsStop:
 				return
-			case row, ok := <-rows:
+			case row, ok := <-observer.rows:
 				if !ok {
 					return
 				}
@@ -983,32 +957,18 @@ func startForegroundRunTraceRenderer(out, errOut io.Writer, rows <-chan diagnost
 	}()
 	go func() {
 		defer renderer.workers.Done()
-		for fact := range renderer.detached {
+		for det := range observer.detached {
+			fact.ReasonCode = det.reason
+			fact.Message = det.message
 			writeRunTraceObserverDetached(errOut, fact)
 		}
 	}()
 	return renderer
 }
 
-func (r *foregroundRunTraceRenderer) enqueueDetached(fact runTraceObserverDetachedFact) {
-	select {
-	case r.detached <- fact:
-	default:
-		panic("foreground run trace renderer received more than one detach fact")
-	}
-}
-
-func (r *foregroundRunTraceRenderer) stopRows(detached <-chan runTraceDetach, reportDetach func(runTraceDetach)) {
+func (r *foregroundRunTraceRenderer) stopRows() {
 	r.rowsStopOnce.Do(func() { close(r.rowsStop) })
-	for {
-		select {
-		case <-r.rowsDone:
-			return
-		case det := <-detached:
-			reportDetach(det)
-			detached = nil
-		}
-	}
+	<-r.rowsDone
 }
 
 func (r *foregroundRunTraceRenderer) stop() {
@@ -1016,8 +976,7 @@ func (r *foregroundRunTraceRenderer) stop() {
 		return
 	}
 	r.stopOnce.Do(func() {
-		r.stopRows(nil, nil)
-		close(r.detached)
+		r.stopRows()
 		r.workers.Wait()
 	})
 }
@@ -1033,6 +992,7 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 	go func() {
 		defer close(done)
 		defer close(rows)
+		defer close(detached)
 
 		attachCtx, cancelAttach := context.WithTimeout(observerCtx, attachTimeout)
 		sub, err := subscribeRunTrace(attachCtx, wsEndpoint, token, runID, replaySince, nil)
