@@ -40,7 +40,7 @@ import (
 func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFrontier(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
 	eventID := uuid.NewString()
@@ -53,6 +53,7 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	}
 
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, request.SourceArtifactFact)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)

@@ -136,16 +136,6 @@ func TestFanOutClosingSourceHeadRefreshPreservesHealthyProgressBothStores(t *tes
 			case <-time.After(5 * time.Second):
 				t.Fatal("current B did not commit after source refresh")
 			}
-			b.Close()
-			if observed := read(); observed != fanoutobligation.UnavailableRuntimeReadback() {
-				t.Fatalf("joined current B retained a runtime observation: %+v", observed)
-			}
-			if permit, found, err := b.BeginTurn(ctx); err == nil || err.Error() != "fan-out serving registration is retired" || found || permit != nil {
-				if permit != nil {
-					permit.Done()
-				}
-				t.Fatalf("joined current B admitted a turn: found=%v err=%v", found, err)
-			}
 			if err := grants[0].ProveCurrent(ctx); err == nil {
 				t.Fatal("off-head A retained current execution authority")
 			}
@@ -199,8 +189,18 @@ func TestFanOutClosingSourceHeadRefreshPreservesHealthyProgressBothStores(t *tes
 					}
 				})
 			}
-			if observed := read(); observed.Reason != "registration_closing" || observed.Eligible == nil || *observed.Eligible {
+			if observed := read(); observed.Availability != "available" || observed.Reason != "intent_closed" || observed.Eligible == nil || *observed.Eligible || observed.Validate() != nil {
 				t.Fatalf("restored complete census did not recover: %+v", observed)
+			}
+			b.Close()
+			if observed := read(); observed != fanoutobligation.UnavailableRuntimeReadback() {
+				t.Fatalf("joined current B retained a runtime observation: %+v", observed)
+			}
+			if permit, found, err := b.BeginTurn(ctx); err == nil || err.Error() != "fan-out serving registration is retired" || found || permit != nil {
+				if permit != nil {
+					permit.Done()
+				}
+				t.Fatalf("joined current B admitted a turn: found=%v err=%v", found, err)
 			}
 			t.Log("validated retained off-head A; current B selected, committed cursor1/outcome1 and remained observable; A authority/claim/turn refused")
 		})
