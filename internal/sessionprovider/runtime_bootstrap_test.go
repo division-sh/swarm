@@ -211,6 +211,21 @@ func (f *runtimeBootstrapFixture) AwaitSessionBootstrap(ctx context.Context, _ c
 	}
 	return f.connection.CheckBootstrap(ctx)
 }
+func (f *runtimeBootstrapFixture) VerifyRegistration(ctx context.Context, op channelonboarding.Operation) (bool, error) {
+	return f.connection.VerifyDeploymentRegistration(ctx, op)
+}
+
+func (f *runtimeBootstrapFixture) LogoutRegistration(ctx context.Context, original, retired channelonboarding.Operation) error {
+	if err := f.connection.LogoutDeploymentRegistration(ctx, original, retired); err != nil {
+		return err
+	}
+	return f.connection.Close(ctx)
+}
+
+func (f *runtimeBootstrapFixture) CloseRegistration(ctx context.Context, _ channelonboarding.Operation) error {
+	return f.connection.Close(ctx)
+}
+
 func (f *runtimeBootstrapFixture) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	if f.connection == nil {
 		return channelonboarding.PairingReadback{Status: "not_started"}, nil

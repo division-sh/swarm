@@ -1983,6 +1983,23 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 	}
 	identityKind := operatorchannel.OperationConnect
 	expectedRevision := op.ConnectFenceRevision
+	if op.DeploymentRegistration {
+		fence, err := s.identities.RetainedBindingFence(ctx, op.Interface)
+		if err != nil && !errors.Is(err, operatorchannel.ErrNotFound) {
+			return op, false, err
+		}
+		expectedRevision = fence.Revision
+		binding, err := s.identities.RetainedCurrentBinding(ctx, op.Interface)
+		if err != nil && !errors.Is(err, operatorchannel.ErrNotFound) && !errors.Is(err, operatorchannel.ErrBindingUnavailable) {
+			return op, false, err
+		}
+		if err == nil && binding.Status == operatorchannel.BindingCurrent {
+			if binding.ProviderAuthority.Scope != authority.DeploymentParent {
+				return op, false, fmt.Errorf("%w: existing development pairing must be logged out and connected again", ErrConflict)
+			}
+			identityKind = operatorchannel.OperationRebind
+		}
+	}
 	boundCredentialRestart := op.Phase == PhaseAwaitingExternalIdentity && op.BindingRevision > 0
 	if boundCredentialRestart {
 		binding, bindingErr := s.identities.RetainedCurrentBinding(ctx, op.Interface)
@@ -2490,6 +2507,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 		return result, err
 	}
 	if op.DeploymentRegistration {
+		result.projectInitialSessionPreparation()
 		return result, ctx.Err()
 	}
 	readinessCandidate := historicalCandidate(op)

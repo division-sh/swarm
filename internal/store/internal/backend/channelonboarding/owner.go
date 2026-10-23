@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -378,6 +377,12 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			}
 			op.AccountConfirmed = true
 		}
+		if req.CompleteDeploymentLogout {
+			if !op.DeploymentRegistration || op.Phase != domain.PhaseRetired || op.FailureCode != "account_logout_pending" {
+				return domain.ErrInvalidRequest
+			}
+			op.LogoutCompleted, op.FailureCode, op.FailureMessage = true, "", ""
+		}
 		if req.ReplaceCredentialAdmissions {
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)
 		}
@@ -446,7 +451,17 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 
 func validTransition(op domain.Operation, req domain.AdvanceRequest) bool {
 	if op.DeploymentRegistration {
-		if req.RebindCoordinate != nil || req.SourceRollover != nil || req.BeginOperatorEnrollment || req.Phase == domain.PhasePublishingActivation ||
+		if req.Phase == domain.PhaseRetired {
+			return !req.BeginOperatorEnrollment && req.RebindCoordinate == nil && req.SourceRollover == nil &&
+				(req.CompleteDeploymentLogout && op.Phase == domain.PhaseRetired && !op.LogoutCompleted && op.FailureCode == "account_logout_pending" ||
+					op.Phase != domain.PhaseRetired && req.FailureCode == "account_logout_pending" ||
+					op.Phase == domain.PhaseSucceeded && op.AccountConfirmed && req.FailureCode == "native_account_revoked")
+		}
+		if req.BeginOperatorEnrollment {
+			return op.Phase == domain.PhaseSucceeded && op.AccountConfirmed && op.IdentityOperationID == "" &&
+				req.Phase == domain.PhaseAwaitingExternalIdentity && req.RebindCoordinate == nil && req.SourceRollover == nil
+		}
+		if req.RebindCoordinate != nil || req.SourceRollover != nil || req.Phase == domain.PhasePublishingActivation ||
 			req.Phase == domain.PhasePublishingProcessActivation || req.Phase == domain.PhasePromotingRegistration || req.Phase == domain.PhaseRetiringPredecessor || req.Phase == domain.PhaseDeliveringConfirmation {
 			return false
 		}
@@ -985,7 +1000,7 @@ const operationSelect = `SELECT operation_id,request_key_hash,request_hash,slot_
 	bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
 	target_selector,target_generation,activation_posture,identity_ceremony,phase,operation_revision,save_proof,client_language,client_locale_revision,
 	credential_reservations,credential_admissions,session_connection_id,session_account_admission,identity_operation_id,binding_revision,connect_fence_revision,activation_revision,confirmation_operation_id,
-	failure_code,failure_message,requested_at,updated_at,completed_at,FALSE,'','',FALSE FROM channel_onboarding_operations`
+	failure_code,failure_message,requested_at,updated_at,completed_at,FALSE,'','',FALSE,FALSE FROM channel_onboarding_operations`
 
 func loadOperationByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool, deployment ...bool) (domain.Operation, bool, error) {
 	query := operationQuery(len(deployment) == 1 && deployment[0]) + ` WHERE request_key_hash=?`
@@ -1029,7 +1044,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 		&op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration,
 		&op.Coordinate.BundleHash, &op.Coordinate.BundleIdentity, &op.Coordinate.PackInventoryGeneration, &op.Coordinate.RuntimeInstanceID, &op.Coordinate.ContextPublicationGeneration, &planGeneration,
 		&op.TargetSelector, &op.Coordinate.TargetGeneration, &posture, &ceremony, &phase, &op.Revision, &op.SaveProof, &op.ClientLanguage, &op.ClientLocaleRevision,
-		&reservations, &admissions, &connection, &session, &identityOp, &bindingRevision, &op.ConnectFenceRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed, &op.DeploymentRegistration, &op.AccountReference, &op.ExpectedAccount, &op.AccountConfirmed)
+		&reservations, &admissions, &connection, &session, &identityOp, &bindingRevision, &op.ConnectFenceRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed, &op.DeploymentRegistration, &op.AccountReference, &op.ExpectedAccount, &op.AccountConfirmed, &op.LogoutCompleted)
 	if err == sql.ErrNoRows {
 		return domain.Operation{}, false, nil
 	}
@@ -1055,7 +1070,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	if err := json.Unmarshal([]byte(reservations), &op.CredentialReservations); err != nil {
 		return domain.Operation{}, false, err
 	}
-	if op.CredentialAdmissions, err = unmarshalCredentialAdmissions(admissions); err != nil {
+	if op.CredentialAdmissions, err = domain.DecodeCredentialAdmissions(admissions); err != nil {
 		return domain.Operation{}, false, err
 	}
 	if op.SessionAccount, err = unmarshalSessionAccount(session); err != nil {
@@ -1101,7 +1116,7 @@ func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Opera
 		nullable(c.BundleHash), c.BundleIdentity, c.PackInventoryGeneration, nullable(c.RuntimeInstanceID), c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(), c.TargetGeneration,
 		op.SlotKey, string(op.Phase), op.Revision, string(admissions), session, nullable(op.IdentityOperationID), nullableInt(op.BindingRevision), nullableInt(op.ActivationRevision), nullable(op.ConfirmationOperationID), nullable(op.FailureCode), nullable(op.FailureMessage), op.UpdatedAt, nullableTime(op.CompletedAt), op.OperationID)
 	if err == nil && op.DeploymentRegistration {
-		_, err = tx.ExecContext(ctx, d.bind(`UPDATE deployment_channel_operations SET account_reference=?,account_confirmed=? WHERE operation_id=?`), op.AccountReference, op.AccountConfirmed, op.OperationID)
+		_, err = tx.ExecContext(ctx, d.bind(`UPDATE deployment_channel_operations SET account_reference=?,account_confirmed=?,logout_completed=? WHERE operation_id=?`), op.AccountReference, op.AccountConfirmed, op.LogoutCompleted, op.OperationID)
 	}
 	return err
 }
@@ -1197,7 +1212,7 @@ func scanActivationRow(row rowScanner) (domain.ConnectedChannelActivation, bool,
 	}
 	a.Posture, a.Status = domain.ActivationPosture(posture), domain.ActivationStatus(status)
 	a.ProofID, a.ProofRevision, a.RetirementReason = proofID.String, proofRevision.Int64, retirement.String
-	if a.CredentialAdmissions, err = unmarshalCredentialAdmissions(admissions); err != nil {
+	if a.CredentialAdmissions, err = domain.DecodeCredentialAdmissions(admissions); err != nil {
 		return a, false, err
 	}
 	if a.SessionAccount, err = unmarshalSessionAccount(session); err != nil {
@@ -1219,13 +1234,7 @@ func scanActivationRow(row rowScanner) (domain.ConnectedChannelActivation, bool,
 	return a, true, nil
 }
 
-type credentialAdmissionRecord struct {
-	Role      string                         `json:"role"`
-	StoreKey  string                         `json:"store_key"`
-	Kind      domain.CredentialAdmissionKind `json:"kind"`
-	Receipt   string                         `json:"receipt,omitempty"`
-	ValueSeal string                         `json:"value_seal"`
-}
+type credentialAdmissionRecord = domain.CredentialAdmissionRecord
 
 func marshalActivationAdmissions(admissions []domain.CredentialAdmission, account operatorchannel.SessionAccountAdmission) ([]byte, any, error) {
 	credentials, err := marshalCredentialAdmissions(admissions)
@@ -1289,29 +1298,6 @@ func marshalCredentialAdmissions(admissions []domain.CredentialAdmission) ([]byt
 		})
 	}
 	return json.Marshal(records)
-}
-
-func unmarshalCredentialAdmissions(raw string) ([]domain.CredentialAdmission, error) {
-	var records []credentialAdmissionRecord
-	if err := json.Unmarshal([]byte(raw), &records); err != nil {
-		return nil, err
-	}
-	admissions := make([]domain.CredentialAdmission, 0, len(records))
-	for _, record := range records {
-		seal, err := runtimecredentials.ParseValueSeal(record.ValueSeal)
-		if err != nil {
-			return nil, fmt.Errorf("decode channel credential admission: %w", err)
-		}
-		admission := domain.CredentialAdmission{
-			Role: record.Role, StoreKey: record.StoreKey, Kind: record.Kind,
-			Receipt: record.Receipt, ValueSeal: seal,
-		}
-		if err := admission.Validate(); err != nil {
-			return nil, err
-		}
-		admissions = append(admissions, admission)
-	}
-	return admissions, nil
 }
 
 func scanActivation(rows *sql.Rows) (domain.ConnectedChannelActivation, error) {

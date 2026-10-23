@@ -590,6 +590,7 @@ func (r StartRequest) Validate() error {
 type Operation struct {
 	DeploymentRegistration  bool                              `json:"deployment_registration,omitempty"`
 	AccountReference        string                            `json:"account_reference,omitempty"`
+	LogoutCompleted         bool                              `json:"logout_completed,omitempty"`
 	AccountConfirmed        bool                              `json:"account_confirmed,omitempty"`
 	ExpectedAccount         string                            `json:"expected_account,omitempty"`
 	OperationID             string                            `json:"operation_id"`
@@ -627,6 +628,7 @@ type Operation struct {
 }
 
 type AdvanceRequest struct {
+	CompleteDeploymentLogout     bool
 	AccountReference             string
 	ConfirmAccount               bool
 	OperationID                  string
@@ -674,6 +676,9 @@ type PairingReadback struct {
 
 // ValidateSessionAccount checks retained provenance, not executable authority.
 func (o Operation) ValidateSessionAccount() error {
+	if o.LogoutCompleted && (!o.DeploymentRegistration || o.Phase != PhaseRetired || o.FailureCode != "") {
+		return fmt.Errorf("%w: completed deployment logout requires its retired operation", ErrInvalidRequest)
+	}
 	if o.AccountConfirmed && (!o.DeploymentRegistration || o.AccountReference == "" || o.Phase == PhasePreparing || o.Phase == PhaseCredentialsAdmitted || o.Phase == PhaseActivatingProvider) {
 		return fmt.Errorf("%w: account approval requires its deployment pairing checkpoint", ErrInvalidRequest)
 	}

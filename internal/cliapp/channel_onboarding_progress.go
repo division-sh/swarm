@@ -21,11 +21,15 @@ func startCLIChannelOnboarding(ctx context.Context, client channelControlClient,
 	err := client.call(ctx, "channel.onboarding_start", params, &result)
 	if err != nil {
 		var rpc *jsonRPCError
-		if !errors.As(err, &rpc) || applicationErrorCode(rpc.Data) != "CHANNEL_CREDENTIAL_REQUIRED" ||
+		var required *channelonboarding.CredentialRequiredError
+		if errors.As(err, &required) {
+			err = client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": required.OperationID}, &result)
+		} else if !errors.As(err, &rpc) || applicationErrorCode(rpc.Data) != "CHANNEL_CREDENTIAL_REQUIRED" ||
 			(opts.verb != "connect" && !opts.credentialStdin) {
 			return result, returnCLIAPIError(errOut, err, channelErrorClassifier())
+		} else {
+			result, err = selectedChannelCredentialReadback(ctx, client, rpc)
 		}
-		result, err = selectedChannelCredentialReadback(ctx, client, rpc)
 		if err != nil {
 			return result, returnCLIValidationError(errOut, err)
 		}
@@ -180,7 +184,7 @@ func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.Sessio
 
 func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
 	if result.Operation.DeploymentRegistration {
-		if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateSessionAccount() != nil {
+		if _, err := result.ProviderCredentialRequirement(); err != nil {
 			return false, errors.New("channel registration readback changed its deployment or account")
 		}
 	}

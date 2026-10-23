@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,47 +46,63 @@ func TestChannelCLIExplicitReplacementPrecedesStartEffects(t *testing.T) {
 }
 
 func TestChannelCLIPendingResumeReachesQRWithoutRevisionChange(t *testing.T) {
-	for _, mode := range []string{"human", "--no-color", "--json", "--quiet"} {
-		t.Run(mode, func(t *testing.T) {
-			calls := 0
-			server := newOperatorChannelCLIServer(t, func(t *testing.T, req jsonRPCRequest, call int) map[string]any {
-				calls++
-				result := sessionProgressCLIResult("whatsapp", "", "activating_provider", false)
-				if call == 0 {
-					if req.Method != "channel.onboarding_get" {
-						t.Fatal(req.Method)
+	for _, deployment := range []bool{false, true} {
+		for _, mode := range []string{"human", "--no-color", "--json", "--quiet"} {
+			t.Run(fmt.Sprintf("%s/deployment=%t", mode, deployment), func(t *testing.T) {
+				calls := 0
+				server := newOperatorChannelCLIServer(t, func(t *testing.T, req jsonRPCRequest, call int) map[string]any {
+					calls++
+					result := sessionProgressCLIResult("whatsapp", "", "activating_provider", false)
+					if deployment {
+						operation := result["operation"].(map[string]any)
+						operation["deployment_registration"] = true
+						operation["identity_ceremony"] = "account_link"
+						delete(operation, "coordinate")
+						delete(operation, "target_selector")
+						candidate := result["candidate"].(map[string]any)
+						candidate["deployment_registration"] = true
+						candidate["identity_ceremony"] = "account_link"
+						delete(candidate, "confirmation_operation")
+						delete(candidate, "coordinate")
+						delete(candidate, "target")
+						delete(candidate, "capabilities")
 					}
+					if call == 0 {
+						if req.Method != "channel.onboarding_get" {
+							t.Fatal(req.Method)
+						}
+						return result
+					}
+					if req.Method != "channel.onboarding_retry" || call != 1 {
+						t.Fatal("QR progress initiated automatic polling or another continuation", req.Method, call)
+					}
+					result["pairing"] = map[string]any{"status": "awaiting_qr", "code": "test-qr-material", "expires_at": time.Now().Add(time.Minute), "paired": false, "connected": true}
 					return result
+				})
+				args := []string{"channel", "resume", operatorChannelCLIOperation}
+				if mode != "human" {
+					args = append(args, mode)
 				}
-				if req.Method != "channel.onboarding_retry" || call != 1 {
-					t.Fatal("QR progress initiated automatic polling or another continuation", req.Method, call)
+				in := &channelCredentialInput{}
+				out, errOut, code := runChannelProgressCLI(t, server, in, args...)
+				if code != 0 || errOut != "" || calls != 2 || in.reads != 0 || strings.Contains(out, "Connected ") {
+					t.Fatal("valid QR progress became terminal failure or READY", code, out, errOut, calls, in.reads)
 				}
-				result["pairing"] = map[string]any{"status": "awaiting_qr", "code": "test-qr-material", "expires_at": time.Now().Add(time.Minute), "paired": false, "connected": true}
-				return result
+				if mode == "--quiet" {
+					if strings.TrimSpace(out) != operatorChannelCLIOperation || strings.Contains(out, "test-qr-material") {
+						t.Fatal("quiet mode disclosed QR instead of operation identity", out)
+					}
+				} else if mode == "--json" {
+					if !strings.Contains(out, "test-qr-material") {
+						t.Fatal("JSON lost the current QR material", out)
+					}
+				} else if !strings.Contains(out, "Linked Devices") || !strings.Contains(out, "\u2588") || strings.Contains(out, "test-qr-material") {
+					t.Fatal("public command did not render a QR without exposing raw pairing text", out)
+				} else if mode == "--no-color" && strings.Contains(out, "\x1b[") {
+					t.Fatal("plain QR output contained ANSI styling", out)
+				}
 			})
-			args := []string{"channel", "resume", operatorChannelCLIOperation}
-			if mode != "human" {
-				args = append(args, mode)
-			}
-			in := &channelCredentialInput{}
-			out, errOut, code := runChannelProgressCLI(t, server, in, args...)
-			if code != 0 || errOut != "" || calls != 2 || in.reads != 0 || strings.Contains(out, "Connected ") {
-				t.Fatal("valid QR progress became terminal failure or READY", code, out, errOut, calls, in.reads)
-			}
-			if mode == "--quiet" {
-				if strings.TrimSpace(out) != operatorChannelCLIOperation || strings.Contains(out, "test-qr-material") {
-					t.Fatal("quiet mode disclosed QR instead of operation identity", out)
-				}
-			} else if mode == "--json" {
-				if !strings.Contains(out, "test-qr-material") {
-					t.Fatal("JSON lost the current QR material", out)
-				}
-			} else if !strings.Contains(out, "Linked Devices") || !strings.Contains(out, "\u2588") || strings.Contains(out, "test-qr-material") {
-				t.Fatal("public command did not render a QR without exposing raw pairing text", out)
-			} else if mode == "--no-color" && strings.Contains(out, "\x1b[") {
-				t.Fatal("plain QR output contained ANSI styling", out)
-			}
-		})
+		}
 	}
 }
 

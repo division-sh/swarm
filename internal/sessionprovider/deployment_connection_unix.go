@@ -53,7 +53,7 @@ func OpenDeploymentConnection(ctx context.Context, opts DeploymentConnectionOpti
 	if opts.Trigger.Valid() && (opts.Trigger.Provider() != op.Provider || opts.Trigger.Transport() != packs.ChannelTransportSession) {
 		return nil, errPairingScope
 	}
-	work, err := opts.Process.BeginStanding(ctx)
+	work, err := opts.Process.BeginStanding(context.WithoutCancel(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -74,4 +74,59 @@ func OpenDeploymentConnection(ctx context.Context, opts DeploymentConnectionOpti
 		return c, errors.Join(err, c.Close(context.WithoutCancel(ctx)))
 	}
 	return c, nil
+}
+
+func (c *RuntimeConnection) VerifyDeploymentRegistration(ctx context.Context, expected channelonboarding.Operation) (bool, error) {
+	op, err := c.currentOperation(ctx)
+	if err != nil || !op.DeploymentRegistration || op.SessionAccount.Validate() != nil ||
+		op.Revision != expected.Revision || op.AccountReference != expected.AccountReference || op.SessionAccount != expected.SessionAccount {
+		return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
+	}
+	err = c.AwaitSessionAccount(ctx)
+	if err != nil {
+		occurrence := c.state.currentOccurrence()
+		if occurrence == nil {
+			return false, err
+		}
+		occurrence.mu.Lock()
+		revoked := occurrence.revoked != nil
+		occurrence.mu.Unlock()
+		if revoked && ctx.Err() == nil {
+			return false, nil
+		}
+		return false, err
+	}
+	account, _, err := c.AccountPresentation(ctx)
+	if account != op.AccountReference {
+		return false, errors.Join(channelonboarding.ErrConflict, err)
+	}
+	return err == nil, err
+}
+
+func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, original, retired channelonboarding.Operation) (err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	op, err := c.operations.GetChannelOnboarding(work.Context(), original.OperationID)
+	if err != nil || !c.operation.DeploymentRegistration || !original.DeploymentRegistration || !op.DeploymentRegistration ||
+		op.OperationID != c.operation.OperationID || op.OperationID != retired.OperationID || op.Revision != retired.Revision ||
+		op.Revision != original.Revision+1 || op.PrincipalID != c.operation.PrincipalID || op.PrincipalID != original.PrincipalID ||
+		op.Phase != channelonboarding.PhaseRetired || op.LogoutCompleted || op.FailureCode != "account_logout_pending" ||
+		op.SessionAccount != original.SessionAccount || op.SessionAccount != c.sessionAccount() || op.AccountReference != original.AccountReference {
+		return errors.Join(channelonboarding.ErrRevisionConflict, err)
+	}
+	occurrence := c.state.currentOccurrence()
+	if occurrence == nil || !c.state.ownsConnectedOccurrence(work.Context(), occurrence) ||
+		occurrence.client.Store.Deleted || occurrence.client.Store.ID == nil ||
+		occurrence.client.Store.ID.ToNonAD().String() != op.SessionAccount.AccountRef {
+		return errClientOccurrenceFenced
+	}
+	owned, release, err := occurrence.prepareLogout(work.Context())
+	if err != nil {
+		return err
+	}
+	defer release()
+	return occurrence.unlink(owned)
 }

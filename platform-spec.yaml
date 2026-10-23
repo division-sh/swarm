@@ -17863,6 +17863,7 @@ platform_tables:
             confirmation_operation_id UUID,
             account_reference TEXT NOT NULL DEFAULT '',
             account_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+            logout_completed BOOLEAN NOT NULL DEFAULT FALSE,
             expected_account TEXT NOT NULL DEFAULT '',
             failure_code TEXT,
             failure_message TEXT,
@@ -17872,11 +17873,12 @@ platform_tables:
             CHECK (bundle_hash IS NULL AND runtime_instance_id IS NULL AND activation_revision IS NULL AND confirmation_operation_id IS NULL),
             CHECK ((phase IN ('succeeded','failed','retired')) = (completed_at IS NOT NULL)),
             CHECK (NOT account_confirmed OR account_reference <> ''),
+            CHECK (NOT logout_completed OR phase = 'retired'),
             CHECK (phase <> 'succeeded' OR account_confirmed),
             CHECK ((provider = 'whatsapp') = (activation_posture = 'session_connection')),
             CHECK ((activation_posture = 'session_connection') = (session_connection_id IS NOT NULL)),
             UNIQUE INDEX idx_deployment_channel_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
-            UNIQUE INDEX idx_deployment_channel_account (principal_id,provider,account_reference) WHERE phase = 'succeeded',
+            UNIQUE INDEX idx_deployment_channel_account (principal_id,provider,account_reference) WHERE account_confirmed AND phase <> 'retired',
             INDEX idx_deployment_channel_principal (principal_id,requested_at)
         );
     channel_onboarding_teardowns:
@@ -36995,6 +36997,41 @@ api_specification:
           kind: {type: string, enum: [written, observed]}
           receipt: {type: string, minLength: 1}
       ChannelOnboardingOperation:
+        oneOf:
+          - {$ref: '#/components/schemas/RuntimeChannelOnboardingOperation'}
+          - {$ref: '#/components/schemas/DeploymentChannelOperation'}
+      DeploymentChannelOperation:
+        type: object
+        additionalProperties: false
+        required: [deployment_registration, operation_id, principal_id, verb, provider, interface, activation_posture, identity_ceremony, phase, revision, save_proof, credential_reservations, requested_at, updated_at]
+        properties:
+          deployment_registration: {type: boolean, const: true}
+          operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          principal_id: {$ref: '#/components/schemas/OpaqueId'}
+          verb: {type: string, const: connect}
+          provider: {type: string, enum: [whatsapp, telegram]}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          activation_posture: {type: string, enum: [webhook_registration, session_connection]}
+          identity_ceremony: {type: string, const: account_link}
+          phase: {type: string, enum: [preparing, credentials_admitted, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, succeeded, failed, retired]}
+          revision: {type: integer, minimum: 1}
+          save_proof: {type: boolean}
+          account_reference: {type: string, minLength: 1}
+          expected_account: {type: string, minLength: 1}
+          account_confirmed: {type: boolean}
+          logout_completed: {type: boolean}
+          client_language: {type: string}
+          client_locale_revision: {type: integer, minimum: 1}
+          credential_reservations: {type: array, items: {$ref: '#/components/schemas/ChannelCredentialReservation'}}
+          credential_admissions: {type: array, items: {$ref: '#/components/schemas/ChannelCredentialAdmission'}}
+          identity_operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          binding_revision: {type: integer, minimum: 1}
+          failure_code: {type: string}
+          failure_message: {type: string}
+          requested_at: {$ref: '#/components/schemas/Timestamp'}
+          updated_at: {$ref: '#/components/schemas/Timestamp'}
+          completed_at: {$ref: '#/components/schemas/Timestamp'}
+      RuntimeChannelOnboardingOperation:
         type: object
         additionalProperties: false
         required: [operation_id, principal_id, verb, provider, interface, coordinate, target_selector, activation_posture, identity_ceremony, phase, revision, save_proof, client_language, client_locale_revision, credential_reservations, requested_at, updated_at]
@@ -37055,6 +37092,24 @@ api_specification:
             type: string
             minLength: 1
       ChannelOnboardingCandidate:
+        oneOf:
+          - {$ref: '#/components/schemas/RuntimeChannelOnboardingCandidate'}
+          - {$ref: '#/components/schemas/DeploymentChannelCandidate'}
+      DeploymentChannelCandidate:
+        type: object
+        additionalProperties: false
+        required: [deployment_registration, provider, interface, activation_posture, identity_ceremony, provider_credential_role, confirmation_operation]
+        properties:
+          deployment_registration: {type: boolean, const: true}
+          provider: {type: string, enum: [whatsapp, telegram]}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          activation_posture: {type: string, enum: [webhook_registration, session_connection]}
+          identity_ceremony: {type: string, const: account_link}
+          provider_credential_role: {type: string}
+          signing_credential_role: {type: string}
+          confirmation_operation: {type: string}
+          connection_health: {type: string}
+      RuntimeChannelOnboardingCandidate:
         type: object
         additionalProperties: false
         required: [provider, interface, coordinate, target, activation_posture, identity_ceremony, provider_credential_role, confirmation_operation, capabilities]
@@ -37176,6 +37231,17 @@ api_specification:
         properties:
           candidate: {$ref: '#/components/schemas/ChannelOnboardingCandidate'}
           selection_fence: {type: string, minLength: 1, description: Transient exact-selection comparison only; no persisted or credential-write authority.}
+      DeploymentChannelHolder:
+        type: object
+        additionalProperties: false
+        required: [authority_id, authority_generation, owner_id, boot_id, runtime_instance_id, backend]
+        properties:
+          authority_id: {$ref: '#/components/schemas/OpaqueId'}
+          authority_generation: {type: integer, minimum: 1}
+          owner_id: {type: string, minLength: 1}
+          boot_id: {$ref: '#/components/schemas/OpaqueId'}
+          runtime_instance_id: {$ref: '#/components/schemas/OpaqueId'}
+          backend: {type: string, minLength: 1}
       ChannelOnboardingResult:
         type: object
         additionalProperties: false
@@ -41574,6 +41640,8 @@ api_specification:
       description: Resolve one exact onboarding declaration and its provider credential requirement without reservation, credential observation or writes, SDK state, or effects. Start must revalidate the transient selection fence before mutation.
       scope: {required: [control:channels]}
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
       - {name: verb, required: true, schema: {type: string, enum: [connect, reconnect, rebind]}}
       - {name: provider, required: true, schema: {type: string, minLength: 1}}
       - {name: bundle, required: false, schema: {type: string, pattern: '^bundle-v2:sha256:[0-9a-f]{64}$'}}
@@ -41590,6 +41658,9 @@ api_specification:
       scope: {required: [control:channels]}
       idempotency: stable-principal domain-operation replay; generic completed-response idempotency does not own this long external flow.
       params:
+        - {name: scope, required: false, schema: {type: string, const: deployment}}
+        - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+        - {name: account, required: false, schema: {type: string, minLength: 1}}
         - name: verb
           required: true
           schema:
@@ -41650,6 +41721,9 @@ api_specification:
       description: Read one durable onboarding operation, its nested identity state, and its exact-current connected readiness without advancing or replaying effects.
       scope: {required: [read:channels]}
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND]
@@ -41664,6 +41738,10 @@ api_specification:
       scope: {required: [control:channels]}
       idempotency: exact durable operation phase/revision and external-effect journal state.
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
+      - {name: reverify, required: false, schema: {type: boolean}}
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: provider_credential, required: false, schema: {type: string, minLength: 1, writeOnly: true}}
       - {name: client_language, required: false, schema: {type: string, minLength: 1}}
@@ -41678,6 +41756,9 @@ api_specification:
       scope: {required: [control:channels]}
       idempotency: per the selected-store API idempotency owner, scoped to the bearer-token request occurrence and exact pending operation; operator authority remains the stable principal.
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
       - {name: approve, required: true, schema: {type: boolean}}
@@ -41707,10 +41788,13 @@ api_specification:
       scope: {required: [control:channels]}
       idempotency: bearer-token-scoped API request occurrence plus stable-principal exact durable logout replay.
       params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
       - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
       - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelLogoutResult'}}
+      result: {name: result, required: true, schema: {oneOf: [{$ref: '#/components/schemas/ChannelLogoutResult'}, {$ref: '#/components/schemas/ChannelOnboardingResult'}]}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, IDEMPOTENCY_CONFLICT]
     channel.proof_revoke:
       tier: must_have
@@ -41727,8 +41811,11 @@ api_specification:
       tier: must_have
       description: Return generation-aware readback for the exact union of current interfaces, retained bindings, machine proofs, and nonterminal operations. Raw account references and display values are masked, with absent provider presentation falling back to the safely masked external account reference.
       scope: {required: [read:channels]}
-      params: []
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelListResult'}}
+      params:
+      - {name: scope, required: false, schema: {type: string, const: deployment}}
+      - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
+      - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
+      result: {name: result, required: true, schema: {oneOf: [{$ref: '#/components/schemas/OperatorChannelListResult'}, {type: object, additionalProperties: false, required: [accounts], properties: {accounts: {type: array, items: {$ref: '#/components/schemas/ChannelOnboardingResult'}}}}]}}
       errors: [CHANNEL_PROOF_UNAVAILABLE]
     runtime.pause:
       tier: should_have

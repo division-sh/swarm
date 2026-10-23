@@ -13,6 +13,7 @@ import (
 
 	domain "github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -241,8 +242,8 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 			out = existing
 			return nil
 		}
-		if req.ProviderAuthority.Kind == domain.ProviderAuthoritySession {
-			if err := requireSessionParent(txctx, tx, runner.dialect(), req.OnboardingOperationID, req.ProviderAuthority); err != nil {
+		if req.ProviderAuthority.Kind == domain.ProviderAuthoritySession || req.ProviderAuthority.Scope != "" {
+			if err := requireSessionParent(txctx, tx, runner.dialect(), req.OnboardingOperationID, req.PrincipalID, req.ProviderAuthority); err != nil {
 				return err
 			}
 		}
@@ -473,11 +474,11 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 			out = op
 			return nil
 		}
-		if op.ProviderAuthority.Kind == domain.ProviderAuthoritySession {
+		if op.ProviderAuthority.Kind == domain.ProviderAuthoritySession || op.ProviderAuthority.Scope != "" {
 			if err := req.ProviderAuthorityAdmission.RequireExecutableFor(op.ProviderAuthority); err != nil {
 				return err
 			}
-			if err := requireSessionParent(txctx, tx, runner.dialect(), op.OnboardingOperationID, req.ProviderAuthorityAdmission); err != nil {
+			if err := requireSessionParent(txctx, tx, runner.dialect(), op.OnboardingOperationID, req.PrincipalID, req.ProviderAuthorityAdmission); err != nil {
 				return err
 			}
 		}
@@ -879,13 +880,13 @@ func dischargeProofResponsibilities(ctx context.Context, tx *sql.Tx, d dialect, 
 // publication transaction. It never owns or exports a transaction beyond this
 // closed operation.
 func (s *PostgresOwner) SettleInboundClaimTx(ctx context.Context, tx *sql.Tx, claim domain.InboundClaim, now time.Time) (domain.ClaimSettlement, error) {
-	return settleInboundClaimTx(ctx, tx, dialectPostgres, claim, now)
+	return settleInboundClaimTx(ctx, tx, dialectPostgres, claim, now, authority.RuntimeParent)
 }
 func (s *SQLiteOwner) SettleInboundClaimTx(ctx context.Context, tx *sql.Tx, claim domain.InboundClaim, now time.Time) (domain.ClaimSettlement, error) {
-	return settleInboundClaimTx(ctx, tx, dialectSQLite, claim, now)
+	return settleInboundClaimTx(ctx, tx, dialectSQLite, claim, now, authority.RuntimeParent)
 }
 
-func settleInboundClaimTx(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, now time.Time) (domain.ClaimSettlement, error) {
+func settleInboundClaimTx(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, now time.Time, scope authority.ParentScope) (domain.ClaimSettlement, error) {
 	if tx == nil {
 		return domain.ClaimSettlement{}, fmt.Errorf("operator channel claim transaction is required")
 	}
@@ -896,6 +897,9 @@ func settleInboundClaimTx(ctx context.Context, tx *sql.Tx, d dialect, claim doma
 	op, found, err := loadOperationByChallenge(ctx, tx, d, claim.Challenge, true)
 	if err != nil {
 		return domain.ClaimSettlement{}, err
+	}
+	if found && op.ProviderAuthority.Scope != scope {
+		return domain.ClaimSettlement{}, domain.ErrConflict
 	}
 	if !found {
 		if err := insertClaimReceipt(ctx, tx, d, claim, domain.Operation{}, domain.DispositionRejectedClaim, "unknown challenge", now); err != nil {

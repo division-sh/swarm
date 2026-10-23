@@ -56,7 +56,7 @@ func operationQuery(deployment bool) string {
 	if !deployment {
 		return operationSelect
 	}
-	query := strings.Replace(operationSelect, "FALSE,'','',FALSE FROM channel_onboarding_operations", "TRUE,account_reference,expected_account,account_confirmed FROM deployment_channel_operations", 1)
+	query := strings.Replace(operationSelect, "FALSE,'','',FALSE,FALSE FROM channel_onboarding_operations", "TRUE,account_reference,expected_account,account_confirmed,logout_completed FROM deployment_channel_operations", 1)
 	query = strings.Replace(query, "bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,",
 		"COALESCE(bundle_hash,''),bundle_identity,pack_inventory_generation,COALESCE(CAST(runtime_instance_id AS TEXT),''),context_publication_generation,plan_generation,", 1)
 	return query
