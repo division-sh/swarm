@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +37,12 @@ func requireSelectedStoreFinalSettlement(t *testing.T, ctx context.Context, sele
 	if !ok || authority.SelectedFork.ForkRunID != req.ForkRunID {
 		t.Fatal("settlement fixture lost its exact attached authority")
 	}
-	return activation, selected.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, req.AllowedSourceEventIDs, req.ExecutionSource)
+	settlementErr := selected.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, req.AllowedSourceEventIDs, req.ExecutionSource)
+	// These hostile fixtures assert business refusal here, not on the immutable activation ACK.
+	if settlementErr == nil || !strings.Contains(settlementErr.Error(), "fork_events_not_selected_contract_lineage") {
+		t.Fatalf("native final settlement error = %v, want fork event lineage blocker", settlementErr)
+	}
+	return activation, settlementErr
 }
 
 func (p *selectedStoreActivationBoundary) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {

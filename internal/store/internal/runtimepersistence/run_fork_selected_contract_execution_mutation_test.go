@@ -60,7 +60,7 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	if materialized.ForkRunID == "" || materialized.SelectedContractBinding == nil || !materialized.DeliveryResumeBlocked {
 		t.Fatalf("materialization = %#v", materialized)
 	}
-	replayed, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
+	replayed, err := pg.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution exact replay: %v", err)
 	}
@@ -1481,8 +1481,8 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
-		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
+	if err != nil {
+		t.Fatalf("committed activation acknowledgement failed: %v", err)
 	}
 	if !activation.Activated {
 		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
@@ -1515,8 +1515,8 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
-		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
+	if err != nil {
+		t.Fatalf("committed activation acknowledgement failed: %v", err)
 	}
 	if !activation.Activated {
 		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
@@ -1549,8 +1549,8 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
-		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
+	if err != nil {
+		t.Fatalf("committed activation acknowledgement failed: %v", err)
 	}
 	if !activation.Activated {
 		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
@@ -1583,8 +1583,8 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
-		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
+	if err != nil {
+		t.Fatalf("committed activation acknowledgement failed: %v", err)
 	}
 	if !activation.Activated {
 		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
