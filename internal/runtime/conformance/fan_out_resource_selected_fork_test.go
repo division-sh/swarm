@@ -99,6 +99,7 @@ func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route st
 	}
 	fact := conformanceSourceArtifactFact(t, f.source)
 	f.ctx = testAuthorActivityContextForBundle(context.Background(), fact)
+	f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
 	f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 	if probe == nil && wrapDelivery == nil && wrapExecutor == nil {
 		f.boot(t)

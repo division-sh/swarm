@@ -221,7 +221,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
 	earlierEventID := "ffffffff-ffff-4fff-8fff-ffffffffffff"

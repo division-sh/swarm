@@ -116,7 +116,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 
 			_, db, _ := testutil.StartPostgres(t)
 			pg := admitTestPostgresStore(t, db)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 			identityFields, err := agentIdentityFields(testAgentIdentity(t, "agent-malformed-runtime-descriptor", ""))
 			if err != nil {
 				t.Fatal(err)
