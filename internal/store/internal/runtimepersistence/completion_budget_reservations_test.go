@@ -255,11 +255,12 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		return authority, selectedProviderClaimContext(t, selected.ctx, selected, authority)
 	case runtimeeffects.AuthorityConversationForkChat:
 		now := time.Now().UTC()
+		sourceCtx := runtimedelivery.WithoutClaim(fixture.normal.context)
 		var source conversationForkSourceFixture
 		if fixture.sqlite {
-			source = seedSQLiteConversationForkSource(t, fixture.primary.(*SQLiteRuntimeStore), now)
+			source = seedSQLiteConversationForkSourceWithContext(t, sourceCtx, fixture.primary.(*SQLiteRuntimeStore), now)
 		} else {
-			source = seedConversationForkSource(t, fixture.db, now)
+			source = seedConversationForkSourceWithContext(t, sourceCtx, fixture.primary.(*PostgresStore), fixture.db, now)
 		}
 		fork, err := fixture.primary.CreateOperatorConversationFork(fixture.normal.context, runfork.ConversationForkCreateRequest{
 			SourceSessionID: source.sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID}, CreatedBy: "budget-actor", Now: now,
