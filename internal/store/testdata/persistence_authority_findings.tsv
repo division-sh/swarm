@@ -820,6 +820,7 @@ typed-process-local	callback-type	typed	internal/runtime/mcp/gateway.go	(*github
 typed-process-local	callback-type	typed	internal/runtime/mcp/gateway.go	(*github.com/division-sh/swarm/internal/runtime/mcp.Gateway).transportExecutionContext	result:#2	func()
 typed-process-local	callback-type	typed	internal/runtime/mcp/gateway.go	GatewayHooks	field:ActorFromContext	func(context.Context) (github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig, bool)
 typed-process-local	callback-type	typed	internal/runtime/mcp/gateway.go	GatewayHooks	field:AfterToolSuccess	func(context.Context, *net/http.Request, string)
+typed-process-local	callback-type	typed	internal/runtime/mcp/gateway.go	GatewayHooks	field:CarryMutationContext	func(context.Context, context.Context) context.Context
 typed-process-local	callback-type	typed	internal/runtime/mcp/gateway.go	GatewayHooks	field:Log	func(context.Context, string, string, string, string, map[string]any, *github.com/division-sh/swarm/internal/runtime/failures.Envelope)
 typed-process-local	callback-type	typed	internal/runtime/mcp/gateway.go	GatewayHooks	field:MarkEmitKeyUsed	func(string, string) bool
 typed-process-local	callback-type	typed	internal/runtime/mcp/gateway.go	GatewayHooks	field:ObserveCapabilityEvidence	func(string, ...github.com/division-sh/swarm/internal/runtime/core/managedcapabilities.DeliveryEvidence) (github.com/division-sh/swarm/internal/runtime/core/managedcapabilities.Surface, bool)

@@ -793,7 +793,8 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
 	waitServedJoinSourceTimer(t, db, initial.RunID)
 	waitServedRunDeliveryQuiescence(t, deliveryReader, initial.RunID)
-	forkEventID := seedServedJoinForkFrontier(t, servedRuntimeProofAuthorActivityContext(t, rt, bundleHash), db, initial.RunID, entityID, arrival.EventID)
+	var frontierStore issue2564ServedObservationOwner = pg
+	forkEventID := seedServedJoinForkFrontier(t, servedRuntimeProofAuthorActivityContext(t, rt, bundleHash), frontierStore, initial.RunID, entityID, arrival.EventID)
 	if _, err := pg.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
 		SourceRunID: initial.RunID,
 		At:          forkEventID,
@@ -4422,7 +4423,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	t.Helper()
 	db := rt.DB
 	backend := rt.Backend
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	now := time.Now().UTC()
@@ -4788,28 +4789,19 @@ func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
 	return ""
 }
 
-func seedServedJoinForkFrontier(t *testing.T, ctx context.Context, db *sql.DB, runID, entityID, sourceEventID string) string {
+func seedServedJoinForkFrontier(t *testing.T, ctx context.Context, selected issue2564ServedObservationOwner, runID, entityID, sourceEventID string) string {
 	t.Helper()
-	var flowInstance string
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(flow_instance, '')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-	`, runID, entityID).Scan(&flowInstance); err != nil {
-		t.Fatalf("load served join flow instance: %v", err)
+	entity, err := selected.LoadOperatorEntity(ctx, entityID, runID)
+	if err != nil || entity.Entity.EntityID != entityID || entity.Entity.RunID != runID {
+		t.Fatalf("load exact served join entity: entity=%+v err=%v", entity.Entity, err)
 	}
 	eventID := uuid.NewString()
-	var createdAt time.Time
-	if err := db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&createdAt); err != nil {
-		t.Fatalf("load served join fork frontier timestamp: %v", err)
-	}
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance)
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), entity.Entity.FlowInstance)
 	event := eventtest.PersistedProjectionForProducer(
 		eventID, "fork.probe", eventtest.Producer(events.EventProducerPlatform, "join-proof"), "",
-		json.RawMessage(`{"marker":"replayed"}`), 0, runID, sourceEventID, envelope, createdAt,
+		json.RawMessage(`{"marker":"replayed"}`), 0, runID, sourceEventID, envelope, time.Now().UTC(),
 	)
-	storetest.CommitSemanticForkFrontier(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event,
+	storetest.CommitSemanticForkFrontier(t, ctx, selected, event,
 		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("frontier-agent"), AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "frontier-agent")}},
 		storetest.AcknowledgedPipelineDisposition())
 	return eventID
