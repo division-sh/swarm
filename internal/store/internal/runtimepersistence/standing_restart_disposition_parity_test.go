@@ -210,6 +210,7 @@ func TestInvalidStandingMemberDoesNotAbortOrMutateCompleteSetParity(t *testing.T
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			invalidCandidate := fixture.candidate("invalid-member")
 			healthyCandidate := fixture.candidate("invalid-member-healthy-sibling")
 			invalid, err := fixture.workflow.ReconcileStandingService(ctx, invalidCandidate)
@@ -370,6 +371,7 @@ func TestInvalidStandingResetUsesLatestDeclarationSourceParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			candidate := fixture.candidate("invalid-declared-source-revision")
 			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -403,6 +405,7 @@ func TestInvalidOrphanStandingRestoreThenResetParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			candidate := fixture.candidate("invalid-orphan-restore-reset")
 			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -439,6 +442,7 @@ func TestInvalidOrphanStandingSameSourceRestoreThenResetParity(t *testing.T) {
 			t.Run(backend+"/"+override, func(t *testing.T) {
 				fixture := openStandingDispositionParityFixture(t, backend)
 				ctx := testAuthorActivityRuntimeContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 				candidate := fixture.candidate("invalid-orphan-same-source-" + override)
 				created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 				if err != nil {

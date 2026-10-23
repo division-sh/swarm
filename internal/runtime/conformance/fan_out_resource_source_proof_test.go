@@ -94,6 +94,7 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 	}
 	fact := conformanceSourceArtifactFact(t, f.source)
 	f.ctx = testAuthorActivityContextForBundle(context.Background(), fact)
+	f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
 	f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 	f.boot(t)
 	return f

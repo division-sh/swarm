@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -127,7 +128,14 @@ func TestReceiverConstructionAndObserverIsolationBothStores(t *testing.T) {
 							ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: fact,
 							SemanticSource: source, WorkflowInstances: workflow, WorkOwner: storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
 						}))
-						eventBus, err := newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TemplateInstancePlanner: planner})
+						eventBus, err := newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{
+							ContractBundle: source, SourceArtifactFact: fact, TemplateInstancePlanner: planner,
+							MutationContext: func(operationCtx context.Context) (context.Context, error) {
+								operationCtx = startupownership.CarryMutationAuthority(operationCtx, ctx)
+								_, err := startupownership.CaptureMutationAuthority(operationCtx)
+								return operationCtx, err
+							},
+						})
 						if err != nil {
 							t.Fatal(err)
 						}

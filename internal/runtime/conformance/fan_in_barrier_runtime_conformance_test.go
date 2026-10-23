@@ -117,6 +117,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, source)
 			const periodID = "2026-Q3"
@@ -284,6 +285,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			backend, _ := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, source)
 			constructionCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
@@ -438,6 +440,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 				FlowID: "portfolio", FlowInstance: "portfolio/selected-period", EntityID: selectedOwner,
 			}.Normalized()
 			seedRuntime := newFanInBarrierRuntime(t, backend, source)
+			ctx = originalConformanceFixtureContext(t, ctx, backend)
 			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.bus, seedRuntime.manager, source, selectedOwner)
 			requireSelectedRunTargetOwner(t, ctx, backend, source, runID, "portfolio/selected-period", selectedOwner)
 
@@ -863,15 +866,16 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 
 	lifecycle := &notifyAllChildrenLifecycleOwner{}
 	manager = runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:   executionposture.Live,
-		BaseContext:        baseCtx,
-		SourceArtifactFact: fact,
-		SemanticSource:     source,
-		WorkflowInstances:  coordinator,
-		WorkOwner:          workOwner,
-		DeliveryStore:      backend,
-		LifecycleStore:     lifecycle,
-		PersistenceRoles:   conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:     executionposture.Live,
+		BaseContext:          baseCtx,
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		SourceArtifactFact:   fact,
+		SemanticSource:       source,
+		WorkflowInstances:    coordinator,
+		WorkOwner:            workOwner,
+		DeliveryStore:        backend,
+		LifecycleStore:       lifecycle,
+		PersistenceRoles:     conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend)
 	ctx := runtimecorrelation.WithRuntimeInstanceID(baseCtx, authorActivityTestRuntimeInstanceID)
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}

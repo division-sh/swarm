@@ -417,6 +417,7 @@ func prepareStopRacePublications(t *testing.T, selected selectedFanOutLifecycleO
 	artifact, bundle := fanOutMixedRouteSource(t)
 	runtimeID := uuid.NewString()
 	ctx := runtimeauthoractivity.WithScope(testAuthorActivityContextForBundle(artifact.BundleHash()), runtimeauthoractivity.BundleScope(runtimeID, artifact.BundleHash()))
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(artifact.BundleHash()))
 	fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, owner, backend == "postgres", 5, time.Now().UTC(), artifact)
 	ctx = runtimecorrelation.WithRunID(ctx, fixture.runID)
