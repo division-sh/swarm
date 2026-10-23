@@ -43,6 +43,7 @@ func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			selected := owner.(storeTestDurableEventBusStore)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 4, base)
@@ -114,6 +115,7 @@ func TestFanOutDeliveryBarrierCardinalityBoundariesOnBothStores(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/N=%d", backend, cardinality), func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx = storeTestOriginalProcessContext(t, ctx, owner)
 				selected := owner.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, cardinality, base)
@@ -152,6 +154,7 @@ func TestFanOutDeliveryBarrierFoldsOnlyExactIntentNotNestedDescendantsOnBothStor
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			selected := owner.(storeTestDurableEventBusStore)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			parent := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
@@ -185,6 +188,7 @@ func TestFanOutDeliveryBarrierRestartAndExactIntentIsolationOnBothStores(t *test
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			restartedSelected := restarted.(storeTestDurableEventBusStore)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			closed := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
@@ -294,6 +298,7 @@ func TestFanOutDeliveryBarrierCorruptFactsFailBeforeCloseOnBothStores(t *testing
 			t.Run(backend+"/"+corruption, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx = storeTestOriginalProcessContext(t, ctx, owner)
 				selected := restarted.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
@@ -329,6 +334,7 @@ func TestFanOutDeliveryBarrierCancellationSuppressesOutcomeOnBothStores(t *testi
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, base)
 			seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
@@ -360,6 +366,7 @@ func TestFanOutDeliveryBarrierGenerationSupersessionOnBothStores(t *testing.T) {
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx = storeTestOriginalProcessContext(t, ctx, owner)
 				selected := owner.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
@@ -465,6 +472,7 @@ func TestFanOutDeliveryBarrierConcurrentGenerationSupersessionCancelsExactlyOnce
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			selected := owner.(storeTestDurableEventBusStore)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
@@ -508,6 +516,7 @@ func TestFanOutDeliveryBarrierConcurrentCandidatesCloseExactlyOnceOnBothStores(t
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			selected := owner.(storeTestDurableEventBusStore)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
@@ -619,6 +628,7 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx = storeTestOriginalProcessContext(t, ctx, owner)
 				selected := owner.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
