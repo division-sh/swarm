@@ -844,13 +844,10 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 			pollTimer.Reset(poll)
 			run, diagnosis, ready, err := readRunCommandFollowState(ctx, client, opts, runID)
 			if err != nil {
-				if errors.Is(ctx.Err(), context.Canceled) {
+				if ctx.Err() != nil {
 					continue
 				}
 				settleObservation()
-				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-					return timeout()
-				}
 				writeCLIAPIError(errOut, err)
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
