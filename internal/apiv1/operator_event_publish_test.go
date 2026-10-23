@@ -29,6 +29,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -44,6 +45,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -2198,7 +2200,7 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 	t.Helper()
 	runBundleContext, _ := runs.(RunBundleContextStore)
 	entities, _ := runs.(EntityReadStore)
-	return testHandler(t, Options{
+	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return time.Now().UTC() },
@@ -2218,6 +2220,12 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 			},
 		}),
 	})
+	if selected, ok := runs.(agentfixture.Store); ok {
+		if _, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(context.Background(), handler.workOwner), selected); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return handler
 }
 
 type blockingAPIV1PublishInterceptor struct {

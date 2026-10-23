@@ -355,7 +355,7 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 			}
 		}
 	})
-	fork, err := store.CreateOperatorConversationFork(testAuthorActivityContext(), runfork.ConversationForkCreateRequest{
+	fork, err := store.CreateOperatorConversationFork(source.ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy: "actor-token", Now: now,
 	})
@@ -367,7 +367,7 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 
 func prepareForkChatCompletionGroup(t *testing.T, fixture forkChatCompletionAuthorityFixture, key, message string) runfork.ConversationForkChatPrepared {
 	t.Helper()
-	prepared, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
+	prepared, err := fixture.store.PrepareOperatorConversationForkChat(fixture.source.ctx, runfork.ConversationForkChatPrepareRequest{
 		ExecutionPosture: executionposture.Live,
 		ForkID:           fixture.fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 		RequestHash: runtimeeffects.Fingerprint([]byte(message)), IdempotencyKey: key, Now: fixture.now.Add(time.Second),
@@ -393,7 +393,7 @@ func forkChatCompletionAuthority(prepared runfork.ConversationForkChatPrepared, 
 }
 
 func forkChatCompletionContext(fixture forkChatCompletionAuthorityFixture, authority runtimeeffects.Authority, suffix string) context.Context {
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(fixture.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(fixture.source.ctx, authority), newCompletionControllerForTest(fixture.store))
 	ctx = runtimeeffects.WithCompletionRequest(ctx, runtimeeffects.CompletionRequest{ModelAlias: "regular", RequestedModel: "forkchat-request", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api"})
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, "forkchat:"+authority.ForkChat.RequestOccurrenceID+":"+suffix)
 }

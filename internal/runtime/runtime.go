@@ -1498,7 +1498,9 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if runtimeDeps.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, boot.ExecutionPosture, runtimeDeps.InboundStore)
 		rt.InboundGateway.SetChannelPlans(opts.ChannelPlans)
-		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
+		rt.InboundGateway.SetAdmissionGuard(func(ctx context.Context) (context.Context, func(), bool) {
+			return rt.shutdownGate.BeginContext(worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner))
+		})
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialAdmission(rt.AdmitInboundCredentials)
 	}
