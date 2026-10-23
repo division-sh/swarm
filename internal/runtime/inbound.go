@@ -747,6 +747,17 @@ func writeInboundCommitError(w http.ResponseWriter, logger *RuntimeLogger, reque
 	http.Error(w, message, status)
 }
 
+func (g *InboundGateway) prepareInboundDeliveryBatch(ctx context.Context, batch runtimebus.InboundDeliveryBatch) (plan runtimebus.InboundDeliveryPlan, err error) {
+	diagnostic := inboundPayloadDiagnostic{active: true}
+	defer func() {
+		diagnostic.active = false
+		if _, rejected := runtimebus.SubmittedInboundValidationPath(err); !rejected {
+			diagnostic.emit()
+		}
+	}()
+	return g.bus.PrepareInboundDeliveryBatch(context.WithValue(ctx, inboundPayloadDiagnosticKey{}, &diagnostic), batch)
+}
+
 func logInboundPublicationFailure(logger *RuntimeLogger, requestCtx context.Context, provider, serviceID, providerEventID string, err error) {
 	if path, rejected := runtimebus.SubmittedInboundValidationPath(err); rejected {
 		logInboundPayloadRejection(logger, requestCtx, provider, serviceID, providerEventID, path)
