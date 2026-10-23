@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package cliapp_test
+package serveapp_test
 
 import (
 	"bytes"
