@@ -6966,64 +6966,6 @@ func TestNonDevServeOwnershipParity(t *testing.T) {
 	})
 }
 
-func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
-	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	run := func(t *testing.T, configPath string) {
-		t.Helper()
-		payloadPath := filepath.Join(t.TempDir(), "payload.json")
-		if err := os.WriteFile(payloadPath, []byte(`{}`), 0o600); err != nil {
-			t.Fatalf("write run payload: %v", err)
-		}
-		apiPort := freeDoctorTCPPort(t)
-		mcpPort := freeDoctorTCPPort(t)
-		if apiPort == mcpPort {
-			mcpPort = freeDoctorTCPPort(t)
-		}
-		var stdout, stderr bytes.Buffer
-		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-			"--swarm-dir", t.TempDir(),
-			"run", "start", sourceRoot, "--event", "task.requested", "--payload", payloadPath,
-			"--config", configPath, "--api-port", apiPort, "--mcp-port", mcpPort,
-		}, &stdout, &stderr, Run)
-		if code != 0 {
-			t.Fatalf("local run start code=%d stdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
-		}
-		if !strings.Contains(stdout.String(), "run terminal:") || !strings.Contains(stdout.String(), "status=completed") {
-			t.Fatalf("local run did not reach terminal public readback:\n%s", stdout.String())
-		}
-	}
-
-	t.Run("sqlite", func(t *testing.T) {
-		stubServeRuntimeWorkspaceLifecycle(t)
-		unsetStoreSelectorEnv(t)
-		path := filepath.Join(t.TempDir(), "runtime.db")
-		spec, err := loadServePlatformSpecDocument()
-		if err != nil {
-			t.Fatalf("load platform spec: %v", err)
-		}
-		plans, err := store.GeneratePlatformTableDDLs(spec)
-		if err != nil {
-			t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-		}
-		selected, err := store.NewSQLiteRuntimeStore(path)
-		if err != nil {
-			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
-		}
-		bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
-		seedServeRuntimeReleasedProcess(t, selected)
-		if err := selected.Close(); err != nil {
-			t.Fatalf("close seeded SQLite store: %v", err)
-		}
-		run(t, writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path))
-	})
-	t.Run("postgres", func(t *testing.T) {
-		_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-		storetest.BootstrapPostgresRuntimeStore(t, selected)
-		seedServeRuntimeReleasedProcess(t, selected)
-		run(t, writeStoreBackendRuntimeConfig(t, storebackend.BackendPostgres.String(), ""))
-	})
-}
-
 func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	canonicalProject, err := filepath.EvalSymlinks(filepath.Join(repoRootForTest(), sourceRoot))
@@ -8218,76 +8160,6 @@ func writeDoctorClaudeDevScratchConfig(t *testing.T) string {
 	return path
 }
 
-func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	stubServeWorkspaceLifecycleForTest(t)
-	apiPortText := freeDoctorTCPPort(t)
-	mcpPort := freeDoctorTCPPort(t)
-	mcpAddr := "127.0.0.1:" + mcpPort
-	stalePort := staleGatewayTestPort(mcpPort)
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
-	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
-
-	bindingCh := make(chan toolgateway.Binding, 1)
-	serveStarted := make(chan cliapp.ServeOptions, 1)
-	runServe := func(ctx context.Context, root cliapp.InvocationRoot, serveOpts cliapp.ServeOptions) int {
-		t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+stalePort)
-		t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+stalePort)
-		if !serveOpts.LocalRun {
-			t.Errorf("local CLI run produced LocalRun = false, want shared run_local preflight consumer")
-		}
-		if serveOpts.APIListenAddr != "127.0.0.1:"+apiPortText {
-			t.Errorf("local CLI run APIListenAddr = %q, want 127.0.0.1:%s", serveOpts.APIListenAddr, apiPortText)
-		}
-		serveOpts.MCPListenAddr = mcpAddr
-		serveOpts.Verbose = true
-		serveOpts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
-			bindingCh <- rt.Options.ToolGatewayBinding
-		}
-		assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_URL", serveOpts)
-		t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
-		t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
-		assertServePreflightTypedGateway(t, serveOpts, "run_local")
-		serveStarted <- serveOpts
-		return Run(ctx, root, serveOpts)
-	}
-	payloadPath := filepath.Join(t.TempDir(), "payload.json")
-	if err := os.WriteFile(payloadPath, []byte("{}\n"), 0o600); err != nil {
-		t.Fatalf("write payload: %v", err)
-	}
-	configPath := writeDoctorClaudeConfig(t, "")
-	dataSource := t.TempDir()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan int, 1)
-	var stdout, stderr bytes.Buffer
-	go func() {
-		done <- executeCLIFrom(ctx, repoRootForTest(), []string{
-			"run", "start", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			"--event", "task.requested",
-			"--payload", payloadPath,
-			"--config", configPath,
-			"--backend", "claude_cli",
-			"--data", dataSource,
-			"--api-port", apiPortText,
-		}, &stdout, &stderr, runServe)
-	}()
-	select {
-	case <-serveStarted:
-	case <-time.After(serveRuntimeReadyTimeout):
-		t.Fatalf("local CLI run did not invoke the serve owner\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
-	}
-	binding := receiveToolGatewayBinding(t, bindingCh, "")
-	assertToolGatewayBindingUsesMCPPort(t, binding, mcpPort, stalePort)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(serveRuntimeReadyTimeout):
-		t.Fatal("local CLI run did not stop after cancellation")
-	}
-}
-
 func TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -8308,21 +8180,15 @@ func TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit(t *testing.T) {
 		return Run(ctx, root, serveOpts)
 	}
 
-	payloadPath := filepath.Join(t.TempDir(), "payload.json")
-	if err := os.WriteFile(payloadPath, []byte("{}\n"), 0o600); err != nil {
-		t.Fatalf("write payload: %v", err)
-	}
 	var stdout, stderr bytes.Buffer
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"run", "start", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		"--event", "task.requested",
-		"--payload", payloadPath,
+		"--swarm-dir", t.TempDir(),
+		"serve", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		"--config", writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "late-gate.sqlite"), nil),
-		"--data", t.TempDir(),
-		"--api-port", apiPortText,
+		"--api-listen-addr", "127.0.0.1:" + apiPortText,
 	}, &stdout, &stderr, runServe)
-	if code == 0 || !strings.Contains(stderr.String(), "exited before readiness") {
-		t.Fatalf("local CLI run exit=%d stderr=%q, want pre-readiness exit", code, stderr.String())
+	if code == 0 {
+		t.Fatalf("serve exit=%d stderr=%q, want pre-readiness exit", code, stderr.String())
 	}
 	if readyStatus.Load() != http.StatusServiceUnavailable {
 		t.Fatalf("/readyz during final pre-commit gate = %d, want %d", readyStatus.Load(), http.StatusServiceUnavailable)

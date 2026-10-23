@@ -118,8 +118,8 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			finite := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 				"run", "start", source, "--config", config, "--event", "start.requested",
 				"--payload", "payload.json", "--run-id", localID, "--mcp-port", fmt.Sprint(freeReleaseTCPPort(t)))
-			if finite.err != nil || !strings.Contains(finite.output, "status=completed") {
-				t.Fatalf("local finite clock run: %v\n%s", finite.err, finite.output)
+			if finite.err == nil || !strings.Contains(finite.output, "No serve running") {
+				t.Fatalf("finite clock without serve must refuse: %v\n%s", finite.err, finite.output)
 			}
 			deploymentStarted := time.Now().UTC()
 			spec := releaseProcessSpec{
@@ -135,7 +135,6 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			if hash := goldenServedBundleHash(t, process.rpc, "live"); hash != described.SourceHash {
 				t.Fatalf("offline/served clock source differs: offline=%s served=%s", described.SourceHash, hash)
 			}
-			assertFiniteClockRun(t, process, localID)
 			standing := waitForFullLifecycleStandingRun(t, process.rpc, described.SourceHash, "", 1, "")
 			if standing.StartedAt.Before(deploymentStarted) {
 				t.Fatalf("finite host created a clock-only standing generation before deployment: %+v deployment=%s", standing, deploymentStarted)
@@ -174,8 +173,8 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			finiteAgain := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 				"run", "start", source, "--config", config, "--event", "start.requested",
 				"--payload", "payload.json", "--run-id", uuid.NewString(), "--mcp-port", fmt.Sprint(freeReleaseTCPPort(t)))
-			if finiteAgain.err != nil || !strings.Contains(finiteAgain.output, "status=completed") {
-				t.Fatalf("finite host with a parked deployment: %v\n%s", finiteAgain.err, finiteAgain.output)
+			if finiteAgain.err == nil || !strings.Contains(finiteAgain.output, "No serve running") {
+				t.Fatalf("parked deployment without serve must refuse: %v\n%s", finiteAgain.err, finiteAgain.output)
 			}
 			restarted := startReleaseServe(t, spec)
 			if err := restarted.waitReady(ctx); err != nil {
@@ -187,7 +186,7 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			if err := restarted.stopAndWait(goldenShutdownGrace); err != nil {
 				t.Fatalf("parked clock restart shutdown: %v\n%s", err, restarted.output.String())
 			}
-			t.Log("proof_surface=real binary verify/describe/private scenario/local finite run/serve/connected finite run; parked HTTP+CLI clock inventory and HTTP+WebSocket+CLI occurrence readback; no external executor, provider or SQL test access")
+			t.Log("proof_surface=real binary verify/describe/private scenario/no-serve refusal/serve/connected finite run; parked HTTP+CLI clock inventory and HTTP+WebSocket+CLI occurrence readback; no external executor, provider or SQL test access")
 		})
 	}
 }
