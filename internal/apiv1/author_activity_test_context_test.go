@@ -29,6 +29,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -148,6 +149,25 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	if binder, ok := eventStore.(runtimepkg.EventPayloadAdmissionBinder); ok {
 		binder.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	}
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash())
+	}
+	setup, setupErr := opts.WorkOwner.Begin(testAuthorActivityContextForRuntime(context.Background(), opts.RuntimeInstanceID, opts.SourceArtifactFact))
+	if setupErr != nil {
+		return nil, setupErr
+	}
+	defer func() {
+		if err := setup.Done(); err != nil {
+			t.Error(err)
+		}
+	}()
+	setupCtx := setup.Context()
+	if selected, native := eventStore.(agentfixture.Store); native {
+		setupCtx, setupErr = agentfixture.ProcessContext(t, setupCtx, selected)
+		if setupErr != nil {
+			return nil, setupErr
+		}
+	}
 	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok {
 		catalog := durabledata.Catalog{BundleHash: opts.SourceArtifactFact.BundleHash()}
 		if exactCatalog != nil {
@@ -176,20 +196,17 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		if reader, ok := eventStore.(interface {
 			ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 		}); ok {
-			existing, err := reader.ListDataDeclarationSummaries(context.Background(), catalog.BundleHash)
+			existing, err := reader.ListDataDeclarationSummaries(setupCtx, catalog.BundleHash)
 			if err != nil {
 				return nil, fmt.Errorf("read API test source artifact/data catalog: %w", err)
 			}
 			register = len(existing) == 0
 		}
 		if register {
-			if _, err := registrar.EnsureSourceArtifactWithData(context.Background(), artifact, catalog); err != nil {
+			if _, err := registrar.EnsureSourceArtifactWithData(setupCtx, artifact, catalog); err != nil {
 				return nil, fmt.Errorf("ensure API test source artifact/data catalog: %w", err)
 			}
 		}
-	}
-	if opts.WorkOwner == nil {
-		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash())
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()

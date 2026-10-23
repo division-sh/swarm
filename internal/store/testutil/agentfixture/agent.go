@@ -11,6 +11,7 @@ import (
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -90,12 +91,28 @@ var fixtureSessions sync.Map
 
 func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixtureSession, error) {
 	t.Helper()
-	key := fmt.Sprintf("%p:%p", t, selected)
+	callerKey := fmt.Sprintf("%p:%p", t, selected)
+	key := callerKey
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		key = fmt.Sprintf("%p:%p", process, selected)
+	}
 	runtimeInstanceID, hasRuntimeInstanceID := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
-	if existing, ok := fixtureSessions.Load(key); ok {
+	existing, ok := fixtureSessions.Load(key)
+	if !ok && callerKey != key {
+		existing, ok = fixtureSessions.Load(callerKey)
+	}
+	if ok {
 		session := existing.(*fixtureSession)
 		if hasRuntimeInstanceID && session.runtimeInstanceID != runtimeInstanceID {
 			return nil, errors.New("agent fixture session runtime differs from caller runtime")
+		}
+		if callerKey != key {
+			fixtureSessions.Store(key, session)
+			fixtureSessions.Store(callerKey, session)
+			t.Cleanup(func() {
+				fixtureSessions.Delete(key)
+				fixtureSessions.Delete(callerKey)
+			})
 		}
 		return session, nil
 	}
@@ -114,8 +131,12 @@ func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixt
 		_ = capability.Release(context.Background())
 		return actual.(*fixtureSession), nil
 	}
+	if callerKey != key {
+		fixtureSessions.Store(callerKey, created)
+	}
 	t.Cleanup(func() {
 		fixtureSessions.Delete(key)
+		fixtureSessions.Delete(callerKey)
 		_ = capability.Release(context.Background())
 	})
 	return created, nil
@@ -143,6 +164,11 @@ func ProcessContext(t testing.TB, ctx context.Context, selected Store) (context.
 	original, err := capability.Evidence()
 	if err != nil {
 		return nil, err
+	}
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+			return nil, err
+		}
 	}
 	return generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
 }

@@ -973,6 +973,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		return 2
 	}
 	processWorkOwner := worklifetime.NewProcess()
+	ctx = worklifetime.WithProcess(ctx, processWorkOwner)
 	apiProbe, err := startServeProcessProbe(ctx, processWorkOwner, opts.APIListenAddr, func(subject string, failure error) {
 		cancelServe()
 		presenter.runtimeFailure(subject, failure)
