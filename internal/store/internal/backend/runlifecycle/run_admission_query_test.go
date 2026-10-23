@@ -13,8 +13,9 @@ import (
 func TestRunAdmissionGenericQueryTransactionStaysFreshAndCannotMint(t *testing.T) {
 	for _, postgres := range []bool{true, false} {
 		t.Run(admissionTestDialect(postgres), func(t *testing.T) {
-			db, mock := admissionTestSQLMock(t)
+			db, mock, original := admissionTestSQLMock(t, postgres)
 			mock.ExpectBegin()
+			expectAdmissionTestGeneration(mock, postgres, false)
 			for range 2 {
 				mock.ExpectQuery(admissionTestRunSQL(postgres, true)).WithArgs(admissionTestRunID).
 					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
@@ -33,7 +34,7 @@ func TestRunAdmissionGenericQueryTransactionStaysFreshAndCannotMint(t *testing.T
 			}
 			mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+			admissionTestNativeAttempt(t, db, mock, postgres, original, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 					query := func() error {
 						// Deliberately erase the typed transaction capability.
@@ -70,8 +71,9 @@ func TestRunAdmissionGenericQueryTransactionStaysFreshAndCannotMint(t *testing.T
 func TestRunAdmissionNonlockingMutationConsumesOnlyExistingAdmission(t *testing.T) {
 	for _, postgres := range []bool{true, false} {
 		t.Run(admissionTestDialect(postgres), func(t *testing.T) {
-			db, mock := admissionTestSQLMock(t)
+			db, mock, original := admissionTestSQLMock(t, postgres)
 			mock.ExpectBegin()
+			expectAdmissionTestGeneration(mock, postgres, false)
 			for range 2 {
 				mock.ExpectQuery(admissionTestRunSQL(postgres, true)).WithArgs(admissionTestRunID).
 					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
@@ -84,7 +86,7 @@ func TestRunAdmissionNonlockingMutationConsumesOnlyExistingAdmission(t *testing.
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 			}
-			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+			admissionTestNativeAttempt(t, db, mock, postgres, original, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 					guard := func() error {
 						if postgres {
