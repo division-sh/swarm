@@ -170,6 +170,11 @@ func nativeProcessContextFixture(t *testing.T, ctx context.Context, selected any
 	if !ok {
 		t.Fatalf("native fixture requires its process acquisition owner, got %T", selected)
 	}
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	}
 	capability, err := agentfixture.ProcessCapability(t, ctx, store)
 	if err != nil {
 		t.Fatal(err)
