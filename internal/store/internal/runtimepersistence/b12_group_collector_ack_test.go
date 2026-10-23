@@ -175,6 +175,7 @@ func newCollectorFixtureWithCardinality(t *testing.T, backend string, cardinalit
 	artifact, bundle := fanOutMixedRouteSource(t)
 	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(artifact.BundleHash()), 15*time.Second)
 	t.Cleanup(cancel)
+	ctx = storeTestOriginalProcessContext(t, ctx, raw)
 	seed := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, backend == "postgres", cardinality, time.Now().UTC(), artifact)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, seed.runID), mustStoreTestSourceArtifactFact(seed.bundleHash))
 	f := &fanOutGroupHistoryFixture{ctx: ctx, raw: raw, db: db, observer: db, postgres: backend == "postgres", runID: seed.runID, sourceRoute: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()}

@@ -808,6 +808,7 @@ func (c *Coordinator) beginDispatchWork(ctx context.Context) (*worklifetime.Leas
 }
 
 func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Duration, shouldWake bool, resultErr error) {
+	dispatchCtx := ctx
 	if c.selectedReconcile != nil {
 		lease, err := c.beginDispatchWork(ctx)
 		if err != nil {
@@ -868,7 +869,8 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Dur
 					return 0, false, err
 				}
 				c.reclaimAttempt(item.DeliveryID, beforeScan[item.DeliveryID])
-				if err := c.schedule(ctx, item); err != nil {
+				// Dispatch outlives this finite scan, but not its coordinator.
+				if err := c.schedule(dispatchCtx, item); err != nil {
 					return 0, false, err
 				}
 			case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimParked:

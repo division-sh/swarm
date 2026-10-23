@@ -125,6 +125,19 @@ func selectedContractTestProcessCapability(
 			return capability
 		}
 	}
+	if original, bound := fixture.process.OriginalProcess(); bound {
+		for _, capability := range fixture.capabilities {
+			evidence, err := capability.Evidence()
+			if err != nil || evidence.LeaseStamp() != original {
+				continue
+			}
+			if err := capability.ProveCurrent(ctx); err != nil {
+				t.Fatal(err)
+			}
+			fixture.capabilities[selected] = capability
+			return capability
+		}
+	}
 	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "selected-contract-test", BootID: uuid.NewString(), RuntimeInstanceID: runForkTestRuntimeInstanceID,
 	})
