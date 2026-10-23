@@ -10,47 +10,55 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 )
 
+func decodeRunFanOutListQuery(req Request) (fanoutobligation.ListQuery, error) {
+	if raw, present := req.Params["outcome_from_ordinal"]; present && raw == nil {
+		return fanoutobligation.ListQuery{}, NewInvalidParamsError(map[string]any{"field": "outcome_from_ordinal", "reason": "must be a non-negative integer"})
+	}
+	if raw, present := req.Params["filter"]; present {
+		filter, ok := raw.(map[string]any)
+		if !ok {
+			return fanoutobligation.ListQuery{}, NewInvalidParamsError(map[string]any{"field": "filter", "reason": "must be an object"})
+		}
+		for key, value := range filter {
+			switch key {
+			case "status", "triggering_delivery_id", "flow_path", "semantic_path", "deployment_feed_id":
+			default:
+				return fanoutobligation.ListQuery{}, NewInvalidParamsError(map[string]any{"field": "filter." + key, "reason": "unknown filter"})
+			}
+			if text, ok := value.(string); !ok || text == "" {
+				return fanoutobligation.ListQuery{}, NewInvalidParamsError(map[string]any{"field": "filter." + key, "reason": "must be a nonempty string; root flow path is ."})
+			}
+		}
+	}
+	if raw, present := req.Params["cursor"]; present {
+		if cursor, ok := raw.(string); !ok || cursor == "" {
+			return fanoutobligation.ListQuery{}, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "must be a nonempty string"})
+		}
+	}
+	var query fanoutobligation.ListQuery
+	raw, err := json.Marshal(req.Params)
+	if err != nil {
+		return query, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&query); err != nil {
+		return query, NewInvalidParamsError(map[string]any{"reason": "invalid fan-out list parameters"})
+	}
+	if _, supplied := req.Params["limit"]; supplied && query.Limit == 0 {
+		return query, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "limit must be between 1 and 500"})
+	}
+	if err := query.Validate(); err != nil {
+		return query, NewInvalidParamsError(map[string]any{"reason": err.Error()})
+	}
+	return query, nil
+}
+
 func runFanOutListHandler(opts RunReadHandlerOptions) MethodHandler {
 	return func(ctx context.Context, req Request) (any, error) {
-		if raw, present := req.Params["outcome_from_ordinal"]; present && raw == nil {
-			return nil, NewInvalidParamsError(map[string]any{"field": "outcome_from_ordinal", "reason": "must be a non-negative integer"})
-		}
-		if raw, present := req.Params["filter"]; present {
-			filter, ok := raw.(map[string]any)
-			if !ok {
-				return nil, NewInvalidParamsError(map[string]any{"field": "filter", "reason": "must be an object"})
-			}
-			for key, value := range filter {
-				switch key {
-				case "status", "triggering_delivery_id", "flow_path", "semantic_path", "deployment_feed_id":
-				default:
-					return nil, NewInvalidParamsError(map[string]any{"field": "filter." + key, "reason": "unknown filter"})
-				}
-				if text, ok := value.(string); !ok || text == "" {
-					return nil, NewInvalidParamsError(map[string]any{"field": "filter." + key, "reason": "must be a nonempty string; root flow path is ."})
-				}
-			}
-		}
-		if raw, present := req.Params["cursor"]; present {
-			if cursor, ok := raw.(string); !ok || cursor == "" {
-				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "must be a nonempty string"})
-			}
-		}
-		var query fanoutobligation.ListQuery
-		raw, err := json.Marshal(req.Params)
+		query, err := decodeRunFanOutListQuery(req)
 		if err != nil {
 			return nil, err
-		}
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&query); err != nil {
-			return nil, NewInvalidParamsError(map[string]any{"reason": "invalid fan-out list parameters"})
-		}
-		if _, supplied := req.Params["limit"]; supplied && query.Limit == 0 {
-			return nil, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "limit must be between 1 and 500"})
-		}
-		if err := query.Validate(); err != nil {
-			return nil, NewInvalidParamsError(map[string]any{"reason": err.Error()})
 		}
 		reader, ok := opts.Runs.(operatorread.FanOutReader)
 		if !ok {
