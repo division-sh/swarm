@@ -55,12 +55,12 @@ func TestRevisionCountersFollowCanonicalLocksBeforeProjection(t *testing.T) {
 					mock.ExpectQuery(`SELECT last_revision FROM run_fork_revision_heads WHERE run_id=\$1 FOR UPDATE`).WithArgs(runID).WillReturnRows(sqlmock.NewRows([]string{"last_revision"}).AddRow(1))
 				}
 			}
-			// Opposite contributions retain their order, but cannot lock runs
-			// until the pre-existing canonical revision locks have been acquired.
+			// Counter locks follow canonical physical identity after revision locks,
+			// without mutating the retained contribution order.
 			deltas := []counterprojection.Delta{{RunID: second, Amount: 2}, {RunID: first, Amount: 1}}
 			effects.SetPendingEventCounts(deltas)
-			for _, delta := range deltas {
-				update := mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`)
+			for _, delta := range []counterprojection.Delta{deltas[1], deltas[0]} {
+				update := mock.ExpectExec(`UPDATE run_event_counts SET event_count = event_count \+`)
 				if postgres {
 					update.WithArgs(delta.Amount, delta.RunID)
 				} else {

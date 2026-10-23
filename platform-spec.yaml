@@ -20994,6 +20994,17 @@ platform_tables:
         process catalog. A run has at most one profile, installed atomically by its run-creation owner or inherited
         atomically by PostgreSQL fork materialization.
       ddl: "CREATE TABLE run_scenario_execution_profiles (\n    run_id                  UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,\n    profile_id              TEXT NOT NULL CHECK (NULLIF(TRIM(profile_id), '') IS NOT NULL),\n    profile_digest          TEXT NOT NULL CHECK (profile_digest ~ '^sha256:[0-9a-f]{64}$'),\n    effective_source_digest TEXT NOT NULL CHECK (effective_source_digest ~ '^sha256:[0-9a-f]{64}$'),\n    profile_bytes           BYTEA NOT NULL,\n    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_run_scenario_profiles_profile (profile_id, profile_digest),\n    INDEX idx_run_scenario_profiles_source (effective_source_digest)\n);"
+    run_event_counts:
+      description: >-
+        Exact physical-event totals, one row created atomically with each run by the run-lifecycle owner.
+        Counter updates do not modify or exclusively lock the active run row. Pending deltas are applied in
+        sorted physical run identity order after revision-head locks and before activity-order acquisition.
+        A missing counter is inconsistent evidence, not an unknown or zero count. Run deletion cascades the counter.
+      ddl: |-
+        CREATE TABLE run_event_counts (
+            run_id UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+            event_count BIGINT NOT NULL DEFAULT 0 CHECK (event_count >= 0)
+        );
     runs:
       description: 'Platform run registry. A run is a top-level execution context with one immutable, explicitly
         discriminated origin: event, deployment, scenario setup, standing generation, or fork materialization. Every event,
@@ -21003,7 +21014,7 @@ platform_tables:
         standing_service_generations relation. Fork-materialized runs link back to their parent through the origin-owned
         forked_from_run_id, forked_from_point_kind, and positive forked_from_revision coordinates. Event forks also
         retain forked_from_event_id; deployment-revision forks have no event ID and never invent one.
-        event_count is the exact nonnegative projection of physical events rows linked by run_id, including durable
+        The run_event_counts row holds the exact nonnegative projection of physical events rows linked by run_id, including durable
         rejection events; zero means no such rows, never an unknown count. The private selected-store run-lifecycle
         counter owner applies actual inserted, copied, and deleted row deltas with atomic database updates in the
         same native transaction as the event work, never by reading and overwriting an old total or recounting events.
@@ -21011,7 +21022,8 @@ platform_tables:
         pending deltas aggregate and flush by physical run identity: PostgreSQL UUID aliases share one projection,
         while distinct SQLite TEXT keys never collapse. Revision finalization applies pending counter deltas after
         its existing canonical parent and revision-head locks, before historical projections; counter contributions
-        never introduce an earlier multi-run row-lock order. First-contribution order and payload spelling are unchanged.
+        use sorted physical run identity for counter locks, without changing contribution order or payload spelling.
+        Same-attempt snapshots overlay pending deltas without writing or locking a counter before finalization.
         Lifecycle, history, and result snapshots preserve the transaction-visible exact count, and rollback discards both event work and
         counter changes. Public entity_count remains derived from distinct entity_state.entity_id values for the run
         and is not stored on runs.'
@@ -21032,7 +21044,6 @@ platform_tables:
             forked_from_revision BIGINT CHECK (forked_from_revision > 0),
             forked_from_event_id UUID,
             continued_as_run_id UUID REFERENCES runs(run_id),
-            event_count       INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0),
             failure           JSONB,
             started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             ended_at          TIMESTAMPTZ,
