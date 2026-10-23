@@ -152,9 +152,12 @@ type foregroundRunTraceObserver struct {
 }
 
 type foregroundRunTraceRenderer struct {
-	detached chan runTraceObserverDetachedFact
-	workers  sync.WaitGroup
-	stopOnce sync.Once
+	detached     chan runTraceObserverDetachedFact
+	rowsStop     chan struct{}
+	rowsDone     chan struct{}
+	rowsStopOnce sync.Once
+	workers      sync.WaitGroup
+	stopOnce     sync.Once
 }
 
 func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
@@ -813,6 +816,16 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		detached = nil
 	}
 	settleObservation := func() {
+		// Keep transport overflow observable until the current output write joins.
+		rowsDone := renderer.stopRows()
+		for waiting := true; waiting; {
+			select {
+			case <-rowsDone:
+				waiting = false
+			case det := <-detached:
+				reportDetach(det)
+			}
+		}
 		observer.stop()
 		select {
 		case det := <-detached:
@@ -954,13 +967,29 @@ func writeRunCommandStageCounts(out io.Writer, diagnosis DiagnosticRunDiagnosisR
 func startForegroundRunTraceRenderer(out, errOut io.Writer, rows <-chan diagnosticRunTraceRow) *foregroundRunTraceRenderer {
 	renderer := &foregroundRunTraceRenderer{
 		detached: make(chan runTraceObserverDetachedFact, 1),
+		rowsStop: make(chan struct{}),
+		rowsDone: make(chan struct{}),
 	}
 	renderer.workers.Add(2)
 	go func() {
 		defer renderer.workers.Done()
+		defer close(renderer.rowsDone)
 		writer := &runTraceRowLineWriter{}
-		for row := range rows {
-			writer.Write(out, row)
+		for {
+			select {
+			case <-renderer.rowsStop:
+				return
+			default:
+			}
+			select {
+			case <-renderer.rowsStop:
+				return
+			case row, ok := <-rows:
+				if !ok {
+					return
+				}
+				writer.Write(out, row)
+			}
 		}
 	}()
 	go func() {
@@ -980,11 +1009,17 @@ func (r *foregroundRunTraceRenderer) enqueueDetached(fact runTraceObserverDetach
 	}
 }
 
+func (r *foregroundRunTraceRenderer) stopRows() <-chan struct{} {
+	r.rowsStopOnce.Do(func() { close(r.rowsStop) })
+	return r.rowsDone
+}
+
 func (r *foregroundRunTraceRenderer) stop() {
 	if r == nil {
 		return
 	}
 	r.stopOnce.Do(func() {
+		<-r.stopRows()
 		close(r.detached)
 		r.workers.Wait()
 	})
