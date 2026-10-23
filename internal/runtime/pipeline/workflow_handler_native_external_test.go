@@ -53,6 +53,7 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, context.Background(), fact))
+	ctx = nativeProcessContextFixture(t, ctx, selected)
 	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	t.Cleanup(func() {
 		counts := probe.Snapshot()

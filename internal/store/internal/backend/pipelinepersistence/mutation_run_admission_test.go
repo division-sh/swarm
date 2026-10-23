@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/google/uuid"
 )
 
@@ -22,21 +23,24 @@ import (
 func missingMutationRunProof(t *testing.T, initial bool) {
 	t.Helper()
 	db := fanOutReadbackTestDB(t, "sqlite")
+	backend, err := sqlitebackend.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := schemastore.NewSQLiteWithBackend(backend, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapStatementRunSchema(t, schema, false)
 	for _, ddl := range []string{
-		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL, bundle_hash TEXT)`,
 		`CREATE TABLE entity_mutations (mutation_id TEXT PRIMARY KEY)`,
-		`CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY, last_sequence INTEGER NOT NULL)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
 		}
 	}
-	backend, err := sqlitebackend.New(db)
-	if err != nil {
-		t.Fatal(err)
-	}
 	store := &PipelineSQLiteOwner{RunLifecycleSQLiteOwner: &runlifecycle.RunLifecycleSQLiteOwner{}}
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	ctx := runtimecorrelation.WithRunID(statementOriginalContext(t, true, backend.RunProcessAcquisitionOutcome), uuid.NewString())
 	result := mutationprotocol.RunSQLite(ctx, backend, "missing mutation run", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		before := runtimemutationlog.EntityStateProjection{}
 		after := runtimemutationlog.EntityStateProjection{Fields: map[string]any{"status": "ready"}}
