@@ -71,11 +71,6 @@ func commitWorkflowTimerOccurrence(
 			if err != nil {
 				return err
 			}
-			if !activation.Recurring {
-				if _, err := attempt.RequestCompletion(txctx, candidateWriter, activation.RunID, nil); err != nil {
-					return err
-				}
-			}
 			evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 			if err != nil {
 				return err
