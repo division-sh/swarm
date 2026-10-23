@@ -48,18 +48,10 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		if rootErr != nil {
 			return nil, rootErr
 		}
-		var expected startupownership.Authority
-		raw, err := json.Marshal(req.Params["holder"])
-		if err != nil || json.Unmarshal(raw, &expected) != nil || expected.Validate() != nil {
-			return nil, channelonboarding.ErrInvalidRequest
-		}
-		actual, err := capability.Evidence()
-		if err != nil || actual != expected {
-			return nil, errors.Join(channelonboarding.ErrConflict, err)
-		}
-		if err := capability.ProveCurrent(ctx); err != nil {
+		if err := requireDeploymentHolder(ctx, capability, req.Params["holder"]); err != nil {
 			return nil, err
 		}
+		var err error
 		provider, _ := req.Params["provider"].(string)
 		id, _ := req.Params["operation_id"].(string)
 		key := provider + ":" + id
@@ -127,6 +119,19 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, current)
 	}
 	return handler, claim, close
+}
+
+func requireDeploymentHolder(ctx context.Context, capability startupownership.ProcessCapability, supplied any) error {
+	var expected startupownership.Authority
+	raw, err := json.Marshal(supplied)
+	if err != nil || json.Unmarshal(raw, &expected) != nil || expected.Validate() != nil {
+		return channelonboarding.ErrInvalidRequest
+	}
+	actual, err := capability.Evidence()
+	if err != nil || actual != expected {
+		return errors.Join(channelonboarding.ErrConflict, err)
+	}
+	return capability.ProveCurrent(ctx)
 }
 
 // OpenChannelRegistration composes an invocation, not Run or a runtime target.

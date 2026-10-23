@@ -281,7 +281,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 			account := *opts.OperatorAccount
 			opts.OperatorAccount = &account
 		}
-		opts.Store = deploymentStore{Store: opts.Store, operations: opts.Operations}
+		opts.Store = deploymentStore{RuntimeStore: opts.Store, OperationStore: opts.Operations}
 	}
 	return &Service{
 		deployment: opts.Deployment, operatorAccount: opts.OperatorAccount,
@@ -299,12 +299,9 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		return Result{}, err
 	}
 	if input.ExpectedSelection != "" {
-		selection, err := selectedStartRequirement(principal, candidate, input)
+		_, err := selectedStartRequirement(principal, candidate, input)
 		if err != nil {
 			return Result{}, err
-		}
-		if selection.SelectionFence != input.ExpectedSelection {
-			return Result{}, fmt.Errorf("%w: channel selection changed before credential admission", ErrConflict)
 		}
 	}
 	reservations := credentialReservations(candidate)
@@ -752,10 +749,11 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 			return Result{Operation: op}, err
 		}
 	}
-	if err := s.resumeSession(ctx, rebound, candidate); err != nil {
-		if errors.Is(err, ErrSessionPending) {
-			return s.result(ctx, rebound, &candidate)
-		}
+	err = s.resumeSession(ctx, rebound, candidate)
+	switch {
+	case errors.Is(err, ErrSessionPending):
+		return s.result(ctx, rebound, &candidate)
+	case err != nil:
 		return Result{Operation: rebound, Candidate: &candidate}, fmt.Errorf("restore onboarding session: %w", err)
 	}
 	if input.CheckpointOnly {
@@ -2441,7 +2439,7 @@ func historicalCandidate(op Operation) Candidate {
 	}
 }
 
-func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
+func (s *Service) sessionResult(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
 	if op.DeploymentRegistration && candidate == nil {
 		current, err := s.currentCandidate(op)
 		if err != nil {
@@ -2484,6 +2482,15 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 	if result.Connection != nil && result.Pairing != nil && result.Pairing.Status == "awaiting_qr" {
 		result.Connection.State = "pairing"
 	}
+	return result, nil
+}
+
+func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
+	result, err := s.sessionResult(ctx, op, candidate)
+	if err != nil {
+		return result, err
+	}
+	candidate = result.Candidate
 	if op.IdentityOperationID != "" {
 		identityOp, err := s.identities.GetOperation(ctx, op.IdentityOperationID)
 		if err != nil {

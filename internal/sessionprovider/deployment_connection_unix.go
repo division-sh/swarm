@@ -119,6 +119,10 @@ func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, ex
 		op.SessionAccount != expected.SessionAccount || op.SessionAccount != c.sessionAccount() || op.AccountReference != expected.AccountReference {
 		return errors.Join(channelonboarding.ErrRevisionConflict, err)
 	}
+	return c.unlinkDeploymentAccount(work.Context(), op)
+}
+
+func (c *RuntimeConnection) unlinkDeploymentAccount(ctx context.Context, op channelonboarding.Operation) error {
 	occurrence := c.state.currentOccurrence()
 	if op.FailureCode == "account_logout_launched" {
 		if occurrence == nil || !occurrence.client.Store.Deleted {
@@ -128,13 +132,13 @@ func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, ex
 		if op.FailureCode != "account_logout_pending" {
 			return channelonboarding.ErrConflict
 		}
-		if occurrence == nil || !c.state.ownsConnectedOccurrence(work.Context(), occurrence) ||
+		if occurrence == nil || !c.state.ownsConnectedOccurrence(ctx, occurrence) ||
 			occurrence.client.Store.Deleted || occurrence.client.Store.ID == nil ||
 			occurrence.client.Store.ID.ToNonAD().String() != op.SessionAccount.AccountRef {
 			return errClientOccurrenceFenced
 		}
-		err = func() error {
-			owned, release, err := occurrence.prepareLogout(work.Context())
+		err := func() error {
+			owned, release, err := occurrence.prepareLogout(ctx)
 			if err != nil {
 				return err
 			}
@@ -156,7 +160,7 @@ func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, ex
 	if !occurrence.client.Store.Deleted {
 		return channelonboarding.ErrConflict
 	}
-	_, err = c.operations.AdvanceChannelOnboarding(context.WithoutCancel(ctx), channelonboarding.AdvanceRequest{OperationID: op.OperationID,
+	_, err := c.operations.AdvanceChannelOnboarding(context.WithoutCancel(ctx), channelonboarding.AdvanceRequest{OperationID: op.OperationID,
 		ExpectedRevision: op.Revision, Phase: op.Phase, FailureCode: "account_logout_unlinked", Now: time.Now().UTC()})
 	return err
 }

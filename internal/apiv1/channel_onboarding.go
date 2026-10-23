@@ -127,32 +127,36 @@ func scopedChannelHandlers(handlers map[string]MethodHandler, channels *operator
 				}
 				return handler(ctx, req)
 			}
-			if scope != "deployment" || deployment == nil {
-				return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "deployment registration is unavailable"})
-			}
-			if err := requireOperatorPrincipal(req, channels); err != nil {
-				return nil, err
-			}
-			for _, field := range []string{"bundle", "interface", "target"} {
-				if _, exists := req.Params[field]; exists {
-					return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "deployment registration has no flow target"})
-				}
-			}
-			if _, exists := req.Params["expected_revision"]; exists {
-				revision, err := channelRevisionParam(req.Params, "expected_revision", false)
-				if err != nil {
-					return nil, err
-				}
-				req.Params["expected_revision"] = revision
-			}
-			result, err := deployment(ctx, req)
-			if err != nil {
-				return nil, channelOnboardingError(err)
-			}
-			return result, nil
+			return deploymentChannelRequest(ctx, req, scope, channels, deployment)
 		}
 	}
 	return handlers
+}
+
+func deploymentChannelRequest(ctx context.Context, req Request, scope any, channels *operatorchannel.Service, deployment MethodHandler) (any, error) {
+	if scope != "deployment" || deployment == nil {
+		return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "deployment registration is unavailable"})
+	}
+	if err := requireOperatorPrincipal(req, channels); err != nil {
+		return nil, err
+	}
+	for _, field := range []string{"bundle", "interface", "target"} {
+		if _, exists := req.Params[field]; exists {
+			return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "deployment registration has no flow target"})
+		}
+	}
+	if _, exists := req.Params["expected_revision"]; exists {
+		revision, err := channelRevisionParam(req.Params, "expected_revision", false)
+		if err != nil {
+			return nil, err
+		}
+		req.Params["expected_revision"] = revision
+	}
+	result, err := deployment(ctx, req)
+	if err != nil {
+		return nil, channelOnboardingError(err)
+	}
+	return result, nil
 }
 
 func channelOnboardingStartInput(params map[string]any) (channelonboarding.StartInput, error) {

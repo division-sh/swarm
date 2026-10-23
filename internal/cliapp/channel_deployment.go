@@ -116,6 +116,36 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 	if err != nil {
 		return nil, err
 	}
+	c, err := openDeploymentChannelStore(ctx, provider, opts, loaded, existing...)
+	if err != nil {
+		return nil, err
+	}
+	if c.remote != nil {
+		return c, nil
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, c.close(context.WithoutCancel(ctx)))
+		}
+	}()
+	if !c.borrowed {
+		plans, err := store.GeneratePlatformTableDDLs(spec)
+		if err != nil {
+			return nil, err
+		}
+		schema, err := SchemaBootstrapRequest(spec, plans, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.store.Schema().BootstrapSchema(ctx, schema); err != nil {
+			return nil, err
+		}
+	}
+	return c, c.initializeRegistration(ctx, directory.Path, loaded.Config.Channels.HITL, candidate, projection.ProviderTriggers, opts)
+}
+
+func openDeploymentChannelStore(ctx context.Context, provider string, opts rootCommandOptions, loaded RuntimeConfigLoadResult, existing ...registrationHolder) (*deploymentChannelClient, error) {
+	root := opts.invocationRoot
 	selection, err := ResolveRuntimeStoreSelection(root.Path(), "", false, loaded)
 	if err != nil {
 		return nil, err
@@ -129,116 +159,96 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 			return nil, err
 		}
 	}
-	var owner *selected.Owner
-	process, borrowed := worklifetime.NewProcess(), len(existing) == 1
-	if borrowed {
-		owner, process = existing[0].store, existing[0].process
-	} else {
-		_, statErr := os.Stat(selection.SQLitePath)
-		if selection.Backend == storebackend.BackendSQLite && statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return nil, statErr
+	c := &deploymentChannelClient{process: worklifetime.NewProcess(), provider: provider}
+	if len(existing) == 1 {
+		c.store, c.process, c.borrowed = existing[0].store, existing[0].process, true
+		return c, nil
+	}
+	_, statErr := os.Stat(selection.SQLitePath)
+	if selection.Backend == storebackend.BackendSQLite && statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
+	}
+	if selection.Backend != storebackend.BackendSQLite || statErr == nil {
+		inspection, err := selected.OpenAuthorityInspection(ctx, request)
+		if err != nil {
+			return nil, err
 		}
-		if selection.Backend != storebackend.BackendSQLite || statErr == nil {
-			inspection, err := selected.OpenAuthorityInspection(ctx, request)
+		observed, readErr := inspection.InspectAuthority(ctx)
+		if err := errors.Join(readErr, inspection.Close()); err != nil {
+			return nil, err
+		}
+		if observed.Possession == nil {
+			return nil, channelonboarding.ErrConflict
+		}
+		if !observed.Possession.Available {
+			if observed.Authority == nil {
+				return nil, errors.New("deployment is busy; no authenticated serve holder is available")
+			}
+			remote, err := newCLIAPIClient(opts)
 			if err != nil {
 				return nil, err
 			}
-			observed, readErr := inspection.InspectAuthority(ctx)
-			if err := errors.Join(readErr, inspection.Close()); err != nil {
-				return nil, err
-			}
-			if observed.Possession == nil {
-				return nil, channelonboarding.ErrConflict
-			}
-			if !observed.Possession.Available {
-				if observed.Authority == nil {
-					return nil, errors.New("deployment is busy; no authenticated serve holder is available")
-				}
-				remote, err := newCLIAPIClient(opts)
-				if err != nil {
-					return nil, err
-				}
-				return &deploymentChannelClient{remote: remote, holder: observed.Authority, provider: provider}, nil
-			}
-		}
-		owner, err = selected.OpenRuntime(ctx, selected.RuntimeRequest{Selection: selection, PostgresDSN: request.PostgresDSN})
-		if err != nil {
-			return nil, err
+			return &deploymentChannelClient{remote: remote, holder: observed.Authority, provider: provider}, nil
 		}
 	}
-	c := &deploymentChannelClient{store: owner, process: process, provider: provider, borrowed: borrowed}
-	defer func() {
-		if err != nil {
-			err = errors.Join(err, c.close(context.WithoutCancel(ctx)))
-		}
-	}()
-	if !borrowed {
-		plans, err := store.GeneratePlatformTableDDLs(spec)
-		if err != nil {
-			return nil, err
-		}
-		schema, err := SchemaBootstrapRequest(spec, plans, nil)
-		if err != nil {
-			return nil, err
-		}
-		if err := owner.Schema().BootstrapSchema(ctx, schema); err != nil {
-			return nil, err
-		}
-	}
+	c.store, err = selected.OpenRuntime(ctx, selected.RuntimeRequest{Selection: selection, PostgresDSN: request.PostgresDSN})
+	return c, err
+}
+
+func (c *deploymentChannelClient) initializeRegistration(ctx context.Context, directory string, hitl *channelonboarding.AccountReference, candidate channelonboarding.Candidate, triggers *providertriggers.CatalogSnapshot, opts rootCommandOptions) error {
+	owner, provider := c.store, c.provider
 	credentialStore, err := CredentialFileStore()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	currentness, err := credentials.NewSnapshotOwner(credentialStore)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	proofs, err := operatorchannel.NewFileProofStore(directory.Path)
+	proofs, err := operatorchannel.NewFileProofStore(directory)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	principal, err := owner.OperatorChannels().EnsureOperatorPrincipal(ctx, time.Now().UTC())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var trigger providertriggers.InboundAdmissionPlan
-	if provider == "whatsapp" {
-		trigger, err = projection.ProviderTriggers.CompileAdmission(providertriggers.CompileAdmissionRequest{Provider: provider, Alias: provider})
-		if err != nil {
-			return nil, err
-		}
-	} else if provider == "telegram" {
-		trigger, err = projection.ProviderTriggers.CompileRegistrationPolling(provider)
-		if err != nil {
-			return nil, err
-		}
+	switch provider {
+	case "whatsapp":
+		trigger, err = triggers.CompileAdmission(providertriggers.CompileAdmissionRequest{Provider: provider, Alias: provider})
+	case "telegram":
+		trigger, err = triggers.CompileRegistrationPolling(provider)
+	}
+	if err != nil {
+		return err
 	}
 	if opts.channelRegistration == nil {
-		return nil, errors.New("channel registration is not installed in this executable")
+		return errors.New("channel registration is not installed in this executable")
 	}
-	c.session, err = opts.channelRegistration(ctx, ChannelRegistrationOptions{Directory: directory.Path, Principal: principal,
+	c.session, err = opts.channelRegistration(ctx, ChannelRegistrationOptions{Directory: directory, Principal: principal,
 		Process: c.process, Store: owner.ChannelOnboarding(), Operations: owner.DeploymentChannels(), Credentials: currentness,
 		Identities: owner.OperatorChannels(), HTTP: opts.httpClient, Plan: candidate.Plan, Trigger: trigger})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	c.identities, err = operatorchannel.NewService(owner.OperatorChannels(), proofs, c.session, []operatorchannel.InterfaceIdentity{candidate.Interface}, principal.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if _, err = c.identities.PreparePrincipal(ctx, time.Now().UTC()); err != nil {
-		return nil, err
+		return err
 	}
 	writer, err := channelonboarding.NewCredentialWriter(credentialStore)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	c.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, OperatorAccount: loaded.Config.Channels.HITL,
+	c.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, OperatorAccount: hitl,
 		Store: owner.ChannelOnboarding(), Operations: owner.DeploymentChannels(), Identities: c.identities, Credentials: writer, Sessions: c.session,
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
 			return channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
 		}})
-	return c, err
+	return err
 }
 
 func (c *deploymentChannelClient) call(ctx context.Context, method string, params map[string]any, target any) error {
@@ -349,6 +359,40 @@ func (c *deploymentChannelClient) accounts(ctx context.Context) ([]channelonboar
 	}
 	err := c.call(ctx, "channel.list", map[string]any{}, &result)
 	return result.Accounts, err
+}
+
+func (c *deploymentChannelClient) connectAccount(ctx context.Context, out, errOut io.Writer, opts channelConnectOptions) (begun channelOnboardingResult, proceed bool, err error) {
+	accounts, err := c.accounts(ctx)
+	if err != nil {
+		return begun, false, err
+	}
+	if opts.account != "" {
+		ref, err := channelonboarding.CanonicalAccount(c.provider, opts.account)
+		if err != nil {
+			return begun, false, err
+		}
+		c.expectedAccount = ref.Account
+		operation, err := selectDeploymentAccount(accounts, ref.Account, opts.apiOptions.input, errOut, false)
+		if err != nil {
+			return begun, false, err
+		}
+		if err := c.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": operation.OperationID, "reverify": true}, &begun); err != nil {
+			return begun, false, err
+		}
+		if begun.Operation.Phase == channelonboarding.PhaseRetired && begun.Operation.FailureCode == "native_account_revoked" {
+			fmt.Fprintln(out, "Account was logged out from the phone. Link it again:")
+			begun = channelOnboardingResult{}
+		}
+	} else if len(accounts) > 0 && !opts.yes {
+		for _, account := range accounts {
+			fmt.Fprintf(out, "Account: %s.\n", account.Operation.DeploymentAccount())
+		}
+		approved, err := confirmChannelAccount(opts.apiOptions.input, errOut, "Link another? [y/N] ")
+		if err != nil || !approved {
+			return begun, false, err
+		}
+	}
+	return begun, true, nil
 }
 
 func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {

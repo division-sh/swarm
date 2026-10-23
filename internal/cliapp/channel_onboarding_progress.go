@@ -96,17 +96,7 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 		return returnCLIValidationError(errOut, err)
 	}
 	if result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded {
-		if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateDeploymentRegistration() != nil ||
-			!result.Operation.AccountConfirmed || result.Operation.ActivationRevision != 0 || result.Operation.FailureCode != "" || result.Readiness != nil {
-			return returnCLIValidationError(errOut, errors.New("deployment registration readback is incomplete or carries runtime authority"))
-		}
-		return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
-			verb := "Registered"
-			if result.Operation.ExpectedAccount != "" {
-				verb = "Reverified"
-			}
-			fmt.Fprintf(w, "%s %s account %s.\n", verb, result.Operation.Provider, result.Operation.AccountReference)
-		}, func() ([]string, error) { return []string{result.Operation.AccountReference}, nil })
+		return renderDeploymentRegistration(out, errOut, output, result)
 	}
 	if !pending && (result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready) {
 		if result.Operation.Provider == "whatsapp" {
@@ -148,6 +138,20 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 			writeChannelNativeQualification(w, result)
 		}
 	}, func() ([]string, error) { return []string{result.Operation.OperationID}, nil })
+}
+
+func renderDeploymentRegistration(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult) error {
+	if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateDeploymentRegistration() != nil ||
+		!result.Operation.AccountConfirmed || result.Operation.ActivationRevision != 0 || result.Operation.FailureCode != "" || result.Readiness != nil {
+		return returnCLIValidationError(errOut, errors.New("deployment registration readback is incomplete or carries runtime authority"))
+	}
+	return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
+		verb := "Registered"
+		if result.Operation.ExpectedAccount != "" {
+			verb = "Reverified"
+		}
+		fmt.Fprintf(w, "%s %s account %s.\n", verb, result.Operation.Provider, result.Operation.AccountReference)
+	}, func() ([]string, error) { return []string{result.Operation.AccountReference}, nil })
 }
 
 func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.SessionConnectionReadback, ready bool) {

@@ -464,29 +464,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 
 func validTransition(op domain.Operation, req domain.AdvanceRequest) bool {
 	if op.DeploymentRegistration {
-		if req.RebindCoordinate != nil || req.SourceRollover != nil {
-			return false
-		}
-		if req.Phase == op.Phase && op.AccountConfirmed && !op.LogoutCompleted {
-			if next, ok := map[string]string{"": "account_logout_pending", "account_logout_pending": "account_logout_launched", "account_logout_launched": "account_logout_unlinked"}[op.FailureCode]; ok && req.FailureCode == next {
-				return true
-			}
-		}
-		if req.Phase == domain.PhaseRetired {
-			return !req.BeginOperatorEnrollment &&
-				(req.CompleteDeploymentLogout && !op.LogoutCompleted && op.FailureCode == "account_logout_unlinked" ||
-					op.Phase != domain.PhaseRetired && op.AccountConfirmed && req.FailureCode == "native_account_revoked")
-		}
-		if req.BeginOperatorEnrollment {
-			return slices.Contains([]domain.Phase{domain.PhaseSucceeded, domain.PhaseAwaitingExternalIdentity, domain.PhaseAwaitingOperatorConfirmation}, op.Phase) && op.AccountConfirmed &&
-				req.Phase == domain.PhaseAwaitingExternalIdentity
-		}
-		if slices.Contains([]domain.Phase{domain.PhasePublishingActivation, domain.PhasePublishingProcessActivation, domain.PhasePromotingRegistration, domain.PhaseRetiringPredecessor, domain.PhaseDeliveringConfirmation}, req.Phase) {
-			return false
-		}
-		if req.Phase == domain.PhaseSucceeded {
-			return op.Phase == domain.PhaseAwaitingOperatorConfirmation && op.AccountReference != "" && op.AccountConfirmed
-		}
+		return validDeploymentTransition(op, req)
 	}
 	if req.SourceRollover != nil {
 		return true // The source-rollover transaction validates its exact admission.
@@ -499,6 +477,37 @@ func validTransition(op domain.Operation, req domain.AdvanceRequest) bool {
 	if req.RebindCoordinate != nil && from == domain.PhaseSucceeded && to == from {
 		return true
 	}
+	return validSequentialTransition(from, to)
+}
+
+func validDeploymentTransition(op domain.Operation, req domain.AdvanceRequest) bool {
+	if req.RebindCoordinate != nil || req.SourceRollover != nil {
+		return false
+	}
+	if req.Phase == op.Phase && op.AccountConfirmed && !op.LogoutCompleted {
+		if next, ok := map[string]string{"": "account_logout_pending", "account_logout_pending": "account_logout_launched", "account_logout_launched": "account_logout_unlinked"}[op.FailureCode]; ok && req.FailureCode == next {
+			return true
+		}
+	}
+	if req.Phase == domain.PhaseRetired {
+		return !req.BeginOperatorEnrollment &&
+			(req.CompleteDeploymentLogout && !op.LogoutCompleted && op.FailureCode == "account_logout_unlinked" ||
+				op.Phase != domain.PhaseRetired && op.AccountConfirmed && req.FailureCode == "native_account_revoked")
+	}
+	if req.BeginOperatorEnrollment {
+		return slices.Contains([]domain.Phase{domain.PhaseSucceeded, domain.PhaseAwaitingExternalIdentity, domain.PhaseAwaitingOperatorConfirmation}, op.Phase) && op.AccountConfirmed &&
+			req.Phase == domain.PhaseAwaitingExternalIdentity
+	}
+	if slices.Contains([]domain.Phase{domain.PhasePublishingActivation, domain.PhasePublishingProcessActivation, domain.PhasePromotingRegistration, domain.PhaseRetiringPredecessor, domain.PhaseDeliveringConfirmation}, req.Phase) {
+		return false
+	}
+	if req.Phase == domain.PhaseSucceeded {
+		return op.Phase == domain.PhaseAwaitingOperatorConfirmation && op.AccountReference != "" && op.AccountConfirmed
+	}
+	return validSequentialTransition(op.Phase, req.Phase)
+}
+
+func validSequentialTransition(from, to domain.Phase) bool {
 	if from.Terminal() {
 		return false
 	}

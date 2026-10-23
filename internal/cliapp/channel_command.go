@@ -378,36 +378,13 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 			return returnCLIValidationError(errOut, err)
 		}
 		defer func() { resultErr = errors.Join(resultErr, local.close(context.WithoutCancel(ctx))) }()
-		accounts, err := local.accounts(ctx)
+		var proceed bool
+		begun, proceed, err = local.connectAccount(ctx, out, errOut, opts)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
-		if opts.account != "" {
-			ref, err := channelonboarding.CanonicalAccount(provider, opts.account)
-			if err != nil {
-				return returnCLIValidationError(errOut, err)
-			}
-			local.expectedAccount = ref.Account
-			operation, err := selectDeploymentAccount(accounts, ref.Account, opts.apiOptions.input, errOut, false)
-			if err != nil {
-				return returnCLIValidationError(errOut, err)
-			}
-			err = local.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": operation.OperationID, "reverify": true}, &begun)
-			if err != nil {
-				return returnCLIValidationError(errOut, err)
-			}
-			if begun.Operation.Phase == channelonboarding.PhaseRetired && begun.Operation.FailureCode == "native_account_revoked" {
-				fmt.Fprintln(out, "Account was logged out from the phone. Link it again:")
-				begun = channelOnboardingResult{}
-			}
-		} else if len(accounts) > 0 && !opts.yes {
-			for _, account := range accounts {
-				fmt.Fprintf(out, "Account: %s.\n", account.Operation.DeploymentAccount())
-			}
-			approved, err := confirmChannelAccount(opts.apiOptions.input, errOut, "Link another? [y/N] ")
-			if err != nil || !approved {
-				return err
-			}
+		if !proceed {
+			return nil
 		}
 		client = local
 	} else {
@@ -438,10 +415,14 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 			return err
 		}
 	}
-	if opts.waitForPairing && opts.apiOptions.input != nil {
+	return finishChannelOnboarding(ctx, client, begun, opts, out, errOut)
+}
+
+func finishChannelOnboarding(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) error {
+	if opts.verb != "resume" && opts.waitForPairing && opts.apiOptions.input != nil {
 		opts.apiOptions.input = bufio.NewReader(opts.apiOptions.input)
 	}
-	if opts.waitForPairing && begun.Operation.Posture == channelonboarding.ActivationSessionConnection {
+	if opts.verb != "resume" && opts.waitForPairing && begun.Operation.Posture == channelonboarding.ActivationSessionConnection {
 		fmt.Fprintf(out, "Connecting to %s...\n", begun.Operation.Provider)
 	}
 	progressOut := out
@@ -504,15 +485,7 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 		opts.resumeCredential = credential
 		defer func() { opts.resumeCredential = "" }()
 	}
-	progressOut := out
-	if opts.output.asJSON || opts.output.quiet {
-		progressOut = io.Discard
-	}
-	result, err := completeChannelOnboarding(ctx, client, current, opts, progressOut, errOut)
-	if err != nil {
-		return err
-	}
-	return renderChannelOnboardingResult(out, errOut, opts.output, result)
+	return finishChannelOnboarding(ctx, client, current, opts, out, errOut)
 }
 
 func writeChannelNativeQualification(out io.Writer, result channelOnboardingResult) {
@@ -550,9 +523,8 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 		if pending && !opts.waitForPairing && !advancePending && opts.resumeCredential == "" {
 			return result, nil
 		}
-		waitingForConnection := !result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
 		if opts.waitForPairing {
-			if pending || waitingForConnection {
+			if channelPairingWaitRequired(result, pending) {
 				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, awaitLogin, progressOut, errOut)
 				if err != nil {
 					return channelOnboardingResult{}, err
@@ -615,6 +587,10 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 		}
 		result = next
 	}
+}
+
+func channelPairingWaitRequired(result channelOnboardingResult, pending bool) bool {
+	return pending || !result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
 }
 
 func waitForChannelOnboardingPairing(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
@@ -702,6 +678,11 @@ func confirmCLIChannelAccount(ctx context.Context, client channelControlClient, 
 		}
 		current = next
 	}
+	return confirmCLIAccountPreview(ctx, client, current, opts, out, errOut, acceptedAccount)
+}
+
+func confirmCLIAccountPreview(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
+	var err error
 	account, name := "", ""
 	if current.Pairing != nil {
 		account, name = current.Pairing.AccountPresentation, current.Pairing.AccountName

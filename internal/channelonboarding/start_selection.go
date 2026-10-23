@@ -94,5 +94,8 @@ func selectedStartRequirement(principal operatorchannel.Principal, candidate Can
 	if candidate.DeploymentRegistration {
 		fence = operatorchannel.Hash("deployment-channel-selection-v1", fence, input.ExpectedAccount)
 	}
+	if input.ExpectedSelection != "" && input.ExpectedSelection != fence {
+		return StartSelection{}, fmt.Errorf("%w: channel selection changed before credential admission", ErrConflict)
+	}
 	return StartSelection{Candidate: candidate, SelectionFence: fence}, nil
 }
