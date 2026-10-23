@@ -159,7 +159,7 @@ func dataShowReadOnlyHandlers(t *testing.T, fixture dataRunLifecycleFixture) map
 
 func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, ref := dataHTTPProbeCatalog(t)
 		for _, keyType := range []string{"boolean", "number"} {
 			keyRef, err := durabledata.ParseDeclarationRef(".", keyType+".observed")
@@ -409,7 +409,7 @@ func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 
 func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, ref := dataHTTPProbeCatalog(t)
 		compiled, defects := durabledata.CompileJSONL(ref, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"slug"}, "properties": map[string]any{"slug": map[string]any{"type": "string"}, "payload": map[string]any{"type": "string"}}}, "slug", nil)
 		if len(defects) != 0 {

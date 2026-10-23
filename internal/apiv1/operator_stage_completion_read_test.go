@@ -69,6 +69,7 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 					source := semanticview.Wrap(bundle)
 					runID := uuid.NewString()
 					fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifact, StartedAt: time.Now().UTC()}
+					ctx = apiTestOriginalProcessContext(t, ctx, selected)
 					storetest.RequireRun(t, ctx, selected, fixture)
 					bus, err := newScopedAPITestEventBus(t, selected.(runtimebus.EventStore), runStartTestEventBusOptions(source))
 					if err != nil {

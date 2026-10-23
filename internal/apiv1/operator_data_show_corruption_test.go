@@ -78,7 +78,7 @@ func (s dataShowCorruptStore) LoadDataPruneOperation(ctx context.Context, id str
 
 func TestDataShowCorruptReadFamilyAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, ref := dataHTTPProbeCatalog(t)
 		if _, err := fixture.primary.EnsureSourceArtifactWithData(ctx, dataProbeSourceArtifact, catalog); err != nil {
 			t.Fatal(err)
