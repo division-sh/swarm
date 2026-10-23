@@ -14,9 +14,6 @@ func TestDeploymentFanOutSummaryUsesFeedIdentityBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := context.Background()
 			db := fanOutReadbackTestDB(t, backend)
-			if _, err := db.ExecContext(ctx, `CREATE TABLE fan_out_obligation_barriers (run_id TEXT, status TEXT)`); err != nil {
-				t.Fatal(err)
-			}
 			request := deploymentStoreRequest(1)
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			tx, err := db.BeginTx(ctx, nil)

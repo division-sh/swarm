@@ -106,6 +106,7 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := fanOutReadbackTestDB(t, backend)
+			ctx := acquireStatementProcessForDB(t, db, backend == "postgres")
 			newValueType := "TEXT"
 			if backend == "postgres" {
 				newValueType = "JSONB"
@@ -146,13 +147,13 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 				if err != nil {
 					t.Fatal(err)
 				}
-				result = mutationprotocol.RunPostgres(context.Background(), store, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
+				result = mutationprotocol.RunPostgres(ctx, store, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
 			} else {
 				store, err := sqlitebackend.New(db)
 				if err != nil {
 					t.Fatal(err)
 				}
-				result = mutationprotocol.RunSQLite(context.Background(), store, "fan-out source encoding", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
+				result = mutationprotocol.RunSQLite(ctx, store, "fan-out source encoding", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
 			}
 			if !errors.Is(result.Err(), rollback) {
 				t.Fatalf("source revision attempt = %v, want isolated rollback", result.Err())
@@ -228,6 +229,9 @@ func fanOutReadbackTestDB(t *testing.T, backend string, pausedRun ...string) *sq
 			ordinal INTEGER NOT NULL, outcome_kind TEXT NOT NULL, event_id TEXT, source_event_id TEXT, inherited_disposition TEXT, failure TEXT, created_at TIMESTAMP NOT NULL,
 			UNIQUE (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal),
 			UNIQUE (run_id,deployment_feed_id,ordinal))`,
+		`CREATE TABLE fan_out_obligation_barriers (
+			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, flow_path TEXT NOT NULL,
+			declaration_family TEXT NOT NULL, semantic_path TEXT NOT NULL, status TEXT NOT NULL)`,
 	}
 	if backend == "postgres" {
 		statements[1] = strings.ReplaceAll(statements[1], "event_id TEXT", "event_id UUID")
