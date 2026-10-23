@@ -109,6 +109,20 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 			if len(logs.records) != beforeLogs+1 {
 				t.Fatalf("internal diagnostics missing: before=%d after=%d", beforeLogs, len(logs.records))
 			}
+			recorded, err := DecodeCanonicalRuntimeLogPayload(logs.records[beforeLogs].Payload)
+			if err != nil || recorded.Failure == nil {
+				t.Fatalf("invalid durable diagnostic: %+v %v", recorded, err)
+			}
+			if cell.status == 400 && (recorded.LogLevel != "warn" || recorded.Failure.Class != runtimefailures.ClassSchemaInvalid || recorded.Failure.Detail.Attributes["path"] != inboundValidationDisplayPath(cell.path)) {
+				t.Fatalf("sender rejection lost safe classification: %+v", recorded)
+			}
+			if cell.status != 400 && (recorded.LogLevel != "error" || recorded.Failure.Class != runtimefailures.ClassInternalFailure) {
+				t.Fatalf("internal/cleanup failure was hidden: %+v", recorded)
+			}
+			expectedMessage := "inbound publication failed"
+			if cell.status == 400 {
+				expectedMessage = "invalid webhook payload at " + inboundValidationDisplayPath(cell.path)
+			}
 			found := 0
 			for _, line := range strings.Split(processLogs.String(), "\n") {
 				var diagnostic struct {
@@ -118,12 +132,16 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 					Causes          []string `json:"causes"`
 				}
 				_, payload, ok := strings.Cut(line, "detail=")
-				if !ok || json.Unmarshal([]byte(payload), &diagnostic) != nil || diagnostic.Message != "inbound publication failed" || diagnostic.ProviderEventID != cell.name {
+				if !ok || json.Unmarshal([]byte(payload), &diagnostic) != nil || diagnostic.Message != expectedMessage || diagnostic.ProviderEventID != cell.name {
 					continue
 				}
 				found++
 				detail := strings.Join(append([]string{diagnostic.Error}, diagnostic.Causes...), "\n")
-				if !strings.Contains(detail, failure.Error()) || strings.Contains(cell.name, "cleanup") && !strings.Contains(detail, cleanup.Error()) {
+				if cell.status == 400 {
+					if detail != "" || !strings.Contains(line, "runtime.warn") || strings.Contains(line, "secret-body-value") || strings.Contains(string(logs.records[beforeLogs].Payload), "secret-body-value") {
+						t.Fatalf("sender diagnostic disclosed payload or wrong level: %s", line)
+					}
+				} else if !strings.Contains(detail, failure.Error()) || strings.Contains(cell.name, "cleanup") && !strings.Contains(detail, cleanup.Error()) {
 					t.Fatalf("original causes lost from process diagnostics: %q", detail)
 				}
 			}

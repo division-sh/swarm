@@ -11,6 +11,25 @@ import (
 )
 
 func proveAffectedFastSelection(t *testing.T) {
+	t.Run("source-contract-inputs", func(t *testing.T) {
+		data, err := os.ReadFile("../../.github/test-proof-plan.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy, err := LoadPolicy(strings.NewReader(string(data)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := TestRoot{Package: "github.com/division-sh/swarm/internal/apispec", Name: "TestDecisionCardMigrationHasNoRetiredPublicSurfaceSurvivors"}
+		native := RunPlan{Units: []ProofUnit{{ID: "source-contract-guards", Packages: []string{root.Package}, RequiredTests: []RequiredTest{{TestRoot: root}}}}}
+		for _, input := range []string{"examples/flow/events.yaml", "data/example.json", "packs/provider/pack.yaml", "tests/transport.yaml", "openrpc.json", "swarm.example.yaml", ".golangci.yml", "platform_artifacts.go"} {
+			inventory := RootInventory{ImpactPackages: []testchanged.Package{{ImportPath: "module/unrelated", RelDir: filepath.ToSlash(filepath.Dir(input))}}}
+			got, err := AffectedFastRoots(".", policy, native, inventory, []byte("M\x00"+input+"\x00"))
+			if err != nil || !reflect.DeepEqual(got, []TestRoot{root}) {
+				t.Fatalf("source contract input %s selected %+v: %v", input, got, err)
+			}
+		}
+	})
 	t.Run("affected-canonical-units", func(t *testing.T) {
 		policy := Policy{Units: map[string]UnitPolicy{
 			"fast": {PreflightFast: true, InputPaths: []string{"internal/source"}},

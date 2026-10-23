@@ -231,7 +231,10 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 			bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{
 				ContractBundle: source, ProviderOutputVerifier: catalog, PipelineObligations: owner,
 				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
-				PayloadAdmitter: func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+				PayloadAdmitter: func(ctx context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+					if !IsSubmittedInboundEvent(ctx, event) || IsSubmittedInboundEvent(context.Background(), event) || IsSubmittedInboundEvent(ctx, events.Event{}) {
+						t.Fatal("submitted diagnostic ownership escaped its authenticated event")
+					}
 					if event.ID() == batch.Events[1].Event.ID() {
 						return events.PayloadAdmission{}, violation
 					}
