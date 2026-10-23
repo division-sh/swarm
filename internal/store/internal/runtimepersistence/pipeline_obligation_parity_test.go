@@ -408,9 +408,9 @@ func provePipelineMalformedRecoveryPreclassification(
 	if err := commitSemanticEventFixture(ctx, selected, event); err != nil {
 		t.Fatalf("commit malformed recovery fixture: %v", err)
 	}
-	query := `UPDATE events SET run_id = NULL WHERE event_id = ?`
+	query := `UPDATE events SET run_id = NULL, run_owner_key = '' WHERE event_id = ?`
 	if fixture.dialect == authoractivityfixture.DialectPostgres {
-		query = `UPDATE events SET run_id = NULL WHERE event_id = $1::uuid`
+		query = `UPDATE events SET run_id = NULL, run_owner_key = '' WHERE event_id = $1::uuid`
 	}
 	if _, err := fixture.db.ExecContext(ctx, query, eventID); err != nil {
 		t.Fatalf("plant malformed recovery fixture: %v", err)

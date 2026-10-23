@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 )
 
 func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T) {
@@ -129,7 +127,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				cancel()
 				forkRunID, _ := fork["fork_run_id"].(string)
 				executed, hasCount := fork["executed_event_count"].(float64)
-				if err != nil || forkRunID == "" || forkRunID == runID || !hasCount || executed != 0 {
+				if err != nil || forkRunID == "" || forkRunID == runID || fork["fork_event_id"] != done.EventID || !hasCount || executed != 0 {
 					t.Fatalf("reconstruct and execute fork: result=%+v err=%v", fork, err)
 				}
 				waitForPresenceEntity(t, process, forkRunID, "done", completed)
@@ -140,7 +138,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if child := goldenSingleNamedEvent(t, childEvents, "work.completed"); child.EventID != activityidentity.ForkLineageEventID(forkRunID, done.EventID) {
+				if child := goldenSingleNamedEvent(t, childEvents, "work.completed"); child.EventID == "" || child.EventID == done.EventID || child.RunID != forkRunID || !reflect.DeepEqual(child.Payload, done.Payload) {
 					t.Fatalf("fork did not execute its exact retained frontier: %+v", child)
 				}
 				var retried map[string]any

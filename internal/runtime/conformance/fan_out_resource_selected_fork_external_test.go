@@ -157,6 +157,7 @@ func TestSelectedExternalEffectFixtureControlBothStores(t *testing.T) {
 			if len(rpcErr) != 0 || result.ForkRunID == "" {
 				t.Fatalf("selected external fixture fork: result=%+v error=%s", result, rpcErr)
 			}
+			waitSelectedDeploymentExecutionClosed(t, f.ctx, f, result.ForkRunID)
 			if calls.Load() != 1 {
 				t.Fatalf("selected external provider calls=%d want one", calls.Load())
 			}
