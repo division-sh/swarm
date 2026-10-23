@@ -40,11 +40,10 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(root, "credentials.json"))
 			config := fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %q\n", filepath.Join(root, "store.sqlite"))
 			if backend == "postgres" {
-				connection, err := testpostgres.ParseConnection(testutil.StartEmptyPostgresDSN(t))
+				p, err := testpostgres.ParseConnectionParameters(testutil.StartEmptyPostgresDSN(t))
 				if err != nil {
 					t.Fatal(err)
 				}
-				p := connection.Parameters()
 				t.Setenv("PGPASSWORD", p.Password)
 				config = fmt.Sprintf("store:\n  backend: postgres\ndatabase:\n  host: %q\n  port: %d\n  name: %q\n  user: %q\n  password_env: PGPASSWORD\n  sslmode: %q\n", p.Host, p.Port, p.Database, p.User, p.SSLMode)
 			}
