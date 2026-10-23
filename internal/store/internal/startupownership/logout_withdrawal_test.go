@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/google/uuid"
 )
 
@@ -15,6 +16,7 @@ func TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores(t *test
 		t.Run(backend, func(t *testing.T) {
 			var original processbinding.LeaseStamp
 			var run func(context.Context, func(context.Context, *sql.Tx) error) error
+			var alterGeneration func(context.Context, func(context.Context, *sql.Tx) error) error
 			sqlite := backend == "sqlite"
 			if sqlite {
 				session, _ := newSQLiteProofSession(t, 4)
@@ -22,10 +24,22 @@ func TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores(t *test
 				run = func(ctx context.Context, f func(context.Context, *sql.Tx) error) error {
 					return session.owner.backend.RunTransaction(ctx, "logout withdrawal negative proof", f)
 				}
+				alterGeneration = func(ctx context.Context, f func(context.Context, *sql.Tx) error) error {
+					_, err := session.owner.backend.RunProcessAcquisitionOutcome(ctx, f)
+					return err
+				}
 			} else {
 				session, _, _ := newPostgresGenerationMonitor(t, "")
 				original = session.authority.LeaseStamp()
 				run = session.owner.backend.RunTransaction
+				alterGeneration = func(ctx context.Context, f func(context.Context, *sql.Tx) error) error {
+					_, err := session.lease.RunProcessAcquisitionOutcome(ctx, f)
+					return err
+				}
+			}
+			ctx, err := generationauthority.MutationContext(context.Background(), original, false)
+			if err != nil {
+				t.Fatal(err)
 			}
 			for _, cell := range []struct {
 				name string
@@ -47,7 +61,7 @@ func TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores(t *test
 				t.Run(cell.name, func(t *testing.T) {
 					claimed := original
 					cell.edit(&claimed)
-					if err := run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+					if err := run(ctx, func(ctx context.Context, tx *sql.Tx) error {
 						withdrawn, err := RuntimeAuthorityWithdrawnTx(ctx, tx, claimed, sqlite)
 						if withdrawn {
 							t.Error("invalid original gained successor proof")
@@ -69,7 +83,9 @@ func TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores(t *test
 					// Corruption is deliberately rolled back; it is never native
 					// successor admission and must not leave fixture authority changed.
 					sentinel := &logoutWithdrawalRollback{}
-					err := run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+					// Generation faults belong to the generation-changing owner,
+					// not the frozen admission of an ordinary domain transaction.
+					err := alterGeneration(ctx, func(ctx context.Context, tx *sql.Tx) error {
 						if err := corruptLogoutGenerationForTest(ctx, tx, original, cell); err != nil {
 							return err
 						}
@@ -90,7 +106,7 @@ func TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores(t *test
 					}
 				})
 			}
-			canceled, cancel := context.WithCancel(context.Background())
+			canceled, cancel := context.WithCancel(ctx)
 			cancel()
 			if err := run(canceled, func(ctx context.Context, tx *sql.Tx) error {
 				withdrawn, err := RuntimeAuthorityWithdrawnTx(ctx, tx, original, sqlite)
