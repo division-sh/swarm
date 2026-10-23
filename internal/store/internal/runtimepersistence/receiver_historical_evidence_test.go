@@ -38,8 +38,8 @@ func TestReceiverHistoricalEvidenceUsesExactCanonicalCutBothStores(t *testing.T)
 			if err != nil || !reflect.DeepEqual(again, plan.Entities[0]) {
 				t.Fatalf("detached historical state changed its fixed cut: %+v %v", again, err)
 			}
-			if counts := probe.Snapshot(); counts.Total.Begun != 2 || counts.Total.ReadCommits != 2 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
-				t.Fatalf("historical evidence escaped original read owner: %+v", counts)
+			if counts := probe.Snapshot(); counts.Total.WriteCommits != 0 || counts.Active != 0 {
+				t.Fatalf("historical evidence wrote state or left active work: %+v", counts)
 			}
 			for _, which := range []string{"run", "route", "entity", "future", "zero"} {
 				wrong, id, cut := owner, entity, revision

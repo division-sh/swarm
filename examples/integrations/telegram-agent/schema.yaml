@@ -1,8 +1,12 @@
-name: telegram-agent
-imports:
-  provider_trigger_events:
-    - provider: telegram
-      event: inbound.telegram.text_message
+stages:
+  active:
+    gate:
+      decision: retire_service
+      outcomes:
+        retire:
+          advances_to: done
+  done:
+    final: true
 pins:
   inputs:
     - inbound.telegram.text_message
@@ -11,9 +15,5 @@ pins:
 connect:
   - event: inbound.telegram.text_message
     from: .
-    to: telegram-chat
-    resolution: select-or-create
-  - event: inbound.telegram.text_message
-    from: telegram-ingress
     to: telegram-chat
     resolution: select-or-create

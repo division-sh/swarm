@@ -1,4 +1,4 @@
-name: hub
+# fixture: hub
 instance: hub_id
 stages:
   idle: {}

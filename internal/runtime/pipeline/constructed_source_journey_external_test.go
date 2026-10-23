@@ -14,13 +14,13 @@ func a2ConstructedDescendantJoinFiles(count int, target string) map[string]strin
 	collector := files["orders/nodes.yaml"]
 	delete(files, "orders/nodes.yaml")
 	for _, path := range []string{"orders/child", "orders/child/leaf", "orders/audit", "orders/audit/leaf"} {
-		files[path+"/schema.yaml"] = "name: descendant\nstages:\n  awaiting: {}\n"
+		files[path+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
+		files[path+"/schema.yaml"] = "stages:\n  awaiting: {}\n"
 		files[path+"/entities.yaml"] = "child_state:\n  final_count: {type: integer, initial: -1}\n"
 	}
 	files[target+"/nodes.yaml"] = collector
 	files[target+"/events.yaml"] = files["orders/events.yaml"]
-	files["orders/audit/leaf/schema.yaml"] = `name: review
-stages:
+	files["orders/audit/leaf/schema.yaml"] = `stages:
   awaiting:
     gate:
       decision: child_review

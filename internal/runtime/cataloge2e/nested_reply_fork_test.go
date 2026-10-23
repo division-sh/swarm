@@ -52,7 +52,7 @@ func TestIssue642TerminalNestedReplyNativeMaterializationBothStores(t *testing.T
 			}
 			var selected interface {
 				runforkexecution.SelectedContractForkLifecycle
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				runforkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			if h.sqlite != nil {

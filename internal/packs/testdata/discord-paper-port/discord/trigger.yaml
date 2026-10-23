@@ -1,0 +1,24 @@
+transport: session
+delivery_id: {json_path: $.message_id, required: true}
+event_type: {literal: message, required: true}
+ack: {mode: durable_before_dispatch}
+event_name: {literal: raw}
+normalized_events:
+  - event: text_message
+    fields:
+      text: {from: text, schema: {type: string, minLength: 1, maxLength: 2000}}
+      author_id: {from: author_id, schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}}
+      channel_id: {from: channel_id, schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}}
+      message_id: {from: message_id, schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}}
+      reply_id: {from: reply_id, optional: true, schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}}
+      scope: {from: scope, schema: {type: string, enum: [direct, shared]}}
+      entry:
+        from: entry
+        optional: true
+        schema:
+          type: object
+          additionalProperties: false
+          required: [reference]
+          properties:
+            reference: {type: string, minLength: 1, maxLength: 32}
+            address: {type: string, minLength: 5, maxLength: 32}

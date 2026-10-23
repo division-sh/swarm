@@ -35,10 +35,14 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selec
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("source constructor requires its admitted artifact")
 	}
+	if err := loaded.RootedSource.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	ctx = effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), mode)
+	ctx = correlation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
-		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
+		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(),
 	})
 	payload, err := json.Marshal(map[string]any{"entity_id": runID})
 	if err != nil {
@@ -50,13 +54,19 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selec
 	if len(inputs) == 1 && len(inputs[0].payload) != 0 {
 		payload = inputs[0].payload
 	}
+	source := events.NoRoutingSource()
+	if len(inputs) == 0 {
+		source = eventtest.RootRoutingSource(runID)
+	}
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, events.EventType(eventName), "source-runtime", "", payload, 0, runID,
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), events.NoRoutingSource(), at, mode)
-	if len(inputs) == 1 && inputs[0].flow != "" {
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), source, at, mode)
+	if len(inputs) == 0 {
+		event, err = eventtest.AdmitPayload(event, ".", eventName)
+	} else {
 		event, err = eventtest.AdmitPayload(event, inputs[0].flow, eventName)
-		if err != nil {
-			t.Fatal(err)
-		}
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, routes, pipelineobligation.ScopeSubscribed)
 	posture := executionposture.Live

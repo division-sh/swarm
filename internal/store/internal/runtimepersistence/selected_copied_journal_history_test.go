@@ -178,7 +178,7 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 			}
 			parent := eventtest.ChildForProducerWithRoutingSource(activityidentity.RequestEventID(identity), "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
 				events.EventLineage{RunID: runID, ParentEventID: rootID, ExecutionMode: executionmode.Live}, events.EnvelopeForSourceRoute(events.EventEnvelope{}, routing.Route()), routing, at)
-			binding, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, parent, "flow-a")
+			binding, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, parent, events.EventPayloadProducer(parent, "flow-a"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -315,7 +315,7 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 func commitCopiedCohortInput(t *testing.T, ctx context.Context, store any, authority effects.Authority, parent events.Event, source semanticview.Source, fact correlation.SourceArtifactFact, original semanticview.OriginalLoopCarriage) (finalErr error) {
 	t.Helper()
 	replay := store.(runforkexecution.SelectedContractReplayPersistence)
-	inputs, err := replay.LoadRunForkSelectedContractSourceEvents(ctx, parent.RunID(), authority.SelectedFork.ForkRunID, []string{parent.ID()}, original)
+	inputs, err := replay.LoadRunForkSelectedContractSourceEvents(ctx, parent.RunID(), authority.SelectedFork.ForkRunID, []string{parent.ID()}, original, originalRootAdmissionForRun(t, store, parent.RunID()))
 	if err != nil {
 		return err
 	}
@@ -333,7 +333,7 @@ func commitCopiedCohortInput(t *testing.T, ctx context.Context, store any, autho
 	event := eventtest.SelectedForkReplayWithRoutingSource(activityidentity.ForkLineageEventID(lineage.DestinationRunID(), parent.ID()), parent.Type(),
 		eventtest.Producer(events.EventProducerPlatform, lineage.AuthorityStamp()), input.Payload, lineage,
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, input.RoutingSource.Route()), input.RoutingSource, time.Now().UTC().Truncate(time.Microsecond))
-	binding, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, event, input.RoutingSource.Route().FlowID)
+	binding, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, event, events.EventPayloadProducer(event, input.RoutingSource.Route().FlowID))
 	if err != nil {
 		return err
 	}

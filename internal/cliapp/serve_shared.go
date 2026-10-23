@@ -11,7 +11,7 @@ import (
 )
 
 func NormalizeSourceRoot(path string) (string, error) {
-	root := strings.TrimSpace(path)
+	root := path
 	if root == "" {
 		return "", fmt.Errorf("source directory is unavailable after source-root selection")
 	}

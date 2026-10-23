@@ -12,7 +12,8 @@ import (
 func TestStoreDefaultSourceFixtureCompilesItsExactArtifact(t *testing.T) {
 	repo := pipeline.WorkflowRepoRoot()
 	artifact := sourceartifactfixture.Artifact()
-	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", artifact)
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

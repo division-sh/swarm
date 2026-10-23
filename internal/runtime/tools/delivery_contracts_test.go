@@ -173,7 +173,7 @@ func TestToolDefinitionsForActor_RetireSameNameEntityToolOverrideWithoutActorCon
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"lifecycle": {
-			SchemaYAML: "name: lifecycle\nstages: []\n",
+			SchemaYAML: "stages: []\n",
 			AgentsYAML: entityToolAgentYAML(lifecycle),
 			ToolsYAML: `
 get_entity:

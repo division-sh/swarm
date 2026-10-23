@@ -241,10 +241,14 @@ func (r Record) validateWithSettlementEnvelope(settlement events.RouteSettlement
 	if !json.Valid(r.Payload) {
 		return decodedRecordEnvelope{}, fmt.Errorf("event record payload must be valid JSON")
 	}
-	payloadBinding, err := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
+	producer, err := events.NewProducerIdentity(r.ProducedByType, r.ProducedBy)
+	if err != nil {
+		return decodedRecordEnvelope{}, fmt.Errorf("event record producer identity: %w", err)
+	}
+	payloadBinding, err := events.RestoreEventPayloadSchemaBinding(events.PayloadSchemaBindingInput{
 		BundleHash: r.PayloadSchemaBundleHash, FlowID: r.PayloadSchemaFlowID,
 		EventKey: r.PayloadSchemaEventKey, SchemaDigest: r.PayloadSchemaDigest, SchemaClass: r.PayloadSchemaClass,
-	})
+	}, r.Class, events.EventType(r.EventName), producer)
 	if err != nil {
 		return decodedRecordEnvelope{}, fmt.Errorf("event record payload schema binding: %w", err)
 	}
@@ -259,10 +263,6 @@ func (r Record) validateWithSettlementEnvelope(settlement events.RouteSettlement
 	}
 	if !r.ExecutionMode.Valid() {
 		return decodedRecordEnvelope{}, fmt.Errorf("event record execution_mode must be live or mock")
-	}
-	producer, err := events.NewProducerIdentity(r.ProducedByType, r.ProducedBy)
-	if err != nil {
-		return decodedRecordEnvelope{}, fmt.Errorf("event record producer identity: %w", err)
 	}
 	if err := events.ValidateEventStructuralContract(r.Class, events.EventType(r.EventName), producer, r.RunID, r.Scope); err != nil {
 		return decodedRecordEnvelope{}, fmt.Errorf("event record identity contract: %w", err)
@@ -413,10 +413,14 @@ func (r Record) decodeWithSettlement(settlement events.RouteSettlement) (events.
 		}
 		selectedFork = &value
 	}
-	payloadBinding, err := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
+	producer, err := events.NewProducerIdentity(r.ProducedByType, r.ProducedBy)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	payloadBinding, err := events.RestoreEventPayloadSchemaBinding(events.PayloadSchemaBindingInput{
 		BundleHash: r.PayloadSchemaBundleHash, FlowID: r.PayloadSchemaFlowID,
 		EventKey: r.PayloadSchemaEventKey, SchemaDigest: r.PayloadSchemaDigest, SchemaClass: r.PayloadSchemaClass,
-	})
+	}, r.Class, events.EventType(r.EventName), producer)
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("event record payload schema binding: %w", err)
 	}

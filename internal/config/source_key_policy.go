@@ -116,6 +116,7 @@ func SourceKeyRules() map[string]SourceKeyRule {
 		"platform.packs.platform_dirs":            {},
 		"channels":                                section,
 		"channels.bindings":                       section,
+		"triggers":                                section,
 		"budget":                                  section,
 		"budget.global_monthly_cap":               {},
 		"budget.per_entity_monthly_cap":           {},

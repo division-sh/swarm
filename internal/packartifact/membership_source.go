@@ -18,61 +18,19 @@ func admitInventoryManifest(body []byte, file string) (InventoryManifest, error)
 	}
 	manifest := InventoryManifest{source: root, Version: 1, Packs: make([]InventoryManifestPack, len(rows))}
 	for i, row := range rows {
-		fields, err := membershipFields(row, "id", "type", "path")
+		fields, err := membershipFields(row, "path")
 		if err != nil {
 			return InventoryManifest{}, err
 		}
-		if err := membershipRequired(row, fields, "id", "type", "path"); err != nil {
+		if err := membershipRequired(row, fields, "path"); err != nil {
 			return InventoryManifest{}, err
 		}
 		for _, field := range []struct {
 			name   string
 			target *string
-		}{{"id", &manifest.Packs[i].ID}, {"type", &manifest.Packs[i].Type}, {"path", &manifest.Packs[i].Path}} {
+		}{{"path", &manifest.Packs[i].Path}} {
 			if *field.target, err = membershipText(fields[field.name]); err != nil {
 				return InventoryManifest{}, err
-			}
-		}
-	}
-	return manifest, nil
-}
-
-func admitProjectManifest(body []byte, file string) (ProjectPackManifest, error) {
-	root, fields, err := membershipRoot(body, file, "imports")
-	if err != nil {
-		return ProjectPackManifest{}, err
-	}
-	rows, err := fields["imports"].Sequence()
-	if err != nil {
-		return ProjectPackManifest{}, err
-	}
-	manifest := ProjectPackManifest{source: root, Version: 1, Imports: make([]ProjectPackManifestImport, len(rows))}
-	for i, row := range rows {
-		fields, err := membershipFields(row, "id", "type", "path", "origin")
-		if err != nil {
-			return ProjectPackManifest{}, err
-		}
-		if err := membershipRequired(row, fields, "id", "type", "path", "origin"); err != nil {
-			return ProjectPackManifest{}, err
-		}
-		origin, err := membershipFields(fields["origin"], "source", "id", "version", "manifest_hash", "envelope_hash")
-		if err != nil {
-			return ProjectPackManifest{}, err
-		}
-		if err := membershipRequired(fields["origin"], origin, "source", "id", "version", "manifest_hash", "envelope_hash"); err != nil {
-			return ProjectPackManifest{}, err
-		}
-		entry := &manifest.Imports[i]
-		for _, field := range []struct {
-			value  yamlsource.Value
-			target *string
-		}{
-			{fields["id"], &entry.ID}, {fields["type"], &entry.Type}, {fields["path"], &entry.Path},
-			{origin["source"], &entry.Origin.Source}, {origin["id"], &entry.Origin.ID}, {origin["version"], &entry.Origin.Version},
-			{origin["manifest_hash"], &entry.Origin.ManifestHash}, {origin["envelope_hash"], &entry.Origin.EnvelopeHash},
-		} {
-			if *field.target, err = membershipText(field.value); err != nil {
-				return ProjectPackManifest{}, err
 			}
 		}
 	}

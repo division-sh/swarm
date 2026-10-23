@@ -301,7 +301,8 @@ func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventC
 	flowRoot := filepath.Join(root, "contracts", "worker")
 	writeReleaseFile(t, filepath.Join(flowRoot, "entities.yaml"), "worker_state:\n  requests: {type: \"[text]\", initial: []}\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "agent.requested:\n  request: {type: \"[text]?\"}\nagent.completed:\n  flow_result: text?\ncompletion.item:\n  request: text?\n")
-	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: claude-cli-release-worker\nstages:\n  pending: {}\n  active:\n    timers:\n      - id: complete_after_overflow\n        after: 10s\n        advances_to: done\n  done:\n    final: true\npins:\n  inputs:\n    - task.assigned\n")
+	writeReleaseFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages:\n  pending: {}\n  active:\n    timers:\n      - id: complete_after_overflow\n        after: 10s\n        advances_to: done\n  done:\n    final: true\npins:\n  inputs:\n    - task.assigned\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "nodes.yaml"), fmt.Sprintf(`intake:
   execution_type: system_node
   subscribes_to: [task.assigned]

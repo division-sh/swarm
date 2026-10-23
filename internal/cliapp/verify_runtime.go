@@ -333,6 +333,7 @@ func verifyWorkflowContractValidationOptions(configResult RuntimeConfigLoadResul
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("admit pack metadata: %w", err)
 	}
 	opts := runtime.StructuralWorkflowContractValidationOptions()
+	opts.TriggerEntries = configResult.Config.Triggers
 	opts.ModelAliases = configResult.Config.LLM.Models
 	opts.ProviderTriggerCatalog = metadata.ProviderTriggers
 	opts.ChannelPlans = metadata.ChannelPlans
@@ -355,7 +356,7 @@ func admitStructuralSource(configResult RuntimeConfigLoadResult, bundle *runtime
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: source, SourceArtifactFact: fact,
-		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
+		ChannelPlans: opts.ChannelPlans,
 	})
 	if err != nil {
 		return nil, opts, err

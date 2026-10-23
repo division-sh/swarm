@@ -17,22 +17,26 @@ func TestRunAdmissionGenericQueryTransactionStaysFreshAndCannotMint(t *testing.T
 			mock.ExpectBegin()
 			for range 2 {
 				mock.ExpectQuery(admissionTestRunSQL(postgres, true)).WithArgs(admissionTestRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 			}
 			mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 			mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+			admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 			for range 2 {
 				mock.ExpectQuery(admissionTestRunSQL(postgres, true)).WithArgs(admissionTestRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 			}
 			mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+			admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 					query := func() error {
@@ -47,7 +51,7 @@ func TestRunAdmissionGenericQueryTransactionStaysFreshAndCannotMint(t *testing.T
 						if err := query(); err != nil {
 							return err
 						}
-						if _, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, admissionTestRunID); err != nil || cached {
+						if _, _, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, admissionTestRunID); err != nil || cached {
 							t.Fatalf("generic query minted admission: cached=%t err=%v", cached, err)
 						}
 					}
@@ -74,15 +78,17 @@ func TestRunAdmissionNonlockingMutationConsumesOnlyExistingAdmission(t *testing.
 			mock.ExpectBegin()
 			for range 2 {
 				mock.ExpectQuery(admissionTestRunSQL(postgres, true)).WithArgs(admissionTestRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 			}
 			mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 			for range 3 {
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 			}
 			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -96,7 +102,7 @@ func TestRunAdmissionNonlockingMutationConsumesOnlyExistingAdmission(t *testing.
 						if err := guard(); err != nil {
 							return err
 						}
-						if _, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, admissionTestRunID); err != nil || cached {
+						if _, _, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, admissionTestRunID); err != nil || cached {
 							t.Fatalf("nonlocking first check minted admission: cached=%t err=%v", cached, err)
 						}
 					}

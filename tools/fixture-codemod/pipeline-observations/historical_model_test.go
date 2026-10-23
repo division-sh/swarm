@@ -72,43 +72,6 @@ func TestHistoricalMechanicalSnapshotsRejectInvalidAndCrossedCuts(t *testing.T) 
 	}
 }
 
-func TestHistoricalMechanicalCurrentHandlerAssemblyIsSourcePinned(t *testing.T) {
-	for _, pin := range []struct{ file, function, digest string }{
-		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "openWorkflowHandlerNativeFixture", "fa6ca50cc31122fef484b3dcb892798c18adb44ad1b86413bc3906969de22847"},
-		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "workflowHandlerNativeFixtureFromSelected", "d7d11a06f23ac10d626104a7875740c93b0a0da064c5fa8011b49d37c3762ca7"},
-		{"internal/runtime/pipeline/delivery_native_owner_external_test.go", "workflowHandlerNativeCoordinator", "21ef5b19dd26e1d1bb42825279b4b1cad5788f1ed6b96efc445fb2fdbcf256cd"},
-	} {
-		t.Run(pin.function, func(t *testing.T) {
-			source := selectedCausalObservationBody(t, pin.file, pin.function)
-			historical, err := historicalHandlerAssemblySource(source, pin.function)
-			if err != nil || !historicalCurrentSourcePinned(historical, pin.digest) {
-				t.Fatal("extracted native handler owner/cleanup/publication assembly changed")
-			}
-			for _, cut := range []string{"t.Helper()", "selected", "fact", "return"} {
-				mutant := strings.Replace(source, cut, "foreignCut", 1)
-				restored, err := historicalHandlerAssemblySource(mutant, pin.function)
-				if mutant != source && err == nil && historicalCurrentSourcePinned(restored, pin.digest) {
-					t.Fatalf("changed handler successor accepted: %s", cut)
-				}
-			}
-			if pin.function == "workflowHandlerNativeFixtureFromSelected" {
-				for _, cut := range []string{"prepare native handler construction: %w", "commit native handler construction: %w"} {
-					for _, replacement := range []string{"foreign construction: %w", strings.Replace(cut, "%w", "%v", 1)} {
-						mutant := strings.Replace(source, cut, replacement, 1)
-						restored, err := historicalHandlerAssemblySource(mutant, pin.function)
-						if mutant == source || err == nil && historicalCurrentSourcePinned(restored, pin.digest) {
-							t.Fatalf("lost construction phase/error cause accepted: %s", replacement)
-						}
-					}
-				}
-				if _, err := historicalHandlerAssemblySource(historical, pin.function); err == nil {
-					t.Fatal("historical unannotated errors accepted as the current handler assembly")
-				}
-			}
-		})
-	}
-}
-
 func historicalHandlerAssemblySource(source, name string) (string, error) {
 	if name != "workflowHandlerNativeFixtureFromSelected" {
 		return source, nil

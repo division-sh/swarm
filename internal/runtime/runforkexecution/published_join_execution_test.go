@@ -195,7 +195,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	marker := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), event.Type(), "source-runtime", "",
 		event.Payload(), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at.Add(time.Second), executionmode.Mock)
 	if os.Getenv(publishedJoinFlowEnv) == "orders" {
-		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, "orders")
+		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, "orders"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -254,7 +254,7 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 	}
 	event = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(event.ID(), events.EventType(declaration.EventKey()), "source-runtime", "",
 		event.Payload(), 0, root.InstancePath, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
-	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, event, "orders")
+	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, event, events.EventPayloadProducer(event, "orders"))
 	if err != nil {
 		t.Fatal(err)
 	}

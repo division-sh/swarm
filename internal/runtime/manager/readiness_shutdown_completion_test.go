@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -185,7 +186,7 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 
 func TestReadinessShutdownRefusalRequiresEveryExactOwnerBranch(t *testing.T) {
 	t.Run("joined native cancellation disposition", proveReadinessShutdownCancellationDisposition)
-	identity := lifecycleTestPersistedAgent(t).Config.Identity
+	identity := runtimeagentidentitytest.RootRuntime(t, "agent-lifecycle-test", "lifecycle-test")
 	shutdown := executableReadinessError(identity, runtimeLifecycleShuttingDown, AgentLifecycleState{}, "manager lifecycle does not admit executable readiness")
 	for _, tc := range []struct {
 		name string

@@ -139,7 +139,8 @@ func TestRetiredReceiverSelectorsRejectEveryIngressShape(t *testing.T) {
 						t.Run(name, func(t *testing.T) {
 							root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
 							if !producer {
-								writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selector-retirement\n")
+								writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+								writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 							}
 							for _, file := range []string{"schema.yaml", "account/schema.yaml", "account/nodes.yaml"} {
 								path := filepath.Join(root, file)

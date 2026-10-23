@@ -14,7 +14,11 @@ func TestRunForkHistoricalIdentityQueuedCancellationBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			f := newSnapshotOwnershipFixture(t, backend, false, false)
-			staged, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+			rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			staged, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -84,8 +84,8 @@ type issue2564PublicationFixture struct {
 func newIssue2564PublicationFixture(t *testing.T, backend string, observer *issue2564PublicationObserver, dispatchGate *issue2564PublicationDispatchGate) *issue2564PublicationFixture {
 	t.Helper()
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml": `name: issue2564-publication-handoff
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   active: {}
 pins:
   inputs: [bump, recurse]

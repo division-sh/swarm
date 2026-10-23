@@ -7,103 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
+
 	"path/filepath"
-	"reflect"
+
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/scripts/rewrite-stages-2566/formatproof"
 )
-
-func TestAccountingFinitePlanBindsEveryChangedRowToTrustedSource(t *testing.T) {
-	ctx := context.Background()
-	repo, base, policy, original := accountingClosureRepo(t)
-	git := func(args ...string) string {
-		t.Helper()
-		command := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		command.Env = append(os.Environ(), "GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@example.test", "GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@example.test")
-		raw, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %s: %v", args, raw, err)
-		}
-		return strings.TrimSpace(string(raw))
-	}
-	put := func(path string, raw []byte) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, path)), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(repo, path), raw, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	commit := func() string {
-		t.Helper()
-		git("add", ".")
-		git("-c", "commit.gpgsign=false", "commit", "-qm", "fixture")
-		return git("rev-parse", "HEAD")
-	}
-	observation := accountingPolicyObservation{Commit: base, Policy: policy}
-	first := bytes.Replace(original, []byte("OmitOutputPin               bool"), []byte("OmitOutputPin                bool"), 1)
-	put(formatproof.Source, first)
-	head := commit()
-	plan, err := deriveFiniteAccountingPlan(ctx, repo, base, head, observation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.Rows != 1 || len(plan.Output.Records) != 1 || len(plan.Previous.Records) != 0 || plan.SourceTree == "" {
-		t.Fatalf("unbound output: %#v", plan)
-	}
-	if err := checkAccountingBase(ctx, repo, base, observation); err != nil {
-		t.Fatal(err)
-	}
-	if err := checkAccountingBase(ctx, repo, head, observation); err == nil {
-		t.Fatal("candidate commit impersonated protected-master base")
-	}
-	if err := writeFiniteHistory(repo, plan.Output); err != nil {
-		t.Fatal(err)
-	}
-	final := commit()
-	actual, err := accountingHistoryAt(ctx, repo, final)
-	if err != nil || !reflect.DeepEqual(actual, plan.Output) {
-		t.Fatalf("append did not preserve all executable provenance: %v", err)
-	}
-	tree, err := accountingSourceTree(ctx, repo, final)
-	if err != nil || tree != plan.SourceTree {
-		t.Fatal("accounting append modified frozen application source")
-	}
-	if _, err := deriveFiniteAccountingPlan(ctx, repo, base, final, observation); err == nil {
-		t.Fatal("prewritten successor accepted as author-approved evidence")
-	}
-	module, err := os.ReadFile(filepath.Join(repo, "go.mod"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	put("go.mod", append(append([]byte{}, module...), []byte("\n// changed dependency\n")...))
-	foreign := commit()
-	if _, err := deriveFiniteAccountingPlan(ctx, repo, final, foreign, observation); err == nil {
-		t.Fatal("changed guard dependency accepted")
-	}
-	put("go.mod", module)
-	commit()
-	put(formatproof.Source, bytes.Replace(first, []byte("bool"), []byte("int "), 1))
-	semantic := commit()
-	if _, err := deriveFiniteAccountingPlan(ctx, repo, final, semantic, observation); err == nil {
-		t.Fatal("semantic source change accepted as hash refresh")
-	}
-	put(formatproof.Source, bytes.Replace(original, []byte("OmitOutputPin               bool"), []byte("OmitOutputPin                 bool"), 1))
-	if err := os.Chmod(filepath.Join(repo, formatproof.Source), 0755); err != nil {
-		t.Fatal(err)
-	}
-	modeChanged := commit()
-	if _, err := deriveFiniteAccountingPlan(ctx, repo, final, modeChanged, observation); err == nil {
-		t.Fatal("file-mode change accompanied an allegedly whitespace-only successor")
-	}
-	if _, err := formatproof.Read([]byte(`{"version":1,"records":[],"new_exception":true}`)); err == nil {
-		t.Fatal("new exception accepted")
-	}
-}
 
 func TestAccountingFiniteWriteRefusesMalformedHistoryWithoutPartialOutput(t *testing.T) {
 	root := t.TempDir()

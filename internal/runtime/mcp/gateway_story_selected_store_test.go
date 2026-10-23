@@ -353,12 +353,14 @@ func loadGatewayStorySource(t *testing.T, serverURL string) (semanticview.Source
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
 
-	writeGatewayStoryFixture(t, filepath.Join(root, "schema.yaml"), "name: mcp-gateway-story\n")
-	writeGatewayStoryFixture(t, filepath.Join(root, "story", "schema.yaml"), `name: story
-stages:
+	writeGatewayStoryFixture(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeGatewayStoryFixture(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeGatewayStoryFixture(t, filepath.Join(root, "story", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeGatewayStoryFixture(t, filepath.Join(root, "story", "schema.yaml"), `stages:
   queued: {}
   done: {final: true}
-`)
+`,
+	)
 	writeGatewayStoryFixture(t, filepath.Join(root, "story", "agents.yaml"), `
 story-writer:
   role: story-writer

@@ -12,7 +12,8 @@ import (
 func TestBuildShowsAuthoredTurnTimeoutWithNoDefault(t *testing.T) {
 	repo := authoringViewRepoRoot(t)
 	root := t.TempDir()
-	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: timeout-view\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "events.yaml"), "work.aborted:\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), "bounded:\n  intent: {inline: investigate}\n  turn_timeout: {after: 10m, emit: work.aborted}\nunbounded:\n  intent: {inline: investigate}\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))

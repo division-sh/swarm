@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -177,8 +178,13 @@ type servingProbeControls struct {
 func newServingFixture(t *testing.T, workers int, release <-chan struct{}, controls ...servingProbeControls) *servingFixture {
 	t.Helper()
 	ctx := context.Background()
-	probe, _ := testRetainedSession(t)
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: startupBundleHashA}, {BundleHash: startupBundleHashB}}, nil)
+	probe, initial := testRetainedSession(t)
+	rootedB, _ := sourceartifactfixture.Rooted(t, "source-b", startupBundleArtifactB)
+	coordinateB, err := agenttopology.NewSourceCoordinate(rootedB.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{initial.Sources[0], coordinateB}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

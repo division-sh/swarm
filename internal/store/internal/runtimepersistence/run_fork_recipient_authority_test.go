@@ -60,7 +60,7 @@ func TestRunForkRecipientAuthorityRecoveryRoundTripBothStores(t *testing.T) {
 				loaded.StaticRouteEventCount != 1 || loaded.RecipientPlanEventCount != 1 {
 				t.Fatalf("record/load lost fingerprints or counts: %#v", loaded)
 			}
-			manager := recipientAuthorityRecoveryManager(t, ctx, selected)
+			manager := recipientAuthorityRecoveryManager(t, ctx, selected, req.ForkRunID)
 			if err := manager.Recover(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -194,7 +194,7 @@ func TestRunForkRecipientAuthorityRecoveryRejectsReducedWireBothStores(t *testin
 						if gotHash != hash || recipientAuthorityRecordHash(t, gotRaw) != hash {
 							t.Fatal("hostility did not reach typed decode with a valid record hash")
 						}
-						manager := recipientAuthorityRecoveryManager(t, ctx, selected)
+						manager := recipientAuthorityRecoveryManager(t, ctx, selected, req.ForkRunID)
 						err = manager.Recover(ctx)
 						if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "fingerprint mismatch") {
 							t.Fatalf("Recover error = %v, want typed rejection %q", err, tc.want)
@@ -238,11 +238,15 @@ func requireRecipientAuthorityRecoveryLoad(t *testing.T, ctx context.Context, st
 	return record
 }
 
-func recipientAuthorityRecoveryManager(t *testing.T, ctx context.Context, store recipientAuthorityRecoveryStore) *runtimemanager.AgentManager {
+func recipientAuthorityRecoveryManager(t *testing.T, ctx context.Context, store recipientAuthorityRecoveryStore, runID string) *runtimemanager.AgentManager {
 	t.Helper()
+	rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bus := &selectedRouteRecoveryPostgresBus{store: &recipientAuthorityRecoveryEventStore{selected: store}}
 	manager := runtimemanager.NewAgentManager(bus, nil, store)
-	prepareSelectedRouteRecoveryStartup(t, ctx, manager, agentfixture.Lifecycle(t, store))
+	prepareSelectedRouteRecoveryStartup(t, ctx, manager, agentfixture.Lifecycle(t, store), rooted)
 	return manager
 }
 

@@ -1542,6 +1542,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 				_ = os.Rename(renamedDir, flowDir)
 				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
 			})
+			writeStandingCandidateFile(t, filepath.Join(renamedDir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-ingress", "name: telegram-ingress-v2", 1))
 		}, wantOutput: []string{" created run=", " orphaned declaration_removed=true"}},
 	}
@@ -1815,6 +1816,7 @@ func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string
 		stoppedSchema = stoppedSchema[:ingress+1]
 	}
 	stoppedSchema += "schedules:\n  retained: {every: 24h, emit: service.tick}\n"
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), stoppedSchema)
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "events.yaml"), "service.tick:\n")
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "nodes.yaml"), "hold:\n  execution_type: system_node\n  subscribes_to: [service.tick]\n  event_handlers:\n    service.tick:\n      guard: {id: hold, check: true}\n")

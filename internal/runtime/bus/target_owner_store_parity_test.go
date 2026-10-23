@@ -199,8 +199,22 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 func TestPreparedPublishAggregateCorruptionRejectsBothStoreReadbackAndExactDuplicate(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.WritePreparedTargetConflict(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := semanticview.Wrap(bundle)
+			ctx := testAuthorActivityContextForSource(context.Background(), source)
 			selected := newTargetOwnerParityStore(t, backend, ctx)
+			initial, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = initial.AdmitSourceArtifactFact(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
 			runID := uuid.NewString()
 			target := events.RouteIdentity{
 				FlowID: "review", FlowInstance: "review/one", EntityID: uuid.NewString(),
@@ -214,6 +228,9 @@ func TestPreparedPublishAggregateCorruptionRejectsBothStoreReadbackAndExactDupli
 				{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator-two")), Target: events.MustExistingEntityTarget(target)},
 			}
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, evt, routes, runtimepipelineobligation.ScopeSubscribed)
+			if prepared, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID()); err != nil || !found || len(prepared.DeliveryRoutes) != len(routes) {
+				t.Fatalf("uncorrupted prepared record = found:%v routes:%d err:%v", found, len(prepared.DeliveryRoutes), err)
+			}
 
 			originalIdentity, err := routes[1].Identity()
 			if err != nil {
@@ -237,11 +254,11 @@ func TestPreparedPublishAggregateCorruptionRejectsBothStoreReadbackAndExactDupli
 			if _, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID()); found || err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
 				t.Fatalf("corrupt prepared readback = found:%v err:%v, want aggregate contradiction", found, err)
 			}
-			restarted, err := newScopedTestEventBus(selected)
+			restarted, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("create duplicate EventBus: %v", err)
 			}
-			duplicateCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			duplicateCtx := runtimecorrelation.WithRunID(ctx, runID)
 			if err := restarted.Publish(duplicateCtx, evt); err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
 				t.Fatalf("corrupt exact duplicate error = %v, want aggregate contradiction", err)
 			}

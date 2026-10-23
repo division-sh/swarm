@@ -54,7 +54,7 @@ func AdmitPlatformSpecValue(root yamlsource.Value) (PlatformSpecDocument, error)
 			return out, e
 		}
 		if catalog, ok := members["catalog"]; ok {
-			if out.eventCatalog, err = admitPlatformEventCatalogValue(catalog); err != nil {
+			if out.eventCatalog, err = admitPlatformEventCatalogValue(catalog, root); err != nil {
 				return out, err
 			}
 		}

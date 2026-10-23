@@ -19,13 +19,11 @@ func TestCommittedAgentAttachmentRequiresExactAcceptedOwner(t *testing.T) {
 		"missing_row", "wrong_hash", "wrong_attempt", "missing_actor", "wrong_generation", "no_executor", "executor_completed",
 		"executor_retiring", "successor", "pending_admission", "retiring_owner", "completed_owner", "stopped_generation", "canceled_generation", "missing_workflow_owner", "shutting_down", "resetting"} {
 		t.Run(fault, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
 			instances := &flowActivationTestInstanceStore{}
-			am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+			bundle := testFlowBundle(t, "")
+			am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
 			am.lifecycle.phase, am.lifecycle.runCtx = runtimeLifecycleRunning, context.Background()
 			defer func() { am.lifecycle.phase, am.lifecycle.runCtx = runtimeLifecycleStopped, nil }()
-			bundle := testFlowBundle(t, "")
-			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
 			req := testActivationRequest(bundle, "review", "one", "unused", "review/one")
 			plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 			if err != nil {

@@ -47,8 +47,8 @@ func newStageTimerEntryVariantProof(t *testing.T, backend, delay, action string,
 		right += ", emit: observed"
 	}
 	files := map[string]string{
-		"schema.yaml": fmt.Sprintf(`name: timer-entry-authority
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": fmt.Sprintf(`stages:
   s1:
     timers:
       - {id: s1_to_s2, after: %s, %s}
@@ -84,7 +84,8 @@ stages:
 		}
 		files["schema.yaml"] += "pins:\n  inputs: [enter.s2]\nconnect:\n  - {event: " + event + ", from: producer, to: ." + rename + "}\n"
 		files["events.yaml"] = "enter.s1:\nnote:\nobserved:\n"
-		files["producer/schema.yaml"] = "name: producer\npins:\n  outputs: [" + event + "]\n"
+		files["producer/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
+		files["producer/schema.yaml"] = "pins:\n  outputs: [" + event + "]\n"
 		files["producer/events.yaml"] = event + ":\n"
 		files["producer/entities.yaml"] = "test_entity: {}\n"
 	}

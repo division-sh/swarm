@@ -11,17 +11,23 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func allocationOperation(t *testing.T) (Operation, SourceProjection) {
 	t.Helper()
-	allocation := SourceProjection{Cleanup: sourceartifact.RuntimeProjectionCleanup{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), Identity: "runtime-projection-v1:" + strings.Repeat("b", 32), Root: filepath.Join(t.TempDir(), "swarm-source-planned")}, ManagedContainers: true}
+	rooted, _ := sourceartifactfixture.Rooted(t, "allocation", sourceartifactfixture.Artifact())
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocation := SourceProjection{Cleanup: sourceartifact.RuntimeProjectionCleanup{BundleHash: coordinate.BundleHash, Identity: "runtime-projection-v1:" + strings.Repeat("b", 32), Root: filepath.Join(t.TempDir(), "swarm-source-planned")}, ManagedContainers: true}
 	operation, err := NewOperation(Request{OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "allocation", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: allocation.Cleanup.BundleHash}}, nil)
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

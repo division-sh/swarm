@@ -40,7 +40,8 @@ func (s foreignHumanTaskRequesterForTest) LoadHumanTaskContinuation(ctx context.
 func nativeHumanTaskRoutingFixtureForTest(t *testing.T, backend string, global bool, open pipelineDeliveryNativeOpenerForTest) (*PipelineDeliveryNativeFixtureForTest, *PipelineCoordinator, context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation, *nativePipelineDeliveryBusObservationForTest) {
 	t.Helper()
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: human-task-native\nstages:\n  active: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  active: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "provider.requested:\nmailbox.card_decided:\nmailbox.card_deferred:\nmailbox.card_expired:\nhuman_task.approved:\nhuman_task.rejected:\nhuman_task.deferred:\nhuman_task.expired:\n",
 	})

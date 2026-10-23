@@ -21,10 +21,12 @@ import (
 func loadMessageRetirementScope(t *testing.T, scope, agents, policy, tool string) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: retirement-proof\nstages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	dir := root
 	if scope != "root" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nstages: []\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "stages: []\n")
 		if scope == "flow" {
 			dir = filepath.Join(root, "child")
 		}
@@ -157,8 +159,10 @@ func TestAgentMessageRetirementShadowedAncestorDeclarationsStillReject(t *testin
 	for _, site := range []string{"bundle", "tool_permission"} {
 		t.Run(site, func(t *testing.T) {
 			root := t.TempDir()
-			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: retirement-project\nstages: []\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nstages: []\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "stages: []\n")
 			if site == "bundle" {
 				writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "permission_bundles:\n  operators:\n    permissions: [message_peers]\n")
 				writeBootverifyFixtureFile(t, filepath.Join(root, "child", "policy.yaml"), "permission_bundles:\n  operators:\n    permissions: [ask_human]\n")
@@ -284,8 +288,10 @@ func TestPermissionBundleMalformedShadowedAncestors(t *testing.T) {
 	for _, malformedOwner := range []string{"root", "child"} {
 		t.Run(malformedOwner, func(t *testing.T) {
 			root := t.TempDir()
-			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: project\nstages: []\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nstages: []\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "stages: []\n")
 			valid := "permission_bundles: {operators: {permissions: [ask_human]}}\n"
 			malformed := "permission_bundles: {operators: {permissions: [message_flow, 7]}}\n"
 			rootPolicy, childPolicy := valid, malformed

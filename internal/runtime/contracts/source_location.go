@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -21,11 +20,11 @@ func (b *WorkflowContractBundle) IntroductionLocation(file, slot string, declara
 		raw = entry.Bytes()
 	} else {
 		for _, entry := range b.PackInventory.Entries() {
-			switch file {
-			case path.Join(entry.Directory(), packartifact.EnvelopeFileName):
-				raw = entry.EnvelopeBody()
-			case path.Join(entry.Directory(), packartifact.ManifestFileNameForType(entry.Type())):
-				raw = entry.ManifestBody()
+			for label, body := range entry.Provider().Members() {
+				if file == path.Join(entry.Directory(), label) {
+					raw = body
+					break
+				}
 			}
 			if raw != nil {
 				break

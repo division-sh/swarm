@@ -6,13 +6,6 @@ source:
   sha256: 182ed500197c682bca81a5a72cb1399e53e18dd87e9cc890fd89df1987b6a38d
   openapi_version: 3.0.3
   server: https://api.acme.test
-pack:
-  id: provider.acme.connector
-  version: 0.1.0
-  platform_version: ">=0.7.0 <0.8.0"
-  provenance: platform
-  tests:
-    - providerconnectors/acme_generated_conformance
 auth:
   mode: static_credentials
   credentials:

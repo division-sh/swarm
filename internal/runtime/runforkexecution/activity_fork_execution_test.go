@@ -272,11 +272,11 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			if err != nil {
 				t.Fatal(err)
 			}
-			reloaded, err := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, result.Materialization.ForkRunID, []string{sourceRequestEventID}, original)
+			reloaded, err := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, result.Materialization.ForkRunID, []string{sourceRequestEventID}, original, loaded.RootedSource.Admission())
 			if err != nil || len(reloaded) != 1 || reloaded[0].SourceEventID != sourceRequestEventID {
 				t.Fatalf("exact child lost bound source preparation: count=%d err=%v", len(reloaded), err)
 			}
-			rejected, refusal := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, sourceRunID, []string{sourceRequestEventID}, original)
+			rejected, refusal := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, sourceRunID, []string{sourceRequestEventID}, original, loaded.RootedSource.Admission())
 			var inactive *runlifecycle.RunNotActiveError
 			if !errors.As(refusal, &inactive) || inactive.RunID != sourceRunID || inactive.State != runlifecycle.StateForked || len(rejected) != 0 {
 				t.Fatalf("frozen source gained execution preparation: count=%d refusal=%v", len(rejected), refusal)
@@ -348,7 +348,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 		t.Fatal(err)
 	}
 	parent := eventtest.ExistingRunRootIngressWithRoutingSource(request.SourceEventID, "flow_a/review.requested", "source-runtime", "", parentPayload, 0, runID, envelope, source, at.Add(-time.Microsecond))
-	parentAdmission, err := admitter(ctx, parent, "flow_a")
+	parentAdmission, err := admitter(ctx, parent, events.EventPayloadProducer(parent, "flow_a"))
 	if err != nil {
 		t.Fatalf("admit source activity cause: %v", err)
 	}
@@ -376,7 +376,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 	}
 	event := eventtest.ChildForProducerWithRoutingSource(eventID, "platform.activity_requested", producer, "", payload, request.ChainDepth+1,
 		events.EventLineage{RunID: runID, ParentEventID: parent.ID(), ExecutionMode: executionmode.Live}, envelope, source, at)
-	admission, err := admitter(ctx, event, "flow_a")
+	admission, err := admitter(ctx, event, events.EventPayloadProducer(event, "flow_a"))
 	if err != nil {
 		t.Fatalf("admit source activity request: %v", err)
 	}
@@ -490,8 +490,10 @@ func selectedContractActivityDeclaredSourceWithResultConsumer(t *testing.T, serv
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
-		"entities.yaml": "root: {}\n",
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"flow_a/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":          "stages:\n  pending: {}\n",
+		"entities.yaml":        "root: {}\n",
 		"flow_a/schema.yaml": `name: flow_a
 stages:
   pending: {}

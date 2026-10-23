@@ -9,7 +9,7 @@ import (
 )
 
 func TestDerivedFlowShapeRejectsAuthoredMode(t *testing.T) {
-	for _, value := range []string{"static", "template", "singleton", "null", "''", "{}", "[]", "&shape static\nname: *shape"} {
+	for _, value := range []string{"static", "template", "singleton", "null", "''", "{}", "[]", "&shape static\nauto_emit_on_create: {event: *shape}"} {
 		t.Run(value, func(t *testing.T) {
 			source := "stages: []\nmode: " + value + "\n"
 			for _, admission := range []struct {

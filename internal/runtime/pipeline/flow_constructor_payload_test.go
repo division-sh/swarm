@@ -21,7 +21,9 @@ func TestFlowConstructorInitialStateUsesCompiledOwner(t *testing.T) {
 		{"declaration_order", "stages:\n  z_entry: {}\n  a_later: {}\n", ".", "z_entry", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			source := loadWorkflowTempSource(t, map[string]string{"schema.yaml": "name: constructor-initial\n" + test.stages, "child/schema.yaml": "name: stateless-child\n"})
+			source := loadWorkflowTempSource(t, map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"schema.yaml": test.stages, "child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"child/schema.yaml": "stages: []\n"})
 			constructor, err := CompileFlowConstructor(source, test.flowID, "")
 			if err != nil {
 				t.Fatal(err)
@@ -38,7 +40,8 @@ func TestFlowConstructorInitialStateUsesCompiledOwner(t *testing.T) {
 
 func TestFlowConstructorPayloadConsumesExactDeliveryProjection(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: constructor-projection\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
 		"entities.yaml": "item:\n  item_id: text\n  precise: double?\n  message: text?\n",
 		"events.yaml":   "item.created:\n  precise: double\n  message: text\n",
 	})
@@ -116,7 +119,8 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: typed-instance-key\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
 				"entities.yaml": "item:\n  item_id: " + test.fieldType + "\n",
 				"events.yaml":   "item.created:\n  item_id: " + test.fieldType + "\n",
 			})
@@ -131,7 +135,8 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 			}
 		})
 	}
-	source := loadWorkflowTempSource(t, map[string]string{"schema.yaml": "name: keyless\n"})
+	source := loadWorkflowTempSource(t, map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": "stages: []\n"})
 	if material, err := AdmitFlowInstanceKey(source, ".", nil); err != nil || material != "" {
 		t.Fatalf("keyless admission: material=%q err=%v", material, err)
 	}
@@ -150,7 +155,8 @@ func TestFlowConstructorResolvedKeySatisfiesOnlyItsDeclaredSlot(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: constructor-key-slot\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
 				"entities.yaml": "item:\n  item_id: text\n  message: text?\n",
 				"events.yaml":   eventSchema,
 			})

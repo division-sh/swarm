@@ -28,7 +28,8 @@ func TestServedClockDeclarationRemovalRetiresLastBindingBothStores(t *testing.T)
 			if code := first.stop(); code != 0 {
 				t.Fatalf("clock source-edit shutdown=%d", code)
 			}
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: clock-export\nstages: []\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 			if err := os.Remove(filepath.Join(root, "events.yaml")); err != nil {
 				t.Fatal(err)
 			}

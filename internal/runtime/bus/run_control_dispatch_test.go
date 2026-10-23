@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -327,6 +328,11 @@ func seedRunControlPublicationRoot(t *testing.T, ctx context.Context, selected i
 	componentFlowConstructionStore
 }, bus *runtimebus.EventBus, source semanticview.Source, runID string) {
 	t.Helper()
+	var err error
+	ctx, err = bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: testSourceArtifactFact(source).BundleHash()})
 	identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
 	seedCompleteEventDispatchRoot(t, runtimecorrelation.WithRunID(ctx, runID), selected, bus, source, identity, time.Now().UTC())
@@ -334,7 +340,8 @@ func seedRunControlPublicationRoot(t *testing.T, ctx context.Context, selected i
 
 func seedRunControlTestRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID string) {
 	t.Helper()
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: authorActivityTestBundleHash})
+	rooted, _ := sourceartifactfixture.Rooted(t, "run-control", sourceartifactfixture.Artifact())
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(), BundleHash: authorActivityTestBundleHash})
 }
 
 type runControlRecordingInterceptor struct {

@@ -90,8 +90,11 @@ func TestCatalogAdmissionScopedSourcesRejectInvalidPresence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: admission\nstages: {done: {final: true}}\n")
-			writeFixtureFile(t, filepath.Join(root, "child/schema.yaml"), "name: child\nstages: {done: {final: true}}\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: admission\nstages: {done: {final: true}}\n")
+			writeFixtureFile(t, filepath.Join(root, "child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "child/schema.yaml"), "# fixture: child\nstages: {done: {final: true}}\n")
 			writeFixtureFile(t, filepath.Join(root, tc.file), tc.source)
 			repo := repoRootForContractsTest(t)
 			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -174,10 +177,12 @@ func TestCatalogAdmissionComparableDomainsRequireResolvedEvidence(t *testing.T) 
 func TestCatalogAdmissionSharedDAGAndAuthoredAliasPolicy(t *testing.T) {
 	root := t.TempDir()
 	for name, source := range map[string]string{
-		"schema.yaml":         "name: dag\nstages: {done: {final: true}}\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":         "# fixture: dag\nstages: {done: {final: true}}\n",
 		"types.yaml":          "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\ntypes:\n  Leaf:\n    value: Label\n  Pair:\n    first: Leaf\n    second: Leaf?\n  Nested:\n    pairs: [Pair]\n    lookup: map[Label]Pair\n",
 		"entities.yaml":       "person:\n  state: Nested\n",
-		"child/schema.yaml":   "name: child\ninstance: id\nstages: {done: {final: true}}\n",
+		"child/schema.yaml":   "# fixture: child\ninstance: id\nstages: {done: {final: true}}\n",
 		"child/entities.yaml": "person:\n  id: Label\n  items: map[Label]Pair\n",
 		"child/events.yaml":   "test.ready:\n  items: [Pair]\n  keys: map[Status]ID\n  stamp: Time\n",
 	} {
@@ -277,7 +282,8 @@ func TestCatalogAdmissionNativePlatformArrays(t *testing.T) {
 
 func TestCatalogAdmissionDurableTextPolicy(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-domains\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: import-domains\n")
 	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "item.ready:\n  label: {type: Label, pattern: '^valid', length: {min: 5}}\n  identity: ID\n  stamp: Time?\n  status: Status\n  labels: [Label]\n")
 	repo := repoRootForContractsTest(t)

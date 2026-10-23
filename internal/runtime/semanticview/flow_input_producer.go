@@ -26,7 +26,6 @@ func (census AuthoredEventEndpointCensus) ResolveNonConnectFlowInputProducer(flo
 }
 
 func resolveNonConnectFlowInputProducer(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, censusForSource func() AuthoredEventEndpointCensus) runtimecontracts.FlowInputProducerResolution {
-	flowID = strings.TrimSpace(flowID)
 	eventType = eventidentity.Normalize(eventType)
 	out := runtimecontracts.FlowInputProducerResolution{FlowID: flowID, EventType: eventType}
 	appendEvidence := func(evidence runtimecontracts.FlowInputProducerEvidence) {
@@ -56,6 +55,13 @@ func resolveNonConnectFlowInputProducer(source Source, flowID, eventType string,
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:   runtimecontracts.FlowInputProducerInvalidContext,
 			Detail: "semantic source and input event are required",
+		})
+		return out
+	}
+	if _, found := FlowScopeByID(source, flowID); !found {
+		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
+			Kind:   runtimecontracts.FlowInputProducerInvalidContext,
+			Detail: fmt.Sprintf("flow selector %q must identify an exact admitted flow; use . for the selected root without whitespace", flowID),
 		})
 		return out
 	}

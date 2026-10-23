@@ -67,6 +67,7 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 						runID = uuid.NewString()
 						selected := store.(agentFixtureFlowStore)
 						identity := mustTestAgentIdentityForRun(runID, "fence-owner", "global")
+						requireRunningRunForTest(t, ctx, store, runID, time.Now().UTC())
 						if err := agentfixture.UpsertStatic(t, ctx, selected, agentFixtureStaticRecord(t, identity)); err != nil {
 							t.Fatal(err)
 						}

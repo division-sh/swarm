@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -14,8 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 //go:embed family144-transitions.json

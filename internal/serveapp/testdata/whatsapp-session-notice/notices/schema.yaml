@@ -1,4 +1,3 @@
-name: notices
 stages: []
 pins:
   inputs: [notice.requested]

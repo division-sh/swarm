@@ -1,4 +1,4 @@
-name: template-create-minted-key
+# fixture: template-create-minted-key
 pins:
   inputs:
     - validation.triggered

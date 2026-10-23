@@ -1,0 +1,25 @@
+tools:
+  create_message:
+    category: provider_connector
+    handler_type: http
+    credentials: [discord_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [channel_id, content]
+      properties:
+        channel_id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
+        content: {type: string, minLength: 1, maxLength: 2000}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
+    http:
+      method: POST
+      url: 'https://discord.com/api/v10/channels/{{input.channel_id}}/messages'
+      headers: {Authorization: 'Bot {{credentials.discord_bot_token}}'}
+      body: {content: '{{input.content}}', allowed_mentions: {parse: []}}
+    response_success: {kind: http_status_2xx}
+    response_mapping: {id: '{{response.body.id}}'}

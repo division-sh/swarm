@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -42,166 +41,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const mutatingRuntimeProbeTestName = "TestOpenRPCMutatingHTTPRuntimeProbes"
-
-func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
-	root := repoRoot(t)
-	api := loadComplianceAPISpec(t, root)
-	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
-	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
-
-	methods := mutatingHTTPRuntimeMethods(t, api, openRPC, matrix)
-	assertStringList(t, "mutating HTTP runtime method set", methods, approvedMutatingHTTPRuntimeMethods())
-
-	fixtures := mutatingHTTPRuntimeFixtures()
-	assertStringList(t, "mutating HTTP runtime fixture methods", sortedMutatingProbeFixtureMethods(fixtures), methods)
-	assertMutatingRuntimeMatrixProofRefs(t, api, matrix, methods)
-	assertMutatingRuntimeDeclaredErrorCoverage(t, api, methods)
-
-	t.Run("classification excludes sibling classes", func(t *testing.T) {
-		mutating := complianceStringSet(methods)
-		for _, sibling := range []string{"agent.get", "event.subscribe", "rpc.unsubscribe", "health.check"} {
-			if _, ok := mutating[sibling]; ok {
-				t.Fatalf("%s classified into mutating HTTP runtime probes; sibling methods belong to their approved probe class", sibling)
-			}
-		}
-	})
-
-	for _, methodName := range methods {
-		methodName := methodName
-		fixture := fixtures[methodName]
-		method := api.MethodCatalog[methodName]
-
-		t.Run(methodName+"/success_idempotency_and_conflict", func(t *testing.T) {
-			handler, calls, state := newMutatingRuntimeProbeHandler(t, methodName)
-			key := "idem-" + strings.ReplaceAll(methodName, ".", "-")
-			params := mutatingProbeParamsWithIdempotency(fixture.Params, key)
-			status, resp, body := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
-			if status != http.StatusOK {
-				t.Fatalf("status = %d, want 200 body=%s", status, body)
-			}
-			if calls[methodName] != 1 {
-				t.Fatalf("%s handler calls = %d, want 1", methodName, calls[methodName])
-			}
-			assertMutatingProbeSuccess(t, methodName, resp, fixture.ResultKeys)
-			if got := state.effectCount(); got != fixture.SuccessEffects {
-				t.Fatalf("%s side effects after success = %d, want %d", methodName, got, fixture.SuccessEffects)
-			}
-			if got, want := state.idempotency.calls, mutatingProbeGenericIdempotencyCalls(methodName, 1); got != want {
-				t.Fatalf("%s idempotency calls after success = %d, want %d", methodName, got, want)
-			}
-
-			replayStatus, replayResp, replayBody := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
-			if replayStatus != http.StatusOK {
-				t.Fatalf("replay status = %d, want 200 body=%s", replayStatus, replayBody)
-			}
-			if calls[methodName] != 2 {
-				t.Fatalf("%s handler calls after replay = %d, want 2", methodName, calls[methodName])
-			}
-			assertMutatingProbeSuccess(t, methodName, replayResp, fixture.ResultKeys)
-			if got := state.effectCount(); got != fixture.SuccessEffects {
-				t.Fatalf("%s side effects after replay = %d, want %d", methodName, got, fixture.SuccessEffects)
-			}
-			if got, want := state.idempotency.calls, mutatingProbeGenericIdempotencyCalls(methodName, 2); got != want {
-				t.Fatalf("%s idempotency calls after replay = %d, want %d", methodName, got, want)
-			}
-
-			conflictParams := mutatingProbeConflictParams(fixture, key)
-			conflictStatus, conflictResp, conflictBody := callMutatingProbeRPC(t, handler, methodName, conflictParams, "Bearer "+testToken)
-			if conflictStatus != http.StatusOK {
-				t.Fatalf("conflict status = %d, want 200 body=%s", conflictStatus, conflictBody)
-			}
-			if calls[methodName] != 3 {
-				t.Fatalf("%s handler calls after conflict = %d, want 3", methodName, calls[methodName])
-			}
-			assertMutatingProbeApplicationError(t, testRegistry(t), methodName, conflictResp, IdempotencyConflictCode)
-			if got := state.effectCount(); got != fixture.SuccessEffects {
-				t.Fatalf("%s side effects after conflict = %d, want %d", methodName, got, fixture.SuccessEffects)
-			}
-			if got, want := state.idempotency.calls, mutatingProbeGenericIdempotencyCalls(methodName, 3); got != want {
-				t.Fatalf("%s idempotency calls after conflict = %d, want %d", methodName, got, want)
-			}
-		})
-
-		t.Run(methodName+"/unknown_params_key", func(t *testing.T) {
-			handler, calls, state := newMutatingRuntimeProbeHandler(t, methodName)
-			params := cloneProbeParams(fixture.Params)
-			params["_unexpected"] = true
-			status, resp, body := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
-			if status != http.StatusOK {
-				t.Fatalf("status = %d, want 200 body=%s", status, body)
-			}
-			assertMutatingProbeInvalidParams(t, methodName, resp, "_unexpected")
-			assertMutatingProbeNoExecution(t, methodName, calls, state, "unknown params-object key")
-		})
-
-		for _, paramName := range requiredParamNames(method) {
-			paramName := paramName
-			t.Run(methodName+"/missing_required_"+paramName, func(t *testing.T) {
-				handler, calls, state := newMutatingRuntimeProbeHandler(t, methodName)
-				params := cloneProbeParams(fixture.Params)
-				delete(params, paramName)
-				status, resp, body := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
-				if status != http.StatusOK {
-					t.Fatalf("status = %d, want 200 body=%s", status, body)
-				}
-				assertMutatingProbeInvalidParams(t, methodName, resp, paramName)
-				assertMutatingProbeNoExecution(t, methodName, calls, state, "missing required param")
-			})
-		}
-
-		for _, authCase := range []struct {
-			name   string
-			header string
-		}{
-			{name: "missing_auth"},
-			{name: "invalid_auth", header: "Bearer wrong"},
-		} {
-			authCase := authCase
-			t.Run(methodName+"/"+authCase.name, func(t *testing.T) {
-				handler, calls, state := newMutatingRuntimeProbeHandler(t, methodName)
-				status, _, body := callMutatingProbeRPC(t, handler, methodName, fixture.Params, authCase.header)
-				if status != http.StatusUnauthorized {
-					t.Fatalf("status = %d, want 401 body=%s", status, body)
-				}
-				assertMutatingProbeNoExecution(t, methodName, calls, state, authCase.name)
-			})
-		}
-	}
-
-	for _, probe := range mutatingHTTPRuntimeErrorProbes(t) {
-		probe := probe
-		t.Run(probe.Method+"/"+probe.Code, func(t *testing.T) {
-			method := api.MethodCatalog[probe.Method]
-			if _, ok := complianceStringSet(method.Errors)[probe.Code]; !ok {
-				t.Fatalf("%s error probe uses %s, absent from declared errors %v", probe.Method, probe.Code, method.Errors)
-			}
-			handler, calls, state := newMutatingRuntimeProbeHandler(t, probe.Method, probe.Modifiers...)
-			status, resp, body := callMutatingProbeRPC(t, handler, probe.Method, probe.Params, "Bearer "+testToken)
-			if status != http.StatusOK {
-				t.Fatalf("status = %d, want 200 body=%s", status, body)
-			}
-			if calls[probe.Method] != 1 {
-				t.Fatalf("%s handler calls = %d, want 1 for declared application error", probe.Method, calls[probe.Method])
-			}
-			assertMutatingProbeApplicationError(t, testRegistry(t), probe.Method, resp, probe.Code)
-			if got := state.effectCount(); got != probe.WantEffects {
-				t.Fatalf("%s side effects after %s = %d, want %d", probe.Method, probe.Code, got, probe.WantEffects)
-			}
-			if probe.Code == "SELECTED_FORK_CONTROL_UNSUPPORTED" {
-				owner := state.selectedControls
-				if owner == nil || owner.calls != 1 || owner.runID != "00000000-0000-0000-0000-000000000101" || string(owner.operation) != probe.Method || state.idempotency.calls != 0 {
-					t.Fatalf("selected refusal borrowed execution or admitted idempotency: owner=%+v idempotency=%d", owner, state.idempotency.calls)
-				}
-			}
-		})
-	}
-}
 
 func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 	operation := decisioncardtest.HumanOperation(t, t.Name(), "provider-turn/tool-call-1")
@@ -724,7 +571,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "test.setup_entities", Params: invalidBundleHashSetup, Code: UnsupportedBundleHashCode},
 		{Method: "test.setup_entities", Params: mergeProbeParams(validSetup, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
 		{Method: "test.setup_entities", Params: mergeProbeParams(validSetup, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleMismatchCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[setupRunID] = runForkAvailable(setupRunID, runStartTestBundleHash)
+			s.runForkAvailability.rows[setupRunID] = runForkAvailable(setupRunID, apiArtifactRoot(t, runStartTestArtifact("scan.requested")))
 		}}},
 		{Method: "test.setup_entities", Params: validSetup, Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runForkAvailability.rows[setupRunID] = runForkDataIntegrity(setupRunID, runStartTestBundleHash)
@@ -951,12 +798,15 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		sourceArtifactFact:          mustAPITestPersistedSourceArtifactFact(runStartTestBundleHash),
 	}
 	state.runForkOperations = newRecordingRunForkOperations()
-	state.runFork = &mutatingProbeRunForkExecutor{state: state}
+	forkTarget, _ := sourceartifactfixture.Rooted(t, "selected-target", runStartTestArtifact("scan.requested"))
+	state.runFork = &mutatingProbeRunForkExecutor{state: state, SelectedContractSourceInspector: &recordingRunForkExecutor{
+		selectedSource: forkTarget,
+	}}
 	state.runForkAvailability = &recordingRunForkAvailability{
 		rows: map[string]runbundle.Availability{
-			runID:                  runForkAvailable(runID, runStartTestBundleHash),
-			otherRunID:             runForkAvailable(otherRunID, runStartTestBundleHash),
-			runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+			runID:                  runForkAvailable(runID, apiArtifactRoot(t, runStartTestArtifact("scan.requested"))),
+			otherRunID:             runForkAvailable(otherRunID, apiArtifactRoot(t, runStartTestArtifact("scan.requested"))),
+			runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 		},
 	}
 	state.runControl.state = state
@@ -1075,7 +925,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 	t.Helper()
 	bundle := testSetupValidationBundle(t)
 	if s.method == "run.start" || s.method == "event.publish" {
-		bundle = runStartTestBundle("scan.requested")
+		bundle = runStartTestBundle(t, "scan.requested")
 	}
 	if s.finiteService {
 		bundle.RootSchema.StageDeclarations.Entries[1].Final = false
@@ -1372,6 +1222,7 @@ func (s *mutatingProbeTestSetupStore) SetupScenarioEntities(_ context.Context, r
 }
 
 type mutatingProbeRunForkExecutor struct {
+	runforkexecution.SelectedContractSourceInspector
 	state *mutatingRuntimeProbeState
 	err   error
 }

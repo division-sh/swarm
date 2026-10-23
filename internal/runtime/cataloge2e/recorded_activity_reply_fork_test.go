@@ -112,7 +112,7 @@ func TestIssue642TwoOpenReplyLevelSiblingForksReturnIndependentlyBothStores(t *t
 type copiedActivityReplyStore interface {
 	runforkexecution.SelectedContractForkLifecycle
 	runforkexecution.SourceArtifactSelectedContractSourceStore
-	storetest.DurableDataCatalogStore
+	storetest.RootedDataCatalogStore
 	pipeline.ActivityAttemptJournal
 	bus.PreparedPublishEventReader
 	replycontext.Store

@@ -1,4 +1,4 @@
-name: claude-cli-release-lifecycle
+# fixture: claude-cli-release-lifecycle
 stages: {done: {final: true}}
 pins:
   inputs:

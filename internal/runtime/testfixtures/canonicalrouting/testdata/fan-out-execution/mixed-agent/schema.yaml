@@ -1,4 +1,4 @@
-name: mixed-route
+# fixture: mixed-route
 connect:
   - {event: mixed.one, from: producer, to: one}
   - {event: mixed.multi, from: producer, to: multi-a}

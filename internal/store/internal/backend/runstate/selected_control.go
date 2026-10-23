@@ -31,6 +31,8 @@ func LoadSelectedContractBinding(ctx context.Context, querier RowQueryer, forkRu
 			COALESCE(CAST(fork_event_id AS TEXT), ''),
 			mode,
 			COALESCE(bundle_hash, ''),
+			target_bundle_hash,
+			source_root_directory,
 			created_at
 		FROM run_fork_selected_contract_bindings
 		WHERE fork_run_id = $1
@@ -43,6 +45,8 @@ func LoadSelectedContractBinding(ctx context.Context, querier RowQueryer, forkRu
 		&binding.ForkEventID,
 		&selection.Mode,
 		&selection.BundleHash,
+		&binding.TargetRootReference.BundleHash,
+		&binding.TargetRootReference.RootDirectory,
 		&createdAt,
 	)
 	if err != nil {
@@ -62,6 +66,9 @@ func LoadSelectedContractBinding(ctx context.Context, querier RowQueryer, forkRu
 	}
 	binding.ContractSelection = selection
 	binding.CreatedAt = parsedCreatedAt
+	if err := binding.ValidateExecutionBinding(forkRunID); err != nil {
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("decode selected contract binding: %w", err)
+	}
 	return binding, nil
 }
 
