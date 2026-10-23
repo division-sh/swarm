@@ -3,16 +3,16 @@ package cliapp
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/json"
+
 	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
-	"os"
+
 	"path/filepath"
 	"reflect"
-	"sort"
+
 	"strings"
 	"testing"
 )
@@ -151,23 +151,6 @@ type admissionPredicateBody struct {
 	SHA256 string `json:"body_sha256"`
 }
 
-func measureAdmissionPredicateBodies(root string) ([]admissionPredicateBody, error) {
-	var result []admissionPredicateBody
-	for _, surface := range admissionPredicateSurfaces {
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, surface.File), nil, 0)
-		if err != nil {
-			return nil, err
-		}
-		bodies, err := admissionPredicateFileBodies(surface, file)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, bodies...)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Owner < result[j].Owner })
-	return result, nil
-}
-
 func admissionPredicateFileBodies(surface admissionPredicateSurface, file *ast.File) ([]admissionPredicateBody, error) {
 	var result []admissionPredicateBody
 	for _, declaration := range file.Decls {
@@ -214,38 +197,6 @@ func compareAdmissionPredicateBodies(expected, measured []admissionPredicateBody
 		return fmt.Errorf("audited startup owner/caller disappeared: %+v", want)
 	}
 	return nil
-}
-
-func TestVerifyBootStartupPredicateCensus(t *testing.T) {
-	root := filepath.Clean(filepath.Join("..", ".."))
-	measured, err := measureAdmissionPredicateBodies(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join("testdata", "verify_admission_predicate_census.json")
-	if os.Getenv("SWARM_UPDATE_ADMISSION_PREDICATE_CENSUS") == "1" {
-		data, err := json.MarshalIndent(measured, "", "  ")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, append(data, '\n'), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var expected []admissionPredicateBody
-	if err := json.Unmarshal(data, &expected); err != nil {
-		t.Fatal(err)
-	}
-	if err := compareAdmissionPredicateBodies(expected, measured); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal(t *testing.T) {

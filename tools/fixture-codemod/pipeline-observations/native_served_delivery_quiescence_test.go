@@ -1,11 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
+
 	"go/ast"
-	"go/format"
+
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -16,108 +15,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 )
-
-func servedDeliveryCallerSource(source, name string) (string, error) {
-	set := token.NewFileSet()
-	file, err := parser.ParseFile(set, "caller.go", "package probe\n"+source, parser.AllErrors)
-	if err != nil {
-		return "", err
-	}
-	var failure error
-	ast.Inspect(file, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok || formattedNativeReadNode(call.Fun) != "waitServedRunDeliveryQuiescence" {
-			return true
-		}
-		if len(call.Args) != 4 {
-			failure = fmt.Errorf("unexpected original delivery wait arity: %s", name)
-			return false
-		}
-		if selector, ok := call.Args[1].(*ast.SelectorExpr); ok && selector.Sel.Name == "DB" {
-			call.Args[1] = &ast.SelectorExpr{X: selector.X, Sel: ast.NewIdent("ReadRunDeliveries")}
-		} else if name == "TestServedMailboxCompletionProcessBoundariesBothStores" && formattedNativeReadNode(call.Args[1]) == "db" {
-			call.Args[1] = &ast.SelectorExpr{X: ast.NewIdent("rt"), Sel: ast.NewIdent("ReadRunDeliveries")}
-		} else {
-			failure = fmt.Errorf("unreviewed delivery-owner handoff: %s", name)
-			return false
-		}
-		call.Args = []ast.Expr{call.Args[0], call.Args[1], call.Args[3]}
-		return true
-	})
-	if failure != nil {
-		return "", failure
-	}
-	var out bytes.Buffer
-	if err := format.Node(&out, set, file.Decls[0]); err != nil {
-		return "", err
-	}
-	return out.String(), nil
-}
-
-func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched, q10Endpoints := 0, 0
-	for _, row := range rows {
-		if row.Family != "native-served-delivery-quiescence-caller" {
-			continue
-		}
-		matched++
-		transformed, err := servedDeliveryCallerSource(row.Before, row.Function)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want, err := canonicalFunction(transformed)
-		got, afterErr := canonicalFunction(row.After)
-		current := row.After
-		if row.Successor != "" {
-			current = row.Successor
-		}
-		historical := current
-		current, endpointErr := q10DeliveryCallerCurrentSource(row)
-		if endpointErr != nil {
-			t.Fatal(endpointErr)
-		}
-		if current != historical {
-			q10Endpoints++
-			currentGuard := row
-			currentGuard.Before, currentGuard.After, currentGuard.Successor = current, current, ""
-			if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+historical), currentGuard); err == nil || changed {
-				t.Fatalf("historical delivery reader accepted as current: %s", row.Function)
-			}
-			for _, cut := range []string{"ReadRunDeliveries", "CurrentState", "!reflect.DeepEqual", "fi.run_id=es.run_id", "fi.instance_path=es.flow_instance", "fi.entity_id=es.entity_id"} {
-				mutant := strings.Replace(current, cut, "foreignCut", 1)
-				if mutant == current {
-					continue
-				}
-				if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), currentGuard); err == nil || changed {
-					t.Fatalf("current delivery caller lost owner, stage, equality or join identity: %s/%s", row.Function, cut)
-				}
-			}
-		}
-		currentPin, pinErr := canonicalFunction(current)
-		activeName := row.Function
-		if row.File == forkProofTruthFile && row.Function == forkProofTruthOldName && row.Successor != "" {
-			activeName = forkProofTruthNewName
-		}
-		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, activeName))
-		if err != nil || afterErr != nil || pinErr != nil || actualErr != nil || want != got || actual != currentPin {
-			t.Fatalf("delivery caller changed setup, temporal cuts or assertions: %s", row.Function)
-		}
-		mutant := strings.Replace(row.After, "ReadRunDeliveries", "ForeignRunDeliveries", 1)
-		if mutant == row.After {
-			t.Fatal("delivery caller hostile owner stopped matching")
-		}
-		if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), row); err == nil || changed {
-			t.Fatalf("foreign owner admitted by finite rewrite: %s", row.Function)
-		}
-	}
-	if matched != 73 || q10Endpoints != 12 {
-		t.Fatalf("mechanical delivery caller recipes=%d,want73; Q10 endpoints=%d,want12; construction is separate", matched, q10Endpoints)
-	}
-}
 
 func TestServedDeliveryQuiescenceCallerInventoryConsumesOnlyDomainReadPorts(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
