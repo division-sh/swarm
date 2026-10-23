@@ -637,6 +637,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
 		LifecycleStore:    grant,
+		ExecutionPosture:  executionposture.Live,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleCensus: store,

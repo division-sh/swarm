@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
@@ -104,13 +105,14 @@ func (c *agentLifecycleCoordinator) commitProcessTakeover(
 		state.ProcessBinding.ProcessAuthorityID, state.ProcessBinding.ProcessBootID,
 		target.ProcessAuthorityID, target.ProcessBootID, target.GenerationGrantID,
 	)
+	now := time.Now().UTC()
 	result, err := c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: "process_takeover", RequestHash: requestHash,
 		Identity: identity, AgentID: identity.AgentID(), Trigger: "process_takeover",
 		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
 		TargetEpoch: state.RuntimeEpoch + 1, TargetGeneration: state.Generation + 1, TargetPhase: state.Phase,
 		ConfigRevision: state.ConfigRevision, RunMode: state.RunMode, Subordinate: subordinate,
-		Topology: state.Topology, Now: time.Now().UTC(),
+		Topology: state.Topology, StartupRecovery: runtimeeffects.NewRecoveryRequest(now, c.executionPosture), Now: now,
 	})
 	if err != nil {
 		return fmt.Errorf("take over lifecycle execution for %s: %w", identity.Description(), err)

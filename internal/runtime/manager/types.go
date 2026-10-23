@@ -131,6 +131,7 @@ type AgentLifecycleTransition struct {
 	Subordinate        sessions.LifecycleMutationPlan
 	Topology           runtimeagenttopology.Admission
 	ProcessBinding     ProcessExecutionBinding
+	StartupRecovery    runtimeeffects.RecoveryRequest
 	Now                time.Time
 }
 

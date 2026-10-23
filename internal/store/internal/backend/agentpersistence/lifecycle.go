@@ -441,6 +441,12 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, a
 	if err == nil {
 		err = insertPostgresLifecycleEvidence(ctx, tx, req, result)
 	}
+	if err == nil && req.OperationKind == "process_takeover" {
+		if drains == nil {
+			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("startup provider recovery owner is required")
+		}
+		err = drains.RecoverStartupProviderAttemptsPostgresTx(ctx, attempt, req, result)
+	}
 	if err == nil {
 		err = attempt.Record(ctx, agentLifecycleAuthorActivityDraft(req, result))
 	}
@@ -486,6 +492,12 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, att
 	}
 	if err == nil {
 		err = insertSQLiteLifecycleEvidenceTx(ctx, tx, req, result)
+	}
+	if err == nil && req.OperationKind == "process_takeover" {
+		if drains == nil {
+			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("startup provider recovery owner is required")
+		}
+		err = drains.RecoverStartupProviderAttemptsSQLiteTx(ctx, attempt, req, result)
 	}
 	if err == nil {
 		err = attempt.Record(ctx, agentLifecycleAuthorActivityDraft(req, result))
