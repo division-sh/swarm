@@ -50,6 +50,7 @@ func decodeFanOutListCursor(q fanoutobligation.ListQuery) (*fanOutListCursor, er
 		return nil, fanoutobligation.ErrInvalidListCursor
 	}
 	if (q.Filter.TriggeringDeliveryID != "" && q.Filter.TriggeringDeliveryID != cursor.After.TriggeringDeliveryID) ||
+		(q.Filter.DeploymentFeedID != "" && q.Filter.DeploymentFeedID != cursor.After.DeploymentFeedID) ||
 		(q.Filter.FlowPath != "" && q.Filter.FlowPath != cursor.After.ElementRef.FlowPath) ||
 		(q.Filter.SemanticPath != "" && q.Filter.SemanticPath != cursor.After.ElementRef.SemanticPath) {
 		return nil, fanoutobligation.ErrInvalidListCursor
@@ -63,6 +64,65 @@ func (s *PipelinePostgresOwner) ListFanOutIntents(ctx context.Context, q fanouto
 
 func (s *PipelineSQLiteOwner) ListFanOutIntents(ctx context.Context, q fanoutobligation.ListQuery) (fanoutobligation.ListPage, error) {
 	return listFanOutIntents(ctx, s.backend.ConstructionHandle(), false, s.now, q)
+}
+
+func readDeploymentFanOutOutcomes(ctx context.Context, db eventReadQueryer, q fanoutobligation.DeploymentOutcomeQuery) (fanoutobligation.DeploymentOutcomePage, error) {
+	page := fanoutobligation.DeploymentOutcomePage{RunID: q.RunID, DeploymentFeedID: q.DeploymentFeedID, Outcomes: []fanoutobligation.Outcome{}, NextOrdinal: q.FromOrdinal, More: new(bool)}
+	if err := q.Validate(); err != nil {
+		return page, err
+	}
+	limit := q.Limit
+	if limit == 0 {
+		limit = fanoutobligation.DefaultListLimit
+	}
+	rows, err := db.QueryContext(ctx, `SELECT o.ordinal,o.outcome_kind,
+		COALESCE(CAST(o.event_id AS TEXT),''),COALESCE(CAST(o.source_event_id AS TEXT),''),
+		COALESCE(o.inherited_disposition,''),o.failure,o.created_at
+		FROM fan_out_intents i LEFT JOIN fan_out_outcomes o
+		ON o.run_id=i.run_id AND o.deployment_feed_id=i.deployment_feed_id AND o.ordinal >= $3 AND o.ordinal < i.cursor
+		WHERE i.run_id=$1 AND i.deployment_feed_id=$2 ORDER BY o.ordinal LIMIT $4`,
+		q.RunID, q.DeploymentFeedID, q.FromOrdinal, limit+1)
+	if err != nil {
+		return page, err
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		found = true
+		var ordinal sql.NullInt64
+		var kind sql.NullString
+		var at any
+		var failure []byte
+		var row fanoutobligation.Outcome
+		if err := rows.Scan(&ordinal, &kind, &row.EventID, &row.SourceEventID, &row.InheritedDisposition, &failure, &at); err != nil {
+			return page, err
+		}
+		if !ordinal.Valid {
+			continue // The feed exists, but has no further committed outcomes yet.
+		}
+		row.Ordinal, row.Kind = int(ordinal.Int64), fanoutobligation.OutcomeKind(kind.String)
+		row.Failure = failure
+		row.CreatedAt, _, err = sqliteTimeValue(at)
+		if err != nil {
+			return page, err
+		}
+		if err := row.Validate(); err != nil {
+			return page, err
+		}
+		if len(page.Outcomes) == limit {
+			*page.More = true
+			break
+		}
+		page.Outcomes = append(page.Outcomes, row)
+		page.NextOrdinal = row.Ordinal + 1
+	}
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	if !found {
+		return page, sql.ErrNoRows
+	}
+	return page, page.Validate(q)
 }
 
 // One read transaction observes the run and a bounded header page. Immutable
@@ -103,7 +163,7 @@ func listFanOutIntents(ctx context.Context, db *sql.DB, postgres bool, now func(
 	query := `SELECT ` + fanOutIntentColumns + ` FROM fan_out_intents WHERE run_id=$1`
 	for _, filter := range []struct{ column, value string }{
 		{"status", string(q.Filter.Status)}, {"triggering_delivery_id", q.Filter.TriggeringDeliveryID},
-		{"flow_path", q.Filter.FlowPath}, {"semantic_path", q.Filter.SemanticPath},
+		{"flow_path", q.Filter.FlowPath}, {"semantic_path", q.Filter.SemanticPath}, {"deployment_feed_id", q.Filter.DeploymentFeedID},
 	} {
 		if filter.value != "" {
 			args = append(args, filter.value)
@@ -158,6 +218,16 @@ func listFanOutIntents(ctx context.Context, db *sql.DB, postgres bool, now func(
 	}
 	if err := rows.Close(); err != nil {
 		return page, err
+	}
+	if q.OutcomeFromOrdinal != nil {
+		outcomes := fanoutobligation.DeploymentOutcomePage{RunID: q.RunID, DeploymentFeedID: q.Filter.DeploymentFeedID, Outcomes: []fanoutobligation.Outcome{}, NextOrdinal: *q.OutcomeFromOrdinal, More: new(bool)}
+		if len(page.Intents) > 0 {
+			outcomes, err = readDeploymentFanOutOutcomes(ctx, tx, fanoutobligation.DeploymentOutcomeQuery{RunID: q.RunID, DeploymentFeedID: q.Filter.DeploymentFeedID, FromOrdinal: *q.OutcomeFromOrdinal, Limit: q.Limit})
+			if err != nil {
+				return page, err
+			}
+		}
+		page.DeploymentOutcomes = &outcomes
 	}
 	if err := tx.Commit(); err != nil {
 		return page, err

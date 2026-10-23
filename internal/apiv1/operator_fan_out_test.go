@@ -54,6 +54,10 @@ func TestFanOutReadAPISchema(t *testing.T) {
 	t.Run("deployment", func(t *testing.T) {
 		page := fanOutReadProbePage()
 		page.Intents[0].Key = fanoutobligation.IntentKey{RunID: page.RunID, DeploymentFeedID: uuid.NewString()}
+		page.DeploymentOutcomes = &fanoutobligation.DeploymentOutcomePage{
+			RunID: page.RunID, DeploymentFeedID: page.Intents[0].Key.DeploymentFeedID, NextOrdinal: 32, More: new(bool),
+			Outcomes: []fanoutobligation.Outcome{{Ordinal: 31, Kind: fanoutobligation.OutcomeCommitted, EventID: uuid.NewString(), CreatedAt: page.ObservedAt}},
+		}
 		raw, err := json.Marshal(page)
 		if err != nil {
 			t.Fatal(err)
@@ -337,6 +341,8 @@ func TestFanOutReadAPIAuthSchemaAndErrors(t *testing.T) {
 		fmt.Sprintf(`{"run_id":%q,"filter":{"flow_path":""}}`, runID), fmt.Sprintf(`{"run_id":%q,"filter":{"flow_path":"./child"}}`, runID),
 		fmt.Sprintf(`{"run_id":%q,"filter":null}`, runID), fmt.Sprintf(`{"run_id":%q,"filter":{"semantic_path":null}}`, runID),
 		fmt.Sprintf(`{"run_id":%q,"cursor":""}`, runID), fmt.Sprintf(`{"run_id":%q,"cursor":null}`, runID),
+		fmt.Sprintf(`{"run_id":%q,"outcome_from_ordinal":0}`, runID), fmt.Sprintf(`{"run_id":%q,"outcome_from_ordinal":null}`, runID),
+		fmt.Sprintf(`{"run_id":%q,"filter":{"deployment_feed_id":%q},"outcome_from_ordinal":-1}`, runID, uuid.NewString()),
 	} {
 		before := store.calls
 		resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"bad","method":"run.fan_out.list","params":%s}`, params))
@@ -380,6 +386,15 @@ func TestFanOutReadAPISelectedStores(t *testing.T) {
 			rows, ok := result["intents"].([]any)
 			if !ok || len(rows) != 0 || result["observed_at"] == "" || result["run_id"] != runID {
 				t.Fatalf("result=%+v", result)
+			}
+			feedID := uuid.NewString()
+			resp = rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"rows","method":"run.fan_out.list","params":{"run_id":%q,"filter":{"deployment_feed_id":%q},"outcome_from_ordinal":0}}`, runID, feedID))
+			if resp.Error != nil {
+				t.Fatalf("bounded outcome request: %+v", resp.Error)
+			}
+			outcomes := asMap(t, asMap(t, resp.Result)["deployment_outcomes"])
+			if outcomes["deployment_feed_id"] != feedID || len(outcomes["outcomes"].([]any)) != 0 {
+				t.Fatalf("absent feed fabricated row evidence: %+v", outcomes)
 			}
 		})
 	}

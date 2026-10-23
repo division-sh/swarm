@@ -16518,6 +16518,7 @@ durable_data_resources:
   deployment_origin:
     initiation: run.start admits exactly event-only, feed-only, or event-plus-feed creation. Feed-only requires a canonical run_id, an exact selected bundle, and at least one import or pin; it stores a payload-free deployment RunOrigin and no synthetic event, handler, delivery, or scenario_setup origin.
     atomicity: Every selected pin creates one deployment-origin feed intent in the same selected-store transaction as its imports, run row, pins, permanent run-creation receipt, and API completion. The feed intent binds the exact declaration, schema digest, immutable version, cardinality, and run. Retrying the same request consumes the permanent receipt and does not create another run, event, pin, or feed.
+    publication_identity: An imported deployment feed is identified by UUIDv5 (SHA1, OID namespace) over the existing swarm.deployment-feed.v1 domain, run_id, declaration key, and the retained import source_invocation_id, separated by NUL. Independent imports into the same run/declaration do not share a feed. Explicit pins retain their existing run/declaration identity. The former run/declaration-only import derivation (historical spec line 39393) is superseded by issue 2728 comment 6353214633 section 4. This is diagnostic publication identity, not execution authority or a new persisted ledger.
     trigger: Pin existence alone never starts processing. The explicit run.start operation creates the feed obligations; issuance uses the existing fan-out pump and normal publication, routing, receiver initialization, settlement, and recovery paths. Authored data.* source events and fake triggering deliveries are not supported.
     source_admission: Before a run.start with --data or --pin commits imports, a run, pins, feeds, or an API completion, every selected declaration must pass the same exact importable-declaration and compiled-boundary admission consumed by deployment-feed routing. A selected-root declaration requires its exact compiled INPUT; an output pin is neither required nor a fallback for a missing input. This applies to feed-only and event-plus-feed starts before domain mutation. Existing explicitly child-addressed declarations retain their exact scoped output check pending the user's retain-or-retire decision; that branch grants no selected-root input capability. Feed capability does not imply producer construction or constructor eligibility for every input. In an event-plus-feed creation, a keyed root requires its lawful creating event and may then consume another declared feed input that cannot itself construct the root; this grants no permission to add data bindings to an existing run.
     row_publication_source: Each row publication carries typed deployment-feed routing source authority at the exact importable declaration scope, with empty concrete sender instance/entity, not a flow-instance or entity producer. The selected root consumes its exact compiled INPUT and existing same-flow or explicitly connected consumers; no output echo, source-instance fabrication, name broadcast or alternate recipient selection is permitted. Existing child-declared output scope remains separate pending the user's disposition. A source event name, row payload, or coincident flow/entity identity cannot substitute for exact declaration/provenance and compiled boundary admission.
@@ -31453,6 +31454,7 @@ cli_specification:
         - --payload <path>
         - --connect <url>
         - --no-follow
+        - --timeout <duration> (default 10m; 0 unlimited)
         - --reattach <run-id>
         - --config <path>
         - --backend <anthropic|claude_cli|openai_compatible|openai_responses>
@@ -31466,22 +31468,22 @@ cli_specification:
         foreground_local_start:
           invocation: swarm run start [directory] [--event <name> --payload <file>] [--config <path>] [--backend <profile>] [--data <name=file.jsonl>] [--pin <name@selector>]
           behavior: >
-            Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, begin
-            authoritative run.get status/interrupt handling, and attempt optional bounded run.subscribe_trace observation.
-            Render available trace rows and the final status-owned summary until terminal. Local runtime config and
-            backend selection consume the same shared resolver as `swarm serve`. Fused imports and pins consume the same
+            Use an existing serve, call health.check and run.start, then follow run.diagnose.test_quiescence and
+            attempt optional bounded run.subscribe_trace observation. Never start a local host; absent serve refuses
+            with "No serve running for this deployment: start `swarm serve` first". Render available trace rows and
+            the quiescence readout. Configure the runtime through `swarm serve`. Fused imports and pins consume the same
             exact selected-bundle data declarations and method-neutral run-creation owner as connected starts. New work uses the active canonical bundle_hash
             returned by health.check for create-new-work scope. `--data` and `--pin` are create-new-work inputs, are valid for
             local and connected starts, and fail closed with `--reattach`.
-          ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
+          ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists and exits 130; it never stops serve. The existing standing-run stop refusal remains authoritative.'
         foreground_connected_start:
           invocation: swarm run start --connect <url> [--event <name> --payload <file>] [--data <name=file.jsonl>] [--pin <name@selector>]
-          behavior: 'Use an existing API server, call health.check, call run.start with an event, one or more explicit data feeds, or both, begin authoritative run.get status/interrupt handling, attempt optional bounded run.subscribe_trace observation, and render until terminal.'
+          behavior: 'Use an existing API server, call health.check and run.start with an event, data feeds, or both; wait on run.diagnose.test_quiescence, not run terminality, with optional bounded run.subscribe_trace observation.'
           ctrl_c: 'First Ctrl-C calls run.stop against the connected server and exits 130; it MUST NOT stop the server.'
         connected_no_follow:
-          invocation: swarm run start --connect <url> [--event <name> --payload <file>] [--data <name=file.jsonl>] [--pin <name@selector>] --no-follow
-          behavior: 'Call health.check and run.start, print run_id plus follow/inspect guidance, exit 0, and do not open /v1/ws.'
-          validation: '`--no-follow` requires `--connect` and is mutually exclusive with `--reattach`.'
+          invocation: swarm run start [--connect <url>] [--event <name> --payload <file>] [--data <name=file.jsonl>] [--pin <name@selector>] --no-follow
+          behavior: 'Publish through existing serve, print the event/feed receipt and available committed or semantic_rejected outcomes per ordinal, then return without waiting or opening /v1/ws. A row refusal exits 6.'
+          validation: '`--no-follow` is mutually exclusive with `--reattach`.'
         reattach_active:
           invocation: swarm run start --reattach <run-id> [--connect <url>]
           behavior: 'Call run.get, then begin authoritative status/interrupt handling and attempt optional bounded run.subscribe_trace observation when the run is active.'
@@ -31489,6 +31491,12 @@ cli_specification:
         reattach_terminal:
           invocation: swarm run start --reattach <run-id> [--connect <url>]
           behavior: 'Call run.get, render terminal summary, and exit according to terminal status without opening /v1/ws.'
+      settled_return:
+        owner: run.diagnose.test_quiescence, exactly as consumed by swarm test
+        readiness: No active delivery, unsettled pipeline event, active session lease, fan-out owed/unsettled/barrier, or due timer. Future timers do not block. The run may remain running.
+        accepted_cost: Unrelated traffic in the live run counts too; a busy deployment may time out rather than settle. No publication lineage, receiver classification, descendant traversal, or transitive follow is derived.
+        timeout: Default 10m; 0 unlimited. Expiry exits 8, prints the last observation and status continuation command, and never calls run.stop or cancels work.
+        exits: Settled without refusal is 0; publication or row refusal is 6; timeout is 8. Existing transport/authentication and terminal-failure exit classes are unchanged.
       post_start_trace_observation:
         role: optional diagnostic observer; never workload lifecycle or normal exit authority
         acquisition: >
@@ -31539,7 +31547,7 @@ cli_specification:
           tty_rendering: 'One WARNING:-class human stderr line projected from the typed fact.'
           non_tty_rendering: 'One compact JSON object on stderr. This does not make stdout or the complete command NDJSON and does not add a JSON output mode.'
         exit_authority: >
-          run.get terminal status exclusively owns normal post-start exit. Observation failure cannot change a
+          run.diagnose.test_quiescence owns normal start completion; run.get retains terminal reattach ownership. Observation failure cannot change a
           successful terminal exit or hide workflow failure/cancellation. Explicit interruption remains authoritative:
           start modes attempt run.stop and exit 130; active reattach detaches without run.stop and exits 130.
       exit_codes:
@@ -31550,12 +31558,13 @@ cli_specification:
         run_not_found: 5
         start_rejection_bundle_or_idempotency_conflict: 6
         workflow_failed_or_cancelled: 7
+        wait_timeout_without_cancellation: 8
         interrupted: 130
       proof_expectations:
-      - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop; health.check exposes the active canonical bundle_hash and run.start carries that hash for new work; existing request replay retains its permanent source binding. Missing new-work scope maps server BUNDLE_SCOPE_REQUIRED and valid non-routable internal hashes map BUNDLE_UNAVAILABLE; authored hash flags are absent.
+      - exact /v1/rpc calls for health.check, run.start, run.diagnose, run.fan_out.list, reattach run.get, and explicit run.stop; health.check exposes the active canonical bundle_hash and run.start carries that hash for new work; existing request replay retains its permanent source binding. Missing new-work scope maps server BUNDLE_SCOPE_REQUIRED and valid non-routable internal hashes map BUNDLE_UNAVAILABLE; authored hash flags are absent.
       - connected start failures for EVENT_NOT_DECLARED, PAYLOAD_VALIDATION_FAILED, EVENT_PUBLISH_FAILED, bundle identity rejection, and IDEMPOTENCY_CONFLICT render canonical API codes on stderr, exit 6, and do not open /v1/ws or follow work after failed run.start
       - exact /v1/ws subscription for run.subscribe_trace where observation is in scope, with finite acquisition timeout, cancellation close/join, and unchanged 16-row transport bound
-      - every post-start attach, timeout, protocol, transport, validation, mismatch, clean-close, and overflow manifestation emits exactly one typed detach fact and continues run.get polling
+      - every post-start attach, timeout, protocol, transport, validation, mismatch, clean-close, and overflow manifestation emits exactly one typed detach fact and continues the authoritative wait (run.diagnose for starts; run.get for reattach)
       - local start, connected start, and active reattach consume the same observer policy; terminal reattach opens no WebSocket; pre-start failures remain lethal
       - terminal success/failure and both start/reattach interrupt modes remain status/control-owned while pending and detached observers close and join without socket or goroutine leaks
       - blocked trace stdout and blocked detach-fact stderr cannot delay status/control decisions; start interruption still calls run.stop, active reattach still performs no stop, terminal polling still selects exact terminal truth, and observer plus renderer children settle after output is released
@@ -34300,6 +34309,7 @@ api_specification:
         type: object
         additionalProperties: false
         properties:
+          deployment_feed_id: {type: string, format: uuid}
           status: {type: string, enum: [open, blocked, closed, canceled]}
           triggering_delivery_id: {type: string, format: uuid}
           flow_path:
@@ -34396,6 +34406,7 @@ api_specification:
         additionalProperties: false
         required: [run_id, run_status, observed_at, order, intents]
         properties:
+          deployment_outcomes: {$ref: '#/components/schemas/FanOutDeploymentOutcomePage'}
           run_id: {type: string, format: uuid}
           run_status: {$ref: '#/components/schemas/RunStatus'}
           observed_at: {$ref: '#/components/schemas/Timestamp'}
@@ -34405,6 +34416,31 @@ api_specification:
             maxItems: 500
             items: {$ref: '#/components/schemas/FanOutIntentReadback'}
           next_cursor: {type: string, minLength: 1, maxLength: 16384}
+      FanOutDeploymentOutcomePage:
+        description: Bounded ordinal read of the exact deployment feed. The native outcome owner validates committed versus semantic_rejected evidence; no rows or receivers are reconstructed.
+        type: object
+        additionalProperties: false
+        required: [run_id, deployment_feed_id, outcomes, next_ordinal, more]
+        properties:
+          run_id: {type: string, format: uuid}
+          deployment_feed_id: {type: string, format: uuid}
+          next_ordinal: {type: integer, minimum: 0}
+          more: {type: boolean}
+          outcomes:
+            type: array
+            maxItems: 500
+            items:
+              type: object
+              additionalProperties: false
+              required: [ordinal, kind, created_at]
+              properties:
+                ordinal: {type: integer, minimum: 0}
+                kind: {type: string, enum: [committed, semantic_rejected]}
+                event_id: {type: string, format: uuid}
+                source_event_id: {type: string, format: uuid}
+                inherited_disposition: {type: string, enum: [succeeded, dead_lettered, no_route]}
+                failure: {$ref: '#/components/schemas/FailureEnvelope'}
+                created_at: {$ref: '#/components/schemas/Timestamp'}
       FanOutRunSummary:
         description: Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.
         type: object
@@ -40306,6 +40342,10 @@ api_specification:
               $ref: '#/components/schemas/RunStatus'
             data_binding:
               $ref: '#/components/schemas/DataBinding'
+            event_id: {type: string, format: uuid}
+            deployment_feed_ids:
+              type: array
+              items: {type: string, format: uuid}
       errors:
       - BUNDLE_MISMATCH
       - BUNDLE_SCOPE_REQUIRED
@@ -40684,7 +40724,11 @@ api_specification:
       tier: must_have
       description: >-
         Read one bounded page of durable fan-out intent headers. Read-only; does not
-        claim, release, retry, repair or hydrate immutable source values or outcomes.
+        claim, release, retry, repair or hydrate immutable source values. Header-only
+        callers do not hydrate outcomes. An exact deployment_feed_id filter plus
+        outcome_from_ordinal requests a bounded deployment_outcomes page using the
+        same limit, in ordinal order. It includes committed event identity or typed
+        semantic rejection, up to the native committed cursor, with next_ordinal and more.
         Filters are exact persisted predicates combined with AND; omitted filters
         select all statuses, including terminal rows. Fixed ascending order is
         triggering_delivery_id, element_ref.flow_path, element_ref.family,
@@ -40721,6 +40765,9 @@ api_specification:
       - name: cursor
         required: false
         schema: {type: string, minLength: 1, maxLength: 16384}
+      - name: outcome_from_ordinal
+        required: false
+        schema: {type: integer, minimum: 0}
       result:
         name: result
         required: true

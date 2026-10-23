@@ -19,6 +19,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
@@ -77,9 +79,11 @@ type runCommandOptions struct {
 }
 
 type runStartResult struct {
-	RunID       string                  `json:"run_id"`
-	Status      string                  `json:"status"`
-	DataBinding durabledata.DataBinding `json:"data_binding"`
+	RunID             string                  `json:"run_id"`
+	EventID           string                  `json:"event_id,omitempty"`
+	DeploymentFeedIDs []string                `json:"deployment_feed_ids,omitempty"`
+	Status            string                  `json:"status"`
+	DataBinding       durabledata.DataBinding `json:"data_binding"`
 }
 
 type runCommandOKResult struct {
@@ -186,7 +190,7 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.eventName, "event", "", "Declared event name to publish as the run trigger")
 	cmd.Flags().StringVar(&opts.payloadPath, "payload", "", "Path to JSON object payload file")
 	cmd.Flags().StringVar(&opts.connectURL, "connect", "", "Existing Swarm API base URL")
-	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Start through a connected server and print the run id without opening a trace subscription")
+	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Print publication receipts and available row outcomes without waiting for run quiescence")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", defaultRunCommandTimeout, "Maximum time to follow after publication; 0 waits indefinitely; expiry never cancels work")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", deploymentConfigFlagHelp+" (local foreground only)")
@@ -267,10 +271,18 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 	}
 	writeRunCommandStarted(out, start)
 	if opts.noFollow {
+		rejected, err := readRunDeploymentOutcomes(ctx, client, out, start.RunID, start.DeploymentFeedIDs)
+		if err != nil {
+			writeCLIAPIError(errOut, err)
+			return commandExitError{code: runCommandErrorExitCode(err)}
+		}
 		writeRunCommandNoFollowGuidance(out, start.RunID, opts.connectURL)
+		if rejected {
+			return commandExitError{code: cliExitConflict}
+		}
 		return nil
 	}
-	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, start.RunID, &traceReplaySince, true)
+	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, start.RunID, &traceReplaySince, true, start.DeploymentFeedIDs)
 }
 
 func (o runCommandOptions) validate() error {
@@ -709,6 +721,15 @@ func validateRunStartResult(result runStartResult) error {
 	if _, ok := diagnosticValidRunStatuses[status]; !ok {
 		return fmt.Errorf("malformed run.start result: status=%q is not a valid RunStatus", status)
 	}
+	ids := append([]string{}, result.DeploymentFeedIDs...)
+	if result.EventID != "" {
+		ids = append(ids, result.EventID)
+	}
+	for _, id := range ids {
+		if parsed, err := uuid.Parse(id); err != nil || parsed == uuid.Nil || parsed.String() != id {
+			return fmt.Errorf("malformed run.start result: publication identity must be a canonical UUID")
+		}
+	}
 	switch result.DataBinding.State {
 	case "none":
 		if result.DataBinding.RunID != "" || result.DataBinding.Evidence != nil {
@@ -741,10 +762,10 @@ func runReattachCommand(ctx context.Context, out, errOut io.Writer, opts runComm
 		return runCommandTerminalExit(run.Status)
 	}
 	writeRunCommandReattached(out, run)
-	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, runID, nil, false)
+	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, runID, nil, false, nil)
 }
 
-func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool) error {
+func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool, feeds []string) error {
 	if opts.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.timeout)
@@ -791,6 +812,14 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		}
 		renderer.stop()
 	}
+	var lastDiagnosis *DiagnosticRunDiagnosisResult
+	timeout := func() error {
+		settleObservation()
+		if lastDiagnosis != nil {
+			writeDiagnosticRunDiagnosis(out, *lastDiagnosis)
+		}
+		return writeRunCommandTimeout(errOut, runID, opts.connectURL)
+	}
 	for {
 		select {
 		case det := <-detached:
@@ -801,8 +830,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		select {
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				settleObservation()
-				return writeRunCommandTimeout(errOut, runID, opts.connectURL)
+				return timeout()
 			}
 			var stopErr error
 			if stopOnInterrupt {
@@ -823,11 +851,45 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		case det := <-detached:
 			reportDetach(det)
 		case <-ticker.C:
+			if opts.reattachRunID == "" {
+				diagnosis, err := readRunDiagnosis(ctx, client, runID)
+				if err != nil {
+					if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+						return timeout()
+					}
+					settleObservation()
+					writeCLIAPIError(errOut, err)
+					return commandExitError{code: runCommandErrorExitCode(err)}
+				}
+				lastDiagnosis = &diagnosis
+				if BoolPointerValue(diagnosis.TestQuiescence.Ready) {
+					settleObservation()
+					rejected, err := readRunDeploymentOutcomes(ctx, client, out, runID, feeds)
+					if err != nil {
+						if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+							return timeout()
+						}
+						writeCLIAPIError(errOut, err)
+						return commandExitError{code: runCommandErrorExitCode(err)}
+					}
+					if runCommandTerminalStatus(diagnosis.Run.Status) {
+						writeRunCommandTerminalSummary(out, diagnosis.Run)
+					} else {
+						fmt.Fprintf(out, "run settled: run_id=%s\n", runID)
+					}
+					writeDiagnosticRunDiagnosis(out, diagnosis)
+					if rejected {
+						return commandExitError{code: cliExitConflict}
+					}
+					return runCommandTerminalExit(diagnosis.Run.Status)
+				}
+				continue
+			}
 			run, err := runCommandGet(ctx, client, runID)
 			if err != nil {
 				settleObservation()
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-					return writeRunCommandTimeout(errOut, runID, opts.connectURL)
+					return timeout()
 				}
 				writeCLIAPIError(errOut, err)
 				return commandExitError{code: runCommandErrorExitCode(err)}
@@ -1249,6 +1311,58 @@ func writeRunCommandStarted(out io.Writer, result runStartResult) {
 		return
 	}
 	fmt.Fprintf(out, "run started: run_id=%s status=%s\n", result.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, result.Status))
+	if result.EventID != "" {
+		fmt.Fprintf(out, "input published: event_id=%s\n", result.EventID)
+	}
+	for _, id := range result.DeploymentFeedIDs {
+		fmt.Fprintf(out, "feed published: deployment_feed_id=%s\n", id)
+	}
+}
+
+func readRunDeploymentOutcomes(ctx context.Context, client *cliAPIClient, out io.Writer, runID string, feeds []string) (bool, error) {
+	rejected := false
+	for _, feedID := range feeds {
+		next := 0
+		for {
+			query := fanoutobligation.DeploymentOutcomeQuery{RunID: runID, DeploymentFeedID: feedID, FromOrdinal: next, Limit: fanoutobligation.DefaultListLimit}
+			var result fanoutobligation.ListPage
+			if err := client.call(ctx, "run.fan_out.list", map[string]any{"run_id": runID, "filter": map[string]any{"deployment_feed_id": feedID}, "outcome_from_ordinal": query.FromOrdinal, "limit": query.Limit}, &result); err != nil {
+				return rejected, err
+			}
+			if err := result.Validate(fanoutobligation.ListQuery{RunID: runID, Filter: fanoutobligation.ListFilter{DeploymentFeedID: feedID}, OutcomeFromOrdinal: &query.FromOrdinal, Limit: query.Limit}); err != nil {
+				return rejected, err
+			}
+			page := result.DeploymentOutcomes
+			if page == nil {
+				return rejected, fmt.Errorf("malformed run.fan_out.list result: deployment_outcomes is required")
+			}
+			if err := page.Validate(query); err != nil {
+				return rejected, err
+			}
+			for _, row := range page.Outcomes {
+				switch row.Kind {
+				case fanoutobligation.OutcomeCommitted:
+					if row.EventID != "" {
+						fmt.Fprintf(out, "feed %s row %d committed: event_id=%s\n", feedID, row.Ordinal, row.EventID)
+					} else {
+						fmt.Fprintf(out, "feed %s row %d committed: source_event_id=%s\n", feedID, row.Ordinal, row.SourceEventID)
+					}
+				case fanoutobligation.OutcomeSemanticRejected:
+					failure, err := failures.UnmarshalEnvelope(row.Failure)
+					if err != nil {
+						return rejected, err
+					}
+					fmt.Fprintf(out, "feed %s row %d semantic_rejected: %s %s\n", feedID, row.Ordinal, failure.Message, failure.Remediation)
+					rejected = true
+				}
+			}
+			next = page.NextOrdinal
+			if !*page.More {
+				break
+			}
+		}
+	}
+	return rejected, nil
 }
 
 func writeRunCommandNoFollowGuidance(out io.Writer, runID, connectURL string) {

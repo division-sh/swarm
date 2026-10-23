@@ -20,8 +20,61 @@ const (
 
 var ErrInvalidListCursor = errors.New("invalid fan-out list cursor")
 
+type DeploymentOutcomeQuery struct {
+	RunID            string `json:"run_id"`
+	DeploymentFeedID string `json:"deployment_feed_id"`
+	FromOrdinal      int    `json:"from_ordinal,omitempty"`
+	Limit            int    `json:"limit,omitempty"`
+}
+
+func (q DeploymentOutcomeQuery) Validate() error {
+	if err := (IntentKey{RunID: q.RunID, DeploymentFeedID: q.DeploymentFeedID}).Validate(); err != nil {
+		return err
+	}
+	if q.FromOrdinal < 0 || q.Limit < 0 || q.Limit > MaxListLimit {
+		return fmt.Errorf("from_ordinal must be non-negative and limit at most %d", MaxListLimit)
+	}
+	return nil
+}
+
+type DeploymentOutcomePage struct {
+	RunID            string    `json:"run_id"`
+	DeploymentFeedID string    `json:"deployment_feed_id"`
+	Outcomes         []Outcome `json:"outcomes"`
+	NextOrdinal      int       `json:"next_ordinal"`
+	More             *bool     `json:"more"`
+}
+
+func (p DeploymentOutcomePage) Validate(q DeploymentOutcomeQuery) error {
+	if err := q.Validate(); err != nil {
+		return err
+	}
+	limit := q.Limit
+	if limit == 0 {
+		limit = DefaultListLimit
+	}
+	if p.RunID != q.RunID || p.DeploymentFeedID != q.DeploymentFeedID || p.Outcomes == nil || p.More == nil || len(p.Outcomes) > limit || *p.More && len(p.Outcomes) != limit {
+		return errors.New("invalid deployment outcome page identity or bounds")
+	}
+	next := q.FromOrdinal
+	for _, row := range p.Outcomes {
+		if err := row.Validate(); err != nil {
+			return err
+		}
+		if row.Ordinal != next {
+			return errors.New("deployment outcome page skipped or repeated an ordinal")
+		}
+		next++
+	}
+	if p.NextOrdinal != next {
+		return errors.New("deployment outcome page has a contradictory next ordinal")
+	}
+	return nil
+}
+
 // ListFilter selects persisted facts, not inferred runtime admission.
 type ListFilter struct {
+	DeploymentFeedID     string `json:"deployment_feed_id,omitempty"`
 	Status               Status `json:"status,omitempty"`
 	TriggeringDeliveryID string `json:"triggering_delivery_id,omitempty"`
 	FlowPath             string `json:"flow_path,omitempty"`
@@ -29,13 +82,22 @@ type ListFilter struct {
 }
 
 type ListQuery struct {
-	RunID  string     `json:"run_id"`
-	Limit  int        `json:"limit,omitempty"`
-	Cursor string     `json:"cursor,omitempty"`
-	Filter ListFilter `json:"filter,omitempty"`
+	OutcomeFromOrdinal *int       `json:"outcome_from_ordinal,omitempty"`
+	RunID              string     `json:"run_id"`
+	Limit              int        `json:"limit,omitempty"`
+	Cursor             string     `json:"cursor,omitempty"`
+	Filter             ListFilter `json:"filter,omitempty"`
 }
 
 func (q ListQuery) Validate() error {
+	if q.Filter.DeploymentFeedID != "" {
+		if err := (IntentKey{RunID: q.RunID, DeploymentFeedID: q.Filter.DeploymentFeedID}).Validate(); err != nil {
+			return err
+		}
+	}
+	if q.OutcomeFromOrdinal != nil && (*q.OutcomeFromOrdinal < 0 || q.Filter.DeploymentFeedID == "") {
+		return errors.New("outcome_from_ordinal requires an exact deployment feed and non-negative ordinal")
+	}
 	if id, err := uuid.Parse(q.RunID); err != nil || id.String() != q.RunID {
 		return errors.New("run_id must be a canonical UUID")
 	}
@@ -136,17 +198,26 @@ type IntentReadback struct {
 }
 
 type ListPage struct {
-	RunID      string           `json:"run_id"`
-	RunStatus  string           `json:"run_status"`
-	ObservedAt time.Time        `json:"observed_at"`
-	Order      string           `json:"order"`
-	Intents    []IntentReadback `json:"intents"`
-	NextCursor string           `json:"next_cursor,omitempty"`
+	DeploymentOutcomes *DeploymentOutcomePage `json:"deployment_outcomes,omitempty"`
+	RunID              string                 `json:"run_id"`
+	RunStatus          string                 `json:"run_status"`
+	ObservedAt         time.Time              `json:"observed_at"`
+	Order              string                 `json:"order"`
+	Intents            []IntentReadback       `json:"intents"`
+	NextCursor         string                 `json:"next_cursor,omitempty"`
 }
 
 func (p ListPage) Validate(q ListQuery) error {
 	if err := q.Validate(); err != nil {
 		return err
+	}
+	if q.OutcomeFromOrdinal != nil {
+		if p.DeploymentOutcomes == nil {
+			return errors.New("requested deployment outcome page is missing")
+		}
+		if err := p.DeploymentOutcomes.Validate(DeploymentOutcomeQuery{RunID: q.RunID, DeploymentFeedID: q.Filter.DeploymentFeedID, FromOrdinal: *q.OutcomeFromOrdinal, Limit: q.Limit}); err != nil {
+			return err
+		}
 	}
 	if p.RunID != q.RunID || p.ObservedAt.IsZero() || p.Order != ListIdentityOrder || p.Intents == nil {
 		return errors.New("invalid fan-out page identity, time, order or rows")
@@ -169,6 +240,9 @@ func (p ListPage) Validate(q ListQuery) error {
 		}
 		if err := row.Runtime.Validate(); err != nil {
 			return err
+		}
+		if q.Filter.DeploymentFeedID != "" && row.Key.DeploymentFeedID != q.Filter.DeploymentFeedID {
+			return errors.New("fan-out row contradicts requested deployment feed")
 		}
 		if q.Filter.Status != "" && row.Status != q.Filter.Status || q.Filter.TriggeringDeliveryID != "" && row.Key.TriggeringDeliveryID != q.Filter.TriggeringDeliveryID || q.Filter.FlowPath != "" && row.Key.ElementRef.FlowPath != q.Filter.FlowPath || q.Filter.SemanticPath != "" && row.Key.ElementRef.SemanticPath != q.Filter.SemanticPath {
 			return errors.New("fan-out row contradicts requested filters")
