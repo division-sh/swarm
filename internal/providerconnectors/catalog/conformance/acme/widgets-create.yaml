@@ -3,8 +3,8 @@ provider: acme
 operation_id: widgets/create
 tool_id: acme.create_widget
 source_sha256: sha256:182ed500197c682bca81a5a72cb1399e53e18dd87e9cc890fd89df1987b6a38d
-profile_sha256: sha256:f8d12f45330f0605d918e2735322f2c63c42757a483f9dd26530431d2b7ad555
-manifest_sha256: sha256:29407bb50ba0b4d71ab6bbb97a42b47f7133a92a2447854d2dc166b61cadd992
+profile_sha256: sha256:c5718bba54eb9b68256d1e8ba3c864ff74d1db9dc56ee04a63d1fcde3bfd38a3
+manifest_sha256: sha256:c3207658825ca0eab9566c9b5e81ba8217a694d1fb6041c283ddd5a47c22db42
 fixture_status: passing
 review_status: approved
 input:

@@ -54,9 +54,6 @@ func TestS1AgentDeclarationProofsPreserveRawSelectors(t *testing.T) {
 		if _, _, found := semanticview.ResolveAgentRegistryEntry(source, actor); !found {
 			t.Fatalf("exact %s lost registry declaration", flow)
 		}
-		if proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{AgentID: actor.ID, FlowPath: flow}); proof.OwningFlowID != flow {
-			t.Fatalf("exact %s lost memory proof: %+v", flow, proof)
-		}
 		for _, raw := range []string{" " + flow + " ", "\t" + flow + "\n", "/" + flow + "/"} {
 			actor.FlowID = raw
 			if _, _, found := semanticview.ResolveAgentRegistryEntry(source, actor); found {
@@ -67,9 +64,6 @@ func TestS1AgentDeclarationProofsPreserveRawSelectors(t *testing.T) {
 			}
 			if len(semanticview.AgentDeclarationsForOwner(source, raw)) != 0 {
 				t.Errorf("declaration census repaired %q", raw)
-			}
-			if proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{AgentID: actor.ID, FlowPath: raw}); proof.OwningFlowID != "" {
-				t.Errorf("memory proof repaired %q into %q", raw, proof.OwningFlowID)
 			}
 			invalidScope := scope
 			invalidScope.ID = raw

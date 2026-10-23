@@ -26,7 +26,7 @@ func workflowStorageNativeFixtureFromSelectedSource(t *testing.T, selected timer
 	// Workflow storage does not execute activities or acquire a journal grant.
 	fixture.RequireRun = func(ctx context.Context, runID string) error {
 		return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
-				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact, RootAdmission: rooted.Admission(),
+			RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact, RootAdmission: rooted.Admission(),
 		})
 	}
 	return fixture

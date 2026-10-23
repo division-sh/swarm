@@ -94,7 +94,7 @@ func TestActivityHistoryLoadsExactOriginAndReleasesEveryAcquisition(t *testing.T
 				t.Fatalf("acquisition was repeated or leaked: requests=%d released=%d err=%v", len(loader.requests), released, err)
 			}
 			request := loader.requests[0]
-			if request.SourceRunID != runID || !request.SourceArtifactFact.Matches(fact) || request.BundleHash != fact.BundleHash() ||
+			if request.Responsibility != OriginalRunSource(runID) || !request.SourceArtifactFact.Matches(fact) || request.BundleHash != fact.BundleHash() ||
 				request.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash || request.Selection.BundleHash != fact.BundleHash() {
 				t.Fatalf("loader lost original run-bound artifact coordinates: %+v", request)
 			}

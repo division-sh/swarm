@@ -8,7 +8,7 @@ generation:
     profile:
         path: catalog/generator-profiles/github.yaml
         schema_version: "1"
-        sha256: sha256:5d6510be91b185586bae25bd5e50e6499ea26872ebf71a20a466b99289ed5b2f
+        sha256: sha256:2e130138764806d9c4e0ba5d0184e34d2f5442c29f2285b0034ea5b4bfbd477d
     operations:
         - operation_id: issues/add-labels
           tool_id: add_labels_to_issue
