@@ -1383,8 +1383,8 @@ rows:
     tier: required_smoke
     backends: [default_sqlite]
     cli_commands: [run]
-    api_methods: [health.check, run.start, run.diagnose, run.fan_out.list]
-    openrpc_matrix_methods: [health.check, run.start, run.diagnose, run.fan_out.list]
+    api_methods: [health.check, run.start, run.diagnose, run.fan_out.list, event.get]
+    openrpc_matrix_methods: [health.check, run.start, run.diagnose, run.fan_out.list, event.get]
     store_owners:
       - internal/cliapp run start serve client
       - internal/store/backendselection
@@ -1392,6 +1392,7 @@ rows:
       - /v1/rpc run.start
       - /v1/rpc run.diagnose
       - /v1/rpc run.fan_out.list
+      - /v1/rpc event.get
     proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
     proof_refs:
       - kind: go_test
@@ -1409,8 +1410,8 @@ rows:
     tier: full_conformance
     backends: [explicit_postgres]
     cli_commands: [run]
-    api_methods: [health.check, run.start, run.diagnose, run.fan_out.list]
-    openrpc_matrix_methods: [health.check, run.start, run.diagnose, run.fan_out.list]
+    api_methods: [health.check, run.start, run.diagnose, run.fan_out.list, event.get]
+    openrpc_matrix_methods: [health.check, run.start, run.diagnose, run.fan_out.list, event.get]
     store_owners:
       - internal/cliapp run start serve client
       - internal/store/backendselection
@@ -1418,6 +1419,7 @@ rows:
       - /v1/rpc run.start
       - /v1/rpc run.diagnose
       - /v1/rpc run.fan_out.list
+      - /v1/rpc event.get
     proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
     proof_refs:
       - kind: go_test
