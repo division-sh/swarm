@@ -299,8 +299,12 @@ func (p selectedForkRecipientPlan) allowsRegistration(plan pinrouting.ConnectRou
 	} else {
 		typed = events.MustNodeDeliveryRecipient(node)
 	}
+	path := recipient.Path()
+	if typed.IsNode() && node.FlowPath() == "." && path == p.lineage.DestinationRunID() {
+		path = "."
+	}
 	actual, err := forkrecipient.NewConnect(forkrecipient.Input{
-		Recipient: typed, Path: recipient.Path(), AgentPlan: recipient.AgentPlan(),
+		Recipient: typed, Path: path, AgentPlan: recipient.AgentPlan(),
 		HandlerNode: node, HandlerEvent: recipient.HandlerEvent(),
 	}, identity, registration.ReceiverIdentity())
 	return err == nil && p.allows(actual)

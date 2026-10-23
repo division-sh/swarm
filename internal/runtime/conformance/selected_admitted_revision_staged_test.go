@@ -182,14 +182,14 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			}
 			assertIssue2655ChildCutContents(t, ctx, f, sourceRun, materialized.ForkRunID, point, postCutEvent, string(laterVersion.VersionID))
 			beforeReplay := snapshot(t)
-			// A nil operation point is still filled from verified preparation,
-			// not from the newer head, for the native staged consumer.
+			// Read back the exact retained child without binding an operation or
+			// resolving the source's newer head again.
 			replay, err := prepared.MaterializationRequest()
 			if err != nil {
 				t.Fatal(err)
 			}
-			replay.ForkOperation.ResolvedPoint = nil
-			repeated, err := fork.MaterializeRunForkForSelectedContractExecution(ctx, replay)
+			replay.ForkOperation = nil
+			repeated, err := fork.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, replay)
 			if err != nil || repeated.ForkRunID != materialized.ForkRunID || repeated.ForkPoint != point {
 				t.Fatalf("repeat rematerialized or moved the child: result=%+v err=%v", repeated, err)
 			}
