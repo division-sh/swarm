@@ -394,6 +394,19 @@ func registerDifferentTestAuthorActivityCatalog(t *testing.T, target testAuthorA
 
 func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if opts.CarryMutationContext == nil {
+		opts.CarryMutationContext = runtimestartupownership.CarryMutationAuthority
+	}
+	if selected, ok := eventStore.(agentfixture.Store); ok && opts.MutationContext == nil {
+		original := originalConformanceFixtureContext(t, testAuthorActivityContext(context.Background()), selected)
+		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+			if !runtimestartupownership.HasMutationAuthority(ctx) {
+				ctx = runtimestartupownership.CarryMutationAuthority(ctx, original)
+			}
+			_, err := runtimestartupownership.CaptureMutationAuthority(ctx)
+			return ctx, err
+		}
+	}
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
