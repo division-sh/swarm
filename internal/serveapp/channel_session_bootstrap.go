@@ -97,7 +97,7 @@ func serveSessionBootstrapRuntimeSelector(manager *runtime.RuntimeContextManager
 		// Construction holds this use until the connection owns its real runtime
 		// work. Settling the use cannot cancel the durable connection context.
 		owned := correlation.WithSourceArtifactFact(context.WithoutCancel(use.WorkContext()), use.Context.SourceArtifactFact)
-		declarations, err := runtime.ResolveStandingTargetDeclarations(use.Context.Source, use.Context.ProviderTriggerCatalog, use.Context.Runtime.Options.TriggerEntries)
+		declarations, err := use.Context.StandingTargetDeclarations()
 		if err != nil {
 			return nil, nil, processbinding.Binding{}, nil, errors.Join(err, use.Done())
 		}
