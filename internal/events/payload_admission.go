@@ -82,7 +82,7 @@ func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class Eve
 	if err != nil {
 		return PayloadSchemaBinding{}, err
 	}
-	if input.SchemaClass == PayloadSchemaPlatform && platformPayloadClass(class) {
+	if input.SchemaClass == PayloadSchemaPlatform && platformPayloadIdentity(class, eventType, producer) {
 		p := PayloadProducer{kind: "platform", producer: producer, class: class, event: eventType}
 		reference := ""
 		if eventType == EventTypePlatformRuntimeLog {
@@ -90,7 +90,7 @@ func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class Eve
 		}
 		return NewPlatformPayloadSchemaBinding(input, p, reference)
 	}
-	if platformPayloadClass(class) || eventType == EventTypePlatformRuntimeLog {
+	if platformPayloadIdentity(class, eventType, producer) || eventType == EventTypePlatformRuntimeLog {
 		return PayloadSchemaBinding{}, fmt.Errorf("platform payload requires persisted producer authority")
 	}
 	return binding, nil
@@ -125,7 +125,7 @@ func (b PayloadSchemaBinding) Validate() error {
 	}
 	if b.producer.IsPlatform() {
 		p := b.producer
-		if b.flowID != "" || b.schemaClass != PayloadSchemaPlatform || b.eventKey != string(p.event) || !platformPayloadClass(p.class) || p.producer.Type() != EventProducerPlatform {
+		if b.flowID != "" || b.schemaClass != PayloadSchemaPlatform || b.eventKey != string(p.event) || !platformPayloadIdentity(p.class, p.event, p.producer) || p.producer.Type() != EventProducerPlatform {
 			return fmt.Errorf("platform payload binding disagrees with producer, class or event")
 		}
 		if err := p.producer.Validate(); err != nil {
@@ -202,7 +202,7 @@ func ApplyPayloadAdmission(event Event, admission PayloadAdmission) (Event, erro
 		if err := admission.binding.producer.ValidateForEvent(event); err != nil {
 			return Event{}, err
 		}
-	} else if platformPayloadClass(event.AdmissionClass()) {
+	} else if platformPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
 		return Event{}, fmt.Errorf("platform payload requires explicit producer binding")
 	}
 	if current, ok := event.PayloadAdmission(); ok {

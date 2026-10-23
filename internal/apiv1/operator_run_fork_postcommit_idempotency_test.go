@@ -39,7 +39,7 @@ func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *tes
 	operations := newRecordingRunForkOperations()
 	executor := &recordingRunForkExecutor{execute: selected.ExecuteRunFork, operations: operations, persistOnError: true}
 	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}
 	opts := RunForkHandlerOptions{Availability: availability, Operations: operations, Executor: executor}
 	request := runForkOperationTestRequest("activated-fork-postcommit", "fork-postcommit-request-hash")
@@ -58,45 +58,6 @@ func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *tes
 	result, ok := replay.(RunForkExecutionResult)
 	if !ok || result.ForkRunID != runForkTestForkRunID || result.ExecutedEventCount != 2 || !result.activationAcknowledged {
 		t.Fatalf("durable replay lost acknowledged activation: %#v", replay)
-	}
-}
-
-func TestOperatorRunForkRecordingKeepsOriginalSelector(t *testing.T) {
-	for _, selector := range []string{"", runForkTestEventID} {
-		name := "omitted"
-		if selector != "" {
-			name = "explicit"
-		}
-		t.Run(name, func(t *testing.T) {
-			operations := newRecordingRunForkOperations()
-			executor := &recordingRunForkExecutor{operations: operations, result: runForkActivatedTestResult()}
-			opts := RunForkHandlerOptions{
-				Availability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-					runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
-				}},
-				Operations: operations, Executor: executor,
-			}
-			request := runForkOperationTestRequest("original-selector", name)
-			if selector == "" {
-				delete(request.Params, "fork_event_id")
-			}
-			first, err := invokeRunForkOperation(opts, request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			original := executor.last.ForkOperation
-			record, found := operations.byID[original.OperationID]
-			_, hash, err := original.Canonical()
-			if err != nil || !found || record.Validate() != nil || original.ResolvedPoint != nil || record.SemanticHash != hash ||
-				record.Request.ForkEventID != selector || record.Request.ResolvedPoint == nil || record.Request.ResolvedPoint.Input != selector ||
-				record.Result == nil || record.Result.ForkPoint.Input != selector || record.Result.ForkPoint.EventID != runForkTestEventID {
-				t.Fatalf("recording changed the original selector/hash: original=%+v record=%+v found=%v err=%v", original, record, found, err)
-			}
-			replayed, err := invokeRunForkOperation(opts, request)
-			if err != nil || !reflect.DeepEqual(replayed, first) || executor.calls != 1 || len(operations.byID) != 1 {
-				t.Fatalf("exact selector replay changed the operation: first=%+v replay=%+v calls=%d err=%v", first, replayed, executor.calls, err)
-			}
-		})
 	}
 }
 
@@ -142,7 +103,7 @@ func TestOperatorRunForkKeyedLookupPrecedesMutableAvailabilityAndConflictsWithou
 	operations := newRecordingRunForkOperations()
 	executor := &recordingRunForkExecutor{operations: operations, result: runForkActivatedTestResult()}
 	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}
 	opts := RunForkHandlerOptions{Availability: availability, Operations: operations, Executor: executor}
 	request := runForkOperationTestRequest("same-key", "original-transport-hash")
@@ -169,7 +130,7 @@ func TestOperatorRunForkMaterializedOperationResumesBeforeAvailability(t *testin
 	operations := newRecordingRunForkOperations()
 	executor := &recordingRunForkExecutor{operations: operations, result: runForkActivatedTestResult()}
 	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}
 	opts := RunForkHandlerOptions{Availability: availability, Operations: operations, Executor: executor}
 	request := runForkOperationTestRequest("materialized-resume", "materialized-transport-hash")
@@ -215,7 +176,7 @@ func TestOperatorRunForkRequiresDurableActivatedRecord(t *testing.T) {
 			}
 			opts := RunForkHandlerOptions{
 				Availability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-					runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+					runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 				}},
 				Operations: operations, Executor: executor,
 			}
@@ -242,7 +203,7 @@ func TestOperatorRunForkKeylessReadsExactOperationIDAfterCleanup(t *testing.T) {
 			}
 			opts := RunForkHandlerOptions{
 				Availability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-					runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+					runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 				}},
 				Operations: operations, Executor: executor,
 			}

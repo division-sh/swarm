@@ -131,6 +131,29 @@ func admittedAPITestBusContext(t testing.TB, ctx context.Context, bus *runtimebu
 	return admitted
 }
 
+func admittedAPICompiledSourceContext(t *testing.T, ctx context.Context, selected runtimebus.EventStore, source semanticview.Source) context.Context {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("API fixture requires its compiled captured source")
+	}
+	if err := retainAPITestCompiledRoot(ctx, selected, bundle); err != nil {
+		t.Fatal(err)
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	if prior, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok && !prior.Matches(fact) {
+		t.Fatal("API fixture source fact conflicts with its captured root")
+	}
+	return runtimecorrelation.WithRootAdmission(testAuthorActivityContextForSource(ctx, fact), rooted.Admission())
+}
+
 func retainAPITestCompiledRoot(ctx context.Context, selected runtimebus.EventStore, bundle *runtimecontracts.WorkflowContractBundle) error {
 	rooted, err := bundle.RootedSource()
 	if err != nil {

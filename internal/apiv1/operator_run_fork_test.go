@@ -12,102 +12,18 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const (
 	runForkTestSourceRunID = "00000000-0000-0000-0000-000000000701"
 	runForkTestForkRunID   = "00000000-0000-0000-0000-000000000702"
 	runForkTestEventID     = "00000000-0000-0000-0000-000000000703"
-	runForkTestBundleHash  = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
-func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T) {
-	availability := runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)
-	executor := &recordingRunForkExecutor{
-		result: RunForkExecutionResult{
-			Owner:              "runtime.run_fork.selected_contract_execution",
-			SourceRunID:        runForkTestSourceRunID,
-			SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
-			SourceFrozen:       true,
-			ForkRunID:          runForkTestForkRunID,
-			ForkPointKind:      string(runfork.RunForkPointEvent),
-			ForkRevision:       1,
-			ForkEventID:        runForkTestEventID,
-			ForkRunStatus:      "running",
-			ExecutedEventCount: 1,
-		},
-	}
-	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: availability}}, executor)
-
-	resp := rpcCall(t, handler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true,"idempotency_key":"idem-fork"}}`,
-		runForkTestSourceRunID,
-		runForkTestEventID,
-	))
-	if resp.Error != nil {
-		t.Fatalf("run.fork error = %#v", resp.Error)
-	}
-	result := asMap(t, resp.Result)
-	if result["fork_run_id"] != runForkTestForkRunID || result["source_run_id"] != runForkTestSourceRunID {
-		t.Fatalf("run.fork result = %#v", result)
-	}
-	if result["source_run_status"] != runfork.RunForkSourceFrozenStatus || result["source_frozen"] != true {
-		t.Fatalf("run.fork source outcome = %#v, want frozen/forked", result)
-	}
-	if result["bundle_hash"] != runForkTestBundleHash {
-		t.Fatalf("run.fork bundle_hash = %#v, want %q", result["bundle_hash"], runForkTestBundleHash)
-	}
-	if executor.calls != 1 {
-		t.Fatalf("executor calls = %d, want 1", executor.calls)
-	}
-	if executor.last.SourceRunID != runForkTestSourceRunID || executor.last.ForkEventID != runForkTestEventID || executor.last.BundleHash != runForkTestBundleHash || !executor.last.AllowSourceFreeze {
-		t.Fatalf("executor request = %#v", executor.last)
-	}
-	replay := rpcCall(t, handler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork-replay","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true,"idempotency_key":"idem-fork"}}`,
-		runForkTestSourceRunID,
-		runForkTestEventID,
-	))
-	if replay.Error != nil {
-		t.Fatalf("run.fork replay error = %#v", replay.Error)
-	}
-	if executor.calls != 1 {
-		t.Fatalf("executor calls after replay = %d, want 1", executor.calls)
-	}
-}
-
-func TestOperatorRunForkHandlersExposePreservedSourceOutcome(t *testing.T) {
-	executor := &recordingRunForkExecutor{
-		result: RunForkExecutionResult{
-			Owner:              "runtime.run_fork.selected_contract_execution",
-			SourceRunID:        runForkTestSourceRunID,
-			SourceRunStatus:    "running",
-			SourceFrozen:       false,
-			ForkRunID:          runForkTestForkRunID,
-			ForkPointKind:      string(runfork.RunForkPointEvent),
-			ForkRevision:       1,
-			ForkEventID:        runForkTestEventID,
-			ForkRunStatus:      "running",
-			ExecutedEventCount: 1,
-		},
-	}
-	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
-	}}, executor)
-
-	resp := rpcCall(t, handler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork-preserved","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true}}`,
-		runForkTestSourceRunID,
-		runForkTestEventID,
-	))
-	if resp.Error != nil {
-		t.Fatalf("run.fork error = %#v", resp.Error)
-	}
-	result := asMap(t, resp.Result)
-	if result["source_run_status"] != "running" || result["source_frozen"] != false {
-		t.Fatalf("run.fork source outcome = %#v, want preserved/running", result)
-	}
-}
+var runForkTestArtifact = mustAPITestSourceArtifactNamed("run-fork")
+var runForkTestBundleHash = runForkTestArtifact.BundleHash()
 
 func TestValidateRunForkExecutionResultRejectsContradictorySourceOutcome(t *testing.T) {
 	for _, result := range []RunForkExecutionResult{
@@ -147,7 +63,7 @@ func TestOperatorRunForkEventlessDeploymentPointReadback(t *testing.T) {
 		ForkRevision: 4, ForkRunStatus: runfork.RunForkActivatedStatus,
 	}}
 	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}, executor)
 	request := fmt.Sprintf(`{"jsonrpc":"2.0","id":"deployment","method":"run.fork","params":{"source_run_id":%q,"allow_source_freeze":true,"idempotency_key":"deployment-point"}}`, runForkTestSourceRunID)
 	response := rpcCall(t, handler, request)
@@ -169,7 +85,7 @@ func TestOperatorRunForkEventlessDeploymentPointReadback(t *testing.T) {
 func TestOperatorRunForkHandlersRequireActiveSourceFreezeConfirmation(t *testing.T) {
 	executor := &recordingRunForkExecutor{}
 	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}, executor)
 
 	resp := rpcCall(t, handler, fmt.Sprintf(
@@ -202,7 +118,7 @@ func TestOperatorRunForkRejectsRetiredConsentBeforeAvailability(t *testing.T) {
 	} {
 		t.Run(consent, func(t *testing.T) {
 			availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-				runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+				runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 			}}
 			executor := &recordingRunForkExecutor{}
 			handler := runForkTestHandler(t, availability, executor)
@@ -226,7 +142,7 @@ func TestOperatorRunForkRejectsRetiredConsentBeforeAvailability(t *testing.T) {
 func TestOperatorRunForkStoreConsentRefusalUsesCurrentPermission(t *testing.T) {
 	executor := &recordingRunForkExecutor{err: runfork.ErrRunForkSourceFreezeConfirmationRequired}
 	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}, executor)
 	resp := rpcCall(t, handler, fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"store-consent","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true}}`, runForkTestSourceRunID, runForkTestEventID,
@@ -295,7 +211,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 
 	t.Run("fork event missing", func(t *testing.T) {
 		executor := &recordingRunForkExecutor{err: errors.New("fork point event " + runForkTestEventID + " not found in source run " + runForkTestSourceRunID)}
-		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact))}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
 			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true,"idempotency_key":"event-missing"}}`,
 			runForkTestSourceRunID,
@@ -312,7 +228,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 
 	t.Run("default fork point missing", func(t *testing.T) {
 		executor := &recordingRunForkExecutor{err: errors.New("no source-run event exists for fork source run " + runForkTestSourceRunID)}
-		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact))}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
 			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"allow_source_freeze":true,"idempotency_key":"default-event-missing"}}`,
 			runForkTestSourceRunID,
@@ -328,7 +244,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 
 	t.Run("executor bundle data integrity", func(t *testing.T) {
 		executor := &recordingRunForkExecutor{err: errors.New(runbundle.CodeBundleDataIntegrityError + ": corrupt persisted bundle catalog bytes")}
-		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact))}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
 			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true,"idempotency_key":"integrity-error"}}`,
 			runForkTestSourceRunID,
@@ -341,7 +257,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 
 	t.Run("executor source hash mismatch", func(t *testing.T) {
 		executor := &recordingRunForkExecutor{err: errors.New(runbundle.CodeBundleDataIntegrityError + ": selected_contracts source hash mismatch: request bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc source " + runForkTestBundleHash)}
-		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact))}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
 			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true,"idempotency_key":"hash-mismatch"}}`,
 			runForkTestSourceRunID,
@@ -370,17 +286,25 @@ func runForkTestHandler(t *testing.T, availability RunForkAvailabilityStore, exe
 	})
 }
 
-func runForkAvailable(runID, bundleHash string) runbundle.Availability {
+func runForkAvailable(runID string, root sourceartifact.RootAdmission) runbundle.Availability {
 	return runbundle.Availability{
 		RunID:                 strings.TrimSpace(runID),
 		Status:                "running",
-		BundleHash:            strings.TrimSpace(bundleHash),
+		BundleHash:            root.BundleHash(),
+		RootReference:         root.Reference(),
+		RootAdmissionPresent:  true,
 		SourceArtifactPresent: true,
 	}
 }
 
+func apiArtifactRoot(t testing.TB, artifact *sourceartifact.AdmittedSourceArtifact) sourceartifact.RootAdmission {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "review", artifact)
+	return rooted.Admission()
+}
+
 func runForkUnavailable(runID, bundleHash string) runbundle.Availability {
-	availability := runForkAvailable(runID, bundleHash)
+	availability := runbundle.Availability{RunID: strings.TrimSpace(runID), Status: "running", BundleHash: strings.TrimSpace(bundleHash)}
 	availability.SourceArtifactPresent = false
 	availability.ErrorCode = runbundle.CodeBundleUnavailable
 	availability.Cause = "source_artifact_unavailable"
@@ -388,7 +312,7 @@ func runForkUnavailable(runID, bundleHash string) runbundle.Availability {
 }
 
 func runForkDataIntegrity(runID, bundleHash string) runbundle.Availability {
-	availability := runForkAvailable(runID, bundleHash)
+	availability := runbundle.Availability{RunID: strings.TrimSpace(runID), Status: "running", BundleHash: strings.TrimSpace(bundleHash)}
 	availability.SourceArtifactPresent = false
 	availability.ErrorCode = runbundle.CodeBundleDataIntegrityError
 	availability.Cause = "missing_source_artifact"

@@ -598,8 +598,15 @@ func ensureFixtureRun(ctx context.Context, selected Store, runID string, started
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
 	}
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("create agent fixture run %s requires its admitted root", runID)
+	}
 	_, err = selected.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: source, StartedAt: startedAt.UTC(),
+		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: source, RootAdmission: root, StartedAt: startedAt.UTC(),
 	})
 	if err != nil {
 		return fmt.Errorf("create agent fixture run %s: %w", runID, err)

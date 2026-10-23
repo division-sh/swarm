@@ -32,14 +32,14 @@ func (p PayloadProducer) ValidateForEvent(event Event) error {
 		if p.producer != (ProducerIdentity{}) || p.class != "" || p.event != "" {
 			return fmt.Errorf("authored payload producer contains platform authority")
 		}
-		if platformPayloadClass(event.AdmissionClass()) {
+		if platformPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
 			return fmt.Errorf("platform event requires explicit platform payload producer")
 		}
 	case "platform":
 		if p.flowID != "" || p.class != event.AdmissionClass() || p.event != event.Type() || !p.producer.Equal(event.Producer()) {
 			return fmt.Errorf("platform payload producer disagrees with event identity")
 		}
-		if !platformPayloadClass(p.class) || p.producer.Type() != EventProducerPlatform {
+		if !platformPayloadIdentity(p.class, p.event, p.producer) || p.producer.Type() != EventProducerPlatform {
 			return fmt.Errorf("platform payload producer requires an admitted platform event class")
 		}
 		if err := ValidateEventContract(event); err != nil {
@@ -53,12 +53,13 @@ func (p PayloadProducer) ValidateForEvent(event Event) error {
 
 // EventPayloadProducer consumes the event's explicit class, never an empty route.
 func EventPayloadProducer(event Event, authoredFlowID string) PayloadProducer {
-	if platformPayloadClass(event.AdmissionClass()) {
+	if platformPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
 		return PlatformPayloadProducer(event)
 	}
 	return AuthoredPayloadProducer(authoredFlowID)
 }
 
-func platformPayloadClass(class EventAdmissionClass) bool {
-	return class == EventAdmissionRuntimeControl || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect
+func platformPayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
+	return class == EventAdmissionRuntimeControl || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect ||
+		(class == EventAdmissionReplay && event == "event.replayed" && producer.Type() == EventProducerPlatform)
 }

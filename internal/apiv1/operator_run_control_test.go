@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -69,7 +71,8 @@ func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailu
 
 func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	bus, err := newScopedAPITestEventBus(t, pg)
+	source := semanticview.Wrap(loadAPIAuthoredBundle(t, authorActivityTestSourceArtifact))
+	bus, err := newScopedAPITestEventBus(t, pg, bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: authorActivityTestSourceArtifactFact})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -87,7 +90,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 			RunControl:  controller,
 		}),
 	})
-	ctx := context.Background()
+	ctx := admittedAPITestBusContext(t, context.Background(), bus)
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
@@ -167,7 +170,8 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 
 func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
-	bus, err := newScopedAPITestEventBus(t, pg)
+	source := semanticview.Wrap(loadAPIAuthoredBundle(t, authorActivityTestSourceArtifact))
+	bus, err := newScopedAPITestEventBus(t, pg, bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: authorActivityTestSourceArtifactFact})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -185,7 +189,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 		}
 	}
 	materializedLikePausedRunID := uuid.NewString()
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: materializedLikePausedRunID, State: storerunlifecycle.StatePaused, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+	storetest.RequireRun(t, admittedAPITestBusContext(t, context.Background(), bus), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: materializedLikePausedRunID, State: storerunlifecycle.StatePaused, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
 	resp := rpcCall(t, handler, runControlBody("run.continue", materializedLikePausedRunID, ""))
 	if resp.Error == nil {
 		t.Fatal("run.continue without operator pause owner error = nil")

@@ -137,6 +137,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	runID := "11111111-1111-1111-1111-111111111111"
 	bundle := operatorReadbackBundle(t)
 	source := semanticview.Wrap(bundle)
+	ctx = admittedAPICompiledSourceContext(t, ctx, pg, source)
 	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForSource(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), runID)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
@@ -199,6 +200,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	runID := "11111111-1111-1111-1111-111111111111"
 	bundle := operatorReadbackBundle(t)
 	source := semanticview.Wrap(bundle)
+	ctx = admittedAPICompiledSourceContext(t, ctx, sqliteStore, source)
 	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForSource(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), runID)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
@@ -297,9 +299,11 @@ func operatorReadbackBundle(t *testing.T) *runtimecontracts.WorkflowContractBund
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+		"scoring/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":           "stages:\n  active: {}\n",
 		"entities.yaml":         "run: {}\n",
-		"scoring/schema.yaml":   "name: scoring\ninstance: vertical_id\nstages:\n  discovered: {}\n  pending: {}\n",
+		"scoring/schema.yaml":   "instance: vertical_id\nstages:\n  discovered: {}\n  pending: {}\n",
 		"scoring/entities.yaml": "vertical:\n  vertical_id: string\n  vertical_name: string\n",
 	} {
 		writeRunCompletionFixtureFile(t, filepath.Join(root, path), contents)

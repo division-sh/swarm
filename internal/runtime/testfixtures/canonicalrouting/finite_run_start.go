@@ -64,10 +64,10 @@ func CopyFiniteInitiation(t testing.TB, finite bool) string {
 	return copyFiniteSource(t, map[string]string{
 		"discovery/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":             "stages: []\n# fixture: initiation\n" + stages + "pins:\n  inputs: [scan.requested]\n  outputs: [scan.requested]\nconnect:\n  - {event: scan.requested, from: ., to: discovery}\n",
+		"schema.yaml":             "# fixture: initiation\n" + stages + "pins:\n  inputs: [scan.requested]\n  outputs: [scan.requested]\nconnect:\n  - {event: scan.requested, from: ., to: discovery}\n",
 		"events.yaml":             "scan.requested:\n  topic: text\n",
 		"nodes.yaml":              "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: " + target + "\n",
-		"discovery/schema.yaml":   "stages: []\n# fixture: discovery\n" + stages + "pins:\n  inputs: [scan.requested]\n",
+		"discovery/schema.yaml":   "# fixture: discovery\n" + stages + "pins:\n  inputs: [scan.requested]\n",
 		"discovery/nodes.yaml":    "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: " + target + "\n",
 	})
 }
@@ -77,6 +77,7 @@ func CopyDeploymentRunStart(t testing.TB) string {
 	// Only data-created templates receive work; an empty feed constructs the
 	// ended root, not an eager worker that would strand completion.
 	return copyFiniteSource(t, map[string]string{
+		"scores/manifest.yaml":    "version: 1.0.0\nplatform_version: '*'\n",
 		"discovery/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":             "# fixture: deployment\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n",

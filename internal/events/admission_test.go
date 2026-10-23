@@ -312,6 +312,45 @@ func TestReplayClassesRequireExactTypedLineage(t *testing.T) {
 	if event.ParentEventID() != "" {
 		t.Fatalf("selected-fork generic parent = %q, want absent", event.ParentEventID())
 	}
+	facts := validFacts()
+	facts.Type = "event.replayed"
+	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "operator-token"}
+	audit, err := NewReplayEvent(ReplayEventInput{Facts: facts, Lineage: validLineage()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer := EventPayloadProducer(audit, "")
+	if !producer.IsPlatform() || producer.producer.ID() != facts.Producer.ID {
+		t.Fatal("replay audit lost its exact platform producer")
+	}
+	input := PayloadSchemaBindingInput{
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("0", 64), EventKey: "event.replayed",
+		SchemaDigest: "sha256:" + strings.Repeat("0", 64), SchemaClass: PayloadSchemaPlatform,
+	}
+	binding, err := NewPlatformPayloadSchemaBinding(input, producer, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreEventPayloadSchemaBinding(input, audit.AdmissionClass(), audit.Type(), audit.Producer())
+	if err != nil || !restored.Equal(binding) {
+		t.Fatalf("replay audit binding restore: %v", err)
+	}
+	for _, change := range []func(*PayloadProducer){
+		func(p *PayloadProducer) { p.class = EventAdmissionChild },
+		func(p *PayloadProducer) { p.event = "task.completed" },
+		func(p *PayloadProducer) { p.producer, _ = NewProducerIdentity(EventProducerAgent, "operator-token") },
+	} {
+		other := producer
+		change(&other)
+		if _, err := NewPlatformPayloadSchemaBinding(input, other, ""); err == nil {
+			t.Fatal("foreign replay class/event/producer gained platform binding")
+		}
+	}
+	for _, authored := range []PayloadProducer{AuthoredPayloadProducer(""), AuthoredPayloadProducer(".")} {
+		if err := authored.ValidateForEvent(audit); err == nil {
+			t.Fatal("replay audit accepted authored flow authority")
+		}
+	}
 }
 
 func TestClassSpecificConstructorsRejectFalseLineage(t *testing.T) {

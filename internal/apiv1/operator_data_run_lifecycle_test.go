@@ -22,7 +22,18 @@ import (
 	"github.com/google/uuid"
 )
 
-var dataRunAmendedSourceArtifact = mustAPITestSourceArtifactNamed("data-run-schema-amended")
+var dataRunAmendedSourceArtifact = func() *sourceartifact.AdmittedSourceArtifact {
+	members := map[string][]byte{}
+	for _, entry := range runStartTestArtifact("scan.requested").Entries() {
+		members[entry.Label()] = entry.Bytes()
+	}
+	members["schema.yaml"] = append([]byte("# data-run-schema-amended\n"), members["schema.yaml"]...)
+	artifact, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
+		panic(err)
+	}
+	return artifact
+}()
 var dataRunMissingSourceArtifact = mustAPITestSourceArtifactNamed("data-run-missing")
 var dataRunAmendedBundleHash = dataRunAmendedSourceArtifact.BundleHash()
 var dataRunMissingBundleHash = dataRunMissingSourceArtifact.BundleHash()
@@ -210,6 +221,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+		ctx = admittedAPITestBusContext(t, ctx, bus)
 
 		t.Run("duplicate fused child invocation IDs fail before success or rejection persistence", func(t *testing.T) {
 			for _, test := range []struct {
@@ -566,7 +578,6 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		})
 
 		t.Run("fork pin owner preserves exact selected subset and overrides", func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
 			newTarget := func() string {
 				runID := uuid.NewString()
 				storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
@@ -618,7 +629,8 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("register target catalog without source pin declaration: %v", err)
 			}
 			missingTarget := uuid.NewString()
-			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
+			missingContext := admittedAPICompiledSourceContext(t, context.Background(), fixture.primary, semanticview.Wrap(loadAPIAuthoredBundle(t, dataRunMissingSourceArtifact)))
+			storetest.RequireRun(t, missingContext, fixture.primary, storetest.RunFixture{
 				RunID: missingTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
 				BundleHash: dataRunMissingBundleHash,
 			})
@@ -671,8 +683,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		})
 
 		t.Run("same declaration schema amendment is not comparable", func(t *testing.T) {
-			amendedBundle := runStartTestBundle(t, "scan.requested")
-			amendedBundle.SourceArtifact = dataRunAmendedSourceArtifact
+			amendedBundle := loadAPIAuthoredBundle(t, dataRunAmendedSourceArtifact)
 			amendedBundleHash := dataRunAmendedBundleHash
 			amended, _, _ := dataRunLifecycleCatalog(t, amendedBundleHash, true)
 			if _, err := fixture.primary.EnsureSourceArtifactWithData(ctx, amendedBundle.SourceArtifact, amended); err != nil {
@@ -720,7 +731,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("schema amendment history = %#v, %v", snapshot, err)
 			}
 
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := admittedAPITestBusContext(t, context.Background(), amendedBus)
 			incompatibleTarget := uuid.NewString()
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: incompatibleTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
