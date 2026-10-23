@@ -409,7 +409,8 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 	markTerminal func() error,
 ) {
 	t.Helper()
-	eb, err := newScopedTestEventBus(eventStore)
+	ctx := nativeBusProcessContext(t, testAuthorActivityContext(context.Background()), eventStore)
+	eb, err := newNativeScopedTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -428,7 +429,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 		if err != nil {
 			t.Fatalf("load state before duplicate preflight: %v", err)
 		}
-		if _, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt); err != nil {
+		if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err != nil {
 			t.Fatalf("preflight exact duplicate: %v", err)
 		}
 		afterPreflight, err := loadState()
@@ -445,7 +446,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 				if err != nil {
 					t.Fatalf("load state before duplicate: %v", err)
 				}
-				if err := publish(testAuthorActivityContext(context.Background()), evt); err != nil {
+				if err := publish(ctx, evt); err != nil {
 					t.Fatalf("publish exact duplicate: %v", err)
 				}
 				after, err := loadState()
@@ -504,7 +505,7 @@ func assertEventBusDiagnosticDirectRefusal(
 	loadEventCount func(string) (int, error),
 ) {
 	t.Helper()
-	eb, err := newScopedTestEventBus(eventStore)
+	eb, err := newNativeScopedTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2302,10 +2303,10 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 		t.Run(form, func(t *testing.T) {
 			pg := storetest.StartPostgresRuntimeStore(t)
 			source := busPublicationClaimsSource(t)
-			originalCtx := nativeBusProcessContext(t, testAuthorActivityContextForSource(context.Background(), source), pg)
-			if err := storetest.LimitPostgresPublicationFixturePool(originalCtx, pg); err != nil {
+			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), pg); err != nil {
 				t.Fatal(err)
 			}
+			originalCtx := nativeBusProcessContext(t, testAuthorActivityContextForSource(context.Background(), source), pg)
 
 			bus, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
@@ -2381,6 +2382,9 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 	for _, surface := range []string{"generic_periodic", "decision_periodic", "run_queue", "startup"} {
 		t.Run(surface, func(t *testing.T) {
 			seedStore := storetest.StartPostgresRuntimeStore(t)
+			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), seedStore); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := newNativeScopedTestEventBus(t, seedStore); err != nil {
 				t.Fatalf("prepare replay seed author activity catalog: %v", err)
 			}
@@ -2392,9 +2396,6 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 				runIDs[i] = uuid.NewString()
 				storetest.RequireRun(t, originalCtx, seedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash})
 				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
-			}
-			if err := storetest.LimitPostgresPublicationFixturePool(originalCtx, seedStore); err != nil {
-				t.Fatal(err)
 			}
 
 			claimed := make(chan struct{}, poolSize)
@@ -2614,6 +2615,7 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	}
 	source := semanticview.Wrap(bundle)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = nativeBusProcessContext(t, ctx, pg)
 	forkRunID := uuid.NewString()
 	providerReached := make(chan struct{}, 1)
 	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -3059,6 +3061,7 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 	source := busRuntimeControlSource(t)
 	sourceFact := testSourceArtifactFact(source)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+	ctx = nativeBusProcessContext(t, ctx, pg)
 	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle:     source,
 		SourceArtifactFact: sourceFact,
@@ -3219,7 +3222,7 @@ func TestEventBusPublish_RuntimeControlBypassesContradictionRouting(t *testing.T
 
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersistedDeliveries(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := nativeBusProcessContext(t, testAuthorActivityContext(context.Background()), pg)
 	eb, err := newNativeScopedTestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3285,6 +3288,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := busRuntimeControlSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = nativeBusProcessContext(t, ctx, pg)
 	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3450,7 +3454,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	ch := runtimebustest.SubscribeForRun(t, eb, eventBusTestRunID, agentID, eventType)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
-	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -3480,7 +3484,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})
