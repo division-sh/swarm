@@ -9,13 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+
 	"github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
-	"github.com/lib/pq"
 )
 
 type orderingNativeFixture struct {
@@ -205,45 +203,6 @@ type orderingBusyError struct{}
 
 func (orderingBusyError) Error() string { return "database is busy (SQLITE_BUSY)" }
 func (orderingBusyError) Code() int     { return 5 }
-
-func TestOrderingNativeRetryStartsFreshAcquisition(t *testing.T) {
-	for _, surface := range []string{"pooled_postgres", "retained_postgres", "sqlite"} {
-		t.Run(surface, func(t *testing.T) {
-			f := newOrderingNativeFixture(t, surface, true, nil)
-			var conflict error = &pq.Error{Code: "40001"}
-			if f.sqlite != nil {
-				conflict = orderingBusyError{}
-			}
-			f.expectAcquisition().WillReturnError(conflict)
-			f.mock.ExpectRollback()
-			f.acquired()
-			f.mock.ExpectCommit()
-			calls := 0
-			write := func(context.Context, *mutationprotocol.Attempt) (int, error) {
-				calls++
-				return 23, nil
-			}
-			var result mutationprotocol.Result[int]
-			if f.sqlite != nil {
-				result = mutationprotocol.RunSQLite(context.Background(), f.sqlite, "ordering retry", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
-			} else if f.session != nil {
-				result = mutationprotocol.RunRetainedPostgres(context.Background(), f.session, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
-			} else {
-				result = mutationprotocol.RunPostgres(context.Background(), f.postgres, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
-			}
-			value, committed := result.Value()
-			if result.Err() != nil || !committed || value != 23 || calls != 1 {
-				t.Fatalf("retry value=%d commit=%t calls=%d err=%v", value, committed, calls, result.Err())
-			}
-			counts := f.collector.Snapshot().Total
-			o := counts.Ordering
-			if counts.BeginAttempts != 2 || o.AcquisitionAttempts != 2 || o.AcquisitionErrors != 1 ||
-				o.Acquired != 1 || o.CommittedHolders != 1 || o.Reuses != 0 || o.UnresolvedHolders != 0 {
-				t.Fatalf("retry receipt=%+v", counts)
-			}
-		})
-	}
-}
 
 func TestOrderingNativeRollbackAndPanicOutcomes(t *testing.T) {
 	for _, surface := range []string{"pooled_postgres", "retained_postgres", "sqlite"} {

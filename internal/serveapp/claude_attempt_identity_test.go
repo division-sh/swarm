@@ -191,6 +191,7 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event)
 }
 
 type claudeAttemptProofBackend struct {
+	original context.Context
 	name     string
 	store    claudeAttemptProofStore
 	db       *sql.DB
@@ -200,6 +201,9 @@ type claudeAttemptProofBackend struct {
 }
 
 func (b claudeAttemptProofBackend) context() context.Context {
+	if b.original != nil {
+		return b.original
+	}
 	return claudeAttemptProofContext(b.source)
 }
 
@@ -614,6 +618,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		return claudeAttemptProofBackend{}
 	}
 	backend.source = requireServeTestSourceArtifactFact(t, backend.store)
+	backend.original = serveFixtureProcessContext(t, backend.context(), backend.store)
 	return backend
 }
 

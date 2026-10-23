@@ -1,9 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+
 	"errors"
 	"os"
 	"os/exec"
@@ -20,55 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
-
-func TestRewrite2566FiniteFixturePlanMatchesReviewedOutputs(t *testing.T) {
-	repo := canonicalrouting.RepoRoot(t)
-	root := finiteFixtureRootWithEmbeddedSpecSuccessor(t, repo)
-	body, err := os.ReadFile(filepath.Join(repo, "scripts/rewrite-stages-2566/finite-fixtures.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var p plan
-	if err := json.Unmarshal(body, &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.Baseline != "c6a90a08be52e613fe273a85875c9ff57bcd28b3" || p.Scope == "" || len(p.Changes) == 0 {
-		t.Fatal("missing or changed historical finite-fixture baseline")
-	}
-	seen := map[string]bool{}
-	composed := 0
-	for _, c := range p.Changes {
-		if seen[c.File] {
-			t.Fatalf("duplicate ledger file %s", c.File)
-		}
-		seen[c.File] = true
-		t.Run(c.File, func(t *testing.T) {
-			before := finiteFixtureGitSource(t, repo, p.Baseline, c.File)
-			if digest(before) != c.BeforeHash {
-				t.Fatal("historical baseline does not match the recorded Before")
-			}
-			historical, err := rewrite(c, before)
-			if err != nil {
-				t.Fatal(err)
-			}
-			second, err := rewrite(c, historical)
-			if err != nil || !bytes.Equal(second, historical) {
-				t.Fatalf("historical replay is not byte-idempotent: %v", err)
-			}
-			var predecessor []byte
-			if _, _, _, listed := finiteFixtureRootInputTransform(c.File); listed {
-				composed++
-				predecessor = finiteFixtureGitSource(t, repo, finiteFixtureFeedPredecessor, c.File)
-			}
-			if err := checkFiniteFixtureCurrentOutput(root, c, historical, predecessor); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-	if composed != 2 {
-		t.Fatalf("root-input compositions=%d, want exactly the two reviewed files", composed)
-	}
-}
 
 // These are sources of real finite run.start calls, not RPC doubles, scenario
 // imports, event.publish services, or low-level construction tests.

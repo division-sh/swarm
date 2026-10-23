@@ -45,6 +45,7 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			selected, configText := newVerifyCompositionBootStore(t, backend, root, schema)
+			ctx = cliFixtureProcessContext(t, ctx, selected)
 			writeRuntimeConfigText(t, config, configText)
 			runID := "abcdefab-1234-4000-8000-abcdefabcdef"
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})

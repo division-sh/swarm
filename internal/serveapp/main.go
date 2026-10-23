@@ -1601,8 +1601,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	apiHandler := newAPIServer(serveSupervisorReadiness{serveReadiness: ready, supervisor: supervisor}, apiV1Handler, inboundHandler, ctx).Handler
 	mcpServer = &http.Server{Handler: http.HandlerFunc(supervisor.serveMCP), ReadHeaderTimeout: 5 * time.Second}
-	apiHandler = processOwnedHTTPHandler(processWorkOwner, apiHandler)
-	mcpServer.Handler = processOwnedHTTPHandler(processWorkOwner, mcpServer.Handler)
+	apiHandler = processOwnedHTTPHandler(processWorkOwner, apiHandler, processCapability)
+	mcpServer.Handler = processOwnedHTTPHandler(processWorkOwner, mcpServer.Handler, nil)
 	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
 		presenter.fail(20, "context_registry", err)
 		return 3
@@ -2937,7 +2937,7 @@ type systemWorkspaceContainerLister interface {
 	SystemWorkspaceContainers() []string
 }
 
-func processOwnedHTTPHandler(owner *worklifetime.Process, next http.Handler) http.Handler {
+func processOwnedHTTPHandler(owner *worklifetime.Process, next http.Handler, original runtimestartupownership.ProcessCapability) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if owner == nil || next == nil {
 			http.Error(w, "runtime process unavailable", http.StatusServiceUnavailable)
@@ -2950,6 +2950,13 @@ func processOwnedHTTPHandler(owner *worklifetime.Process, next http.Handler) htt
 		}
 		defer func() { _ = lease.Done() }()
 		ctx := worklifetime.WithProcess(lease.Context(), owner)
+		if original != nil {
+			ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, original)
+			if err != nil {
+				http.Error(w, "runtime process unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -18,10 +18,11 @@ func TestConstructedHeaderGateSummaryBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			fixtureOwner := t
 			for _, shape := range []string{"fieldless", "zero"} {
 				for _, status := range []string{"open", "superseded", "malformed", "unproven_decision"} {
 					t.Run(shape+"/"+status, func(t *testing.T) {
-						_, child, _ := seedSelectedOrdinaryRootProjectionFixture(t, fixture, backend.name == "postgres", shape)
+						_, child, _ := seedSelectedOrdinaryRootProjectionFixture(fixtureOwner, fixture, backend.name == "postgres", shape)
 						ctx, at := testAuthorActivityContext(), time.Now().UTC()
 						gate, err := gateruntime.New(child.ForkRunID, child.ForkRunID, child.ForkRunID, ".", "pending", "review", authorActivityTestBundleHash, testGateRoutes(t), "state:pending", at)
 						if err != nil {

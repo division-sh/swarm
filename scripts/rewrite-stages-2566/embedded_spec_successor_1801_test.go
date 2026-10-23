@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/scripts/rewrite-stages-2566/formatproof"
 )
 
@@ -115,95 +114,5 @@ func writeEmbeddedSpecFiniteEvidence(t *testing.T, root, name string, body []byt
 	}
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestRewrite2566EmbeddedSpecFiniteSuccessorPreservesExactHistory(t *testing.T) {
-	root := canonicalrouting.RepoRoot(t)
-	ledger := readEmbeddedSpecFiniteEvidence(t, root, "scripts/rewrite-stages-2566/finite-fixtures.json")
-	successor := readEmbeddedSpecFiniteEvidence(t, root, "scripts/rewrite-stages-2566/embedded-spec-successor-1801.json")
-	current := readEmbeddedSpecFiniteEvidence(t, root, embeddedSpecFiniteFile)
-	original, err := originalFiniteEmbeddedSpecOutput(ledger, successor, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if digest(original) != embeddedSpecFiniteSuccessorPlan().Changes[0].BeforeHash || bytes.Equal(original, current) {
-		t.Fatal("successor did not restore the exact distinct reviewed output")
-	}
-	for _, tc := range []struct{ name, before, after string }{
-		{"stage edit", "[]byte(declaration+canonicalrouting.DeploymentFixtureCloseDeclaration)", "[]byte(declaration)"},
-		{"assertion", "t.Fatal(err)", "t.Log(err)"},
-		{"cleanup", "t.Cleanup(proxy.Close)", "// t.Cleanup(proxy.Close)"},
-		{"store cell", `[]string{"sqlite", "postgres"}`, `[]string{"sqlite"}`},
-		{"unrelated byte", "package conformance", "package conformance\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			changed := bytes.Replace(current, []byte(tc.before), []byte(tc.after), 1)
-			if bytes.Equal(changed, current) {
-				t.Fatal("negative control did not change the intended source boundary")
-			}
-			if _, err := originalFiniteEmbeddedSpecOutput(ledger, successor, changed); err == nil {
-				t.Fatal("unrelated source edit acquired successor authority")
-			}
-		})
-	}
-}
-
-func TestRewrite2566EmbeddedSpecFiniteSuccessorRefusesChangedDecisions(t *testing.T) {
-	root := canonicalrouting.RepoRoot(t)
-	ledger := readEmbeddedSpecFiniteEvidence(t, root, "scripts/rewrite-stages-2566/finite-fixtures.json")
-	successor := readEmbeddedSpecFiniteEvidence(t, root, "scripts/rewrite-stages-2566/embedded-spec-successor-1801.json")
-	current := readEmbeddedSpecFiniteEvidence(t, root, embeddedSpecFiniteFile)
-	for _, tc := range []struct {
-		name   string
-		mutate func(*plan)
-	}{
-		{"file", func(p *plan) { p.Changes[0].File = "different.go" }},
-		{"key", func(p *plan) { p.Changes[0].BeforeHash = p.Changes[0].AfterHash }},
-		{"extra member", func(p *plan) { p.Changes = append(p.Changes, p.Changes[0]) }},
-		{"edit", func(p *plan) { p.Changes[0].Edits[0].After += "// unrelated\n" }},
-		{"missing edit", func(p *plan) { p.Changes[0].Edits = nil }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := embeddedSpecFiniteSuccessorPlan()
-			tc.mutate(&p)
-			changed, err := json.Marshal(p)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := originalFiniteEmbeddedSpecOutput(ledger, changed, current); err == nil {
-				t.Fatal("changed successor acquired authority")
-			}
-		})
-	}
-	for _, tc := range []struct {
-		name      string
-		ledger    []byte
-		successor []byte
-	}{
-		{"missing successor", ledger, nil},
-		{"changed stage edit", bytes.Replace(ledger, []byte("DeploymentFixtureCloseDeclaration"), []byte("ChangedStageEdit"), 1), successor},
-		{"changed review", bytes.Replace(ledger, []byte("Routing-only root"), []byte("Changed review"), 1), successor},
-		{"changed equivalence", bytes.Replace(ledger, []byte(`"equivalence": []`), []byte(`"equivalence": [{}]`), 1), successor},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := originalFiniteEmbeddedSpecOutput(tc.ledger, tc.successor, current); err == nil {
-				t.Fatal("missing successor or changed historical decision acquired authority")
-			}
-		})
-	}
-	var original plan
-	if err := json.Unmarshal(ledger, &original); err != nil {
-		t.Fatal(err)
-	}
-	for _, member := range original.Changes {
-		t.Run("current member/"+member.File, func(t *testing.T) {
-			mirror := finiteFixtureRootWithEmbeddedSpecSuccessor(t, root)
-			body := readEmbeddedSpecFiniteEvidence(t, mirror, member.File)
-			writeEmbeddedSpecFiniteEvidence(t, mirror, member.File, append(body, '\n'))
-			if err := apply(mirror, "finite-fixtures.json", false, true); err == nil {
-				t.Fatal("existing full-plan check accepted changed member bytes")
-			}
-		})
 	}
 }

@@ -44,10 +44,11 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			fixtureOwner := t
 			for _, owner := range []string{"root", "static"} {
 				for _, corrupt := range []string{"flow", "type"} {
 					t.Run(owner+"/"+corrupt, func(t *testing.T) {
-						ctx, sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, json.RawMessage(`{"value":"unchanged"}`))
+						ctx, sourceRun, child, event := seedSelectedActivityProjectionFixture(fixtureOwner, fixture, backend.name == "postgres", owner == "root", true, false, json.RawMessage(`{"value":"unchanged"}`))
 						store := fixture.store.(selectedActivityProjectionStore)
 						original := originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint)
 						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original)

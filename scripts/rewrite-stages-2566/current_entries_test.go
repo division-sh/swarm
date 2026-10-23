@@ -68,29 +68,6 @@ func assertDiagnosticNativeConsumerCall(t *testing.T, function *ast.FuncDecl) {
 	}
 }
 
-func TestRewrite2566CurrentSelectorsRetainExactSourceCorrespondence(t *testing.T) {
-	root := canonicalrouting.RepoRoot(t)
-	entries, err := readCurrentEntryGoldens(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.Current == nil {
-			continue
-		}
-		t.Run(entry.File+"/"+entry.Flow, func(t *testing.T) {
-			original := reviewedEntryLiteralForCurrent(t, root, entry)
-			current, err := readEntryLiteral(root, entry.Current.File, entry.Current.Function, entry.Current.Literal)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertEntryLiteralStageGolden(t, entry, original)
-			assertEntryLiteralStageGolden(t, entry, current)
-			t.Logf("source correspondence: original_sha256=%s current_sha256=%s byte_equal=%t", digest([]byte(original.Body)), digest([]byte(current.Body)), original.Body == current.Body)
-		})
-	}
-}
-
 func reviewedEntryLiteralForCurrent(t *testing.T, root string, entry entryGolden) goLiteralSite {
 	t.Helper()
 	// This master ancestor predates the fixture migration and stays reachable

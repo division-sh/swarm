@@ -21,14 +21,30 @@ import (
 
 func acquireLogoutProcessFixture(t *testing.T, f *activeInputFixture, runtimeID string, exact ...startupownership.AcquireRequest) startupownership.ProcessCapability {
 	t.Helper()
+	if f.nativeProcess != nil {
+		if evidence, err := f.nativeProcess.Evidence(); err == nil {
+			if evidence.RuntimeInstanceID != runtimeID || (len(exact) == 1 && (evidence.OwnerID != exact[0].OwnerID || evidence.BootID != exact[0].BootID)) {
+				t.Fatal("session fixture cannot replace a live native process")
+			}
+			return f.nativeProcess
+		}
+	}
+	if f.nativeContext == nil {
+		f.nativeContext = f.ctx
+	}
 	request := startupownership.AcquireRequest{OwnerID: "logout-process-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID}
 	if len(exact) == 1 {
 		request = exact[0]
 	}
-	owner, err := f.selected.(startupownership.Store).AcquireProcessCapability(f.ctx, request)
+	owner, err := f.selected.(startupownership.Store).AcquireProcessCapability(f.nativeContext, request)
 	if err != nil {
 		t.Fatal("acquire real selected process responsibility", err)
 	}
+	f.ctx, err = startupownership.WithProcessMutationAuthority(f.nativeContext, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.nativeProcess = owner
 	t.Cleanup(func() {
 		if err := owner.Release(context.Background()); err != nil {
 			t.Error("release logout process responsibility", err)
@@ -185,6 +201,10 @@ func admitLogoutGenerationFixture(t *testing.T, f *activeInputFixture, owner sta
 		t.Fatal(err)
 	}
 	if _, err := grant.AdmitExecution(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.ctx, err = startupownership.WithRuntimeMutationAuthority(f.ctx, grant)
+	if err != nil {
 		t.Fatal(err)
 	}
 	binding, err := grant.ProcessExecutionBinding()

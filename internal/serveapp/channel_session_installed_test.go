@@ -114,6 +114,10 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		t.Fatal(err)
 	}
 	effects := selected.(channelConfirmationEffectStore)
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	confirmation, err := newServeChannelConfirmationDispatcher(effects, current, executionposture.Live, owner.Identity().RuntimeInstanceID, nil)
 	if err != nil {
 		t.Fatal(err)
