@@ -87,7 +87,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	process := startReleaseServe(t, releaseProcessSpec{
 		BinaryPath: binaryPath, WorkingDir: releaseRoot, Source: contracts,
 		APIPort: apiPort, MCPListenPort: 8082, TokenFile: apiTokenFile, Token: apiToken,
-		Env: env, DefaultExecutionSelection: true, ShutdownGrace: goldenShutdownGrace,
+		Env: env, WorkspaceBackend: "docker", ShutdownGrace: goldenShutdownGrace,
 	})
 	if err := process.waitReady(runCtx); err != nil {
 		t.Fatal(err)
