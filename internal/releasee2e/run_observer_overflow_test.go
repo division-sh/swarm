@@ -65,6 +65,14 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	// wall time to emit its deterministic burst under full-suite contention.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	process := startReleaseServe(t, releaseProcessSpec{
+		BinaryPath: binaryPath, WorkingDir: releaseRoot, Source: contracts,
+		APIPort: apiPort, MCPListenPort: 8082, Env: env,
+		DefaultExecutionSelection: true, ShutdownGrace: goldenShutdownGrace,
+	})
+	if err := process.waitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.CommandContext(
 		ctx,
 		binaryPath,
@@ -169,6 +177,9 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	}
 	if fact.Type != "run_trace_observer_detached" || fact.Severity != "warning" || fact.ReasonCode != "queue_overflow" || !fact.RunContinues {
 		t.Fatalf("release detach fact = %#v", fact)
+	}
+	if err := process.stopAndWait(goldenShutdownGrace); err != nil {
+		t.Fatalf("release overflow serve shutdown: %v\n%s", err, process.output.String())
 	}
 	assertReleaseExternalProcessesExited(t, fakeRoot)
 }
