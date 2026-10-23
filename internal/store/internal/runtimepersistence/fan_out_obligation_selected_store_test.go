@@ -2031,7 +2031,10 @@ func materializeFanOutForkAtCurrentRevision(t *testing.T, ctx context.Context, d
 func seedFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, selected any, postgres bool, cardinality int, createdAt time.Time) fanOutOwnerFixture {
 	t.Helper()
 	artifactRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(artifactRoot, "schema.yaml"), []byte("name: fan-out-store-fixture\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(artifactRoot, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactRoot, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(artifactRoot)

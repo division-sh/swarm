@@ -315,9 +315,11 @@ func TestGenerateEmitToolsForActor_ResolvesTemplateDeclarationThroughOwningFlowP
 
 func TestGenerateEmitToolsForActor_DoesNotBorrowRootSchemaForChildEvent(t *testing.T) {
 	root := t.TempDir()
-	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: exact-flow-emits\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "events.yaml"), "local.done:\n  root_only: text\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "stages: []\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "local.done:\n  child_only: text\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
 child-agent:
@@ -572,12 +574,14 @@ func TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType(t *testin
 	root := t.TempDir()
 
 	writeEmitFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: uuid\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-schema-validation\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
-	writeEmitFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
-stages:
+	writeEmitFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `stages:
   waiting: {}
-`)
+`,
+	)
 	writeEmitFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 local.done:
   unsupported: NotDeclared
@@ -590,10 +594,11 @@ flow-agent:
     - local.done
 `)
 
-	writeEmitFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), `name: other
-stages:
+	writeEmitFixtureFile(t, filepath.Join(root, "other", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), `stages:
   waiting: {}
-`)
+`,
+	)
 	writeEmitFixtureFile(t, filepath.Join(root, "other", "events.yaml"), `
 local.done:
   ok: string

@@ -606,7 +606,7 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	}
-	journal := activityNativeJournalForFixture(t, fixture)
+	journal := activityNativeJournalForFixture(t, fixture, runID)
 	record, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: requestID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: instance, NodeID: owner.Key(), HandlerEventKey: handler, ActivityID: activity, Tool: tool,
@@ -661,7 +661,12 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 		}
 	} else {
 		retainActivityFixtureProcessForMaterialization(t, ctx, fixture.store, fixture.activityOwner)
-		child = materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, event.ID())
+		selected := fixture.store.(selectedActivityProjectionStore)
+		request := selectedSourceMaterializationRequest(t, ctx, selected, runID, event.ID(), declarations)
+		child, err = selected.MaterializeRunForkForSelectedContractExecution(ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	wantEntities := 2
 	if child.MaterializedEntityCount != wantEntities {

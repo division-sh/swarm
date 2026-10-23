@@ -40,6 +40,27 @@ func admitPlatformEventAuthority(root yamlsource.Value, fields map[string]yamlso
 			return authority, err
 		}
 	}
+	if eventKey == "platform.dead_letter" {
+		if authority.reference != events.DeadLetterSchemaReference || authority.definedIn != "engine.error_model.dead_letter_schema" || authority.hasPayload {
+			return authority, fmt.Errorf("dead-letter payload requires its exact catalog reference, not an inline schema")
+		}
+		engine, err := root.Lookup("engine")
+		if err != nil {
+			return authority, err
+		}
+		model, err := engine.Value.Lookup("error_model")
+		if err != nil {
+			return authority, err
+		}
+		law, err := model.Value.Lookup("dead_letter_schema")
+		if err != nil {
+			return authority, err
+		}
+		if law.Value.Presence() != yamlsource.PresenceMapping {
+			return authority, fmt.Errorf("dead-letter referenced law is missing or not a mapping")
+		}
+		return bindPlatformReferenceLaw(authority, eventKey, law.Value)
+	}
 	if eventKey != string(events.EventTypePlatformRuntimeLog) || authority.reference != events.RuntimeLogSchemaReference || authority.definedIn != "platform_tables.diagnostics_encoding" {
 		return authority, nil
 	}
@@ -70,8 +91,12 @@ func admitPlatformEventAuthority(root yamlsource.Value, fields map[string]yamlso
 	if declaredEvent != eventKey || declaredProducer != authority.producerType {
 		return authority, fmt.Errorf("runtime-log referenced law disagrees with catalog event/producer")
 	}
+	return bindPlatformReferenceLaw(authority, eventKey, law.Value)
+}
+
+func bindPlatformReferenceLaw(authority PlatformEventAuthority, eventKey string, law yamlsource.Value) (PlatformEventAuthority, error) {
 	var definition map[string]any
-	if err := law.Value.Project(&definition); err != nil {
+	if err := law.Project(&definition); err != nil {
 		return authority, err
 	}
 	canonical, err := canonicaljson.Bytes(map[string]any{
@@ -101,6 +126,10 @@ func ResolvePlatformEventAuthority(platform PlatformSpecDocument, event events.E
 	if event.Type() == events.EventTypePlatformRuntimeLog {
 		if authority.producerID != "runtime" || authority.reference != events.RuntimeLogSchemaReference || authority.definedIn != "platform_tables.diagnostics_encoding" || authority.digest == "" || authority.hasPayload {
 			return EventCatalogEntry{}, PlatformEventAuthority{}, fmt.Errorf("runtime-log catalog reference authority is missing or contradictory")
+		}
+	} else if event.Type() == "platform.dead_letter" {
+		if event.AdmissionClass() != events.EventAdmissionRuntimeDiagnostic || authority.reference != events.DeadLetterSchemaReference || authority.definedIn != "engine.error_model.dead_letter_schema" || authority.digest == "" || authority.hasPayload {
+			return EventCatalogEntry{}, PlatformEventAuthority{}, fmt.Errorf("dead-letter catalog reference authority is missing or contradictory")
 		}
 	} else if len(entry.Payload.Properties) == 0 {
 		return EventCatalogEntry{}, PlatformEventAuthority{}, fmt.Errorf("platform event has no supported payload schema authority")

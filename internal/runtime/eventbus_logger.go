@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deadletters"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
@@ -116,8 +117,17 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 		eventKey := eventType
 		schemaDigest := canonicaljson.HashBytes([]byte("{}"))
 		if resolution.Reference.Digest() != "" {
-			if _, err := DecodeCanonicalRuntimeLogPayload(payload); err != nil {
-				return events.PayloadAdmission{}, err
+			switch resolution.Reference.Reference() {
+			case events.RuntimeLogSchemaReference:
+				if _, err := DecodeCanonicalRuntimeLogPayload(payload); err != nil {
+					return events.PayloadAdmission{}, err
+				}
+			case events.DeadLetterSchemaReference:
+				if err := deadletters.ValidatePayload(payload); err != nil {
+					return events.PayloadAdmission{}, err
+				}
+			default:
+				return events.PayloadAdmission{}, fmt.Errorf("unsupported platform payload reference")
 			}
 			bindingClass, schemaDigest = events.PayloadSchemaPlatform, resolution.Reference.Digest()
 		}

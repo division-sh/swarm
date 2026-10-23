@@ -32,9 +32,9 @@ func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
 			root := t.TempDir()
 			fields := "  label: {type: text, pattern: '^[a-z]+$', length: {min: 1, max: 10}, equal_to: peer}\n  peer: text\n  score: {type: numeric, range: {min: 1.5, max: 9.5}}\n  note: text?\n"
 			for name, body := range map[string]string{
-				"schema.yaml":   "name: detached-retained\nstages: {done: {final: true}}\n",
+				"schema.yaml":   "stages: {done: {final: true}}\n",
 				"events.yaml":   "audit.record:\n" + fields,
-				"entities.yaml": "person:\n" + fields,
+				"entities.yaml": "person:\n" + fields, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			} {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
 					t.Fatal(err)

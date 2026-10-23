@@ -36,7 +36,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -508,11 +507,7 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, fixture.store, admitted, nil, pipelineobligation.ScopeSubscribed); err != nil {
 		t.Fatal(err)
 	}
-	sourceProcess, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentfixture.Store))
-	if err != nil {
-		t.Fatal(err)
-	}
-	journal := activityNativeJournalForFixture(t, fixture)
+	journal := activityNativeJournalForFixture(t, fixture, runID)
 	var admittedPayload map[string]json.RawMessage
 	if err := json.Unmarshal(event.Payload(), &admittedPayload); err != nil {
 		t.Fatal(err)
@@ -532,11 +527,6 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	record.ResultPayload = map[string]any{"activity_id": fact.ActivityID, "tool": fact.Tool, "result": map[string]any{"value": "recorded-result"}}
 	if _, acknowledged, err := journal.CompleteActivityAttempt(ctx, record); err != nil || !acknowledged {
 		t.Fatalf("settle original activity projection journal: acknowledged=%t err=%v", acknowledged, err)
-	}
-	// The terminal source journal no longer needs possession; preparation owns
-	// the next retained process rather than competing for the same SQLite file.
-	if err := sourceProcess.Release(ctx); err != nil {
-		t.Fatal(err)
 	}
 	if postEvent != nil {
 		postEvent(ctx, runID)
@@ -777,6 +767,7 @@ func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFi
 		fixture.activityJournal.once.Do(func() {
 			fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, ctx, fixture.store)
 		})
+		retainActivityFixtureProcessForMaterialization(t, ctx, fixture.store, fixture.activityOwner)
 	}
 	return ctx
 }

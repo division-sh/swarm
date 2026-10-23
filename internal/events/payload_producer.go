@@ -7,6 +7,8 @@ import (
 
 const RuntimeLogSchemaReference = "platform-spec.yaml#platform_tables.diagnostics_encoding"
 
+const DeadLetterSchemaReference = "platform-spec.yaml#engine.error_model.dead_letter_schema"
+
 const JoinOccurrencePayloadReference = "platform-spec.yaml#engine.join_engine.occurrence_routing"
 
 const StageTimerPayloadReference = "platform-spec.yaml#engine.timer_model.boot_validation.stage_timers"

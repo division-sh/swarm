@@ -47,7 +47,9 @@ func capturedProviderSource(t *testing.T, members map[string][]byte) (sourcearti
 }
 
 func TestS1ProviderSourceFreezesNearestWholeDirectories(t *testing.T) {
-	rooted, _ := capturedProviderSource(t, scopedProviderMembers())
+	members := scopedProviderMembers()
+	members["child/team-bot/manifest.yaml"] = bytes.Replace(members["child/team-bot/manifest.yaml"], []byte("platform_version: '*'"), []byte("platform_version: '>=99.0.0'"), 1)
+	rooted, _ := capturedProviderSource(t, members)
 	source, err := AdmitProviderSource(rooted, providerDefinitionPlatform(t))
 	if err != nil || !source.Valid() || !source.RootedSource().Admission().Equal(rooted.Admission()) {
 		t.Fatalf("admit exact provider source: %v", err)
@@ -189,7 +191,7 @@ func TestS1ProviderSourceRefusesPartialAdmissionAndStandaloneProvider(t *testing
 		{"sibling/team-bot/trigger.yaml", "event_name:", "unknown:"},
 		{"child/team-bot/connector.yaml", "handler_type: http", "handler_type: unknown"},
 		{"team-bot/channel.yaml", "tool: send_message", "tool: missing"},
-		{"child/team-bot/manifest.yaml", "platform_version: '*'", "platform_version: '>=99.0.0'"},
+		{"child/team-bot/manifest.yaml", "platform_version: '*'", "platform_version: '[invalid'"},
 	} {
 		t.Run(cell.label, func(t *testing.T) {
 			members := scopedProviderMembers()

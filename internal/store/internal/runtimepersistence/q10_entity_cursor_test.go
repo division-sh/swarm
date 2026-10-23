@@ -26,12 +26,12 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":           "name: q10-cursor\nstages:\n  ready: {}\n  done: {final: true}\n",
+				"schema.yaml":           "stages:\n  ready: {}\n  done: {final: true}\n",
 				"entities.yaml":         "cursor_item:\n  count: integer?\n",
-				"imports/schema.yaml":   "name: imports\ninstance: item_id\n",
+				"imports/schema.yaml":   "instance: item_id\n",
 				"imports/entities.yaml": "cursor_item:\n  item_id: text\n  count: integer?\n",
-				"others/schema.yaml":    "name: others\ninstance: item_id\n",
-				"others/entities.yaml":  "other_item:\n  item_id: text\n",
+				"others/schema.yaml":    "instance: item_id\n",
+				"others/entities.yaml":  "other_item:\n  item_id: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "imports/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "others/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			const (
 				runA   = "91000000-0000-4000-8000-000000000001"

@@ -24,7 +24,7 @@ func TestClockScheduleSourceRoundTripOnBothStores(t *testing.T) {
 				"events.yaml":        "poll.tick:\n",
 				"worker/schema.yaml": "stages: []\nschedules:\n  poll: {every: 1m, emit: poll.tick}\n",
 				"worker/events.yaml": "poll.tick:\n",
-				"worker/nodes.yaml":  "observer:\n  event_handlers:\n    poll.tick: {}\n",
+				"worker/nodes.yaml":  "observer:\n  event_handlers:\n    poll.tick: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}
 			for name, body := range files {
 				path := filepath.Join(root, name)

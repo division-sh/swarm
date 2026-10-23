@@ -16852,6 +16852,7 @@ platform_tables:
       request_scoped_bundle_catalog:
         - bundles
       request_scoped_source_artifacts:
+        - source_root_admissions
         - source_artifacts
       split_preserve:
         - mailbox

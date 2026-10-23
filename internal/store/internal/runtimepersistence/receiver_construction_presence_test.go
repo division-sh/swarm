@@ -35,8 +35,8 @@ func TestReceiverReadinessRequiresConstructedHeaderBothStores(t *testing.T) {
 		} {
 			t.Run(backend+"/"+test.name, func(t *testing.T) {
 				documents := map[string]string{
-					"schema.yaml":        "name: receiver-construction\n",
-					"review/schema.yaml": "name: review\nstages:\n  pending: {}\n",
+					"schema.yaml":        "stages: []\n",
+					"review/schema.yaml": "stages:\n  pending: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if test.fielded {
 					documents["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
@@ -136,8 +136,8 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					var f receiverConfigActivationFixture
 					if shape == "root" {
 						f = newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-							"schema.yaml": "name: root-receiver-construction\npins:\n  inputs:\n    - start.seeded\n",
-							"events.yaml": "start.seeded:\n",
+							"schema.yaml": "pins:\n  inputs:\n    - start.seeded\n",
+							"events.yaml": "start.seeded:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 						}, nil)
 					} else {
 						f = newEagerFlowConstructorFixture(t, backend)

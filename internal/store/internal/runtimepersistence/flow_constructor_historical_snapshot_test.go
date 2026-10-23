@@ -192,7 +192,7 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("exact fixed fork replay changed durable evidence: %v", err)
 			}
-			newer := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# newer historical directory source\n"})
+			newer := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# newer historical directory source\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"})
 			newerRoot, err := newer.RootedSource()
 			if err != nil {
 				t.Fatal(err)
@@ -231,9 +231,9 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 		stages = "stages:\n  pending: {}\n"
 	}
 	files := map[string]string{
-		"schema.yaml":        "name: historical-fieldless\n" + stages,
+		"schema.yaml":        "# fixture: historical-fieldless\n" + stages,
 		"events.yaml":        "checkpoint:\n",
-		"detail/schema.yaml": "name: detail\n",
+		"detail/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if fielded {
 		files["entities.yaml"] = "record:\n  marker: {type: text, initial: original}\n"

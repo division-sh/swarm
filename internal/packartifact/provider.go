@@ -2,6 +2,7 @@ package packartifact
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"strings"
@@ -34,6 +35,7 @@ func LoadProviderFS(fsys fs.FS, directory, runningVersion string) (AdmittedProvi
 		return AdmittedProvider{}, err
 	}
 	members := map[string][]byte{}
+	var totalBytes int64
 	err = fs.WalkDir(fsys, directory, func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -44,13 +46,33 @@ func LoadProviderFS(fsys fs.FS, directory, runningVersion string) (AdmittedProvi
 		if !entry.Type().IsRegular() {
 			return fmt.Errorf("provider member %q must be a regular file", name)
 		}
-		body, err := fs.ReadFile(fsys, name)
-		if err != nil {
-			return err
-		}
 		if len(members) >= sourceartifact.MaxMembers {
 			return fmt.Errorf("provider directory exceeds the source member bound")
 		}
+		file, err := fsys.Open(name)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("provider member %q must be a regular file", name)
+		}
+		limit := min(int64(sourceartifact.MaxMemberBytes), int64(sourceartifact.MaxArtifactBytes)-totalBytes)
+		if info.Size() < 0 || info.Size() > limit {
+			return fmt.Errorf("provider member %q exceeds the source byte bound", name)
+		}
+		body, err := io.ReadAll(io.LimitReader(file, limit+1))
+		if err != nil {
+			return err
+		}
+		if int64(len(body)) > limit {
+			return fmt.Errorf("provider member %q exceeds the source byte bound", name)
+		}
+		totalBytes += int64(len(body))
 		members[strings.TrimPrefix(name, directory+"/")] = body
 		return nil
 	})

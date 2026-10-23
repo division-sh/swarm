@@ -125,6 +125,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "author_activity_order", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "monotonic author activity cursor authority", PreservationProof: "cursor identity must never be reused after destructive cleanup"},
 		{Table: "api_idempotency", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "API idempotency/auth-like state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "runtime_ingress_state", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "singleton runtime ingress owner", PreservationProof: "must survive destructive runtime cleanup"},
+		{Table: "source_root_admissions", TableKind: CleanupTableKindPlatform, Classification: CleanupRequestScopedSourceArtifacts, PredicateOwner: "source_root_admissions.bundle_hash -> source_artifacts.bundle_hash", PreservationProof: "root admissions follow request-scoped source artifact retention; deleting source content cascades to its root admissions"},
 		{Table: "source_artifacts", TableKind: CleanupTableKindPlatform, Classification: CleanupRequestScopedSourceArtifacts, PredicateOwner: "runtime.nuke include_source_artifacts request policy", PreservationProof: "include_source_artifacts=false preserves admitted source artifacts; include_source_artifacts=true deletes them as part of server-wide runtime.nuke"},
 		{Table: "mailbox", TableKind: CleanupTableKindPlatform, Classification: CleanupSplitPreserve, PredicateOwner: "no run_id; source_event_id policy split", PreservationProof: "preserve until a mailbox cleanup owner exists"},
 		{Table: "spend_ledger", TableKind: CleanupTableKindPlatform, Classification: CleanupSplitPreserve, PredicateOwner: "immutable cost audit with snapshotted run and optional concrete-agent identity", PreservationProof: "cost evidence survives destructive runtime cleanup without retaining a live run or agent selector"},
@@ -170,19 +171,22 @@ func CleanupCatalogByTableForPolicy(policy CleanupPolicy) map[string]CleanupCata
 }
 
 func CleanupEntryForPolicy(entry CleanupCatalogEntry, policy CleanupPolicy) CleanupCatalogEntry {
-	if entry.Table != "source_artifacts" || entry.Classification != CleanupRequestScopedSourceArtifacts {
+	if (entry.Table != "source_artifacts" && entry.Table != "source_root_admissions") || entry.Classification != CleanupRequestScopedSourceArtifacts {
 		return entry
 	}
 	if policy.IncludeSourceArtifacts {
 		entry.Classification = CleanupDeleteAll
 		entry.PredicateOwner = "runtime.nuke include_source_artifacts=true server-wide admitted source deletion"
 		entry.DeleteOrderGroup = 7
+		if entry.Table == "source_root_admissions" {
+			entry.DeleteOrderGroup = 6
+		}
 		entry.PreservationProof = ""
 		return entry
 	}
 	entry.Classification = CleanupPreserve
 	entry.PredicateOwner = "runtime.nuke include_source_artifacts=false admitted source preservation"
 	entry.DeleteOrderGroup = 0
-	entry.PreservationProof = "source artifact rows must survive runtime.nuke when include_source_artifacts=false"
+	entry.PreservationProof = "source artifact and dependent root admission rows must survive runtime.nuke when include_source_artifacts=false"
 	return entry
 }

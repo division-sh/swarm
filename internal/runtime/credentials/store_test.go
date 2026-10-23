@@ -144,9 +144,11 @@ func TestBuildRequirementIndex_IndexesDirectFilesystemFlowCredentialBindings(t *
 	repoRoot := credentialsRepoRootForTest(t)
 	root := t.TempDir()
 
-	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: credential-binding\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	for _, flowID := range []string{"alpha", "beta"} {
 
+		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
 		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "tools.yaml"), `
 call_provider:
@@ -182,9 +184,11 @@ func TestMissingRequired_IndexesDirectFilesystemNativeWebSearchCredentialBinding
 	repoRoot := credentialsRepoRootForTest(t)
 	root := t.TempDir()
 
-	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: native-web-search-credential-binding\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
-	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), "name: worker\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), "stages: []\n")
 	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "policy.yaml"), `
 web_search_provider:
   provider: brave

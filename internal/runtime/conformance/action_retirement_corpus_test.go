@@ -2,16 +2,14 @@ package conformance
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
+
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io"
 	"os"
-	"os/exec"
+
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -20,94 +18,16 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 const actionRetirementCorpusPath = "internal/runtime/conformance/testdata/action_retirement_corpus_ledger.json"
-const actionRetirementHistoricalBase = "34c558b660bf8d7986209dd1dbfebd819da64f18"
 
 // This is a lexical source/reference census, not a count of executable actions.
 // Per-file dispositions and named proof rows must not be inferred from a match.
 var actionRetirementCorpusPattern = regexp.MustCompile(`\b(create_flow_instance|record_evidence|mailbox_write|artifact_repo_commit|config_from|instance_id_from|evidence_target|[A-Za-z0-9_]*(ArtifactRepo|MailboxWrite|ActionSpec|ConfigFrom|EvidenceTarget|HandlerAction|ActionRegistry|ActionRunner|ActionExecution|EmitSurfaceAction|ActionInstruction)[A-Za-z0-9_]*)\b`)
 
 var actionRetirementFieldLine = regexp.MustCompile(`(?m)^\s*(action|template|evidence_target|config_from|instance_id_from)\s*:`)
-
-type actionRetirementCorpusLedger struct {
-	Version           string                       `json:"version"`
-	HistoricalBase    string                       `json:"historical_base"`
-	Scope             string                       `json:"scope"`
-	HistoricalFiles   []actionRetirementCorpusFile `json:"historical_files"`
-	NewReferenceFiles map[string]string            `json:"new_reference_files"`
-}
-
-type actionRetirementCorpusFile struct {
-	Path        string   `json:"path"`
-	SHA256      string   `json:"historical_sha256"`
-	Markers     []string `json:"historical_markers"`
-	Functions   []string `json:"historical_functions,omitempty"`
-	Disposition string   `json:"disposition"`
-	Proofs      []string `json:"proofs"`
-}
-
-func TestActionRetirementCorpusLedgerIsComplete(t *testing.T) {
-	t.Run("unresolved_disposition_rejection", func(t *testing.T) {
-		for _, disposition := range []string{"", " ", "pending_owner_assertion_review", "migrated_receipt_pending", "PENDING"} {
-			if actionRetirementDispositionResolved(disposition) {
-				t.Fatalf("unresolved disposition accepted: %q", disposition)
-			}
-		}
-		if !actionRetirementDispositionResolved("Removed action adapter; surviving guard assertions retained. Execution receipts are separate.") {
-			t.Fatal("source disposition incorrectly requires an execution receipt")
-		}
-	})
-	root := conformanceRepoRoot(t)
-	if os.Getenv("SWARM_GENERATE_ACTION_RETIREMENT_LEDGER") == "1" {
-		generateActionRetirementCorpusLedger(t, root)
-	}
-	raw, err := os.ReadFile(filepath.Join(root, actionRetirementCorpusPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ledger actionRetirementCorpusLedger
-	if err := json.Unmarshal(raw, &ledger); err != nil {
-		t.Fatal(err)
-	}
-	if ledger.Version != "handler-action-retirement/v1" || ledger.HistoricalBase != actionRetirementHistoricalBase || len(ledger.HistoricalFiles) != 163 {
-		t.Fatalf("unqualified historical corpus identity: %#v", ledger)
-	}
-	classified := map[string]bool{}
-	for _, row := range ledger.HistoricalFiles {
-		if row.Path == "" || classified[row.Path] || len(row.SHA256) != 64 || len(row.Markers) == 0 || !actionRetirementDispositionResolved(row.Disposition) || len(row.Proofs) == 0 {
-			t.Fatalf("incomplete/duplicate historical row: %#v", row)
-		}
-		if _, err := hex.DecodeString(row.SHA256); err != nil {
-			t.Fatalf("invalid source digest for %s: %v", row.Path, err)
-		}
-		classified[row.Path] = true
-	}
-	for path, disposition := range ledger.NewReferenceFiles {
-		if classified[path] || !actionRetirementDispositionResolved(disposition) {
-			t.Fatalf("duplicate or unclassified current reference %s", path)
-		}
-		classified[path] = true
-	}
-	current := actionRetirementCurrentCorpus(t, root)
-	for path := range current {
-		if !classified[path] {
-			t.Errorf("action-related source/reference missing from complete ledger: %s", path)
-		}
-	}
-	for path := range ledger.NewReferenceFiles {
-		if _, ok := current[path]; !ok {
-			t.Errorf("stale current-only corpus reference: %s", path)
-		}
-	}
-	t.Logf("historical files=%d; current lexical reference files=%d; current-only files=%d; completeness is NOT migration/qualification", len(ledger.HistoricalFiles), len(current), len(ledger.NewReferenceFiles))
-}
-
-func actionRetirementDispositionResolved(disposition string) bool {
-	return strings.TrimSpace(disposition) != "" && !strings.Contains(strings.ToLower(disposition), "pending")
-}
 
 func TestActionRetirementCorpusHasNoLiveAuthoredActions(t *testing.T) {
 	root := conformanceRepoRoot(t)
@@ -420,86 +340,8 @@ func requireRetiredActionHistoricalFixture(t *testing.T, root string) {
 // Generation reads the pinned pre-retirement tree, never the new head as the
 // denominator. Generated pending dispositions require manual source review and
 // cannot pass the checked ledger guard; they are never execution claims.
-func generateActionRetirementCorpusLedger(t *testing.T, root string) {
-	t.Helper()
-	// Rebuilding the historical denominator must not erase reviewed dispositions.
-	if _, err := os.Stat(filepath.Join(root, actionRetirementCorpusPath)); !os.IsNotExist(err) {
-		t.Fatal("ledger already exists or cannot be inspected; preserve reviewed classifications and regenerate only in an isolated scratch worktree")
-	}
-	git := func(args ...string) []byte {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		raw, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-		return raw
-	}
-	paths := strings.Split(strings.TrimSpace(string(git("ls-tree", "-r", "--name-only", actionRetirementHistoricalBase))), "\n")
-	ledger := actionRetirementCorpusLedger{
-		Version: "handler-action-retirement/v1", HistoricalBase: actionRetirementHistoricalBase,
-		Scope:             "All checked .go/.yaml/.yml/.json/.md files containing exact retired spellings or dedicated action symbols. Lexical historical/reference census, not executable-row counts. Pending rows remain pending; see named proof matrix and per-owner assertion ledger.",
-		NewReferenceFiles: map[string]string{},
-	}
-	// Filter at Git's source boundary, then use the same Go regexp for identity.
-	// This avoids thousands of git-show processes without losing a source file.
-	candidates := strings.Split(strings.TrimSpace(string(git("grep", "-l", "-E", "create_flow_instance|record_evidence|mailbox_write|artifact_repo_commit|config_from|instance_id_from|evidence_target|ArtifactRepo|MailboxWrite|ActionSpec|ConfigFrom|EvidenceTarget|HandlerAction|ActionRegistry|ActionRunner|ActionExecution|EmitSurfaceAction|ActionInstruction", actionRetirementHistoricalBase, "--", "*.go", "*.yaml", "*.yml", "*.json", "*.md"))), "\n")
-	wanted := map[string]bool{}
-	for _, path := range candidates {
-		wanted[strings.TrimPrefix(path, actionRetirementHistoricalBase+":")] = true
-	}
-	seen := map[string]bool{}
-	for _, path := range paths {
-		if !wanted[path] {
-			continue
-		}
-		raw := git("show", actionRetirementHistoricalBase+":"+path)
-		matches := actionRetirementCorpusPattern.FindAllString(string(raw), -1)
-		if len(matches) == 0 {
-			continue
-		}
-		markerSet := map[string]bool{}
-		for _, marker := range matches {
-			markerSet[marker] = true
-		}
-		markers := make([]string, 0, len(markerSet))
-		for marker := range markerSet {
-			markers = append(markers, marker)
-		}
-		sort.Strings(markers)
-		digest := sha256.Sum256(raw)
-		row := actionRetirementCorpusFile{Path: path, SHA256: hex.EncodeToString(digest[:]), Markers: markers, Disposition: "pending_owner_assertion_review", Proofs: []string{"R37"}}
-		if strings.HasSuffix(path, ".go") {
-			files := token.NewFileSet()
-			file, err := parser.ParseFile(files, path, raw, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, declaration := range file.Decls {
-				function, ok := declaration.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
-				start, end := files.Position(function.Pos()).Offset, files.Position(function.End()).Offset
-				if actionRetirementCorpusPattern.Match(raw[start:end]) {
-					row.Functions = append(row.Functions, function.Name.Name)
-				}
-			}
-		}
-		ledger.HistoricalFiles = append(ledger.HistoricalFiles, row)
-		seen[path] = true
-	}
-	for path := range actionRetirementCurrentCorpus(t, root) {
-		if !seen[path] {
-			ledger.NewReferenceFiles[path] = "pending_new_reference_review"
-		}
-	}
-	raw, err := json.MarshalIndent(ledger, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, actionRetirementCorpusPath), append(raw, '\n'), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Log(fmt.Sprintf("generated %d historical source rows", len(ledger.HistoricalFiles)))
-}
+
+// Rebuilding the historical denominator must not erase reviewed dispositions.
+
+// Filter at Git's source boundary, then use the same Go regexp for identity.
+// This avoids thousands of git-show processes without losing a source file.

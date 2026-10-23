@@ -382,7 +382,7 @@ func TestWhatsAppRecoveredBusinessStandingRefusalsBothStores(t *testing.T) {
 				if change == "replacement_run_generation" {
 					source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
 					replacement, err := f.selected.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
-						ServiceID: f.standing.ServiceID, FlowPath: f.standing.FlowPath, BindingEnabled: true, Source: source})
+						ServiceID: f.standing.ServiceID, FlowPath: f.standing.FlowPath, BindingEnabled: true, Source: source, RootAdmission: f.rooted.Admission()})
 					if err != nil || replacement.RunID == f.standing.RunID || replacement.Generation == f.standing.Generation {
 						t.Fatal("reset did not produce a distinct run and generation", err)
 					}

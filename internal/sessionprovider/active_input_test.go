@@ -27,6 +27,7 @@ import (
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
@@ -42,6 +43,7 @@ import (
 type activeInputStore interface {
 	sessionInputSelectedStore
 	pipeline.StandingServicePersistence
+	sourceartifactfixture.RootedWriter
 }
 
 type activeInputFixture struct {
@@ -66,6 +68,7 @@ type activeInputFixture struct {
 	activation channelonboarding.ConnectedChannelActivation
 	binding    operatorchannel.Binding
 	standing   pipeline.StandingServiceReconciliation
+	rooted     sourceartifact.RootedSource
 	source     captureSource
 	mu         sync.Mutex
 	scope      captureScope
@@ -102,6 +105,11 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	}
 	ctx, now := context.Background(), time.Now().UTC().Truncate(time.Microsecond)
 	source := sourceartifactfixture.Require(t, ctx, f.selected)
+	f.rooted, _ = sourceartifactfixture.Rooted(t, "session-business", sourceartifactfixture.Artifact())
+	ctx = correlation.WithRootAdmission(ctx, f.rooted.Admission())
+	if _, err := f.selected.EnsureRootedSource(ctx, f.rooted); err != nil {
+		t.Fatal(err)
+	}
 	manifest := sessionInputManifestFixture(t)
 	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
@@ -166,7 +174,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		}
 	}
 	f.peer = newSDKPeer(t)
-	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
+	f.ctx = authoractivity.WithScope(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.rooted.Admission()), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
 	process := worklifetime.NewProcess()
 	f.workOwner, err = process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})
 	if err != nil {
@@ -374,7 +382,7 @@ func (f *activeInputFixture) activate(t *testing.T) {
 	}
 	source := sourceartifactfixture.Require(t, ctx, f.selected)
 	f.standing, err = f.selected.ReconcileStandingService(ctx, pipeline.StandingServiceCandidate{BindingEnabled: f.activation.Status == channelonboarding.ActivationCurrent && f.binding.Status == operatorchannel.BindingCurrent,
-		ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: source})
+		ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: source, RootAdmission: f.rooted.Admission()})
 	if err != nil {
 		t.Fatal(err)
 	}

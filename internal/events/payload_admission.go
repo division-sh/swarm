@@ -94,6 +94,8 @@ func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class Eve
 		reference := ""
 		if eventType == EventTypePlatformRuntimeLog {
 			reference = RuntimeLogSchemaReference
+		} else if eventType == "platform.dead_letter" {
+			reference = DeadLetterSchemaReference
 		} else if joinOccurrencePayloadIdentity(p) {
 			reference = JoinOccurrencePayloadReference
 		} else if stageTimerPayloadIdentity(p) {
@@ -145,6 +147,10 @@ func (b PayloadSchemaBinding) Validate() error {
 		if p.event == EventTypePlatformRuntimeLog {
 			if p.class != EventAdmissionDiagnosticDirect || p.producer.ID() != "runtime" || b.reference != RuntimeLogSchemaReference {
 				return fmt.Errorf("runtime-log payload requires exact platform/runtime reference authority")
+			}
+		} else if p.event == "platform.dead_letter" {
+			if p.class != EventAdmissionRuntimeDiagnostic || b.reference != DeadLetterSchemaReference {
+				return fmt.Errorf("dead-letter payload requires exact catalog reference authority")
 			}
 		} else if joinOccurrencePayloadIdentity(p) {
 			if b.reference != JoinOccurrencePayloadReference {

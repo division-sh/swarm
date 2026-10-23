@@ -76,7 +76,7 @@ func TestIndexedFlowInstanceAuthorityRefusesInvalidProvenanceBothStores(t *testi
 					}
 					args = append(args, raw)
 				case "foreign_run_source":
-					foreign := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# foreign indexed publication source\n"})
+					foreign := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# foreign indexed publication source\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"})
 					rooted, err := foreign.RootedSource()
 					if err != nil {
 						t.Fatal(err)

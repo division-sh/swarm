@@ -146,8 +146,15 @@ func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias stri
 	if err != nil || !found || source.BundleHash() != event.Source.Coordinate.BundleHash {
 		return request, errCaptureScopeChanged
 	}
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil {
+		return request, err
+	}
+	if !present {
+		return request, errCaptureScopeChanged
+	}
 	standing, found, err := store.LoadReconciledStandingService(ctx, pipeline.StandingServiceCandidate{
-		ServiceID: event.Scope.PublicationBinding.ServiceID, FlowPath: target.FlowPath, BindingEnabled: true, Source: source})
+		ServiceID: event.Scope.PublicationBinding.ServiceID, FlowPath: target.FlowPath, BindingEnabled: true, Source: source, RootAdmission: root})
 	if err != nil {
 		return request, err
 	}

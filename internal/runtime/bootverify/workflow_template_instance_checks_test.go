@@ -36,6 +36,7 @@ func TestA9RootConstructorAdmissionUsesSharedOwners(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root, repo := t.TempDir(), repoRootForBootverifyTest(t)
+			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root\ninstance: "+test.key+"\npins:\n  inputs: [account.opened]\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "account.opened:\n  "+test.eventSchema+"\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "account:\n  account_id: text\n  region: text\n  count: {type: integer, initial: 0}\n")
