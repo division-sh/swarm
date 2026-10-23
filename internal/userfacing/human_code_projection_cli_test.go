@@ -290,6 +290,8 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 		"fork.go\x00writeRunForkHuman":                                 {string(userfacing.HumanCodeRunStatus)},
 		"run_command.go\x00writeRunCommandStarted":                     {string(userfacing.HumanCodeRunStatus)},
 		"run_command.go\x00writeRunCommandReattached":                  {string(userfacing.HumanCodeRunStatus)},
+		"run_command.go\x00writeRunCommandStageCounts":                 {string(userfacing.HumanCodeOperationalState)},
+		"run_command.go\x00writeRunEventOutcome":                       {string(userfacing.HumanCodeDeliveryStatus)},
 		"run_command.go\x00Write":                                      {string(userfacing.HumanCodeDeliveryStatus)},
 		"run_command.go\x00writeRunCommandTerminalSummary":             {string(userfacing.HumanCodeRunStatus)},
 		"fan_out.go\x00newRunFanOutCommand":                            {string(userfacing.HumanCodeRunStatus)},
