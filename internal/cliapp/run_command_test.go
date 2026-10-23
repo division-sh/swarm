@@ -60,56 +60,72 @@ func TestRunCommandRequiresRunningServe(t *testing.T) {
 }
 
 func TestRunCommandUsesRunningServeAPITokenFile(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	tokenFile := writeCLIAPITokenFile(t, "serve-token")
-	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"serve_api_token_file": tokenFile,
-	}))
-	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
-	requestRead := make(chan struct{})
-	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
-		expectedToken: "serve-token",
-		strictAuth:    true,
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			switch req.Method {
-			case "health.check":
-				return runCommandHealthResult()
-			case "run.start":
-				return runStartCommandResult("9d4ee136-7965-50e5-9111-821facf546b7", "running")
-			case "run.get", "run.diagnose":
-				awaitRunCommandTraceRequest(t, requestRead)
-				run := validDiagnosticRunHeader("9d4ee136-7965-50e5-9111-821facf546b7")
-				run["status"] = "completed"
-				run["ended_at"] = "2026-05-13T10:01:00Z"
-				return runCommandReadResult(req.Method, run)
-			default:
-				t.Fatalf("unexpected method = %q", req.Method)
+	for _, explicit := range []bool{false, true} {
+		name := "serve_config_fallback"
+		if explicit {
+			name = "explicit_client_token_wins"
+		}
+		t.Run(name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			tokenFile := writeCLIAPITokenFile(t, "serve-token")
+			configuredTokenFile := tokenFile
+			if explicit {
+				configuredTokenFile = writeCLIAPITokenFile(t, "other-config-token")
 			}
-			return nil
-		},
-		wsRows:        []map[string]any{validRunCommandTraceRow("evt-token-file")},
-		wsRequestRead: requestRead,
-	})
-	defer server.Close()
+			t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+				"serve_api_token_file": configuredTokenFile,
+			}))
+			payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
+			requestRead := make(chan struct{})
+			server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+				expectedToken: "serve-token",
+				strictAuth:    true,
+				rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+					switch req.Method {
+					case "health.check":
+						return runCommandHealthResult()
+					case "run.start":
+						return runStartCommandResult("9d4ee136-7965-50e5-9111-821facf546b7", "running")
+					case "run.get", "run.diagnose":
+						awaitRunCommandTraceRequest(t, requestRead)
+						run := validDiagnosticRunHeader("9d4ee136-7965-50e5-9111-821facf546b7")
+						run["status"] = "completed"
+						run["ended_at"] = "2026-05-13T10:01:00Z"
+						return runCommandReadResult(req.Method, run)
+					default:
+						t.Fatalf("unexpected method = %q", req.Method)
+					}
+					return nil
+				},
+				wsRows:        []map[string]any{validRunCommandTraceRow("evt-token-file")},
+				wsRequestRead: requestRead,
+			})
+			defer server.Close()
 
-	opts := testRunCommandOptions(server)
-	var serveCalled atomic.Int32
-	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
-		serveCalled.Add(1)
-		t.Error("run start must use the existing serve")
-		return 1
-	}
+			opts := testRunCommandOptions(server)
+			var serveCalled atomic.Int32
+			opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
+				serveCalled.Add(1)
+				t.Error("run start must use the existing serve")
+				return 1
+			}
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", ".", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
-	if code != 0 {
-		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			var stdout, stderr bytes.Buffer
+			args := []string{"run", "start", ".", "--event", "scan.requested", "--payload", payloadPath}
+			if explicit {
+				args = append(args, "--api-token-file", tokenFile)
+			}
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
+			if code != 0 {
+				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if serveCalled.Load() != 0 {
+				t.Fatalf("serve called = %d, want 0", serveCalled.Load())
+			}
+			assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.diagnose"})
+			assertRunCommandTraceSubscription(t, wsRequests, "9d4ee136-7965-50e5-9111-821facf546b7", true)
+		})
 	}
-	if serveCalled.Load() != 0 {
-		t.Fatalf("serve called = %d, want 0", serveCalled.Load())
-	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.diagnose"})
-	assertRunCommandTraceSubscription(t, wsRequests, "9d4ee136-7965-50e5-9111-821facf546b7", true)
 }
 
 func awaitRunCommandTraceRequest(t *testing.T, requestRead <-chan struct{}) {
