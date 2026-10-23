@@ -51,9 +51,11 @@ func TestFanOutSharedServingAcrossRealBundleGrantsOnBothBackends(t *testing.T) {
 			runIDs := []string{uuid.NewString(), uuid.NewString()}
 			for i, runtime := range runtimes {
 				ctx := correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), runIDs[i])
-				if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "shared-fan-out", runtime.sourceArtifactFact)); err != nil {
+
+				if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "shared-fan-out", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
 					t.Fatalf("run bundle %d manager: %v", i, err)
 				}
+
 				publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, sources[i], runIDs[i], "portfolio.opened", map[string]any{"portfolio_id": "shared", "threshold": 75})
 				row := map[string]any{"account_id": "shared-account", "eng_roles": i + 1, "gem_score": 8.25}
 				if i == 1 {

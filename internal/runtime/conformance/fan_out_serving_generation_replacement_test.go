@@ -48,9 +48,11 @@ func TestFanOutServingM06SameBundleGenerationReplacementOnBothBackends(t *testin
 			default:
 				t.Fatal("same-bundle replacement left predecessor grant executable")
 			}
-			if err := replacement.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-same-bundle-successor", replacement.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-same-bundle-successor", replacement.sourceArtifactFact), replacement.bus, replacement.manager); err != nil {
 				t.Fatalf("start exact same-bundle successor manager: %v", err)
 			}
+
 			join := beginServingLifetimeJoin(f.runtimes[0], nil)
 			assertServingJoinBlocked(t, join)
 			replacement.fanOutServing.Wake()
