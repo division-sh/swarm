@@ -633,6 +633,9 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 			if !matched {
 				return nil, managedexecution.Admission{}, errors.New("selected flow agent has no admitted activation attempt")
 			}
+			if req.Prepared.recoveryFromExecutionID != "" {
+				continue
+			}
 		}
 		var materializeErr error
 		if req.Prepared.recoveryFromExecutionID != "" && rec.Topology.Authority.Kind == runtimeagenttopology.AuthoritySelectedForkDeclarationPlan {
@@ -690,6 +693,11 @@ func (r *selectedContractAgentRuntime) startExecution(ctx context.Context, pipel
 		activation := r.pendingActivations[0]
 		if err := r.manager.AdoptSelectedFlowActivation(ctx, activation.identity, activation.attempt, activation.timersProjected); err != nil {
 			return err
+		}
+		if recoverTopology {
+			if err := r.manager.PrepareAdmittedDynamicFlowInstanceForStart(topologyCtx, activation.identity); err != nil {
+				return fmt.Errorf("restore selected flow agents %s: %w", activation.identity.Route.InstancePath, err)
+			}
 		}
 		r.pendingActivations = r.pendingActivations[1:]
 	}
