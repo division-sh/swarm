@@ -83,6 +83,7 @@ type diagnosticRunGetResult struct {
 
 type DiagnosticRunDiagnosisResult struct {
 	Run              diagnosticRunHeader                         `json:"run"`
+	NextWakeAt       *time.Time                                  `json:"next_wake_at,omitempty"`
 	OperationalState *string                                     `json:"operational_state"`
 	BlockingLayer    *string                                     `json:"blocking_layer"`
 	BlockingReason   *string                                     `json:"blocking_reason"`
@@ -1054,6 +1055,9 @@ func validateDiagnosticRunListResult(result diagnosticRunListResult) error {
 }
 
 func validateDiagnosticRunDiagnosis(result DiagnosticRunDiagnosisResult) error {
+	if result.NextWakeAt != nil && result.NextWakeAt.IsZero() {
+		return fmt.Errorf("malformed run.diagnose result: next_wake_at must be a nonzero timestamp")
+	}
 	if err := validateDiagnosticRunHeader("run", result.Run); err != nil {
 		return err
 	}

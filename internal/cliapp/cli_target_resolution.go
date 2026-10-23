@@ -132,7 +132,7 @@ func resolveCLIAPITokenForTarget(opts rootCommandOptions, cfg cliCommandConfig, 
 	if err != nil {
 		return cliAPITokenResolution{}, err
 	}
-	return cliAPITokenResolution{token: token, source: "context descriptor " + target.descriptor.Auth.Mode}, nil
+	return cliAPITokenResolution{token: token, tokenFile: target.descriptor.Auth.TokenFile, source: "context descriptor " + target.descriptor.Auth.Mode}, nil
 }
 
 func cliAPIContextResolutionError(prefix string, entry localContextEntry) error {

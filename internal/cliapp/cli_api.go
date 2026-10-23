@@ -146,6 +146,8 @@ func processStdinIsTerminal() bool {
 type cliAPIClient struct {
 	endpoint   string
 	token      string
+	tokenFile  string
+	configPath string
 	target     cliAPITargetResolution
 	httpClient *http.Client
 }
@@ -159,12 +161,14 @@ func newCLIAPIClient(opts rootCommandOptions) (*cliAPIClient, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &cliAPIClient{endpoint: settings.rpcEndpoint, token: settings.token, target: settings.target, httpClient: client}, nil
+	return &cliAPIClient{endpoint: settings.rpcEndpoint, token: settings.token, tokenFile: settings.tokenFile, configPath: settings.configPath, target: settings.target, httpClient: client}, nil
 }
 
 type cliAPISettings struct {
 	rpcEndpoint   string
 	token         string
+	tokenFile     string
+	configPath    string
 	tokenSource   string
 	tokenExplicit bool
 	target        cliAPITargetResolution
@@ -216,11 +220,15 @@ func (e *cliAPIAuthConfigError) Error() string {
 
 func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
 	opts = opts.ensureRootFlagState()
-	cfg, err := loadCLICommandConfigWithOptions(opts.unifiedConfigLoadOptions())
+	loaded, err := loadUnifiedConfig(opts.unifiedConfigLoadOptions())
 	if err != nil {
 		return cliAPISettings{}, err
 	}
-	return resolveCLIAPISettingsFromConfig(opts, cfg)
+	settings, err := resolveCLIAPISettingsFromConfig(opts, loaded.CLI)
+	if loaded.sourcePresent != nil && *loaded.sourcePresent {
+		settings.configPath = loaded.Path
+	}
+	return settings, err
 }
 
 func resolveCLIAPISettingsFromConfig(opts rootCommandOptions, cfg cliCommandConfig) (cliAPISettings, error) {
@@ -236,13 +244,14 @@ func resolveCLIAPISettingsFromConfig(opts rootCommandOptions, cfg cliCommandConf
 	if err != nil {
 		return cliAPISettings{}, err
 	}
-	return cliAPISettings{rpcEndpoint: target.rpcEndpoint, token: token.token, tokenSource: token.source, tokenExplicit: token.explicit, target: target}, nil
+	return cliAPISettings{rpcEndpoint: target.rpcEndpoint, token: token.token, tokenFile: token.tokenFile, tokenSource: token.source, tokenExplicit: token.explicit, target: target}, nil
 }
 
 type cliAPITokenResolution struct {
-	token    string
-	source   string
-	explicit bool
+	token     string
+	tokenFile string
+	source    string
+	explicit  bool
 }
 
 func resolveCLIAPIToken(opts rootCommandOptions, cfg cliCommandConfig, rpcEndpoint string) (cliAPITokenResolution, error) {
@@ -371,7 +380,7 @@ func readCLIAPIExplicitTokenFile(root InvocationRoot, tokenFile, source string) 
 	if err != nil {
 		return cliAPITokenResolution{}, err
 	}
-	return cliAPITokenResolution{token: token, source: source, explicit: true}, nil
+	return cliAPITokenResolution{token: token, tokenFile: root.Resolve(tokenFile), source: source, explicit: true}, nil
 }
 
 func cliAPIRPCEndpointAllowsDefaultToken(endpoint string) bool {

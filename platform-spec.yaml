@@ -34587,6 +34587,9 @@ api_specification:
         - instances
         - attributions
         properties:
+          next_wake_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Earliest active timer due from the same canonical run timer-obligation snapshot. Future wakes are shown by the CLI, never awaited by test quiescence.
           run:
             $ref: '#/components/schemas/RunHeader'
           operational_state:

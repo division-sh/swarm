@@ -608,9 +608,33 @@ jobs:
           go test ./internal/runtime/workspace -run '^TestWorkerRealDocker' -count=1 -timeout=2m -v
       - name: Prove no-selector SQLite local run
         run: |
+          set -euo pipefail
           payload=$(mktemp)
+          serve_log=$(mktemp)
+          swarm_dir=$(mktemp -d)
+          ./swarm --swarm-dir "$swarm_dir" serve examples/routing/root-ingress \
+            --dev --api-port 18091 --mcp-port 18092 >"$serve_log" 2>&1 &
+          serve_pid=$!
+          cleanup() {
+            result=$?
+            trap - EXIT
+            kill -TERM "$serve_pid" 2>/dev/null || true
+            if ! wait "$serve_pid"; then result=1; fi
+            if [ "$result" -ne 0 ]; then cat "$serve_log"; fi
+            rm -f "$payload" "$serve_log"
+            rm -rf "$swarm_dir"
+            exit "$result"
+          }
+          trap cleanup EXIT
+          deadline=$((SECONDS + 30))
+          until curl --fail --silent http://127.0.0.1:18091/readyz >/dev/null; do
+            if ! kill -0 "$serve_pid" 2>/dev/null || [ "$SECONDS" -ge "$deadline" ]; then
+              exit 1
+            fi
+            sleep 0.25
+          done
           printf '{"item_id":"smoke-item"}\n' > "$payload"
-          ./swarm run start examples/routing/root-ingress \
+          ./swarm --swarm-dir "$swarm_dir" run start examples/routing/root-ingress \
             --event item.received \
             --payload "$payload" \
             --api-port 18091

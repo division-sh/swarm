@@ -191,10 +191,11 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.eventName, "event", "", "Declared event name to publish as the run trigger")
 	cmd.Flags().StringVar(&opts.payloadPath, "payload", "", "Path to JSON object payload file")
 	cmd.Flags().StringVar(&opts.connectURL, "connect", "", "Existing Swarm API base URL")
+	bindCLIAPITokenFileFlag(cmd, &opts.apiOptions)
 	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Print publication receipts and available row outcomes without waiting for run quiescence")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", defaultRunCommandTimeout, "Maximum time to follow after publication; 0 waits indefinitely; expiry never cancels work")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
-	cmd.Flags().StringVar(&opts.configPath, "config", "", deploymentConfigFlagHelp+" (local foreground only)")
+	cmd.Flags().StringVar(&opts.configPath, "config", "", deploymentConfigFlagHelp)
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Fused immutable data import and pin: name=file.jsonl (repeatable)")
 	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Exact data version pin: name@head, name@vN, or name@ResourceVersionID (repeatable)")
@@ -277,7 +278,7 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
-		writeRunCommandNoFollowGuidance(out, start.RunID, opts.connectURL)
+		writeRunCommandNoFollowGuidance(out, start.RunID, client)
 		if rejected {
 			return commandExitError{code: cliExitConflict}
 		}
@@ -329,7 +330,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"config", "backend", "data", "pin", "api-port", "mcp-port"} {
+		for _, flag := range []string{"backend", "data", "pin", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -340,7 +341,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.sourceRoot) != "" {
 			return fmt.Errorf("a source directory requires local foreground mode and cannot be used with --connect")
 		}
-		for _, flag := range []string{"config", "backend", "api-port", "mcp-port"} {
+		for _, flag := range []string{"backend", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}
@@ -803,7 +804,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 			ReasonCode:      det.reason,
 			RunID:           runID,
 			RunContinues:    true,
-			ReattachCommand: runCommandReattachGuidance(runID, opts.connectURL),
+			ReattachCommand: runCommandReattachGuidance(runID, client),
 			Message:         det.message,
 		})
 		detached = nil
@@ -823,7 +824,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		if lastDiagnosis != nil {
 			writeRunCommandStageCounts(out, *lastDiagnosis)
 		}
-		return writeRunCommandTimeout(errOut, runID, opts.connectURL)
+		return writeRunCommandTimeout(errOut, runID, client)
 	}
 	for {
 		select {
@@ -941,6 +942,9 @@ func writeRunCommandStageCounts(out io.Writer, diagnosis DiagnosticRunDiagnosisR
 		parts = append(parts, fmt.Sprintf("%d %s", counts[label], label))
 	}
 	parts = append(parts, fmt.Sprintf("%d live", live))
+	if diagnosis.NextWakeAt != nil {
+		parts = append(parts, "next wake "+diagnosis.NextWakeAt.UTC().Format(time.RFC3339Nano))
+	}
 	fmt.Fprintf(out, "Run %s: %s\n", diagnosis.Run.RunID, strings.Join(parts, " | "))
 }
 
@@ -1474,27 +1478,50 @@ func writeRunEventOutcome(ctx context.Context, client *cliAPIClient, out io.Writ
 	return refused, nil
 }
 
-func writeRunCommandNoFollowGuidance(out io.Writer, runID, connectURL string) {
+func writeRunCommandNoFollowGuidance(out io.Writer, runID string, client *cliAPIClient) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "reattach: %s\n", runCommandReattachGuidance(runID, connectURL))
+	fmt.Fprintf(out, "reattach: %s\n", runCommandReattachGuidance(runID, client))
 }
 
-func writeRunCommandTimeout(out io.Writer, runID, connectURL string) error {
-	command := "swarm run status " + runID
-	if connectURL != "" {
-		command += " --api-server " + connectURL
-	}
+func writeRunCommandTimeout(out io.Writer, runID string, client *cliAPIClient) error {
+	server, auth := runCommandGuidanceSelection(client)
+	command := "swarm run status " + runID + " --api-server " + server + auth
 	fmt.Fprintf(out, "Timed out waiting for run %s; work continues. Check: %s\n", runID, command)
 	return commandExitError{code: cliExitRunTimeout}
 }
 
-func runCommandReattachGuidance(runID, connectURL string) string {
-	if connect := strings.TrimSpace(connectURL); connect != "" {
-		return fmt.Sprintf("swarm run start --connect %s --reattach %s", connect, runID)
+func runCommandReattachGuidance(runID string, client *cliAPIClient) string {
+	server, auth := runCommandGuidanceSelection(client)
+	return fmt.Sprintf("swarm run start --connect %s --reattach %s%s", server, runID, auth)
+}
+
+func runCommandGuidanceSelection(client *cliAPIClient) (string, string) {
+	endpoint, err := url.Parse(client.endpoint)
+	if err != nil {
+		return "", ""
 	}
-	return fmt.Sprintf("swarm run start --reattach %s", runID)
+	endpoint.User = nil
+	endpoint.Path = strings.TrimSuffix(endpoint.Path, cliAPIRPCPath)
+	endpoint.RawPath, endpoint.RawQuery, endpoint.Fragment = "", "", ""
+	flags := ""
+	for _, flag := range []struct{ name, value string }{
+		{"--config", client.configPath},
+		{"--api-token-file", client.tokenFile},
+	} {
+		if flag.value != "" {
+			flags += " " + flag.name + " " + runCommandQuoteArgument(flag.value)
+		}
+	}
+	return runCommandQuoteArgument(endpoint.String()), flags
+}
+
+func runCommandQuoteArgument(value string) string {
+	if value != "" && !strings.ContainsAny(value, " \t\r\n'\"\\`$&;|<>*?()[]{}!#~") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func writeRunTraceObserverDetached(out io.Writer, fact runTraceObserverDetachedFact) {
