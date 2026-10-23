@@ -170,14 +170,14 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 		t.Fatalf("default SQLite store was not created under the selected source root: %v", err)
 	}
 
+	if err := process.stopAndWait(goldenShutdownGrace); err != nil {
+		t.Fatalf("release serve shutdown: %v\n%s", err, process.output.String())
+	}
 	records := readFakeDockerRecords(t, fakeRoot)
 	if log := fakeDockerLogText(t, fakeRoot); strings.Contains(log, secret) {
 		t.Fatalf("fake Docker evidence leaked credential value:\n%s", log)
 	}
 	assertReleaseDockerEvidence(t, records)
-	if err := process.stopAndWait(goldenShutdownGrace); err != nil {
-		t.Fatalf("release serve shutdown: %v\n%s", err, process.output.String())
-	}
 	assertReleaseExternalProcessesExited(t, fakeRoot)
 	assertReleaseProjectionWorkspacesReleased(t, fakeRoot, records)
 }
