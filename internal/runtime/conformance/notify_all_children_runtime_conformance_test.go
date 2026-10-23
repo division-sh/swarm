@@ -59,7 +59,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
+
 	"github.com/google/uuid"
 )
 
@@ -842,7 +842,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 func assertNotifyAllChildrenRunEventCount(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
 	var stored, actual int
-	err := db.QueryRowContext(ctx, `SELECT r.event_count, (SELECT COUNT(*) FROM events e WHERE e.run_id = r.run_id) FROM runs r WHERE r.run_id = $1`, runID).Scan(&stored, &actual)
+	err := db.QueryRowContext(ctx, `SELECT c.event_count, (SELECT COUNT(*) FROM events e WHERE e.run_id = c.run_id) FROM run_event_counts c WHERE c.run_id = $1`, runID).Scan(&stored, &actual)
 	if err != nil {
 		t.Fatalf("read run event counter: %v", err)
 	}
@@ -2144,12 +2144,6 @@ func newNotifyAllChildrenRuntime(
 	if !ok || bundle == nil {
 		t.Fatal("notify-all-children runtime requires a bundle-backed source")
 	}
-	storetest.RequireBundleDataCatalog(
-		t,
-		testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact),
-		backend,
-		bundle,
-	)
 	if opts.processTopology == nil {
 		opts.processTopology = newNotifyAllChildrenProcessTopology(
 			t,
@@ -2157,6 +2151,15 @@ func newNotifyAllChildrenRuntime(
 			backend,
 		)
 	}
+	original, err := opts.processTopology.capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := conformanceTestProcessOwner(t)
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	storetest.RequireBundleDataCatalog(t, testAuthorActivityContextForBundle(worklifetime.WithProcess(context.Background(), process), sourceArtifactFact), backend, bundle)
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	workOwner := conformanceTestRuntimeOccurrence(t, sourceArtifactFact.BundleHash())
@@ -2442,38 +2445,7 @@ func newNotifyAllChildrenRuntime(
 	coordinator.InstallFanOutWorkNotifier(fanOutRegistration)
 	t.Cleanup(fanOutRegistration.Close)
 	if opts.enableGenericSchedules {
-		candidateOwner, ok := backend.(runtimerunlifecycle.CandidateOwner)
-		if !ok {
-			t.Fatalf("notify-all-children store %T does not implement run lifecycle candidates", backend)
-		}
-		executor, err := runtimerunlifecycle.NewExecutor(
-			candidateOwner,
-			runtimerunlifecycle.CandidateScope{BundleHash: sourceArtifactFact.BundleHash()},
-			notifyAllChildrenTerminalCatalog(source),
-			workOwner,
-			runtimerunlifecycle.ExecutorOptions{GenericSchedules: genericSchedules},
-		)
-		if err != nil {
-			t.Fatalf("construct notify-all-children completion executor: %v", err)
-		}
-		runtimeCtx := worklifetime.WithRuntimeOccurrence(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), workOwner)
-		registration, err := candidateOwner.RegisterCompletionCandidateSink(
-			runtimeCtx,
-			runtimerunlifecycle.CandidateScope{BundleHash: sourceArtifactFact.BundleHash()},
-			executor,
-		)
-		if err != nil {
-			t.Fatalf("register notify-all-children completion executor: %v", err)
-		}
-		if err := executor.Start(runtimeCtx); err != nil {
-			registration.Release()
-			t.Fatalf("start notify-all-children completion executor: %v", err)
-		}
 		t.Cleanup(func() {
-			if err := executor.Retire(context.Background()); err != nil {
-				t.Errorf("retire notify-all-children completion executor: %v", err)
-			}
-			registration.Release()
 			if err := genericSchedules.Stop(context.Background()); err != nil {
 				t.Errorf("stop notify-all-children generic schedules: %v", err)
 			}
@@ -2500,22 +2472,6 @@ func newNotifyAllChildrenRuntime(
 		workOwner: workOwner, selected: backend, sourceArtifactFact: sourceArtifactFact, genericSchedules: genericSchedules,
 		fanOutServing: fanOutRegistration,
 	}
-}
-
-func notifyAllChildrenTerminalCatalog(source semanticview.Source) runtimerunlifecycle.FinalCatalog {
-	workflow := source.FlowFinalStages(semanticview.RootExecutionFlowID(source))
-	flows := make(map[string][]string)
-	for flowID := range source.FlowSchemaEntries() {
-		states := source.FlowFinalStages(flowID)
-		if len(states) == 0 {
-			continue
-		}
-		flows[flowID] = states
-		if path := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"); path != "" {
-			flows[path] = states
-		}
-	}
-	return stagecatalogfixture.NewFinalCatalog(workflow, flows)
 }
 
 func loadNotifyAllChildrenAgentsByID(
