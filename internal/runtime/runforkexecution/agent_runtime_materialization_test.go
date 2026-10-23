@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -110,22 +109,6 @@ func selectedContractTestProcessCapability(
 	if selected == nil {
 		t.Fatal("selected-contract topology fixture requires a selected store")
 	}
-	_ = runForkTestContext(t)
-	value, _ := runForkTestWorkFixtures.Load(t)
-	fixture := value.(*runForkTestWorkFixture)
-	fixture.mu.Lock()
-	defer fixture.mu.Unlock()
-	db := storetest.Database(selected)
-	if capability := fixture.capabilities[db]; capability != nil {
-		select {
-		case <-capability.Done():
-		default:
-			if err := capability.ProveCurrent(ctx); err != nil {
-				t.Fatal(err)
-			}
-			return capability
-		}
-	}
 	native, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("selected-contract fixture requires its native lifecycle owner: %T", selected)
@@ -134,15 +117,6 @@ func selectedContractTestProcessCapability(
 	if err != nil {
 		t.Fatalf("acquire selected-contract process capability: %v", err)
 	}
-	if fixture.capabilities == nil {
-		fixture.capabilities = make(map[*sql.DB]runtimestartupownership.ProcessCapability)
-	}
-	fixture.capabilities[db] = capability
-	t.Cleanup(func() {
-		if err := capability.Release(context.Background()); err != nil {
-			t.Errorf("release selected-contract process capability: %v", err)
-		}
-	})
 	return capability
 }
 

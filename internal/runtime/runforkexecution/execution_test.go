@@ -149,7 +149,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			entityID := uuid.NewString()
 			seedSelectedExecutionSourceRunWithPrimaryRoute(
 				t,
-				pg,
+				pg, db,
 				sourceRunID,
 				entityID,
 				sourceEventID,
@@ -534,7 +534,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					t.Fatalf("construct state-only joined receiver: %+v %v", committed, err)
 				}
 			} else if test.stateOnly {
-				seedSelectedExecutionStateOnlySourceRun(t, pg, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
+				seedSelectedExecutionStateOnlySourceRun(t, pg, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
 			} else {
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: sourceRunID, EntityID: sourceRunID})
@@ -3697,7 +3697,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	at := time.Unix(1700002215, 0).UTC()
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
-	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
+	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, originalSelectedFixtureContext(t, ctx, pg), db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3905,7 +3905,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
-	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
+	seedSelectedExecutionPostForkSourceEvent(t, originalSelectedFixtureContext(t, ctx, pg), db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
 	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, "replay_scope_direct", at.Add(time.Second))
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID,
 		runforkrevision.FamilyEvents,
@@ -5327,7 +5327,7 @@ func selectedExecutionFixtureAgentConfig(t testing.TB, identity agentidentity.Id
 
 func seedSelectedExecutionStateOnlySourceRun(
 	t *testing.T,
-	selected *store.PostgresStore,
+	selected *store.PostgresStore, db *sql.DB,
 	sourceRunID, sourceEventID, eventName string,
 	at time.Time,
 	sourceFacts ...runtimecorrelation.SourceArtifactFact,
@@ -5343,7 +5343,6 @@ func seedSelectedExecutionStateOnlySourceRun(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
-	db := storetest.Database(selected)
 	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
 	ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, selectedContractTestProcessCapability(t, ctx, selected))
 	if err != nil {
@@ -5377,7 +5376,7 @@ func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
 
 func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	t *testing.T,
-	selected *store.PostgresStore,
+	selected *store.PostgresStore, db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
 	entityType string,
@@ -5390,7 +5389,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	routingSource := events.NoRoutingSource()
 	envelope := events.EventEnvelope{}
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
-		t, selected, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
+		t, selected, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
 	)
 }
@@ -5402,7 +5401,7 @@ type selectedExecutionInputFixture struct {
 
 func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	t *testing.T,
-	selected *store.PostgresStore,
+	selected *store.PostgresStore, db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
 	entityType string,
@@ -5429,7 +5428,6 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
-	db := storetest.Database(selected)
 	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
 	if len(input.payload) != 0 {
@@ -5544,9 +5542,8 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 	}
 }
 
-func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, sourceRunID, diagnosticEventID string, at time.Time) {
+func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, diagnosticEventID string, at time.Time) {
 	t.Helper()
-	ctx := originalSelectedFixtureContext(t, runForkTestContext(t), storetest.AdmitPostgresRuntimeStore(t, db))
 	payload, _ := json.Marshal(map[string]any{
 		"level":   "info",
 		"message": "diagnostic platform row must remain lineage-only",
@@ -5587,9 +5584,8 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 	}
 }
 
-func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
+func seedSelectedExecutionPostForkSourceEvent(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
-	ctx := originalSelectedFixtureContext(t, runForkTestContext(t), storetest.AdmitPostgresRuntimeStore(t, db))
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, sourceEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
