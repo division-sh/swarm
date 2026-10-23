@@ -18,7 +18,6 @@ var preflightCandidates = []TestRoot{
 	preflightRoot("internal/runtime/conformance", "TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified"),
 	preflightRoot("internal/runtime/manager", "TestDynamicFlowRuntimeReadinessProductionConsumersStatic"),
 	preflightRoot("internal/testplanning", "TestCurrentProofPlansBindActiveRequiredRoots"),
-	preflightRoot("scripts/rewrite-stages-2566", "TestRewrite2566NoFinalRootCensusIsExplicitlyClassified"),
 	preflightRoot("internal/store", "TestPersistenceAuthorityFindingRegistry"),
 	preflightRoot("internal/store", "TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority"),
 	preflightRoot("internal/store", "TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource"),
