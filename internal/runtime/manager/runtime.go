@@ -2100,6 +2100,9 @@ func agentDeliveryExecutionContext(
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(deliveryCtx)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(deliveryCtx)
 	ctx, cleanup := eventreceiver.NewContext(deliveryCtx)
+	if process, found := worklifetime.ProcessFromContext(deliveryCtx); found {
+		ctx = worklifetime.WithProcess(ctx, process)
+	}
 	fail := func(err error) (context.Context, func(), error) {
 		cleanup()
 		return nil, nil, err
@@ -2129,9 +2132,6 @@ func agentDeliveryExecutionContext(
 		}
 		if admission, found := managedexecution.FromContext(loopCtx); found {
 			ctx = managedexecution.WithAdmission(ctx, admission)
-		}
-		if process, found := worklifetime.ProcessFromContext(loopCtx); found {
-			ctx = worklifetime.WithProcess(ctx, process)
 		}
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)

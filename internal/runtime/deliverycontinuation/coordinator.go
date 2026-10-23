@@ -807,17 +807,16 @@ func (c *Coordinator) beginDispatchWork(ctx context.Context) (*worklifetime.Leas
 	return c.workOwner.Begin(ctx)
 }
 
-func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration, bool, error) {
+func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Duration, shouldWake bool, resultErr error) {
 	if c.selectedReconcile != nil {
 		lease, err := c.beginDispatchWork(ctx)
 		if err != nil {
 			return 0, false, err
 		}
-		err = func() (err error) {
-			defer func() { err = errors.Join(err, lease.Done()) }()
-			return c.selectedReconcile(lease.Context())
-		}()
-		if err != nil {
+		// Keep the recovered work and its delivery handoff in one finite reach.
+		defer func() { resultErr = errors.Join(resultErr, lease.Done()) }()
+		ctx = lease.Context()
+		if err := c.selectedReconcile(ctx); err != nil {
 			return 0, false, err
 		}
 	}
