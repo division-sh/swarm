@@ -109,9 +109,9 @@ func listWorkflowTimerActivations(ctx context.Context, db dynamicFlowReadinessQu
 	runID = strings.TrimSpace(runID)
 	entityID = strings.TrimSpace(entityID)
 	activeStates := runtimerunlifecycle.ActiveStates()
-	args := []any{runID, entityID, string(activeStates[0]), string(activeStates[1])}
+	args := []any{runID, entityID, string(activeStates[0]), string(activeStates[1]), string(activeStates[2])}
 	if sqlite {
-		args = []any{runID, runID, entityID, entityID, string(activeStates[0]), string(activeStates[1])}
+		args = []any{runID, runID, entityID, entityID, string(activeStates[0]), string(activeStates[1]), string(activeStates[2])}
 	}
 	if activeOnly {
 		query += " AND t.status = 'active'"
@@ -151,9 +151,9 @@ func workflowTimerActivationSelect(list, sqlite bool) string {
 	}
 	if list {
 		if sqlite {
-			where = "(? = '' OR t.run_id = ?) AND (? = '' OR t.entity_id = ?) AND t.task_type = 'workflow_timer' AND run.status IN (?, ?)"
+			where = "(? = '' OR t.run_id = ?) AND (? = '' OR t.entity_id = ?) AND t.task_type = 'workflow_timer' AND run.status IN (?, ?, ?)"
 		} else {
-			where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND t.task_type = 'workflow_timer' AND run.status IN ($3, $4)"
+			where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND t.task_type = 'workflow_timer' AND run.status IN ($3, $4, $5)"
 		}
 	}
 	return workflowTimerSelectColumns() + " WHERE " + where

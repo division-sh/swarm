@@ -21088,7 +21088,9 @@ platform_tables:
       ddl: |-
         CREATE TABLE runs (
             run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled', 'forked')),
+            status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'live', 'paused', 'completed', 'failed', 'cancelled', 'forked')),
+            deployment        TEXT,
+            flow_path         TEXT,
             bundle_hash        TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             origin_kind        TEXT NOT NULL CHECK (origin_kind IN ('event', 'deployment', 'scenario_setup', 'standing_generation', 'fork_materialization')),
             trigger_event_id   UUID,
@@ -21111,6 +21113,9 @@ platform_tables:
             CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),
             CHECK (completion_due_at IS NULL OR completion_revision > 0),
             CHECK (status = 'running' OR completion_due_at IS NULL),
+            CHECK ((deployment IS NULL AND flow_path IS NULL) OR (NULLIF(TRIM(deployment), '') IS NOT NULL AND NULLIF(TRIM(flow_path), '') IS NOT NULL)),
+            CHECK (status <> 'live' OR (deployment IS NOT NULL AND flow_path IS NOT NULL)),
+            UNIQUE INDEX idx_runs_live_flow (deployment, flow_path) WHERE status = 'live',
             INDEX idx_runs_status (status, started_at),
             INDEX idx_runs_completion_candidates (bundle_hash, completion_due_at, run_id) WHERE completion_due_at IS NOT NULL,
             INDEX idx_runs_standing_origin (origin_service_id, origin_generation) WHERE origin_kind = 'standing_generation',
@@ -21125,7 +21130,13 @@ platform_tables:
           readback use UTC microsecond precision admitted by the typed run-lifecycle owner before validation,
           persistence, or exact replay comparison. PostgreSQL statement time and the selected SQLite store clock are
           the backend time authorities; backend timestamp coercion is never semantic policy.
-        running: Active execution. Events being processed.
+        live: The sole live run for its durable deployment and flow_path. The partial unique index is the claim fence.
+          Only the run-lifecycle transaction creates or changes live selection. Ingress, timers and schedules consume
+          that row through their existing context and scheduling owners; bundle hashes, process pointers and standing
+          service current-run fields are not selectors. A fork fences outgoing admissions and settles or parks accepted
+          work before one transaction pauses the currently live sibling and selects the child. Rollback and lost-ACK
+          recovery preserve the committed selection. A live run is not normally completed when its instances settle.
+        running: Active isolated execution. Events being processed; this status is not deployment live-selection authority.
         paused: Execution suspended (budget threshold, admin action). Resumable.
         completed: All pipelines reached terminal states or idle. No in-flight events.
         failed: Unrecoverable error. Run cannot continue.
@@ -21139,6 +21150,10 @@ platform_tables:
           postgres: Hard status/failure and status/ended_at constraints installed by the canonical failure migration owner.
           sqlite: Equivalent fail-closed insert/update triggers installed by the canonical failure migration owner because the shared DDL translator does not interpret table-level named checks.
         status_matrix:
+          live:
+            failure: forbidden
+            ended_at: forbidden
+            control_reason: optional last continue/control transition evidence only
           running:
             failure: forbidden
             ended_at: forbidden
@@ -33947,6 +33962,7 @@ api_specification:
       RunStatus:
         type: string
         enum:
+        - live
         - running
         - paused
         - completed
@@ -39470,6 +39486,16 @@ api_specification:
           flow_id: {type: string}
           detail: {type: string}
         description: Finite run.start requires an explicit final stage in every instance-bearing flow of its canonical constructor/routing closure. A no-final service remains valid for serve.
+      RUN_FLOW_ALREADY_LIVE:
+        type: object
+        additionalProperties: false
+        required: [run_id, live_run_id, deployment, flow_path]
+        properties:
+          run_id: {$ref: '#/components/schemas/OpaqueId'}
+          live_run_id: {$ref: '#/components/schemas/OpaqueId'}
+          deployment: {type: string}
+          flow_path: {type: string}
+        description: Pause the named live sibling before continuing this run. The partial unique index owns refusal; no second claim check is performed.
       RUN_NOT_PAUSED:
         type: object
         additionalProperties: false
@@ -40513,6 +40539,7 @@ api_specification:
         cannot resurrect abandoned work. The committed response reports timer projection recovery as complete,
         pending in the family lifecycle recovery loops, or failed with a diagnostic. Idempotent replay returns that
         exact response and never repeats the committed stop.
+        A live deployment/flow run must be paused first; run.stop refuses RUN_NOT_PAUSED while it is live.
       scope:
         required:
         - write:runs
@@ -40534,6 +40561,7 @@ api_specification:
       errors:
       - RUN_NOT_FOUND
       - RUN_ALREADY_TERMINAL
+      - RUN_NOT_PAUSED
       - IDEMPOTENCY_CONFLICT
     run.pause:
       tier: should_have
@@ -40565,7 +40593,7 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     run.continue:
       tier: should_have
-      description: Resume an operator-paused run with paired paused lifecycle/control and canonical standing permission. Suspended or orphaned current standing generations refuse RUN_NOT_PAUSED without mutation; use standing controls. The committed transition wakes handed work even when no pipeline work remains.
+      description: Resume an operator-paused run with paired paused lifecycle/control. A deployment/flow run claims live through the unique runs index, refusing RUN_FLOW_ALREADY_LIVE and naming the current sibling if it is already claimed. Continuing an older source never merges work handled by a fork. The committed transition wakes handed work even when no pipeline work remains.
       scope:
         required:
         - write:runs
@@ -40588,6 +40616,7 @@ api_specification:
       - SELECTED_FORK_CONTROL_UNSUPPORTED
       - RUN_NOT_FOUND
       - RUN_NOT_PAUSED
+      - RUN_FLOW_ALREADY_LIVE
       - IDEMPOTENCY_CONFLICT
     run.get:
       tier: must_have

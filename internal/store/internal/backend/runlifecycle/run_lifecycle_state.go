@@ -17,7 +17,8 @@ import (
 
 const runLifecycleActiveStateSQLValues = "'" +
 	string(runtimerunlifecycle.StateRunning) + "', '" +
-	string(runtimerunlifecycle.StatePaused) + "'"
+	string(runtimerunlifecycle.StatePaused) + "', '" +
+	string(runtimerunlifecycle.StateLive) + "'"
 
 type terminalRunMutation struct {
 	RunID                         string

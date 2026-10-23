@@ -33,6 +33,10 @@ func TestDeploymentFanOutReadbackPreservesOriginBundle(t *testing.T) {
 			if err := page.Validate(ListQuery{RunID: request.Key.RunID}); err != nil {
 				t.Errorf("valid deployment feed became an invalid public page: %v", err)
 			}
+			page.RunStatus = "live"
+			if err := page.Validate(ListQuery{RunID: request.Key.RunID}); err != nil {
+				t.Errorf("live selection invalidated the retained fan-out page: %v", err)
+			}
 		})
 	}
 }
