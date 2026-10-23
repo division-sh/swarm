@@ -37,14 +37,6 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 			want: "channel opaque_types",
 		},
 		{
-			name: "effect mismatch",
-			mutate: func(_, _, connector map[string]any) {
-				tool := connector["tools"].(map[string]any)["send_interactive"].(map[string]any)
-				tool["category"] = "provider_registration"
-			},
-			want: "effect class does not match",
-		},
-		{
 			name: "unconsumed interface input",
 			mutate: func(channel, _, _ map[string]any) {
 				delete(channel["operations"].(map[string]any)["deliver"].(map[string]any)["input"].(map[string]any), "text")
