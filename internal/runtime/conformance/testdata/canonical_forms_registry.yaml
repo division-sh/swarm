@@ -542,16 +542,16 @@ rows:
 
   - id: agent.behavior
     ruled: mechanical-ratified
-    paths: "agents.<agent>.role, intent, entity_writes, permissions, permissions_bundle, manager_fallback, node_type, model, mock, subscriptions, tools, native_tools, flow_data_access, criteria, emit_events, implementation"
+    paths: "agents.<agent>.role, intent, writes, permissions, permissions_bundle, manager_fallback, node_type, model, mock, subscriptions, tools, native_tools, flow_data_access, emit_events, implementation"
     owners: [projectAgentDeclarationsValue, agentintent.AdmitSource, projectAgentWritesValue, projectAgentDataAccessValue]
     information:
       fact: [intent source/content, mock module, implementation]
-      choice: [role, write grants, permissions, fallback, node/model, subscriptions, tools, access, criteria, emit grants]
+      choice: [role, own-flow write grants, permissions, fallback, node/model, subscriptions, tools, access, emit grants]
       boundary_snapshot: [resolved local/import intent content and mock source bytes]
     spelling:
-      canonical: "intent scalar for local; typed mapping for inline/import; entity writes scalar all or explicit list"
+      canonical: "intent scalar for local; typed mapping for inline/import; writes is scalar all or a nonempty own-flow field list; all inside a list names a field; absent grants no save/update tools"
       distinct_overrides: [local_vs_inline_vs_import, all_vs_field_list]
-      already_retired: [model_tier, mode, conversation_mode, session_scope, session_scope_authority, tools_tier2, subscriptions_bootstrap, subscribes_to, prompt_ref, prompt_inputs]
+      already_retired: [model_tier, mode, conversation_mode, session_scope, session_scope_authority, tools_tier2, subscriptions_bootstrap, subscribes_to, prompt_ref, prompt_inputs, criteria, entity_writes, create]
       retired_duplicates: []
     corpus: {intent_local_scalar: 2, intent_mapping: 0}
 

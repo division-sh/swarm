@@ -97,17 +97,22 @@ func accumulatorTargetWriterConflictFindings(c *checkerContext, node runtimeiden
 			Location: target.nodeID(),
 		})
 	}
-	for flowID, fields := range wave1AgentExplicitEntityWriteCoverageByFlow(c.source) {
-		if strings.TrimSpace(flowID) != node.FlowPath() {
+	for _, agent := range wave1ScopedAgentRecords(c.source) {
+		if strings.TrimSpace(agent.Source.FlowPath) != node.FlowPath() {
 			continue
 		}
-		if _, ok := fields[field]; !ok {
+		grant := agent.Entry.Writes
+		declared := grant.All
+		for _, granted := range grant.Fields {
+			declared = declared || granted == field
+		}
+		if !declared {
 			continue
 		}
 		out = append(out, Finding{
 			CheckID:  "accumulator_entity_projection",
 			Severity: SeverityHardInvalidity,
-			Message:  fmt.Sprintf("accumulate target %q also appears in an agent entity_writes declaration; ordinary writes to an accumulate target are forbidden", field),
+			Message:  fmt.Sprintf("accumulate target %q is also granted by agent %s writes; ordinary writes to an accumulate target are forbidden", field, agent.LogicalID),
 			Location: defaultFlowLabel(node.FlowPath()),
 		})
 	}

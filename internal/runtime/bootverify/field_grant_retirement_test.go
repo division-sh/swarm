@@ -1,7 +1,6 @@
 package bootverify
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -61,25 +60,5 @@ func TestEntityContractResolutionCannotBorrowParentState(t *testing.T) {
 	_, owner, _, err := wave1ResolveWriteTargetPath(source, target)
 	if err != nil || owner != "child" {
 		t.Fatalf("undeclared write must stay receiver-local for compliance validation: owner %q, error %v", owner, err)
-	}
-}
-
-func TestRun_PromptEntityWriteCannotBorrowParentField(t *testing.T) {
-	root := writePromptWriterCoverageFixture(t, `
-writer:
-  role: writer
-  intent: prompts/writer.md
-  workspace_class: factory
-  manager_fallback: ops
-  entity_writes:
-    case:
-      save: all
-`, "local_status: text\n", "Use `save_entity_field` for `priority`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "priority: integer\n")
-	repo := repoRootForBootverifyTest(t)
-	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "entity_writer_coverage", "undeclared field path priority") {
-		t.Fatalf("parent state rescued undeclared child write: %#v", report.Errors())
 	}
 }

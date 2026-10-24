@@ -2182,12 +2182,12 @@ func newEntityToolConformanceHarness(t *testing.T, backend, flowID string) (cont
 	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nstages:\n  queued: {}\n  done: {final: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "state.yaml", "score: numeric(10,2)\nstatus: text\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "events.yaml", "accounts.updated:\n")
-	writeConformanceSnapshotFixture(t, fixtureRoot, "agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  writes: [status]\n")
 	if flowID == "accounts" {
 		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/schema.yaml", "name: accounts\nstages:\n  queued: {}\n  done: {final: true}\n")
 		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/state.yaml", "score: numeric(10,2)\nstatus: text\n")
 		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/events.yaml", "accounts.updated:\n")
-		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  writes: [status]\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

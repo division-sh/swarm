@@ -1372,35 +1372,35 @@ type EventCatalogEntry struct {
 }
 
 type AgentRegistryEntry struct {
-	ID                     string                          `yaml:"id"`
-	Type                   string                          `yaml:"type"`
-	Role                   string                          `yaml:"role"`
-	Intent                 runtimeagentintent.Source       `yaml:"intent" json:"intent"`
-	ResolvedIntent         runtimeagentintent.Resolved     `yaml:"-" json:"resolved_intent"`
-	EntityWrites           map[string]AgentEntityWriteDecl `yaml:"entity_writes"`
-	Permissions            []string                        `yaml:"permissions" json:"permissions,omitempty"`
-	PermissionsBundle      string                          `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
-	WorkspaceClass         string                          `yaml:"workspace_class"`
-	ManagerFallback        string                          `yaml:"manager_fallback"`
-	NodeType               string                          `yaml:"node_type"`
-	Model                  string                          `yaml:"model"`
-	Memory                 bool                            `yaml:"memory"`
-	Mock                   mockperformance.Performance     `yaml:"mock" json:"mock,omitempty"`
-	MemoryPlan             agentmemory.Plan                `yaml:"-" json:"memory_plan"`
-	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
-	TurnTimeout            *timeridentity.TurnTimeout      `yaml:"-" json:"turn_timeout,omitempty"`
-	Subscriptions          []string                        `yaml:"subscriptions"`
-	SubscriptionsBootstrap []string                        `yaml:"subscriptions_bootstrap"`
-	SubscribesTo           []string                        `yaml:"subscribes_to"`
-	Tools                  []string                        `yaml:"tools"`
-	ToolsTier2             []string                        `yaml:"tools_tier2"`
-	NativeTools            map[string]any                  `yaml:"native_tools"`
-	FlowDataAccess         []string                        `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
-	DataAccess             []DurableDataAccessRef          `yaml:"data_access" json:"data_access,omitempty"`
-	EmitEvents             []string                        `yaml:"emit_events"`
-	Implementation         string                          `yaml:"implementation"`
-	AuthoredFields         map[string]bool                 `yaml:"-" json:"-"`
-	EffectiveFieldSources  map[string]string               `yaml:"-" json:"-"`
+	ID                     string                      `yaml:"id"`
+	Type                   string                      `yaml:"type"`
+	Role                   string                      `yaml:"role"`
+	Intent                 runtimeagentintent.Source   `yaml:"intent" json:"intent"`
+	ResolvedIntent         runtimeagentintent.Resolved `yaml:"-" json:"resolved_intent"`
+	Writes                 AgentWriteGrant             `yaml:"writes"`
+	Permissions            []string                    `yaml:"permissions" json:"permissions,omitempty"`
+	PermissionsBundle      string                      `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
+	WorkspaceClass         string                      `yaml:"workspace_class"`
+	ManagerFallback        string                      `yaml:"manager_fallback"`
+	NodeType               string                      `yaml:"node_type"`
+	Model                  string                      `yaml:"model"`
+	Memory                 bool                        `yaml:"memory"`
+	Mock                   mockperformance.Performance `yaml:"mock" json:"mock,omitempty"`
+	MemoryPlan             agentmemory.Plan            `yaml:"-" json:"memory_plan"`
+	MaxTurnsPerTask        int                         `yaml:"max_turns_per_task"`
+	TurnTimeout            *timeridentity.TurnTimeout  `yaml:"-" json:"turn_timeout,omitempty"`
+	Subscriptions          []string                    `yaml:"subscriptions"`
+	SubscriptionsBootstrap []string                    `yaml:"subscriptions_bootstrap"`
+	SubscribesTo           []string                    `yaml:"subscribes_to"`
+	Tools                  []string                    `yaml:"tools"`
+	ToolsTier2             []string                    `yaml:"tools_tier2"`
+	NativeTools            map[string]any              `yaml:"native_tools"`
+	FlowDataAccess         []string                    `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
+	DataAccess             []DurableDataAccessRef      `yaml:"data_access" json:"data_access,omitempty"`
+	EmitEvents             []string                    `yaml:"emit_events"`
+	Implementation         string                      `yaml:"implementation"`
+	AuthoredFields         map[string]bool             `yaml:"-" json:"-"`
+	EffectiveFieldSources  map[string]string           `yaml:"-" json:"-"`
 }
 
 var agentRegistryEntryFieldOptions = map[string]struct{}{
@@ -1408,7 +1408,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"type":               {},
 	"role":               {},
 	"intent":             {},
-	"entity_writes":      {},
+	"writes":             {},
 	"permissions":        {},
 	"permissions_bundle": {},
 	"workspace_class":    {},

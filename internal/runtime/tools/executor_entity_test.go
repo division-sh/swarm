@@ -470,9 +470,7 @@ validation-orchestrator:
   intent: {inline: "Validate the current entity using only its declared contract surface."}
   tools:
     - save_entity_field
-  entity_writes:
-    validation_case:
-      save:
+  writes:
         - component
         - owner
         - manifest
@@ -3018,7 +3016,7 @@ stages:
 	}
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
-	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  entity_writes:\n    "+entityType+": {save: all}\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  writes: all\n")
 	if len(reviewedTransition) > 0 && reviewedTransition[0] {
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), "advance:\n")
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "nodes.yaml"), "reviewer:\n  advance: {advances_to: marginal_review}\n")
@@ -3121,12 +3119,8 @@ func roleScopedEntityToolAgentYAML(actor models.AgentConfig) string {
 			builder.WriteString("\n")
 		}
 	}
-	builder.WriteString("  entity_writes:\n")
-	builder.WriteString("    validation_case:\n")
-	builder.WriteString("      create:\n")
-	builder.WriteString("        - status\n")
-	builder.WriteString("      save:\n")
-	builder.WriteString("        - business_brief\n")
+	builder.WriteString("  writes:\n")
+	builder.WriteString("    - business_brief\n")
 	return builder.String()
 }
 
@@ -3202,14 +3196,6 @@ stages:
 		}
 		if strings.TrimSpace(fixture.AgentsYAML) != "" {
 			agents := fixture.AgentsYAML
-			if strings.Contains(agents, "save_entity_field") && !strings.Contains(agents, "entity_writes:") {
-				for _, line := range strings.Split(fixture.EntitiesYAML, "\n") {
-					if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") && strings.HasSuffix(strings.TrimSpace(line), ":") {
-						agents += "  entity_writes:\n    " + strings.TrimSuffix(strings.TrimSpace(line), ":") + ": {save: all}\n"
-						break
-					}
-				}
-			}
 			writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), agents)
 		}
 		if strings.TrimSpace(fixture.ToolsYAML) != "" {

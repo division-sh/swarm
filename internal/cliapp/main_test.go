@@ -3503,61 +3503,6 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 	}
 }
 
-func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
-	root := t.TempDir()
-
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
-  idle: {}
-  done: {final: true}
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "state.yaml"), `business_brief: text
-research_context: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
-writer:
-  type: factory
-  role: writer
-  intent: prompts/writer.md
-  model: regular
-  subscriptions: []
-  entity_writes:
-    case:
-      save:
-      - research_context
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
-task.assigned:
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
-closer:
-  task.assigned:
-    advances_to: done
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "prompts", "writer.md"), `
-Use save_entity_field for `+"`business_brief`"+`.
-`)
-
-	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
-		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
-	}
-	errText := stderr.String()
-	for _, want := range []string{
-		"[BLOCKER] entity_writer_coverage @",
-		"business_brief",
-	} {
-		if !strings.Contains(errText, want) {
-			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
-		}
-	}
-}
-
 func TestRunVerifyCommand_AllowsOpenStreamAccumulatorWithRootInput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 

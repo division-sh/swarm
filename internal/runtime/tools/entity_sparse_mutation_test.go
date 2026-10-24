@@ -439,9 +439,7 @@ work:
 writer:
   role: writer
   intent: {inline: "Maintain accurate work records."}
-  entity_writes:
-    work:
-      save: [label, profile, left, right, token]
+  writes: [label, profile, left, right, token]
 `,
 				},
 			})

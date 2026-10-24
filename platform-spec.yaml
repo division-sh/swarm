@@ -2728,7 +2728,7 @@ contract_formats:
           runtime_callback_routes: '#2423 supersedes consumer-side callback name repair with canonical producer publication; authoritative route semantics remain in route_plan_authority.runtime_callback_context.'
   persistence_model:
     description: Agents do not have raw database access. The platform derives agent-facing persistence tools from the
-      authoritative flow-owned entity contracts in entities.yaml, agents.yaml entity_writes declarations, and the shared
+      authoritative flow-owned fields in state.yaml, agents.yaml writes declarations, and the shared
       type system. This ensures all data access is permissioned, auditable, and storage-backend agnostic.
     role_scoped_entity_tools:
       default_surface: 'For normal agents, the Path alpha entity-tool model is mandatory. If an actor resolves to a
@@ -2760,7 +2760,7 @@ contract_formats:
           error. They MUST NOT silently return preview, truncated, omitted, or follow-up-file placeholder shapes as the value.'
       generated_writes:
         save_field: 'save_{entity_type}_{field}({value, op?, index?, key?}) operates on exactly one top-level declared field
-          authorized by agents.yaml entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.
+          authorized by the declaring agent''s agents.yaml writes grant for its own flow.
           Default/explicit set, list append, integer-index update and map-key set share runtime_enforcement.save_entity_field;
           each generated branch carries the exact value/key/index types and excludes unrelated operands.'
         update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
@@ -2774,8 +2774,10 @@ contract_formats:
         response_semantics: 'Generated save/update tools inherit save_entity_field committed revision and post-commit failure response semantics; they expose only the safe post_commit_error_code and MUST NOT expose raw SQL or connection error text or invite a duplicate write.'
         materialized_field_exclusion: 'Fields declaring materialize_from, and every nested subpath below them, MUST NOT
           appear in generated write tools or writable-path summaries. They are runtime-owned projection fields.'
-        create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
-          expose a generic agent-facing create_entity replacement for current-entity tools.'
+        grant: 'writes: is the scalar all or a nonempty list of fields from the agent''s own flow state.
+          Inside a list every entry is a field name, including all. Absent writes grants no save or update tool.
+          entity_writes and create are retired on presence with teaching text naming writes:; there is no alias or cross-flow write grant.
+          Change another flow''s state by sending it an event. Intent prose naming create_entity or save_entity_field is not authorization or a boot refusal.'
       generated_schema_closure: 'Generated entity-tool input and output schemas are closed recursively: additionalProperties
         is false for named-record and argument object schemas; declared maps retain their typed additionalProperties
         value schema and exact key constraints. Exclusive operation branches use oneOf through the canonical tool-schema
@@ -10832,7 +10834,7 @@ tool_model:
       (emit_{event_name}) are auto-generated from emit_events. Neither notify_human nor emit tools require an explicit
       tools entry. agent_message is retired and reopen-gated under retired_agent_message; no universal grant or candidate exists.'
     role_scoped_entity_tools: 'When a normal actor resolves to a flow-owned entity contract, the platform generates
-      current-entity read/save/update tools from that contract and the actor''s entity_writes declaration. The generated
+      current-entity read/save/update tools from that contract and the actor''s own-flow writes declaration. The generated
       tools are eligible for the agent-visible/provider-visible surface without explicit tools entries, then filtered per
       turn by current-entity contract eligibility. The legacy entity names create_entity, get_entity, get_subject_status,
       query_entities, search_entities, query_metrics, and save_entity_field are removed before provider delivery and remain

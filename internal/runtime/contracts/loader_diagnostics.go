@@ -140,6 +140,9 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	if context == "agent" && key == "criteria" {
 		remediation = "criteria is not an agent key; put agent instructions in intent, and use a validate row for machine-checked rules."
 	}
+	if context == "agent" && (key == "entity_writes" || key == "create") {
+		remediation = "Use writes: all or writes: [field, ...] for fields of this agent's own flow; omit writes: to grant no save or update tools. There is no create arm or cross-flow write grant."
+	}
 	if (context == "handler" && (key == "sets_gate" || key == "clear_gates")) || (context == "node" && key == "gate_state") {
 		remediation = "Declare an ordinary boolean field in state.yaml and write it explicitly with data_accumulation; there is no separate gate state."
 	}
