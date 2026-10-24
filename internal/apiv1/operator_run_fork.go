@@ -20,11 +20,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func activeRunStatus(raw string) bool {
-	state, err := runtimerunlifecycle.ParseState(raw)
-	return err == nil && state.Active()
-}
-
 type RunForkAvailabilityStore interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 }
@@ -76,10 +71,6 @@ type SelectedContractRunForkExecutor struct {
 	LiveRuns                       runtimerunlifecycle.LiveRunReader
 }
 
-func (e SelectedContractRunForkExecutor) ForksBecomeLive() bool {
-	return e.RuntimeContexts != nil && e.LiveRuns != nil
-}
-
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
 	if req.AtStart && req.ForkEventID != "" {
 		return RunForkExecutionResult{}, fmt.Errorf("run.fork at_start and fork_event_id are mutually exclusive")
@@ -113,31 +104,35 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		ContractSelection:  req.ContractSelection,
 		AgentRuntime:       e.AgentRuntime,
 	}
-	var result runtimerunforkexecution.SelectedContractExecutionResult
-	var err error
+	result, err := e.executePreparedFork(ctx, runtimeRequest)
+	return selectedRunForkResult(req, result, err)
+}
+
+func (e SelectedContractRunForkExecutor) executePreparedFork(ctx context.Context, runtimeRequest runtimerunforkexecution.SelectedContractExecutionRequest) (result runtimerunforkexecution.SelectedContractExecutionResult, err error) {
+	liveRuntime := runtimeRequest.LiveRuntime
 	execute := func() error {
 		result, err = e.ExecuteSelectedContractRunFork(ctx, runtimeRequest)
 		return err
 	}
 	if liveRuntime != nil {
 		if e.LiveRuns == nil {
-			return RunForkExecutionResult{}, errors.New("live fork requires the durable flow selector")
+			return result, errors.New("live fork requires the durable flow selector")
 		}
-		scope, scopeErr := e.LiveRuns.LoadRunLiveScope(ctx, req.SourceRunID)
+		scope, scopeErr := e.LiveRuns.LoadRunLiveScope(ctx, runtimeRequest.SourceRunID)
 		if scopeErr != nil {
-			return RunForkExecutionResult{}, scopeErr
+			return result, scopeErr
 		}
 		if scopeErr := scope.Validate(); scopeErr != nil {
-			return RunForkExecutionResult{}, scopeErr
+			return result, scopeErr
 		}
 		live, found, readErr := e.LiveRuns.LoadLiveRun(ctx, scope)
 		if readErr != nil {
-			return RunForkExecutionResult{}, readErr
+			return result, readErr
 		}
 		if found {
 			parkCtx, parked, _, acquireErr := runtimeBundleContextByRun(ctx, e.RuntimeContexts, live.RunID)
 			if acquireErr != nil {
-				return RunForkExecutionResult{}, acquireErr
+				return result, acquireErr
 			}
 			err = parked.Runtime.WithParkedLiveRun(parkCtx, live, execute)
 			if !result.Activation.Activated {
@@ -152,6 +147,10 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	} else {
 		err = execute()
 	}
+	return result, err
+}
+
+func selectedRunForkResult(req RunForkExecutionRequest, result runtimerunforkexecution.SelectedContractExecutionResult, err error) (RunForkExecutionResult, error) {
 	acknowledged := exactSelectedForkActivation(req, result)
 	if result.Activation.Activated && !acknowledged {
 		return RunForkExecutionResult{}, errors.Join(err, fmt.Errorf("selected fork activation has no exact acknowledged identity"))
@@ -268,13 +267,6 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		}
 		if !availability.Available() {
 			return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
-		}
-		liveExecutor, liveMode := opts.Executor.(interface{ ForksBecomeLive() bool })
-		if activeRunStatus(availability.Status) && !params.AllowSourceFreeze && !(liveMode && liveExecutor.ForksBecomeLive()) {
-			return nil, NewInvalidParamsError(map[string]any{
-				"field":  "allow_source_freeze",
-				"reason": "must be true to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started",
-			})
 		}
 		sourceBundleHash := strings.TrimSpace(availability.BundleHash)
 		targetBundleHash := strings.TrimSpace(params.BundleHash)

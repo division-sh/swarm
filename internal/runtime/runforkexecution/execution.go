@@ -15,7 +15,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -236,37 +235,7 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			return result, nil
 		}
 	}
-	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
-	if req.LiveRuntime != nil {
-		return container.activateLive(prepared, req, result)
-	}
-	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		InheritedSchedules:    prepared.readiness,
-		ForkOperation:         forkOperation,
-		DataPins:              materialization.DataPins,
-		ExecutionSource:       loadedSource.Source,
-		ForkRunID:             materialization.ForkRunID,
-		AllowSourceFreeze:     req.AllowSourceFreeze,
-		AllowedSourceEventIDs: sourceEventIDs,
-		FrontierAdmission:     frontier,
-		RouteTopology:         routeTopology,
-		RecipientPlanning:     *model.RecipientPlanning,
-	})
-	result.Activation = activation
-	if !activation.Activated {
-		if err == nil {
-			err = errors.New("selected fork activation was not acknowledged")
-		}
-		acknowledged, authorityErr := container.Fail(ctx, err)
-		if !acknowledged {
-			return result, errors.Join(err, authorityErr)
-		}
-		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, errors.Join(err, authorityErr))
-	}
-	// The permanent result owns acknowledgment; registration or cleanup loss
-	// cannot reverse it. Recovery resumes the committed child and owed work.
-	container.RetainActivated(prepared, errors.Join(err, materializationDiagnostic))
-	return result, nil
+	return container.activatePrepared(prepared, req, result, materializationDiagnostic)
 }
 
 func validateSelectedContractExecutionFrontierForMutation(frontier runfork.RunForkContractFrontierAdmission) error {
