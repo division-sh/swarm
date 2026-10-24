@@ -111,13 +111,13 @@ func TestD1HistoricalReforkExactRequireSurvivesReopenBothStores(t *testing.T) {
 			if err := f.manager.Shutdown(); err != nil {
 				t.Fatal(err)
 			}
-			before := forkReceiverFaultSnapshot(t, f.ctx, selected)
 			reopened, _ := c4ReopenCreationStore(t, backend, selected, db, connector)
 			defer func() {
 				if err := reopened.(interface{ Close() error }).Close(); err != nil {
 					t.Error(err)
 				}
 			}()
+			before := forkReceiverFaultSnapshot(t, f.ctx, reopened)
 			got, err := reopened.(c4ForkCreationOwner).RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request)
 			if err != nil || !reflect.DeepEqual(got, fork) {
 				t.Fatalf("reopened exact historical child changed: %+v err=%v", got, err)
