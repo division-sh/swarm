@@ -174,8 +174,8 @@ func authoredTransitionRelation(t *testing.T, family, flow string) []contracts.W
 		handler("arrived", "handler.join.on_complete", "join.on_complete", "done", []string{"awaiting"}, 0)
 		handler("arrived", "handler.join.on_deadline", "join.on_deadline", "done", []string{"awaiting"}, 0)
 		timeout := &rows[len(rows)-1]
-		timeout.EventType, timeout.TimerID, timeout.After, timeout.Timed = "platform.join_timeout", "awaiting", "3h", true
-		timer := map[string]string{".": "advance", "left": "left.advance", "right": "right.advance"}[flow]
+		timeout.EventType, timeout.TimerID, timeout.After, timeout.Timed = "platform.join_timeout", "arrived", "3h", true
+		timer := map[string]string{".": "ready.working", "left": "left.ready.working", "right": "right.ready.working"}[flow]
 		rows = append(rows, contracts.WorkflowStageTopologyEdge{From: "ready", To: "working", Source: "timer", InternalOwner: "runtime", EventType: "timer:" + timer, TimerID: timer, After: "1h", Timed: true})
 	case "loop":
 		for _, op := range []struct{ event, operation, from, to string }{
@@ -320,8 +320,8 @@ func transitionRelationDeclarations(family string) (schema, handlers, events str
 		return `stages:
   ready:
     timers:
-      - {id: advance, after: 1h, advances_to: working}
-      - {id: notify, after: 2h, emit: tick}
+      - {after: 1h, advances_to: working}
+      - {after: 2h, emit: tick}
   working: {}
   awaiting: {}
   done: {final: true}

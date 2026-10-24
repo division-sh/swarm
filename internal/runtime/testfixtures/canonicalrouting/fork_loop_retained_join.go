@@ -96,7 +96,6 @@ join.observed:
       admit: revision
       from: working
     join:
-      id: reviews
       stage: working
       members:
         from: state.members

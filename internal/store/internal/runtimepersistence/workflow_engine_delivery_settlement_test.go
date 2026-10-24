@@ -292,7 +292,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 				t.Fatalf("admit writer source witness before hostile cases: %v", err)
 			}
 			joinRef, err := timeridentity.NewFanOutDeliveryJoinRef(
-				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()), "fan-out-complete",
+				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()),
 				declaration, intent.PlanRef.BundleHash, intent.PlanRef.SemanticDigest,
 			)
 			if err != nil {
@@ -337,7 +337,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			hostilePlanRef.BundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
 			hostilePlanRef.SemanticDigest = "sha256:" + strings.Repeat("b", 64)
 			hostileJoinRef, err := timeridentity.NewFanOutDeliveryJoinRef(
-				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()), "fan-out-complete",
+				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()),
 				declaration, hostilePlanRef.BundleHash, hostilePlanRef.SemanticDigest,
 			)
 			if err != nil {

@@ -60,7 +60,7 @@ func TestPublishedBarrierSelectedDeclarationDoesNotRelaxLiveAdmission(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	handleRef, err := timeridentity.NewFanOutDeliveryJoinRef(join.Node, join.HandlerEvent, join.Spec.EffectiveID(), declaration, ref.BundleHash, ref.SemanticDigest)
+	handleRef, err := timeridentity.NewFanOutDeliveryJoinRef(join.Node, join.HandlerEvent, declaration, ref.BundleHash, ref.SemanticDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestPublishedBarrierSelectedDeclarationDoesNotRelaxLiveAdmission(t *testing
 	if _, _, _, found, err := pipeline.ResolvePublishedJoinOccurrenceDeliveryTarget(target, runfork.PublishedJoinOccurrence{}); err == nil || found {
 		t.Fatal("unsealed zero publication gained a recipient")
 	}
-	for _, fault := range []string{"node", "handler", "join", "mode", "declaration", "bundle", "digest"} {
+	for _, fault := range []string{"node", "handler", "mode", "declaration", "bundle", "digest"} {
 		t.Run(fault, func(t *testing.T) {
 			bad := target.WorkflowJoins()[0].Clone()
 			switch fault {
@@ -138,8 +138,6 @@ func TestPublishedBarrierSelectedDeclarationDoesNotRelaxLiveAdmission(t *testing
 				bad.Node, err = identity.AdmitExecutableNodeDeclaration("other", "producer")
 			case "handler":
 				bad.HandlerEvent = "other.requested"
-			case "join":
-				bad.Spec.ID = "other-join"
 			case "mode":
 				bad.Mode = contracts.WorkflowJoinModeArrival
 			case "declaration":

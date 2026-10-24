@@ -755,5 +755,5 @@ func findStageLifecycleJoin(t *testing.T, ctx context.Context, instance runtimep
 	if instance.Fields["batch_id"] != batchID {
 		t.Fatalf("keyed business batch = %#v, want %q", instance.Fields["batch_id"], batchID)
 	}
-	return findConformanceJoinActivation(t, ctx, instance, conformanceFlowPathNode(t, "scout", "scout-coordinator"), "scout.member.done", "awaiting", "awaiting")
+	return findConformanceJoinActivation(t, ctx, instance, conformanceFlowPathNode(t, "scout", "scout-coordinator"), "scout.member.done", "awaiting")
 }

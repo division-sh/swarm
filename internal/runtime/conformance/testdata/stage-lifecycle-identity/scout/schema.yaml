@@ -4,15 +4,12 @@ stages:
   collecting: {}
   review:
     timers:
-      - id: review_timeout
-        after: 10m
+      - after: 10m
         advances_to: timed_out
     gate:
-      decision: approve_scout
-      title: Approve scout batch
+      decision: approve_scout_batch
       outcomes:
         approve:
-          label: Approve
           advances_to: awaiting
   awaiting: {}
   complete:

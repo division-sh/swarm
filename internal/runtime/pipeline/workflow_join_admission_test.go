@@ -34,7 +34,7 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 	}
 	entry := timeridentity.StageEntryRef{RunID: run, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID,
 		InstancePath: owner.Route.InstancePath, EntityID: target.EntityID, Stage: "awaiting", Cause: "construction"}
-	declaration, err := timeridentity.NewJoinRef(plan.Node, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID())
+	declaration, err := timeridentity.NewJoinRef(plan.Node, plan.HandlerEvent, plan.Spec.Stage)
 	if err != nil {
 		t.Fatal(err)
 	}

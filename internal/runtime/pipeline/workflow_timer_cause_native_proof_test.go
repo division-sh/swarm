@@ -45,14 +45,14 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 						"nodes.yaml": "observer:\n  timer.arm: {}\n",
 					}
 					if kind == workflowTimerCauseEvent {
-						files["nodes.yaml"] += "  timers:\n    - {id: event.timeout, event: timer.elapsed, start_on: 'event:timer.arm', delay: 1h}\n"
+						files["nodes.yaml"] += "  timers:\n    - {event: timer.elapsed, start_on: 'event:timer.arm', delay: 1h}\n"
 					} else {
 						files["schema.yaml"] = "name: timer-cause-proof\nstages:\n"
 						if kind == workflowTimerCauseTransition {
 							files["schema.yaml"] += "  ready: {}\n"
 							files["nodes.yaml"] = "observer:\n  timer.arm: {advances_to: waiting}\n"
 						}
-						files["schema.yaml"] += "  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n"
+						files["schema.yaml"] += "  waiting:\n    timers:\n      - {after: 1h, emit: timer.elapsed}\n"
 					}
 					bundle := loadWorkflowTempBundle(t, files)
 					bundle.Semantics.Timers[0].Recurring = recurring

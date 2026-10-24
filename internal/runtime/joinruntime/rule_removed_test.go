@@ -42,7 +42,7 @@ func ruleRemovedJoinFixture(t *testing.T, flowID string, pendingEmpty bool) Acti
 	if err != nil || !enters {
 		t.Fatalf("canonical removed-rule entry: %+v enters=%t err=%v", entry, enters, err)
 	}
-	ref, err := timeridentity.NewJoinRef(node, event, "awaiting", "members")
+	ref, err := timeridentity.NewJoinRef(node, event, "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}

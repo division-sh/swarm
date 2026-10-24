@@ -187,6 +187,9 @@ stages:
 	if plan.FlowID != "launch" || plan.Stage != "awaiting_launch_approval" || plan.Decision != "launch_review" {
 		t.Fatalf("gate identity = %#v", plan)
 	}
+	if plan.Title != "Launch review" || plan.Outcomes["approve"].Label != "Approve" || plan.Outcomes["reject"].Input["feedback"].Label != "Feedback" {
+		t.Fatalf("gate copy must derive uniformly from the decision/verdict/input keys: %#v", plan)
+	}
 	if got := plan.Context["staging"]; got.Kind != ExpressionKindCEL || got.CEL != "entity.staging_url" {
 		t.Fatalf("context staging = %#v", got)
 	}
@@ -262,6 +265,17 @@ stages:
 	if err == nil || !strings.Contains(err.Error(), "authority") {
 		t.Fatalf("decode error = %v, want unknown-field rejection", err)
 	}
+	for _, row := range []struct{ field, body string }{
+		{"title", "title: null\n      outcomes:\n        approve: {advances_to: operating}"},
+		{"label", "outcomes:\n        approve: {label: null, advances_to: operating}"},
+		{"label", "outcomes:\n        approve:\n          input:\n            note: {type: text, label: null}\n          advances_to: operating"},
+	} {
+		var doc FlowSchemaDocument
+		err := decodeNodeTestYAML([]byte("stages:\n  awaiting:\n    gate:\n      decision: launch_review\n      "+row.body+"\n  operating: {final: true}\n"), &doc)
+		if err == nil || !strings.Contains(err.Error(), "DIALECT-GATE") || !strings.Contains(err.Error(), `field "`+row.field+`" is not supported`) {
+			t.Fatalf("retired gate copy %s was admitted: %v", row.body, err)
+		}
+	}
 }
 
 func TestFlowSchemaDocumentDecodeBoundedLoopCanonicalSyntax(t *testing.T) {
@@ -332,7 +346,7 @@ func TestSystemNodeEventHandlerRejectsRetiredTopLevelLoopShadowFields(t *testing
 }
 
 func TestFlowSchemaDocumentDecodeStageTimersRejectSupersededFields(t *testing.T) {
-	for _, field := range []string{"delay", "interrupting", "repeat"} {
+	for _, field := range []string{"id", "delay", "interrupting", "repeat"} {
 		t.Run(field, func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := decodeNodeTestYAML([]byte(fmt.Sprintf(`
@@ -351,7 +365,7 @@ stages:
 	}
 }
 
-func TestFlowSchemaDocumentDecodeStageTimersRequireExplicitIDOnDerivedCollision(t *testing.T) {
+func TestFlowSchemaDocumentDecodeStageTimersRejectDuplicateTargets(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
 name: validation
@@ -363,31 +377,8 @@ stages:
       - after: 72h
         emit: review.sla_escalated
 `), &doc)
-	if err == nil || !strings.Contains(err.Error(), "duplicate id") {
-		t.Fatalf("yaml.Unmarshal error = %v, want duplicate derived id rejection", err)
-	}
-}
-
-func TestFlowSchemaDocumentDecodeStageTimersRejectExplicitIDCollisionAcrossStages(t *testing.T) {
-	var doc FlowSchemaDocument
-	err := decodeNodeTestYAML([]byte(`
-name: validation
-stages:
-  awaiting_review:
-    timers:
-      - id: sla
-        after: 48h
-        emit: review.sla_escalated
-  parked:
-    timers:
-      - id: sla
-        after: 72h
-        advances_to: expired
-  expired:
-    final: true
-`), &doc)
-	if err == nil || !strings.Contains(err.Error(), `stage timer id "sla" is declared in both stage "awaiting_review" and stage "parked"`) {
-		t.Fatalf("yaml.Unmarshal error = %v, want cross-stage timer id rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "two rows targeting") || !strings.Contains(err.Error(), "review.sla_escalated") {
+		t.Fatalf("yaml.Unmarshal error = %v, want duplicate target rejection", err)
 	}
 }
 
@@ -442,8 +433,8 @@ coordinator:
 	if join == nil {
 		t.Fatal("join = nil")
 	}
-	if got, want := join.EffectiveID(), "awaiting_items"; got != want {
-		t.Fatalf("join id = %q, want %q", got, want)
+	if got, want := join.Stage, "awaiting_items"; got != want {
+		t.Fatalf("join stage = %q, want %q", got, want)
 	}
 	if join.Members.FromPath.Root != paths.RootEntity || join.Members.ByPath.Root != paths.RootPayload {
 		t.Fatalf("join member paths = %#v/%#v", join.Members.FromPath, join.Members.ByPath)
@@ -1903,8 +1894,7 @@ state_schema:
     count:
       type: integer
 timers:
-  - id: task_timeout
-    event: timer.task.timeout
+  - event: timer.task.timeout
     delay: 1m
 gate_state:
   ready: Worker is ready
@@ -1938,7 +1928,6 @@ func TestWorkflowTimerContractDecode_RejectsRetiredDurationAliases(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			var timer WorkflowTimerContract
 			err := decodeNodeTestYAML([]byte(`
-id: reminder
 event: timer.reminder
 `+tc.field+`
 `), &timer)
@@ -1952,7 +1941,6 @@ event: timer.reminder
 func TestWorkflowTimerContractDecode_RejectsMixedCanonicalAndRetiredDurationAlias(t *testing.T) {
 	var timer WorkflowTimerContract
 	err := decodeNodeTestYAML([]byte(`
-id: reminder
 event: timer.reminder
 delay: 30m
 delay_minutes: 30
@@ -1980,7 +1968,6 @@ timer_defaults: &timer_defaults
   `+tc.field+`
 timer:
   <<: *timer_defaults
-  id: reminder
   event: timer.reminder
 `), "timer", &timer)
 			if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), strings.Split(tc.field, ":")[0]) {
@@ -1993,7 +1980,6 @@ timer:
 func TestWorkflowTimerContractDecode_PreservesCanonicalDelay(t *testing.T) {
 	var timer WorkflowTimerContract
 	if err := decodeNodeTestYAML([]byte(`
-id: reminder
 event: timer.reminder
 delay: 7d
 `), &timer); err != nil {

@@ -140,7 +140,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 `,
 	}
 	if len(initialTimer) > 0 && initialTimer[0] {
-		files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  ready: {}", "  ready:\n    timers:\n      - {id: keep, after: 1h, emit: observed}", 1)
+		files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  ready: {}", "  ready:\n    timers:\n      - {after: 1h, emit: observed}", 1)
 	}
 	return loadWorkflowTempBundle(t, files)
 }

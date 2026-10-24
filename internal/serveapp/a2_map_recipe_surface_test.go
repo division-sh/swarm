@@ -193,7 +193,7 @@ func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened
 		t.Fatalf("public canonical map join catalog: arms=%+v err=%v", arms, err)
 	}
 	arm := arms[0]
-	declaration, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "collector"), "item.reported", "collecting", "collecting")
+	declaration, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "collector"), "item.reported", "collecting")
 	if err != nil {
 		t.Fatal(err)
 	}

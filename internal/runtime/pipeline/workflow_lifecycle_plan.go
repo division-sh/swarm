@@ -699,7 +699,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 			continue
 		}
 		if joinPlan.ResultType.Empty() {
-			return fmt.Errorf("join %s has no resolved output type in the semantic plan", joinPlan.Spec.EffectiveID())
+			return fmt.Errorf("join handler %s has no resolved output type in the semantic plan", joinPlan.HandlerEvent)
 		}
 		members := []string{}
 		if joinPlan.Spec.Members.Count == nil {
@@ -707,7 +707,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 			members, ok = joinMemberSnapshot(instance.Fields, joinPlan)
 			if !ok {
 				return failures.New(failures.ClassSchemaInvalid, "join_members_invalid", "join-lifecycle", "arm", map[string]any{
-					"row_id": joinPlan.Spec.EffectiveID(), "source": joinPlan.Spec.Members.From,
+					"node_id": joinPlan.Node.Key(), "handler_event": joinPlan.HandlerEvent, "source": joinPlan.Spec.Members.From,
 				})
 			}
 		}
@@ -715,7 +715,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 		if err != nil {
 			return err
 		}
-		ref, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID())
+		ref, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage)
 		if err != nil {
 			return err
 		}
@@ -737,23 +737,23 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 			delay := workflowTimerRenderedDelay(joinPlan.Spec.Deadline.After, workflowTimerPolicy(pc.SemanticSource(), joinPlan.Node.FlowPath()))
 			interval, ok := timeridentity.ParseDelayDuration(delay)
 			if !ok {
-				return fmt.Errorf("join %s deadline.after %q did not resolve to a positive duration", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Deadline.After)
+				return fmt.Errorf("join handler %s deadline.after %q did not resolve to a positive duration", joinPlan.HandlerEvent, joinPlan.Spec.Deadline.After)
 			}
 			due = now.Add(interval)
 		}
 		activation, err := joinruntime.NewActivation(ref, members, joinPlan.Spec.Members.Count, now, due)
 		if err != nil {
-			return fmt.Errorf("arm join %s: %w", joinPlan.Spec.EffectiveID(), err)
+			return fmt.Errorf("arm join handler %s: %w", joinPlan.HandlerEvent, err)
 		}
 		if activation.Completed() == activation.Expected() {
 			activation.Close(joinruntime.CloseReasonComplete, true, false)
 			completionHandle, handleErr := timeridentity.JoinCompleteHandle(ref)
 			if handleErr != nil {
-				return fmt.Errorf("arm join %s completion timer: %w", joinPlan.Spec.EffectiveID(), handleErr)
+				return fmt.Errorf("arm join handler %s completion timer: %w", joinPlan.HandlerEvent, handleErr)
 			}
 			activation, err = activation.WithTimerHandle(completionHandle, now)
 			if err != nil {
-				return fmt.Errorf("arm join %s completion identity: %w", joinPlan.Spec.EffectiveID(), err)
+				return fmt.Errorf("arm join handler %s completion identity: %w", joinPlan.HandlerEvent, err)
 			}
 		}
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {

@@ -46,7 +46,7 @@ func WorkflowJoinPlanForExecutionHandler(source Source, node runtimeidentity.Exe
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	plan, ok := WorkflowJoinPlanForHandler(source, node, handlerEvent)
-	if !ok || plan.Mode != spec.Mode() || strings.TrimSpace(plan.Spec.Stage) != strings.TrimSpace(spec.Stage) || plan.Spec.EffectiveID() != spec.EffectiveID() {
+	if !ok || plan.Mode != spec.Mode() || strings.TrimSpace(plan.Spec.Stage) != strings.TrimSpace(spec.Stage) {
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	return plan, true
@@ -57,7 +57,7 @@ func WorkflowJoinPlanForRef(source Source, joinRef timeridentity.JoinRef) (runti
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	plan, ok := WorkflowJoinPlanForHandler(source, joinRef.Node(), joinRef.HandlerEvent())
-	if !ok || plan.Spec.EffectiveID() != joinRef.JoinID() {
+	if !ok {
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	switch joinRef.Mode() {

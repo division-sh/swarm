@@ -162,31 +162,32 @@ rows:
     corpus: {legacy_schemas: 7, stage_schemas: 1, stage_rows: 4}
 
   - id: flow.stage_timer
-    ruled: mechanical-ratified
-    paths: "schema.stages.<stage>.timers[].id, schema.stages.<stage>.timers[].after, schema.stages.<stage>.timers[].emit, schema.stages.<stage>.timers[].advances_to"
+    ruled: issue-2293-6170395611
+    paths: "schema.stages.<stage>.timers[].after, schema.stages.<stage>.timers[].emit, schema.stages.<stage>.timers[].advances_to"
     owner: projectSchemaStagesValue
     information:
       derived_projection: [id]
       choice: [after, emit, advances_to]
     spelling:
-      canonical_candidate: omit_id_when_stage_plus_outcome_is_unique
-      retired_duplicates: [explicit_id_equal_to_derived_id]
-      distinct_overrides: [explicit_id_required_to_resolve_collision]
+      canonical: stage_plus_target_identity
+      retired_duplicates: []
+      distinct_overrides: []
+      already_retired: [id]
     corpus: {rows: 0}
 
   - id: flow.stage_gate
-    ruled: mechanical-ratified
-    paths: "schema.stages.<stage>.gate.decision, schema.stages.<stage>.gate.title, schema.stages.<stage>.gate.context, schema.stages.<stage>.gate.outcomes.<verdict>.label, schema.stages.<stage>.gate.outcomes.<verdict>.input, schema.stages.<stage>.gate.outcomes.<verdict>.advances_to, schema.stages.<stage>.gate.outcomes.<verdict>.emit"
+    ruled: issue-2293-6170395611
+    paths: "schema.stages.<stage>.gate.decision, schema.stages.<stage>.gate.context, schema.stages.<stage>.gate.outcomes.<verdict>.input, schema.stages.<stage>.gate.outcomes.<verdict>.advances_to, schema.stages.<stage>.gate.outcomes.<verdict>.emit"
     owners: [projectSchemaGateValue, projectSchemaGateInputValue, projectNodeEmitValue, FlowStageDeclarations.GatePlans]
     information:
       fact: [decision and verdict IDs]
       choice: [context, input type/required, advances_to, emit]
-      annotation: [title, outcome label, input label]
-      derived_projection: [default title and labels]
+      derived_projection: [humanized decision title, humanized outcome and input text]
     spelling:
-      canonical_candidate: omit_derived_title_and_labels
-      retired_duplicates: [explicit_title_or_label_equal_to_display_derivation]
-      distinct_overrides: [authored_title_or_label_different_from_default]
+      canonical: humanized_keys
+      retired_duplicates: []
+      distinct_overrides: []
+      already_retired: [title, outcome_label, input_label]
     corpus: {gates: 0}
 
   - id: flow.loop
@@ -370,16 +371,17 @@ rows:
     list_proofs: [TestListSpellingRetirementTypedFields, TestListSpellingRetirementBundleStyle, TestListSpellingRetirementNodeState]
 
   - id: node.timer
-    ruled: mechanical-ratified
-    paths: "nodes.<node>.timers[].id, nodes.<node>.timers[].event, nodes.<node>.timers[].owner, nodes.<node>.timers[].action, nodes.<node>.timers[].cancellation, nodes.<node>.timers[].delay, nodes.<node>.timers[].start_on, nodes.<node>.timers[].cancel_on, nodes.<node>.timers[].recurring"
+    ruled: issue-2293-6170610897
+    paths: "nodes.<node>.timers[].event, nodes.<node>.timers[].owner, nodes.<node>.timers[].action, nodes.<node>.timers[].cancellation, nodes.<node>.timers[].delay, nodes.<node>.timers[].start_on, nodes.<node>.timers[].cancel_on, nodes.<node>.timers[].recurring"
     owner: projectNodeTimerValue
     information:
-      fact: [id, event, owner]
+      fact: [event, owner]
+      derived_projection: [scoped_node_plus_event_identity]
       choice: [action, cancellation, delay, start_on, cancel_on, recurring]
     spelling:
       canonical_candidate: mapping
       retired_duplicates: [scalar_id]
-      already_retired: [delay_seconds, delay_minutes, delay_hours, delay_days]
+      already_retired: [id, delay_seconds, delay_minutes, delay_hours, delay_days]
     corpus: {rows: 0}
 
   - id: handler.container
@@ -444,22 +446,21 @@ rows:
     action_retirement: "#2307: action_rows above is historical at census_head, not current authority; emit specialization and activity/tool grammar remain separate, open owners."
 
   - id: handler.guard_gate_clear
-    ruled: mechanical-ratified
-    paths: "guard, guard.on_fail, guard.on_fail.escalate, sets_gate, clear_gates"
+    ruled: issue-2293-6170610897
+    paths: "guard, sets_gate, clear_gates"
     owners: [projectNodeGuardValue, projectNodeGateEffectValue, projectNodeClearGatesValue]
     information:
-      fact: [guard/check IDs and policy refs]
-      choice: [failure behavior, gate name, clear targets]
+      choice: [guard expression, gate name, clear targets]
     spelling:
-      canonical_candidate: typed_mapping_and_explicit_clear_list
+      canonical: scalar_guard_and_explicit_clear_list
       retired_duplicates: [sets_gate_scalar_equals_name_true, sets_gate_inert_value, clear_gates_true_equals_star, clear_gates_scalar_equals_one_item_list]
-      already_retired: [guard_scalar_id, deprecated_guard_id_only_fallback]
-    execution_note: "sets_gate always sets the named gate true; GateSpec.Value is not evaluated by Executor.stepSetsGate and must not be treated as an R2 value slot. Guard.check is required only in single-check form; checks is the list-form selector."
+      already_retired: [guard_id, guard_object, guard_checks, guard_on_fail, builtin_guard_registry]
+    execution_note: "Guard is a scalar CEL expression; false records rejection with no business effects. sets_gate always sets the named gate true; GateSpec.Value is not evaluated by Executor.stepSetsGate and must not be treated as an R2 value slot."
     corpus: {rows: 0}
 
   - id: handler.expression
     ruled: scalar-style-2556-frozen
-    paths: "handler/rule/on_success/fan_out emit.fields.*, activity.input.*, guard.on_fail.escalate.fields.*, stage_gate.context/outcome fields, data_accumulation.writes[].value/key/index; rules.when, on_complete.condition, guard.check/checks[].check, query.filter, filter/count.condition and fan_out.identity share source classification; path/data slots are separate"
+    paths: "handler/rule/on_success/fan_out emit.fields.*, activity.input.*, stage_gate.context/outcome fields, data_accumulation.writes[].value/key/index; rules.when, on_complete.condition, guard, query.filter, filter/count.condition and fan_out.identity share source classification; path/data slots are separate"
     owners: [projectNodeExpressionValue, projectNodeScalarExpression, projectSchemaGateValue, projectSchemaEmitValue, LowerEmitSpecFields, validateEmitTemplateFields, CarriesLoopRevision, evalExpressionValue, evalWorkflowGateContext]
     information:
       fact: [literal values and references]
@@ -510,10 +511,10 @@ rows:
       fact: [member identity and lifecycle-owned stage entry]
       choice: [membership, output, outcomes, deadline, until]
     spelling:
-      canonical_candidate: omit_id_when_equal_to_stage
-      retired_duplicates: [explicit_id_equal_to_stage]
-      distinct_overrides: [explicit_unique_id]
-    mode_note: "Arrival joins require stage, output, nonempty on_complete, and members.by plus exactly one of members.from or bounded nonnegative members.count. Count requires deadline or until including zero. Deadline uses after/from:stage_entry and on_deadline iff declared; distinct until closes through on_complete. Fan-out delivery joins require explicit id, literal members.from_fan_out:true, one same-handler top-level compiled site, and nonempty on_complete; arrival members/stage/output/deadline/on_deadline/until are forbidden on presence. window/complete_when/remaining/timeout are retired for all joins."
+      canonical: identity_is_scoped_node_and_handler_event
+      retired_duplicates: []
+      distinct_overrides: []
+    mode_note: "All joins reject id on presence; identity is the scoped node and handler event. Arrival joins require stage, output, nonempty on_complete, and members.by plus exactly one of members.from or bounded nonnegative members.count. Count requires deadline or until including zero. Deadline uses after/from:stage_entry and on_deadline iff declared; distinct until closes through on_complete. Fan-out delivery joins require literal members.from_fan_out:true, one same-handler top-level compiled site, and nonempty on_complete; arrival members/stage/output/deadline/on_deadline/until are forbidden on presence. window/complete_when/remaining/timeout are retired for all joins."
     corpus: {joins: 0}
 
   - id: handler.mailbox_artifact_repo

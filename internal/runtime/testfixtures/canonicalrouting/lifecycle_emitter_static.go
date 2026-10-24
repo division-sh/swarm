@@ -131,7 +131,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticGateExternalProof:
 		events = strings.Replace(events, "work.requested:\n", "work.requested:\n  swarm: {source: external}\n", 1)
 	case LifecycleStaticTimerCollision, LifecycleStaticTimerSelfOnly:
-		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {id: reminder, after: 1h, emit: work.completed}\n", 1)
+		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {after: 1h, emit: work.completed}\n", 1)
 	case LifecycleStaticLoopScopeMatrix:
 		for _, scope := range []string{"left", "right", "left/deep"} {
 			for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "entities.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/entities.yaml"} {
@@ -304,7 +304,7 @@ func CopyLifecycleEmitterExistingLifecycleFamilies(t testing.TB) string {
 	events := lifecycleStaticRead(t, root, "events.yaml") + "join.completed:\njoin.expired:\ncreated:\nreminder:\nexpired:\n"
 	writeClosedVariantFile(t, root, "events.yaml", events)
 	schema := lifecycleStaticRead(t, root, "schema.yaml")
-	schema = strings.Replace(schema, "  dispatching: {}", "  dispatching:\n    timers:\n      - {id: reminder, after: 1h, emit: reminder}\n      - {id: expired, after: 2h, emit: expired, advances_to: attention}\n      - {id: internal, after: 3h, advances_to: attention}", 1)
+	schema = strings.Replace(schema, "  dispatching: {}", "  dispatching:\n    timers:\n      - {after: 1h, emit: reminder}\n      - {after: 2h, emit: expired, advances_to: attention}\n      - {after: 3h, advances_to: ready}", 1)
 	schema += "auto_emit_on_create: {event: created}\n"
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nauto_emit_on_create: {event: created}\n")

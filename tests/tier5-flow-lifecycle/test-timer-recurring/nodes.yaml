@@ -1,7 +1,6 @@
 test-node:
   timers:
-    - id: tick_timer
-      event: timer.tick
+    - event: timer.tick
       delay: 10s
       start_on: event:monitor.started
       cancel_on: event:monitor.stopped

@@ -184,8 +184,7 @@ func issue642TimerContinuationSource(t *testing.T) string {
 	for name, body := range map[string]string{
 		"nodes.yaml": `test-node:
   timers:
-    - id: check_timer
-      event: timer.check
+    - event: timer.check
       delay: 1s
       start_on: event:timer.scheduled
   timer.scheduled:

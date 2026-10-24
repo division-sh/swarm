@@ -34,7 +34,7 @@ func TestExecutorJoinOutcomePresenceCompleteAndDeadline(t *testing.T) {
 					expression = `join.results.exists(r, r.?note.orValue("fallback") == "fallback")`
 				}
 				outcome := rc.HandlerRuleEntry{AdvancesTo: "ready", DataAccumulation: rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{{TargetField: "captured", Value: rc.CELExpression(expression)}}}}
-				spec := rc.JoinSpec{ID: "proof", Stage: "awaiting", Output: "payload.result", OutputPath: paths.Parse("payload.result"),
+				spec := rc.JoinSpec{Stage: "awaiting", Output: "payload.result", OutputPath: paths.Parse("payload.result"),
 					Members:    rc.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
 					OnComplete: outcome, OnCompleteFound: true, Deadline: &rc.JoinDeadlineSpec{After: "1h", From: rc.JoinDeadlineFromStageEntry}, OnDeadline: outcome, OnDeadlineFound: true}
 				types := rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Result": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}

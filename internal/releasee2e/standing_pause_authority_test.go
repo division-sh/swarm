@@ -61,7 +61,7 @@ func TestStandingPauseAuthorityPublicBothStores(t *testing.T) {
 			p := start()
 			bundle := requireFullLifecycleHealth(t, p.rpc)
 			standing := waitForFullLifecycleStandingRun(t, p.rpc, bundle, "", 0, "")
-			card := waitForFullLifecycleCard(t, p.rpc, standing.RunID, "lifecycle_ready")
+			card := waitForFullLifecycleCard(t, p.rpc, standing.RunID, "confirm_lifecycle_readiness")
 			decideFullLifecycleCard(t, p.rpc, card, "standing-initial-"+standing.RunID)
 			assertFullLifecycleCardDecided(t, p.rpc, card.CardID)
 			cli := func(args ...string) releaseCommandResult {
@@ -188,7 +188,7 @@ func TestStandingPauseAuthorityPublicBothStores(t *testing.T) {
 			if resumed.Origin != restored.Origin || !resumed.StartedAt.Equal(restored.StartedAt) {
 				t.Fatalf("standing resume replaced generation identity: before=%+v after=%+v", restored, resumed)
 			}
-			card = waitForFullLifecycleCard(t, p.rpc, reset.RunID, "lifecycle_ready")
+			card = waitForFullLifecycleCard(t, p.rpc, reset.RunID, "confirm_lifecycle_readiness")
 			decideFullLifecycleCard(t, p.rpc, card, "standing-resumed-"+reset.RunID)
 			assertFullLifecycleCardDecided(t, p.rpc, card.CardID)
 			assertFreshNoop("resume", reset.RunID, "repeat-resume")

@@ -58,7 +58,7 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 					p := start()
 					bundle := requireFullLifecycleHealth(t, p.rpc)
 					standing := waitForFullLifecycleStandingRun(t, p.rpc, bundle, "", 0, "")
-					card := waitForFullLifecycleCard(t, p.rpc, standing.RunID, "lifecycle_ready")
+					card := waitForFullLifecycleCard(t, p.rpc, standing.RunID, "confirm_lifecycle_readiness")
 					ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 					defer cancel()
 					if strings.HasPrefix(product, "validated-invalid") {
@@ -66,7 +66,7 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 					} else {
 						var result any
 						if err := p.rpc.call(ctx, "mailbox.decide", map[string]any{
-							"card_id": card.CardID, "verdict": "reject", "fields": map[string]any{},
+							"card_id": card.CardID, "verdict": "retire", "fields": map[string]any{},
 							"observed_content_hash": card.CardContentHash, "idempotency_key": "terminal-reject",
 						}, &result); err != nil {
 							t.Fatal(err)
@@ -158,7 +158,7 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 					}
 					waitForFullLifecycleStandingRun(t, p.rpc, latestBundle, reset.ServiceID, reset.Generation, reset.RunID)
 					if wantState == "active" {
-						waitForFullLifecycleCard(t, p.rpc, reset.RunID, "lifecycle_ready")
+						waitForFullLifecycleCard(t, p.rpc, reset.RunID, "confirm_lifecycle_readiness")
 					} else {
 						waitForFullLifecycleRunStatus(t, p.rpc, reset.RunID, "paused")
 					}

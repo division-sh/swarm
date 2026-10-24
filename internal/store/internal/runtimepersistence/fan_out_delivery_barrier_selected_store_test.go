@@ -857,7 +857,7 @@ func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.
 		t.Fatal(err)
 	}
 	ref, err := timeridentity.NewFanOutDeliveryJoinRef(
-		mustPersistenceRootNode("fan-out-source"), "items.ready", "all-items-delivered",
+		mustPersistenceRootNode("fan-out-source"), "items.ready",
 		mustFanOutBarrierDeclaration(t, fixture), fixture.bundleHash, digest,
 	)
 	if err != nil {
@@ -885,12 +885,12 @@ func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `
 		INSERT INTO fan_out_obligation_barriers (
 			run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,
-			target_flow_path,target_node_id,handler_event,join_id,
+			target_flow_path,target_node_id,handler_event,
 			route_scope_key,route_instance_id,route_instance_path,entity_id,routing_source,
 			execution_mode,timer_handle,status,created_at,updated_at
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$17,$18,$19,$12,$13,$14,$15,'armed',$16,$16)
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$16,$17,$18,$11,$12,$13,$14,'armed',$15,$15)
 	`, fixture.runID, fixture.deliveryID, fixture.flowPath, "fan_out", fixture.semanticPath, fixture.bundleHash, digest,
-		ref.FlowPath(), ref.NodeID(), ref.HandlerEvent(), ref.JoinID(), entityID,
+		ref.FlowPath(), ref.NodeID(), ref.HandlerEvent(), entityID,
 		string(routingRaw), string(executionmode.Live), string(handleRaw), at, owner.ScopeKey, owner.InstanceID, owner.InstancePath)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)

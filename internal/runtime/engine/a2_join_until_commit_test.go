@@ -42,7 +42,7 @@ func TestA2UntilAndOrdinaryConsumerShareOneEngineCommit(t *testing.T) {
 	for _, rejectCommit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "commit", true: "reject_no_effects"}[rejectCommit], func(t *testing.T) {
 			node := testRootExecutableNode(t, "collector")
-			spec := rc.JoinSpec{ID: "parts", Stage: "awaiting", Members: rc.JoinMembersSpec{From: "state.expected", By: "payload.member"}, Output: "payload.result",
+			spec := rc.JoinSpec{Stage: "awaiting", Members: rc.JoinMembersSpec{From: "state.expected", By: "payload.member"}, Output: "payload.result",
 				OnCompleteFound: true, OnComplete: rc.HandlerRuleEntry{DataAccumulation: rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{
 					{TargetField: "closed_count", Value: rc.RefExpression("join.completed")},
 					{TargetField: "reason", Value: rc.RefExpression("join.close_reason")},

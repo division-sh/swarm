@@ -204,7 +204,7 @@ func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fi
 	var barrier *fanoutbarrier.Registration
 	var handle timeridentity.TimerHandle
 	if withBarrier {
-		joinPlan, ok := semanticview.WorkflowJoinPlanForHandler(source, node, "items.ready")
+		_, ok := semanticview.WorkflowJoinPlanForHandler(source, node, "items.ready")
 		if !ok {
 			t.Fatal("fixture requires the compiled fan-out join")
 		}
@@ -212,7 +212,7 @@ func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fi
 		if err != nil {
 			t.Fatal(err)
 		}
-		join, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", joinPlan.Spec.ID, declaration, request.PlanRef.BundleHash, request.PlanRef.SemanticDigest)
+		join, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", declaration, request.PlanRef.BundleHash, request.PlanRef.SemanticDigest)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -921,7 +921,7 @@ func VerifyNativeReentrantJoinCompletionDoesNotCancelNextGenerationForTest(t *te
 			if err != nil || !entryFound {
 				t.Fatalf("next lifecycle entry: found=%v err=%v", entryFound, err)
 			}
-			nextRef, err := timeridentity.NewJoinRef(pipelineNode(t, "orders", "join-node"), "item.completed", "awaiting", "awaiting")
+			nextRef, err := timeridentity.NewJoinRef(pipelineNode(t, "orders", "join-node"), "item.completed", "awaiting")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1037,7 +1037,7 @@ func VerifyNativeConcurrentRootAndFlowSameLeafJoinsRemainDistinctAcrossRestartFo
 
 func pipelineJoinHandle(t *testing.T, flowID string, kind timeridentity.TimerHandleKind, runID, path, entityID string) timeridentity.TimerHandle {
 	t.Helper()
-	ref := initialWorkflowJoinRefForTest(t, runtimecorrelation.WithRunID(context.Background(), runID), pipelineNode(t, flowID, "join-node"), path, entityID, "awaiting", "awaiting")
+	ref := initialWorkflowJoinRefForTest(t, runtimecorrelation.WithRunID(context.Background(), runID), pipelineNode(t, flowID, "join-node"), path, entityID, "awaiting")
 	if kind == timeridentity.TimerHandleJoinComplete {
 		handle, err := timeridentity.JoinCompleteHandle(ref)
 		if err != nil {

@@ -196,7 +196,7 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 			return bundle, run
 		}
 		run := waitForFullLifecycleStandingRun(t, process.rpc, bundle, "", 0, "")
-		card := waitForFullLifecycleCard(t, process.rpc, run.RunID, "lifecycle_ready")
+		card := waitForFullLifecycleCard(t, process.rpc, run.RunID, "confirm_lifecycle_readiness")
 		decideFullLifecycleCard(t, process.rpc, card, "live-ready-"+card.CardID)
 		assertFullLifecycleCardDecided(t, process.rpc, card.CardID)
 		waitForFullLifecycleRunStatus(t, process.rpc, run.RunID, "running")

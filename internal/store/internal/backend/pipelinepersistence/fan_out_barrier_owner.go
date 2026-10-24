@@ -318,7 +318,6 @@ type persistedFanOutBarrier struct {
 	targetFlowPath     string
 	targetNode         string
 	handlerEvent       string
-	joinID             string
 	routingRaw         []byte
 	handleRaw          []byte
 	summaryRaw         []byte
@@ -347,7 +346,7 @@ func loadFanOutBarriers(
 	query := `
 		SELECT triggering_delivery_id, flow_path, declaration_family, semantic_path,
 		       bundle_hash, semantic_digest, target_flow_path,
-		       target_node_id, handler_event, join_id,
+		       target_node_id, handler_event,
 		       route_scope_key, route_instance_id, route_instance_path,
 		       entity_id, routing_source, execution_mode, timer_handle,
 		       summary, schedule_key, schedule_activation_id, created_at, updated_at, transferred_occurrence, status
@@ -382,7 +381,7 @@ func loadFanOutBarriers(
 			&item.barrier.Registration.IntentKey.ElementRef.Family,
 			&item.barrier.Registration.IntentKey.ElementRef.SemanticPath,
 			&item.bundleHash, &item.digest, &item.targetFlowPath,
-			&item.targetNode, &item.handlerEvent, &item.joinID,
+			&item.targetNode, &item.handlerEvent,
 			&item.barrier.Registration.Route.ScopeKey, &item.barrier.Registration.Route.InstanceID, &item.barrier.Registration.Route.InstancePath,
 			&item.barrier.Registration.EntityID, &routingRaw, &item.execution, &handleRaw,
 			&summaryRaw, &item.scheduleKey, &item.scheduleActivation, &createdAtRaw, &updatedAtRaw, &transferredRaw, &persistedStatus,
@@ -461,8 +460,7 @@ func decodePersistedFanOutBarrier(item persistedFanOutBarrier) (fanoutbarrier.Ba
 	if identityErr != nil || !fanOut.DeclarationIdentity().Equal(intentDeclaration) ||
 		fanOut.BundleHash() != strings.TrimSpace(item.bundleHash) || fanOut.SemanticDigest() != strings.TrimSpace(item.digest) ||
 		ref.FlowPath() != strings.TrimSpace(item.targetFlowPath) ||
-		ref.NodeID() != strings.TrimSpace(item.targetNode) || ref.HandlerEvent() != strings.TrimSpace(item.handlerEvent) ||
-		ref.JoinID() != strings.TrimSpace(item.joinID) {
+		ref.NodeID() != strings.TrimSpace(item.targetNode) || ref.HandlerEvent() != strings.TrimSpace(item.handlerEvent) {
 		return fanoutbarrier.Barrier{}, fmt.Errorf("fan-out barrier persisted identity contradicts its typed handle")
 	}
 	return item.barrier, nil
@@ -1173,17 +1171,17 @@ func commitFanOutBarrierRegistrationTx(
 		INSERT INTO fan_out_obligation_barriers (
 			run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 			bundle_hash, semantic_digest, target_flow_path,
-			target_node_id, handler_event, join_id,
+			target_node_id, handler_event,
 			route_scope_key, route_instance_id, route_instance_path,
 			entity_id, routing_source, execution_mode, timer_handle, status, created_at, updated_at
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$19
 		)`
 		if postgres {
-			query = strings.ReplaceAll(query, "$16", "$16::jsonb")
-			query = strings.ReplaceAll(query, "$18", "$18::jsonb")
+			query = strings.ReplaceAll(query, "$15", "$15::jsonb")
+			query = strings.ReplaceAll(query, "$17", "$17::jsonb")
 		} else {
-			query = postgresPlaceholdersToSQLite(query, 20)
+			query = postgresPlaceholdersToSQLite(query, 19)
 		}
 		_, err = tx.ExecContext(ctx, query,
 			registration.IntentKey.RunID,
@@ -1196,7 +1194,6 @@ func commitFanOutBarrierRegistrationTx(
 			ref.Node().FlowPath(),
 			ref.Node().NodeID(),
 			ref.HandlerEvent(),
-			ref.JoinID(),
 			registration.Route.ScopeKey,
 			registration.Route.InstanceID,
 			registration.Route.InstancePath,

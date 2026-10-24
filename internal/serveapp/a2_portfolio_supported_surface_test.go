@@ -508,7 +508,7 @@ func requireA2PortfolioJoin(t *testing.T, rt servedControlProofRuntime, period o
 		t.Fatalf("public period join activation: joins=%+v err=%v", joins, err)
 	}
 	join := joins[0]
-	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "portfolio/period", "portfolio-collector"), "period.reported", "awaiting", "awaiting")
+	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "portfolio/period", "portfolio-collector"), "period.reported", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}

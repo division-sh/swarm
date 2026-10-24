@@ -293,7 +293,7 @@ func TestRun_JoinValidationAttributesDistinctFlowFailureExactlyInEitherOrder(t *
 
 func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	spec := runtimecontracts.JoinSpec{
-		ID: "awaiting", Stage: "awaiting",
+		Stage:   "awaiting",
 		Members: runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
 		Output:  "payload.result", OnCompleteFound: true,
 		OnComplete:      runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready", Emit: runtimecontracts.EmitSpec{Event: "join.completed", Fields: map[string]runtimecontracts.ExpressionValue{"results": runtimecontracts.CELExpression("join.results")}}},

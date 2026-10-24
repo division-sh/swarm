@@ -40,7 +40,7 @@ func publishedBarrierEvidenceFixture(t *testing.T, root bool, mode executionmode
 		if err != nil {
 			t.Fatal(err)
 		}
-		ref, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", "joined", declaration, registration.PlanRef.BundleHash, registration.PlanRef.SemanticDigest)
+		ref, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", declaration, registration.PlanRef.BundleHash, registration.PlanRef.SemanticDigest)
 		if err != nil {
 			t.Fatal(err)
 		}

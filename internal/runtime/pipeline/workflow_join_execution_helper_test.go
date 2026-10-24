@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
-func initialWorkflowJoinRefForTest(t *testing.T, ctx context.Context, node identity.ExecutableNode, path, entityID, stage, joinID string) timeridentity.JoinRef {
+func initialWorkflowJoinRefForTest(t *testing.T, ctx context.Context, node identity.ExecutableNode, path, entityID, stage string) timeridentity.JoinRef {
 	t.Helper()
 	owner := testRunScopedWorkflowInstanceFromContext(ctx, path)
 	route := owner.Route
@@ -25,7 +25,7 @@ func initialWorkflowJoinRefForTest(t *testing.T, ctx context.Context, node ident
 	if err != nil || !found {
 		t.Fatalf("initial lifecycle entry: found=%v err=%v", found, err)
 	}
-	ref, err := timeridentity.NewJoinRef(node, "item.completed", stage, joinID)
+	ref, err := timeridentity.NewJoinRef(node, "item.completed", stage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func workflowJoinActivationKey(t *testing.T, buckets map[string]map[string]any, 
 	}
 	var key string
 	for _, activation := range activations {
-		if activation.JoinRef().Node().Equal(node) && activation.Stage() == "awaiting" && activation.JoinID() == "awaiting" {
+		if activation.JoinRef().Node().Equal(node) && activation.Stage() == "awaiting" && activation.HandlerEvent() == "item.completed" {
 			if key != "" {
 				t.Fatal("fixture requires one exact lifecycle-entry arm; multiple arms must use their retained JoinRef")
 			}

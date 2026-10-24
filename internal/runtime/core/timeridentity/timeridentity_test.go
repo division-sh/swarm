@@ -125,10 +125,10 @@ func TestParseAccumulatorBucketKey(t *testing.T) {
 }
 
 func TestJoinHandleRoundTripIncludesOwningFlowAndStageIdentity(t *testing.T) {
-	awaiting := mustJoinHandle(t, TimerHandleJoinTimeout, "orders", "join-node", "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
-	reviewing := mustJoinHandle(t, TimerHandleJoinTimeout, "orders", "join-node", "item.completed", "reviewing", "shared", "window-1", attemptgeneration.Generation{})
-	foreignFlow := mustJoinHandle(t, TimerHandleJoinTimeout, "returns", "join-node", "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
-	foreignPath := mustJoinHandleForNode(t, TimerHandleJoinTimeout, identitytest.ExecutableNode(t, "dependency/orders", "join-node"), "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
+	awaiting := mustJoinHandle(t, TimerHandleJoinTimeout, "orders", "join-node", "item.completed", "awaiting", "window-1", attemptgeneration.Generation{})
+	reviewing := mustJoinHandle(t, TimerHandleJoinTimeout, "orders", "join-node", "item.completed", "reviewing", "window-1", attemptgeneration.Generation{})
+	foreignFlow := mustJoinHandle(t, TimerHandleJoinTimeout, "returns", "join-node", "item.completed", "awaiting", "window-1", attemptgeneration.Generation{})
+	foreignPath := mustJoinHandleForNode(t, TimerHandleJoinTimeout, identitytest.ExecutableNode(t, "dependency/orders", "join-node"), "item.completed", "awaiting", "window-1", attemptgeneration.Generation{})
 	if awaiting.TaskID() == reviewing.TaskID() {
 		t.Fatalf("join task ids collide across stages: %q", awaiting.TaskID())
 	}
@@ -140,14 +140,14 @@ func TestJoinHandleRoundTripIncludesOwningFlowAndStageIdentity(t *testing.T) {
 	}
 	parsed, ok := ParseTimerHandle(awaiting.PayloadMetadata())
 	ref, refOK := parsed.JoinRef()
-	if !ok || !refOK || !ref.Node().Equal(identitytest.FlowNode(t, "orders", "join-node")) || ref.Stage() != "awaiting" || ref.JoinID() != "shared" || ref.StageEntry().OccurrenceID != "window-1" {
+	if !ok || !refOK || !ref.Node().Equal(identitytest.FlowNode(t, "orders", "join-node")) || ref.Stage() != "awaiting" || ref.HandlerEvent() != "item.completed" || ref.StageEntry().OccurrenceID != "window-1" {
 		t.Fatalf("parsed join handle = %#v, %v", parsed, ok)
 	}
 }
 
 func TestJoinHandleGenerationHasOneCanonicalOwner(t *testing.T) {
 	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
-	handle := mustJoinHandle(t, TimerHandleJoinTimeout, "", "join-node", "item.completed", "awaiting", "shared", "window-1", generation)
+	handle := mustJoinHandle(t, TimerHandleJoinTimeout, "", "join-node", "item.completed", "awaiting", "window-1", generation)
 	payload := handle.PayloadMetadata()
 	inner := payload["timer_handle"].(map[string]any)
 	if _, duplicated := inner[attemptgeneration.PayloadKey]; duplicated {
@@ -168,7 +168,7 @@ func TestFanOutDeliveryJoinHandleRoundTripPreservesExactDeclarationIntentAndGene
 	declaration, err := NewFanOutDeliveryJoinRef(
 		identitytest.ExecutableNode(t, "worker", "producer"),
 		"batch.requested",
-		"all-items-delivered",
+
 		fanOutDeclaration,
 		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -222,7 +222,7 @@ func mustFanOutDeliveryJoinHandle(t *testing.T, flowPath, nodeID, semanticPath, 
 		t.Fatal(err)
 	}
 	ref, err := NewFanOutDeliveryJoinRef(
-		identitytest.ExecutableNode(t, flowPath, nodeID), "batch.requested", "all-items-delivered",
+		identitytest.ExecutableNode(t, flowPath, nodeID), "batch.requested",
 		declaration,
 		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -243,7 +243,7 @@ func mustFanOutDeliveryJoinHandle(t *testing.T, flowPath, nodeID, semanticPath, 
 
 func TestJoinHandleCodecRejectsMissingOrContradictoryDeclarationIdentity(t *testing.T) {
 	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
-	root := mustJoinHandle(t, TimerHandleJoinTimeout, "", "join-node", "item.completed", "awaiting", "shared", "window-1", generation)
+	root := mustJoinHandle(t, TimerHandleJoinTimeout, "", "join-node", "item.completed", "awaiting", "window-1", generation)
 	if _, ref, ok := ParseJoinHandle(root.PayloadMetadata()); !ok || ref.FlowPath() != "." || !ref.Generation().Equal(generation) {
 		t.Fatalf("explicit root handle failed strict round trip: ref=%#v ok=%v", ref, ok)
 	}
@@ -291,7 +291,7 @@ func cloneTimerPayload(t *testing.T, payload map[string]any) map[string]any {
 	return cloned
 }
 
-func mustJoinHandle(t *testing.T, kind TimerHandleKind, flowID, nodeID, handlerEvent, stage, joinID, occurrence string, generation attemptgeneration.Generation) TimerHandle {
+func mustJoinHandle(t *testing.T, kind TimerHandleKind, flowID, nodeID, handlerEvent, stage, occurrence string, generation attemptgeneration.Generation) TimerHandle {
 	t.Helper()
 	flowPath := flowID
 	if flowPath == "" {
@@ -301,12 +301,12 @@ func mustJoinHandle(t *testing.T, kind TimerHandleKind, flowID, nodeID, handlerE
 	if err != nil {
 		t.Fatal(err)
 	}
-	return mustJoinHandleForNode(t, kind, node, handlerEvent, stage, joinID, occurrence, generation)
+	return mustJoinHandleForNode(t, kind, node, handlerEvent, stage, occurrence, generation)
 }
 
-func mustJoinHandleForNode(t *testing.T, kind TimerHandleKind, node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID, occurrence string, generation attemptgeneration.Generation) TimerHandle {
+func mustJoinHandleForNode(t *testing.T, kind TimerHandleKind, node runtimeidentity.ExecutableNode, handlerEvent, stage, occurrence string, generation attemptgeneration.Generation) TimerHandle {
 	t.Helper()
-	ref, err := NewJoinRef(node, handlerEvent, stage, joinID)
+	ref, err := NewJoinRef(node, handlerEvent, stage)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,8 +22,8 @@ func TestA2JoinClosedGrammarM01M04(t *testing.T) {
 			if err := decodeNodeTestYAML([]byte(source), &spec); err != nil {
 				t.Fatal(err)
 			}
-			if spec.EffectiveID() != "waiting" || spec.Mode() != WorkflowJoinModeArrival {
-				t.Fatalf("lost default/declaration mode: %#v", spec)
+			if spec.Stage != "waiting" || spec.Mode() != WorkflowJoinModeArrival {
+				t.Fatalf("lost stage/declaration mode: %#v", spec)
 			}
 		})
 	}
@@ -163,7 +163,7 @@ func TestA2JoinPairedCompiledFanOutM03(t *testing.T) {
 	node := identitytest.RootNode(t, "dispatcher")
 	handler := SystemNodeEventHandler{
 		FanOut: &FanOutSpec{ItemsFrom: "payload.items", As: "candidate", Emit: EmitSpec{Event: "item.requested"}},
-		Join: &JoinSpec{ID: "settled", Members: JoinMembersSpec{FromFanOut: true},
+		Join: &JoinSpec{Members: JoinMembersSpec{FromFanOut: true},
 			OnCompleteFound: true, OnComplete: HandlerRuleEntry{Emit: EmitSpec{Event: "batch.completed"}}},
 	}
 	qualified, err := QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", handler)

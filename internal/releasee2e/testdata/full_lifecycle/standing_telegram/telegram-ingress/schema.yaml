@@ -2,19 +2,15 @@ name: telegram-ingress
 stages:
   warming:
     timers:
-      - id: warmup
-        after: 100ms
+      - after: 100ms
         advances_to: review
   review:
     gate:
-      decision: lifecycle_ready
-      title: Confirm lifecycle readiness
+      decision: confirm_lifecycle_readiness
       outcomes:
-        approve:
-          label: Continue
+        continue:
           advances_to: serving
-        reject:
-          label: Retire
+        retire:
           advances_to: retired
   serving: {}
   retired:

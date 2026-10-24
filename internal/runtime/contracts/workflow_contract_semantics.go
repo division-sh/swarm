@@ -381,7 +381,7 @@ func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTime
 	out := make([]WorkflowTimerContract, 0, 8)
 	indexByID := map[string]int{}
 	addTimer := func(timer WorkflowTimerContract) {
-		timer = normalizeWorkflowSemanticTimer(bundle, timer)
+		timer = normalizeWorkflowSemanticTimer(timer)
 		key := timer.SemanticKey()
 		if key == "" {
 			return
@@ -438,7 +438,7 @@ func deriveStageWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCo
 				if eventType == "" {
 					eventType = WorkflowStageTimerInternalEvent
 				}
-				timerID := stageWorkflowTimerSemanticID(schema.FlowID, row.ID)
+				timerID := stageWorkflowTimerSemanticID(schema.FlowID, row.derivedID(stageID))
 				out = append(out, WorkflowTimerContract{
 					ID:         timerID,
 					Stage:      stageID,
@@ -483,20 +483,18 @@ func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCon
 		}
 		for _, timer := range node.Timers {
 			timer.Node = nodeRef
+			timer.ID = nodeID + "." + strings.TrimSpace(timer.Event)
 			timer.FlowID = ""
 			timer.StageOwned = false
 			if strings.TrimSpace(timer.Owner) == "" {
 				timer.Owner = nodeID
-			}
-			if strings.TrimSpace(timer.Event) == "" {
-				timer.Event = inferWorkflowTimerEvent(bundle, node, timer)
 			}
 			out = append(out, timer)
 		}
 	}
 	return out
 }
-func normalizeWorkflowSemanticTimer(bundle *WorkflowContractBundle, timer WorkflowTimerContract) WorkflowTimerContract {
+func normalizeWorkflowSemanticTimer(timer WorkflowTimerContract) WorkflowTimerContract {
 	timer.ID = strings.TrimSpace(timer.ID)
 	timer.Stage = strings.TrimSpace(timer.Stage)
 	timer.Event = strings.TrimSpace(timer.Event)
@@ -512,11 +510,6 @@ func normalizeWorkflowSemanticTimer(bundle *WorkflowContractBundle, timer Workfl
 	timer.Delay = strings.TrimSpace(timer.Delay)
 	timer.StartOn = strings.TrimSpace(timer.StartOn)
 	timer.CancelOn = strings.TrimSpace(timer.CancelOn)
-	if timer.Event == "" && timer.Node.Valid() {
-		if record, ok := bundle.ExecutableNode(timer.Node); ok {
-			timer.Event = inferWorkflowTimerEvent(bundle, record.Entry, timer)
-		}
-	}
 	return timer
 }
 func mergeWorkflowSemanticTimer(existing, incoming WorkflowTimerContract) WorkflowTimerContract {
@@ -559,56 +552,6 @@ func mergeWorkflowSemanticTimer(existing, incoming WorkflowTimerContract) Workfl
 	}
 	existing.Recurring = existing.Recurring || incoming.Recurring
 	return existing
-}
-func inferWorkflowTimerEvent(bundle *WorkflowContractBundle, node SystemNodeContract, timer WorkflowTimerContract) string {
-	if eventType := strings.TrimSpace(timer.Event); eventType != "" {
-		return eventType
-	}
-	timerID := strings.TrimSpace(timer.ID)
-	if timerID == "" {
-		return ""
-	}
-	candidates := []string{timerID}
-	if !strings.HasPrefix(timerID, "timer.") {
-		candidates = append([]string{"timer." + timerID}, candidates...)
-	}
-	for _, candidate := range candidates {
-		if _, ok := node.EventHandlers[candidate]; ok {
-			return candidate
-		}
-	}
-	for _, candidate := range candidates {
-		if workflowTimerEventDefined(bundle, candidate) {
-			return candidate
-		}
-	}
-	for _, subscribed := range EffectiveSystemNodeSubscriptions(node) {
-		subscribed = strings.TrimSpace(subscribed)
-		if subscribed == "" {
-			continue
-		}
-		for _, candidate := range candidates {
-			if subscribed == candidate {
-				return candidate
-			}
-		}
-	}
-	return ""
-}
-func workflowTimerEventDefined(bundle *WorkflowContractBundle, eventType string) bool {
-	eventType = strings.TrimSpace(eventType)
-	if bundle == nil || eventType == "" {
-		return false
-	}
-	for scopedKey := range bundle.scopedEvents {
-		if strings.HasSuffix(scopedKey, "::"+eventType) {
-			return true
-		}
-	}
-	if _, ok := bundle.Events[eventType]; ok {
-		return true
-	}
-	return false
 }
 func rootSchemaInitialStage(root *FlowSchemaDocument) string {
 	if root == nil {

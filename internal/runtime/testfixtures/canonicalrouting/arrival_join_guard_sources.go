@@ -16,7 +16,7 @@ worker:
       writes: [{op: set, target: entity.window, value: payload.aggregation}]
     emit: {event: forwarded, fields: {window: payload.window, dedup_by: payload.dedup_by, aggregation: payload.aggregation}}
   batch:
-    join: {id: children, members: {from_fan_out: true}, on_complete: {emit: done}}
+    join: {members: {from_fan_out: true}, on_complete: {emit: done}}
 business_event:
   window: text
   aggregation: text

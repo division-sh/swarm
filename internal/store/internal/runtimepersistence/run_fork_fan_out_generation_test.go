@@ -152,7 +152,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					if err != nil {
 						t.Fatal(err)
 					}
-					join, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", "all-items-delivered", declaration, plans[0].Ref.BundleHash, plans[0].Ref.SemanticDigest)
+					join, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", declaration, plans[0].Ref.BundleHash, plans[0].Ref.SemanticDigest)
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -29,7 +29,7 @@ func TestEmitCompletenessConsumesSharedRuleDisplayAndKeepsSingularJoins(t *testi
 		},
 		{
 			name:   "join outcomes",
-			source: "join:\n  id: membership-owner\n  stage: pending\n  members: {count: 1, by: payload.member_id}\n  output: payload.value\n  deadline: {after: 1h, from: stage_entry}\n  on_complete: {emit: chosen}\n  on_deadline: {emit: fallback}",
+			source: "join:\n  stage: pending\n  members: {count: 1, by: payload.member_id}\n  output: payload.value\n  deadline: {after: 1h, from: stage_entry}\n  on_complete: {emit: chosen}\n  on_deadline: {emit: fallback}",
 			labels: []string{"join.on_complete.emit", "join.on_deadline.emit"},
 		},
 	} {
@@ -57,8 +57,8 @@ func TestEmitCompletenessConsumesSharedRuleDisplayAndKeepsSingularJoins(t *testi
 					t.Fatalf("site[%d] lost display, exact identity or original output: %#v display=%q", i, site, got)
 				}
 			}
-			if handler.Join != nil && handler.Join.EffectiveID() != "membership-owner" {
-				t.Fatalf("outcome presentation changed join membership identity: %#v", handler.Join)
+			if handler.Join != nil && handler.Join.Stage != "pending" {
+				t.Fatalf("outcome presentation changed join membership stage: %#v", handler.Join)
 			}
 		})
 	}

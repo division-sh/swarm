@@ -16,7 +16,7 @@ stages:
   ready: {}
   waiting:
     timers:
-      - {id: deadline, after: 1h, advances_to: done}
+      - {after: 1h, advances_to: done}
   done: {final: true}
 `,
 		"entities.yaml": "test_entity:\n  marker: text\n",

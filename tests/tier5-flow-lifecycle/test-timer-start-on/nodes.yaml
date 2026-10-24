@@ -1,7 +1,6 @@
 task-node:
   timers:
-    - id: task_timer
-      event: timer.task_timeout
+    - event: timer.task_timeout
       delay: 1h
       start_on: event:task.started
   task.started:

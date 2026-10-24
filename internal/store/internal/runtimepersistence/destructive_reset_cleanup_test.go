@@ -1330,14 +1330,14 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		INSERT INTO fan_out_obligation_barriers (
 			run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 			bundle_hash, semantic_digest, target_flow_path,
-			target_node_id, handler_event, join_id, route_scope_key,
+			target_node_id, handler_event, route_scope_key,
 			route_instance_id, route_instance_path, entity_id, routing_source,
 			execution_mode, timer_handle, status, summary, schedule_key,
 			created_at, updated_at
 		)
 		SELECT run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 			bundle_hash, semantic_digest, '.',
-			'cleanup-node', 'cleanup.event', 'cleanup-join', 'cleanup-scope',
+			'cleanup-node', 'cleanup.event', 'cleanup-scope',
 			'cleanup-instance', 'cleanup-path', $2::uuid, '{}'::jsonb,
 			'live', '{}'::jsonb, 'armed', NULL, NULL,
 			$3, $3

@@ -247,7 +247,6 @@ pins:
 		files[flow+"/nodes.yaml"] = `collector:
   item.completed:
     join:
-      id: primary
       stage: awaiting
       members: {from: state.expected, by: payload.member_id}
       output: payload.result
@@ -266,7 +265,6 @@ pins:
             close_reason: join.close_reason
   alternate.completed:
     join:
-      id: alternate
       stage: awaiting
       members: {count: 3, by: payload.member_id}
       output: payload.result

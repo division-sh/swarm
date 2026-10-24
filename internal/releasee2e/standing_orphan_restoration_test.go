@@ -41,12 +41,12 @@ func runStandingOrphanRestorationPublic(t *testing.T, binary, lifecycle, root st
 	}
 	p := start()
 	standing := waitForFullLifecycleStandingRun(t, p.rpc, requireFullLifecycleHealth(t, p.rpc), "", 0, "")
-	card := waitForFullLifecycleCard(t, p.rpc, standing.RunID, "lifecycle_ready")
+	card := waitForFullLifecycleCard(t, p.rpc, standing.RunID, "confirm_lifecycle_readiness")
 	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 	defer cancel()
 	if product == "terminal-orphan" {
 		var result any
-		if err := p.rpc.call(ctx, "mailbox.decide", map[string]any{"card_id": card.CardID, "verdict": "reject", "fields": map[string]any{}, "observed_content_hash": card.CardContentHash, "idempotency_key": "terminal-orphan-reject"}, &result); err != nil {
+		if err := p.rpc.call(ctx, "mailbox.decide", map[string]any{"card_id": card.CardID, "verdict": "retire", "fields": map[string]any{}, "observed_content_hash": card.CardContentHash, "idempotency_key": "terminal-orphan-reject"}, &result); err != nil {
 			t.Fatal(err)
 		}
 		waitForFullLifecycleRunStatus(t, p.rpc, standing.RunID, "completed")
@@ -146,7 +146,7 @@ func runStandingOrphanRestorationPublic(t *testing.T, binary, lifecycle, root st
 	}
 	waitForFullLifecycleStandingRun(t, p.rpc, bundle, reset.ServiceID, reset.Generation, reset.RunID)
 	if wantState == "active" {
-		waitForFullLifecycleCard(t, p.rpc, reset.RunID, "lifecycle_ready")
+		waitForFullLifecycleCard(t, p.rpc, reset.RunID, "confirm_lifecycle_readiness")
 	} else {
 		waitForFullLifecycleRunStatus(t, p.rpc, reset.RunID, "paused")
 	}

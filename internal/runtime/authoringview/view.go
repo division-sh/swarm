@@ -191,7 +191,6 @@ type StageGraphTimerView struct {
 }
 
 type StageGraphJoinView struct {
-	ID                string `json:"id"`
 	Stage             string `json:"stage,omitempty"`
 	FlowPath          string `json:"flow_path"`
 	NodeID            string `json:"node_id"`
@@ -648,7 +647,6 @@ func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []St
 			continue
 		}
 		item := StageGraphJoinView{
-			ID:                strings.TrimSpace(plan.Spec.EffectiveID()),
 			Stage:             strings.TrimSpace(plan.Spec.Stage),
 			FlowPath:          plan.Node.FlowPath(),
 			NodeID:            plan.Node.NodeID(),
@@ -669,8 +667,8 @@ func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []St
 		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		left := out[i].FlowPath + "\x00" + out[i].Stage + "\x00" + out[i].ID + "\x00" + out[i].NodeID + "\x00" + out[i].HandlerEvent
-		right := out[j].FlowPath + "\x00" + out[j].Stage + "\x00" + out[j].ID + "\x00" + out[j].NodeID + "\x00" + out[j].HandlerEvent
+		left := out[i].FlowPath + "\x00" + out[i].NodeID + "\x00" + out[i].HandlerEvent
+		right := out[j].FlowPath + "\x00" + out[j].NodeID + "\x00" + out[j].HandlerEvent
 		return left < right
 	})
 	return out

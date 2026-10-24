@@ -1,7 +1,6 @@
 test-node:
   timers:
-    - id: check_timer
-      event: timer.check
+    - event: timer.check
       delay: 1s
       start_on: event:timer.scheduled
   timer.scheduled:

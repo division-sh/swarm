@@ -36,7 +36,7 @@ func TestFinalStageExplicitLoopAndJoinSourcesCannotWidenEligibility(t *testing.T
 					}
 				default:
 					transition.AdvancesTo = ""
-					join := &JoinSpec{ID: "members", Stage: "waiting"}
+					join := &JoinSpec{Stage: "waiting"}
 					if kind == "join_complete" {
 						join.OnCompleteFound = true
 						join.OnComplete = HandlerRuleEntry{AdvancesTo: "other", authored: true}
@@ -103,7 +103,7 @@ func TestFinalJoinDeclarationApplicabilityPreservesLoopAndFanOutKinds(t *testing
 	for _, kind := range []string{"arrival", "loop_arrival", "fan_out_delivery"} {
 		for _, final := range []bool{false, true} {
 			t.Run(kind+"/final="+boolString(final), func(t *testing.T) {
-				join := &JoinSpec{ID: "results", Stage: "waiting", OnCompleteFound: true, OnComplete: HandlerRuleEntry{Emit: EmitSpec{Event: "work.completed"}}}
+				join := &JoinSpec{Stage: "waiting", OnCompleteFound: true, OnComplete: HandlerRuleEntry{Emit: EmitSpec{Event: "work.completed"}}}
 				transition := HandlerTransitionSemantic{Node: node, EventType: "work.received", Join: join}
 				if kind == "loop_arrival" {
 					transition.Loop = &LoopOperationSpec{Admit: "revision", From: "waiting"}

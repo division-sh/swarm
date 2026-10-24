@@ -59,7 +59,8 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	}
 	if frozen.Hash != canonicaljson.HashBytes(frozen.Input) || frozen.Revision != 17 ||
 		!strings.Contains(frozen.FullText, "Gate: . / awaiting_review") ||
-		strings.Index(frozen.FullText, "zeta: text") > strings.Index(frozen.FullText, "alpha: text") ||
+		!strings.Contains(frozen.FullText, "Zeta: text") || !strings.Contains(frozen.FullText, "Alpha: text") ||
+		strings.Index(frozen.FullText, "Zeta: text") > strings.Index(frozen.FullText, "Alpha: text") ||
 		len(frozen.Choices) != 2 || frozen.Choices[1].Verdict != "revise" ||
 		frozen.Choices[1].Fields[0].Name != "zeta" || frozen.Choices[1].Fields[1].Name != "alpha" {
 		t.Fatalf("frozen card = %#v", frozen)
@@ -77,7 +78,7 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	card.DeferredUntil = time.Time{}
 	prompt := DraftPrompt{DraftID: uuid.NewString(), Verdict: "revise", NextFieldIndex: 1, ExpiresAt: now.Add(15 * time.Minute)}
 	prompted, err := FreezeCard(card, 18, "", audience, prompt)
-	if err != nil || !strings.Contains(prompted.FullText, "Input: alpha (text) required") ||
+	if err != nil || !strings.Contains(prompted.FullText, "Input: Alpha (text) required") ||
 		strings.Contains(prompted.FullText, "private-answer") || prompted.Hash == frozen.Hash {
 		t.Fatalf("private-answer-free ordered prompt = %#v, %v", prompted, err)
 	}

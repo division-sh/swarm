@@ -394,7 +394,7 @@ func writeDescribeStageJoins(out io.Writer, joins []authoringview.StageGraphJoin
 	}
 	fmt.Fprintln(out, "    joins:")
 	for _, join := range joins {
-		parts := []string{join.ID}
+		parts := []string{join.NodeID + ":" + join.HandlerEvent}
 		if join.MembersFromFanOut {
 			parts = append(parts, "members from_fan_out")
 		} else {

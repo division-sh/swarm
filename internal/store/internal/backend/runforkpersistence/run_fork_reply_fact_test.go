@@ -17,7 +17,7 @@ import (
 
 func historicalReplyRecord(t *testing.T) replycontext.Record {
 	t.Helper()
-	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "join"), "item.done", "collecting", "items")
+	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "join"), "item.done", "collecting")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func historicalReplyRecord(t *testing.T) replycontext.Record {
 	if err != nil {
 		t.Fatal(err)
 	}
-	early, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "early"), "later.done", "waiting", "later")
+	early, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "early"), "later.done", "waiting")
 	if err != nil {
 		t.Fatal(err)
 	}

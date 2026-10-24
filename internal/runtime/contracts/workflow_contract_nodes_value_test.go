@@ -50,7 +50,7 @@ func TestNodeValueFieldsRejectDuplicateEffectiveAliasKeys(t *testing.T) {
 }
 
 func TestProjectNodeTimerValuePreservesNestedCoordinates(t *testing.T) {
-	source, err := yamlsource.Load([]byte("node:\n  timers:\n    - {id: retry, delay: 1m, recurring: true}\n"))
+	source, err := yamlsource.Load([]byte("node:\n  timers:\n    - {event: timer.retry, delay: 1m, recurring: true}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,8 +71,15 @@ func TestProjectNodeTimerValuePreservesNestedCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if timer.ID != "retry" || timer.Delay != "1m" || !timer.Recurring {
+	if timer.ID != "" || timer.Event != "timer.retry" || timer.Delay != "1m" || !timer.Recurring {
 		t.Fatalf("wrong timer projection: %#v", timer)
+	}
+	for _, field := range []string{"id: retry", "id: null", "id: false", "id: {}"} {
+		var timer WorkflowTimerContract
+		err := decodeNodeTestYAML([]byte("event: timer.retry\ndelay: 1m\n"+field+"\n"), &timer)
+		if err == nil || !strings.Contains(err.Error(), `timer field "id" is not supported`) {
+			t.Fatalf("retired timer identity %s was admitted: %v", field, err)
+		}
 	}
 	retired, err := yamlsource.Load([]byte("node:\n  timers:\n    - {delay_seconds: 7}\n"))
 	if err != nil {

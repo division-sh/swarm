@@ -80,7 +80,7 @@ func TestCompiledProcessLifecycleStartupEvidence(t *testing.T) {
 	assertFullLifecycleReadySurface(t, process)
 	bundle := requireFullLifecycleHealth(t, process.rpc)
 	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundle, "", 0, "")
-	card := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "lifecycle_ready")
+	card := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "confirm_lifecycle_readiness")
 	parts := map[string]any{}
 	partErrors := map[string]error{}
 	selected := goldenSQLiteStore(filepath.Join(root, "store"))
@@ -92,7 +92,7 @@ func TestCompiledProcessLifecycleStartupEvidence(t *testing.T) {
 		})
 	}
 	var refused any
-	if err := process.rpc.call(ctx, "mailbox.decide", map[string]any{"card_id": card.CardID, "verdict": "approve", "fields": map[string]any{}, "observed_content_hash": "wrong-hash", "idempotency_key": "failure-evidence-control"}, &refused); err == nil {
+	if err := process.rpc.call(ctx, "mailbox.decide", map[string]any{"card_id": card.CardID, "verdict": "continue", "fields": map[string]any{}, "observed_content_hash": "wrong-hash", "idempotency_key": "failure-evidence-control"}, &refused); err == nil {
 		t.Fatal("controlled invalid decision did not fail")
 	}
 	for part, err := range partErrors {
@@ -303,7 +303,7 @@ func runFullLifecycleJourney(t *testing.T, binary, lifecycleBinary, root string,
 	process := startReady()
 	bundleHash := requireFullLifecycleHealth(t, process.rpc)
 	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, "", 0, "")
-	lifecycleCard := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "lifecycle_ready")
+	lifecycleCard := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "confirm_lifecycle_readiness")
 	if lifecycleCard.ListedTitle != "Confirm lifecycle readiness" || lifecycleCard.Snapshot.Title != lifecycleCard.ListedTitle {
 		t.Fatalf("lifecycle decision card title = %#v, want exact authored title", lifecycleCard)
 	}
@@ -433,7 +433,7 @@ func runFullLifecycleDevFreshJourney(
 	if !fresh.StartedAt.After(standing.StartedAt) {
 		t.Fatalf("fresh dev standing started_at = %s, want later than predecessor %s (checkpoint=%#v)", fresh.StartedAt, standing.StartedAt, checkpoint)
 	}
-	card := waitForFullLifecycleCard(t, process.rpc, fresh.RunID, "lifecycle_ready")
+	card := waitForFullLifecycleCard(t, process.rpc, fresh.RunID, "confirm_lifecycle_readiness")
 	assertFullLifecycleTimerCardinality(t, process.rpc, fresh.RunID, 1)
 	assertFullLifecycleHistoryAbsent(t, process.rpc, fresh.RunID, predecessorHistory)
 	decideFullLifecycleCard(t, process.rpc, card, "lifecycle-gate-"+fresh.RunID)
@@ -649,8 +649,12 @@ func decideFullLifecycleCard(t *testing.T, rpc *releaseRPCClient, card fullLifec
 		Status              string `json:"status"`
 		IdempotencyReplayed bool   `json:"idempotency_replayed"`
 	}
+	verdict := "approve"
+	if card.Decision == "confirm_lifecycle_readiness" {
+		verdict = "continue"
+	}
 	if err := rpc.call(ctx, "mailbox.decide", map[string]any{
-		"card_id": card.CardID, "verdict": "approve", "fields": map[string]any{},
+		"card_id": card.CardID, "verdict": verdict, "fields": map[string]any{},
 		"observed_content_hash": card.CardContentHash, "idempotency_key": key,
 	}, &result); err != nil {
 		t.Fatal(err)

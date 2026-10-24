@@ -282,8 +282,8 @@ func TestBuildStageGraphShowsSameLocalJoinIDAtDistinctFlowPaths(t *testing.T) {
 				"b/orders": runtimecontracts.BuildWorkflowStageTopology("b/orders", "awaiting", []string{"awaiting", "done"}, nil, nil, nil, nil),
 			},
 			Joins: []runtimecontracts.WorkflowJoinPlan{
-				{Node: second, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{ID: "second", Stage: "awaiting"}},
-				{Node: first, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{ID: "first", Stage: "awaiting"}},
+				{Node: second, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{Stage: "awaiting"}},
+				{Node: first, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{Stage: "awaiting"}},
 			},
 		},
 	}
@@ -688,7 +688,7 @@ func TestBuildStageGraphShowsJoinCompleteAndDeadlineEdges(t *testing.T) {
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention", Final: true}}}},
 		Semantics:  runtimecontracts.WorkflowSemanticView{},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &runtimecontracts.JoinSpec{
-			ID: "line_items", Stage: "awaiting",
+			Stage:           "awaiting",
 			OnComplete:      runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"},
 			Deadline:        &runtimecontracts.JoinDeadlineSpec{After: "24h", From: "stage_entry"},
 			OnDeadlineFound: true, OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"},
@@ -715,7 +715,7 @@ func TestBuildStageGraphShowsJoinCompleteAndDeadlineEdges(t *testing.T) {
 	if len(complete.From) != 1 || complete.From[0] != "awaiting" || complete.To != "ready" {
 		t.Fatalf("complete edge = %#v", complete)
 	}
-	if len(timeout.From) != 1 || timeout.From[0] != "awaiting" || timeout.To != "attention" || !timeout.Timed || timeout.After != "24h" || timeout.TimerID != "line_items" {
+	if len(timeout.From) != 1 || timeout.From[0] != "awaiting" || timeout.To != "attention" || !timeout.Timed || timeout.After != "24h" || timeout.TimerID != "item.completed" {
 		t.Fatalf("timeout edge = %#v", timeout)
 	}
 	if timeout.HandlerEvent != "item.completed" || timeout.EventType != "platform.join_timeout" {
@@ -726,7 +726,7 @@ func TestBuildStageGraphShowsJoinCompleteAndDeadlineEdges(t *testing.T) {
 func TestBuildStageGraphShowsDeliveryJoinCompletionFromHandlerScope(t *testing.T) {
 	node := identitytest.RootNode(t, "dispatcher")
 	join := runtimecontracts.JoinSpec{
-		ID: "all-delivered", Members: runtimecontracts.JoinMembersSpec{FromFanOut: true},
+		Members:    runtimecontracts.JoinMembersSpec{FromFanOut: true},
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "done"}, OnCompleteFound: true,
 	}
 	topology := runtimecontracts.BuildWorkflowStageTopology(
@@ -1020,7 +1020,7 @@ func TestBuildShowsStatelessCountJoinWithoutCoordinatorDemandWithExactProvenance
 		t.Fatalf("stateless count join readback = %#v, want one exact declaration", joins)
 	}
 	join := joins[0]
-	if join.FlowPath != "coordinator" || join.NodeID != "coordinator-node" || join.HandlerEvent != "job.received" || join.ID != "active" || join.Stage != "active" || join.MemberCount == nil || *join.MemberCount != 1 || join.MembersFrom != "" || join.MembersFromFanOut || join.MembersBy != "payload.vertical_id" || join.Output != "payload.job" || join.DeadlineAfter != "1h" || join.DeadlineFrom != runtimecontracts.JoinDeadlineFromStageEntry {
+	if join.FlowPath != "coordinator" || join.NodeID != "coordinator-node" || join.HandlerEvent != "job.received" || join.Stage != "active" || join.MemberCount == nil || *join.MemberCount != 1 || join.MembersFrom != "" || join.MembersFromFanOut || join.MembersBy != "payload.vertical_id" || join.Output != "payload.job" || join.DeadlineAfter != "1h" || join.DeadlineFrom != runtimecontracts.JoinDeadlineFromStageEntry {
 		t.Fatalf("stateless count join lost canonical membership/closure/provenance: %#v", join)
 	}
 	// Intrinsic workflow_join demand is retired; keep the exact admitted join in

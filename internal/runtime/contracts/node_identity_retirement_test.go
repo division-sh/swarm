@@ -68,7 +68,7 @@ func TestNodeMapKeyIdentityAcrossRecordSources(t *testing.T) {
 
 func TestNodeIDRetirementPreservesIndependentIDs(t *testing.T) {
 	const body = `timers:
-  - {id: reminder, event: timer.reminder, delay: 1m}
+  - {event: timer.reminder, delay: 1m}
 task.requested:
   activity: {id: send, tool: provider.send, input: {message: payload.message}}
 task.extra: {}
@@ -77,7 +77,7 @@ task.extra: {}
 	if err := decodeNodeTestYAML([]byte(body), &node); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(EffectiveSystemNodeSubscriptions(node), []string{"task.extra", "task.requested"}) || len(node.Timers) != 1 || node.Timers[0].ID != "reminder" || node.EventHandlers["task.requested"].Activity.ID != "send" {
+	if !reflect.DeepEqual(EffectiveSystemNodeSubscriptions(node), []string{"task.extra", "task.requested"}) || len(node.Timers) != 1 || node.Timers[0].Event != "timer.reminder" || node.EventHandlers["task.requested"].Activity.ID != "send" {
 		t.Fatalf("independent node behavior changed: %#v", node)
 	}
 	if err := decodeNodeTestYAML([]byte("id: worker\n"+body), &node); err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) || !strings.Contains(err.Error(), "must be a mapping, got scalar") {

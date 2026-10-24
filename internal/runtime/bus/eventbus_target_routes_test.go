@@ -602,7 +602,7 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 			Emit: runtimecontracts.EmitSpec{Event: "work.done", From: "entity"},
 		}}},
 		{name: "join membership", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{
-			ID: "all", Stage: "waiting", Members: runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"}, Output: "payload.result",
+			Stage: "waiting", Members: runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"}, Output: "payload.result",
 			OnCompleteFound: true, OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "done"},
 		}}},
 		{name: "loop lifecycle", handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "waiting"}}},

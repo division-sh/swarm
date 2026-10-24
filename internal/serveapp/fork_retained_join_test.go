@@ -447,7 +447,7 @@ func compareRetainedJoinActivations(first, repeated []joinruntime.Activation) er
 func TestRetainedJoinComparisonRequiresExactUniqueActivations(t *testing.T) {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	makeActivation := func(id string) joinruntime.Activation {
-		ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "join"), "item.done", "review", id)
+		ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "join"), "item.done", "review")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -568,7 +568,7 @@ func TestRetainedJoinOutcomeFenceDoesNotBorrowRunReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "controller"), "review.requested", "working", "reviews")
+	ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "controller"), "review.requested", "working")
 	if err != nil {
 		t.Fatal(err)
 	}

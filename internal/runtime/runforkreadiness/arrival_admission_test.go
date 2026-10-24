@@ -46,7 +46,7 @@ func inheritedArrivalAdmissionFixture(t *testing.T, flowID string) (*contracts.W
 	if err != nil || !enters {
 		t.Fatalf("canonical arrival entry: %+v enters=%t err=%v", entry, enters, err)
 	}
-	ref, err := timeridentity.NewJoinRef(node, event, "awaiting", "members")
+	ref, err := timeridentity.NewJoinRef(node, event, "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func inheritedArrivalAdmissionFixture(t *testing.T, flowID string) (*contracts.W
 	}
 	bundle := &contracts.WorkflowContractBundle{Semantics: contracts.WorkflowSemanticView{Joins: []contracts.WorkflowJoinPlan{{
 		Node: node, HandlerEvent: event, Mode: contracts.WorkflowJoinModeArrival,
-		Spec: contracts.JoinSpec{ID: "members", Stage: "awaiting", Members: contracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
+		Spec: contracts.JoinSpec{Stage: "awaiting", Members: contracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
 			Deadline: &contracts.JoinDeadlineSpec{After: "1h", From: contracts.JoinDeadlineFromStageEntry}},
 	}}}}
 	return bundle, schedule, ref
@@ -81,7 +81,7 @@ func inheritedArrivalAdmissionFixture(t *testing.T, flowID string) (*contracts.W
 
 func TestInheritedArrivalAdmissionMatchesExactSelectedDeclaration(t *testing.T) {
 	for _, flowID := range []string{".", "orders"} {
-		for _, change := range []string{"retained", "removed", "wrong_flow", "wrong_event", "wrong_stage", "wrong_join_id", "delay_changed", "prepared_removed", "canceled_removed"} {
+		for _, change := range []string{"retained", "removed", "wrong_flow", "wrong_event", "wrong_stage", "delay_changed", "prepared_removed", "canceled_removed"} {
 			t.Run(flowID+"/"+change, func(t *testing.T) {
 				bundle, source, ref := inheritedArrivalAdmissionFixture(t, flowID)
 				selected := &bundle.Semantics.Joins[0]
@@ -97,8 +97,6 @@ func TestInheritedArrivalAdmissionMatchesExactSelectedDeclaration(t *testing.T) 
 					selected.HandlerEvent = "other.completed"
 				case "wrong_stage":
 					selected.Spec.Stage = "other"
-				case "wrong_join_id":
-					selected.Spec.ID = "other"
 				case "delay_changed":
 					selected.Spec.Deadline.After = "24h"
 					want = genericschedule.ForkJoinRetained
@@ -267,7 +265,7 @@ func TestInheritedArrivalAdmissionSealIgnoresExternalDeclarationAndRefMutation(t
 				if err != nil || removed && (len(refs) != 1 || !refs[0].Equal(ref)) || !removed && len(refs) != 0 {
 					t.Fatalf("sealed removed refs changed with external source: %+v err=%v", refs, err)
 				}
-				foreign, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "unrelated", "join-node"), "other.completed", "other", "other")
+				foreign, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "unrelated", "join-node"), "other.completed", "other")
 				if err != nil {
 					t.Fatal(err)
 				}

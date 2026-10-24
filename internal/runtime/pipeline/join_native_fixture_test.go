@@ -223,7 +223,7 @@ func driveNativePublishedJoinCompletionForTest(t *testing.T, fixture *PipelineDe
 	}
 	target := route.Target.Route()
 
-	declaration, err := timeridentity.NewJoinRef(node, "item.completed", handler.Join.Stage, handler.Join.EffectiveID())
+	declaration, err := timeridentity.NewJoinRef(node, "item.completed", handler.Join.Stage)
 	if err != nil {
 		return result, err
 	}

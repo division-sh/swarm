@@ -64,7 +64,6 @@ func CopyRootIngressServedDecisionControl(t testing.TB) string {
   awaiting_review:
     gate:
       decision: launch_review
-      title: Launch review
       context:
         environment: "'staging'"
       outcomes:

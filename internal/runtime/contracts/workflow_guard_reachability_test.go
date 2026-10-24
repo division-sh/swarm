@@ -9,7 +9,7 @@ func TestGuardTerminationJoinCombinationsRemainForbidden(t *testing.T) {
 	for _, delivery := range []bool{false, true} {
 		handler := SystemNodeEventHandler{
 			Guard: &GuardSpec{Check: "false"},
-			Join:  &JoinSpec{ID: "barrier", Stage: "ready", Members: JoinMembersSpec{FromFanOut: delivery}},
+			Join:  &JoinSpec{Stage: "ready", Members: JoinMembersSpec{FromFanOut: delivery}},
 		}
 		if delivery {
 			handler.FanOut = &FanOutSpec{}
