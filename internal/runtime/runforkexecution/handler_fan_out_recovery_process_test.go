@@ -71,6 +71,7 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("handler fan-out source lacks its admitted artifact")
 	}
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: sourceRun, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: event.CreatedAt().Add(-time.Minute),

@@ -177,6 +177,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	ctx := runForkTestContext(t)
 	capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
+	ctx = originalSelectedFixtureContext(t, ctx, capabilityStore)
 	if os.Getenv("SWARM_SELECTED_CRASH_CUT") == pendingReplyBeforeJournalCrashCut {
 		runPendingEffectReplyCrashHelper(t, ctx, selected, owner, capability)
 		return

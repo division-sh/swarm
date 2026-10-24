@@ -67,6 +67,7 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("armed arrival source lacks its immutable artifact")
 	}
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at,

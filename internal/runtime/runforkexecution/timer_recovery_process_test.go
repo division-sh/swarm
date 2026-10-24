@@ -97,6 +97,7 @@ func seedIssue642TimerCrashSource(t *testing.T, ctx context.Context, selected an
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("timer crash source requires its immutable artifact")
 	}
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at,

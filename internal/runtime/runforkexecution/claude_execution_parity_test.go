@@ -33,6 +33,7 @@ func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, selecte
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(),
 		Artifact: artifact, StartedAt: at.Add(-time.Minute),
 	}
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), fixture)
 	root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 	worker, err := flowidentity.KeylessChild(loaded.Source, root, "worker")

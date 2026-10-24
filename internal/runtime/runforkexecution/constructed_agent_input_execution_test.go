@@ -192,6 +192,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		t.Fatal(err)
 	}
 	bundle, _ := semanticview.Bundle(loaded.Source)
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 	payload := []byte(`{}`)

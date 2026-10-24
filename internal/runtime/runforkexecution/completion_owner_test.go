@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"reflect"
 	"testing"
 	"time"
@@ -102,6 +103,7 @@ func proveSelectedCompletionScope(t *testing.T, ordinaryCtx, selectedCtx context
 		t.Fatalf("fresh native selected fence rejected current candidate: %+v %v", result, err)
 	}
 	ordinaryRunID := uuid.NewString()
+	ordinaryCtx = originalSelectedFixtureContext(t, ordinaryCtx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ordinaryCtx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: ordinaryRunID, State: runlifecycle.StateRunning, Origin: runlifecycle.ScenarioSetupRunOrigin(),
 		BundleHash: sourceFact.BundleHash(), StartedAt: time.Now().UTC().Add(-time.Minute),
