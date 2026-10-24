@@ -168,7 +168,7 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	}
 	ctx := startupownership.WithGenerationGrantEvidence(p.operation.Context(), evidence)
 	ctx = effects.WithAuthority(ctx, c.authority)
-	activation, err := c.ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+	activation, err := c.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation, DataPins: result.Materialization.DataPins,
 		ExecutionSource: p.loadedSource.Source, ForkRunID: result.Materialization.ForkRunID,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
