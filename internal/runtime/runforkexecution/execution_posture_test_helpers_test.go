@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -122,11 +123,21 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 			return selectedRetainedExecutionObservation{}, err
 		}
 		for storage.State == "running" {
+			published := true
+			if retained.retained != nil {
+				for _, source := range selectedContractExecutionFrontierEventIDs(retained.retained.frontier.FrontierEvents) {
+					frontier, err := storetest.ReadCausalDeliveryFrontier(wait, selected, child, activityidentity.ForkLineageEventID(child, source))
+					if err != nil {
+						return selectedRetainedExecutionObservation{}, err
+					}
+					published = published && frontier.Observed != 0
+				}
+			}
 			pending, err := storetest.ReadServedIncompletePipelineHandoffCount(wait, selected, child)
 			if err != nil {
 				return selectedRetainedExecutionObservation{}, err
 			}
-			if pending == 0 {
+			if published && pending == 0 {
 				break
 			}
 			select {
