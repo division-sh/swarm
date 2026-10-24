@@ -137,7 +137,7 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 
-	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	sourceRoot := writeStandingMemoryServeFixture(t, "")
 	sqlitePath := filepath.Join(t.TempDir(), "live.sqlite")
 	configPath := writeStandingMockRuntimeConfig(t, "sqlite", sqlitePath)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
@@ -1036,8 +1036,7 @@ func writeStandingMockRuntimeConfigWithRecovery(t *testing.T, backend, sqlitePat
 
 func writeStandingMemoryServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
-	_ = telegramBaseURL
-	return canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	return writeStandingTelegramServeFixture(t, telegramBaseURL)
 }
 
 func standingMemoryStoreDiagnostics(backend, location string) string {

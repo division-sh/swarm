@@ -379,6 +379,9 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	if err := credentials.Set(context.Background(), "telegram.telegram_bot_token", token); err != nil {
 		t.Fatal(err)
 	}
+	if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
+		t.Fatal(err)
+	}
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	var identity apiv1.RuntimeIdentityResult
@@ -541,8 +544,9 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != "name: telegram-agent\n" {
-		t.Fatalf("channel anchor fixture requires the isolated root declaration, got:\n%s", body)
+	var rootSchema map[string]any
+	if err := yaml.Unmarshal(body, &rootSchema); err != nil {
+		t.Fatal(err)
 	}
 	var pins, connects strings.Builder
 	pins.WriteString("pins:\n  inputs:\n")
@@ -563,7 +567,15 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 		}
 		fmt.Fprintf(&connects, "  - {event: %s, from: ., to: %s}\n", event, target)
 	}
-	body = append(body, []byte(pins.String()+connects.String())...)
+	var routes map[string]any
+	if err := yaml.Unmarshal([]byte(pins.String()+connects.String()), &routes); err != nil {
+		t.Fatal(err)
+	}
+	rootSchema["pins"], rootSchema["connect"] = routes["pins"], routes["connect"]
+	body, err = yaml.Marshal(rootSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
