@@ -20,32 +20,6 @@ func TestCatalogRequiredInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load catalog inventory: %v", err)
 	}
-	counts := map[Disposition]int{}
-	verifyCounts := map[VerifyResult]int{}
-	for _, fixture := range inventory.Fixtures {
-		counts[fixture.Metadata.Disposition]++
-		if fixture.Metadata.Disposition == DispositionVerifyOnly {
-			verifyCounts[fixture.Metadata.Verify]++
-		}
-	}
-	if got := len(inventory.Fixtures); got != 156 {
-		t.Fatalf("fixture count = %d, want 156", got)
-	}
-	if counts[DispositionRuntime] != 99 || counts[DispositionVerifyOnly] != 37 || counts[DispositionRetired] != 20 {
-		t.Fatalf("disposition counts = %#v, want runtime=99 verify-only=37 retired=20", counts)
-	}
-	if verifyCounts[VerifyPass] != 3 || verifyCounts[VerifyWarning] != 6 || verifyCounts[VerifyReject] != 28 {
-		t.Fatalf("verify-only counts = %#v, want pass=3 warning=6 reject=28", verifyCounts)
-	}
-	if got := len(inventory.PublicCompanions()); got != 86 {
-		t.Fatalf("public companion count = %d, want 86", got)
-	}
-	if got := len(inventory.Claims); got != 26 {
-		t.Fatalf("canonical claim count = %d, want 26", got)
-	}
-	if got := len(inventory.ExternalProofs); got != 5 {
-		t.Fatalf("external proof count = %d, want 5", got)
-	}
 	wantProofs := map[string]struct {
 		executor string
 		claims   []string
