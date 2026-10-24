@@ -1148,7 +1148,12 @@ func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) er
 }
 
 func (c selectedContractForkLocalRuntimeContainer) closeAcknowledged(ctx context.Context) (bool, error) {
-	acknowledged, err := c.settleAcknowledged(context.WithoutCancel(ctx), startupownership.PreparedForkClose, nil, 0)
+	cleanupCtx, err := c.req.Prepared.cleanupContext()
+	if err != nil {
+		return false, err
+	}
+	cleanupCtx = c.failureDispositionContext(cleanupCtx)
+	acknowledged, err := c.settleAcknowledged(cleanupCtx, startupownership.PreparedForkClose, nil, 0)
 	if !acknowledged {
 		return false, errors.Join(errors.New("selected execution close remains unacknowledged"), err)
 	}
