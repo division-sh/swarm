@@ -97,7 +97,7 @@ func testWholeJobEvidence(t *testing.T, event string) {
 			}
 		})
 	}
-	for _, kind := range []string{"missing", "duplicate", "wrong_head", "wrong_attempt", "wrong_run", "unfinished", "failed", "cancelled", "missing_upload", "invalid_time", "unknown_unit", "missing_workflow_head", "wrong_workflow_head", "wrong_command_head"} {
+	for _, kind := range []string{"missing", "duplicate", "wrong_head", "wrong_attempt", "wrong_run", "unfinished", "failed", "cancelled", "missing_upload", "stale_steps", "invalid_time", "unknown_unit", "missing_workflow_head", "wrong_workflow_head", "wrong_command_head"} {
 		t.Run(kind, func(t *testing.T) {
 			values := append([]ActionJob(nil), decoded...)
 			expectedHead := workflowHeadSHA
@@ -124,6 +124,8 @@ func testWholeJobEvidence(t *testing.T, event string) {
 				values[0].Conclusion = "cancelled"
 			case "missing_upload":
 				values[0].Steps = values[0].Steps[:1]
+			case "stale_steps":
+				values[0].Steps = []ActionStep{{Name: "Run exact planned proof unit", Status: "in_progress"}, {Name: "Upload proof evidence", Status: "pending"}}
 			case "invalid_time":
 				values[0].CompletedAt = values[0].CreatedAt
 			case "unknown_unit":
@@ -140,7 +142,11 @@ func testWholeJobEvidence(t *testing.T, event string) {
 			}
 			got := EvaluateBudget(timingTestPolicy(), opts, commandValues)
 			AttachJobEvidence(&got, plan, 1, 1, expectedHead, values)
-			if got.Status != BudgetIncomplete {
+			want := BudgetIncomplete
+			if kind == "missing_upload" || kind == "stale_steps" {
+				want = BudgetPass
+			}
+			if got.Status != want {
 				t.Fatalf("invalid evidence accepted: %+v", got)
 			}
 		})
