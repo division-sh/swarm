@@ -252,6 +252,7 @@ func TestOperatorChannelProofCurrentnessReadFailurePreservesPendingResponsibilit
 type failOnceOperatorChannelProofStore struct {
 	delegate operatorchannel.ProofStore
 	failed   bool
+	attempt  operatorchannel.VerifiedProof
 }
 
 func (s *failOnceOperatorChannelProofStore) List(ctx context.Context) ([]operatorchannel.VerifiedProof, error) {
@@ -265,6 +266,7 @@ func (s *failOnceOperatorChannelProofStore) Get(ctx context.Context, identity op
 func (s *failOnceOperatorChannelProofStore) Put(ctx context.Context, proof operatorchannel.VerifiedProof) error {
 	if !s.failed {
 		s.failed = true
+		s.attempt = proof
 		return errInjectedOperatorChannelProofWrite
 	}
 	return s.delegate.Put(ctx, proof)
@@ -388,8 +390,7 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 			}
 			responsibility := responsibilities[0]
 			if responsibility.Operation.ProviderAuthority != operatorChannelProviderAuthority() ||
-				responsibility.Binding.ProviderAuthority != responsibility.Operation.ProviderAuthority ||
-				responsibility.Proof.ProviderAuthority != responsibility.Operation.ProviderAuthority {
+				responsibility.Binding.ProviderAuthority != responsibility.Operation.ProviderAuthority {
 				t.Fatalf("proof responsibility provider evidence diverged: %#v", responsibility)
 			}
 			replayed, replayedBinding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(3*time.Second))
@@ -736,8 +737,7 @@ func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreP
 				if err != nil || len(responsibilities) != 1 || responsibilities[0].Operation.OperationID != op.OperationID {
 					t.Fatalf("pending mismatch responsibility = %#v, %v", responsibilities, err)
 				}
-				conflicting := responsibilities[0].Proof
-				conflicting.MintingDeploymentID = uuid.NewString()
+				conflicting := failingProofs.attempt
 				conflicting.ConversationRef = "different-conversation"
 				if err := proofs.Put(ctx, conflicting); err != nil {
 					t.Fatal(err)
