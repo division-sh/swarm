@@ -1638,7 +1638,8 @@ func loadFlowActivationEntityContracts(
 	flowEntityTypes map[string]string,
 ) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "flow-activation-test")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	flowIDs := make([]string, 0, len(flowEntityTypes))
 	for flowID := range flowEntityTypes {
 		flowIDs = append(flowIDs, strings.TrimSpace(flowID))
@@ -1649,10 +1650,11 @@ func loadFlowActivationEntityContracts(
 		if flowID == "" || entityType == "" {
 			t.Fatalf("flow activation entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "stages:\n  active: {}\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType))
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-activation-test\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: flow-activation-test\n")
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -5813,9 +5815,10 @@ func TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore(t *testing.T) {
 func loadRootAndFlowStaticAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "root-and-flow-static-agents")
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-and-flow-static-agents\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: root-and-flow-static-agents\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned:\ntask.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 test-agent:
@@ -5826,7 +5829,8 @@ test-agent:
   emit_events: [task.completed]
 `)
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "schema.yaml"), "name: ops-flow\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "schema.yaml"), "# fixture: ops-flow\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "events.yaml"), "work.requested:\nwork.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "agents.yaml"), `
 operator:
