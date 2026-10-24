@@ -996,6 +996,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 
 	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
+	ctx = originalSelectedFixtureContext(t, ctx, any(pg).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()),
@@ -2786,6 +2787,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	forkRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	bindingID := uuid.NewString()
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
@@ -2797,6 +2799,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: forkOrigin,
 		Artifact: runForkTestSourceArtifact, StartedAt: now,
@@ -3157,6 +3160,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	forkRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	bindingID := uuid.NewString()
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
@@ -3168,6 +3172,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: forkOrigin,
 		Artifact: runForkTestSourceArtifact, StartedAt: now,
@@ -5401,6 +5406,7 @@ func seedSelectedExecutionStateOnlySourceRun(
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
 	})
@@ -5487,6 +5493,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		payload = input.payload
 	}
 	ctx = originalSelectedFixtureContext(t, ctx, selected)
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
 	})
@@ -5746,6 +5753,7 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, identity.RunID), loaded.SourceArtifactFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	ctx = originalSelectedFixtureContext(t, ctx, selected)
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID, StartedAt: at.Add(-time.Minute),
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,

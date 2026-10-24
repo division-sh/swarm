@@ -340,6 +340,7 @@ func (f activityForkFixture) seedSource(t *testing.T, ctx context.Context, loade
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
+	ctx = originalSelectedFixtureContext(t, ctx, any(f.owner.ports.fork).(startupownership.Store))
 	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: artifact,
 	})

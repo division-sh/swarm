@@ -121,6 +121,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	if !ok || bundle.SourceArtifact == nil {
 		t.Fatal("published join source lacks its immutable artifact")
 	}
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID,
 		Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.completed", "source-runtime", "",

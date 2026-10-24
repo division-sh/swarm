@@ -645,6 +645,10 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					} else {
 						restarted = newSelectedContractSQLiteExecutionOwnerForTest(t, selected.(*store.SQLiteRuntimeStore))
 					}
+					predecessor := selectedContractTestProcessCapability(t, ctx, selected.(runtimestartupownership.Store))
+					if err := predecessor.Release(context.Background()); err != nil {
+						t.Fatal(err)
+					}
 					process := worklifetime.NewProcess()
 					t.Cleanup(func() {
 						process.Retire()
@@ -658,7 +662,10 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					recovered, err := restarted.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
+					if err := restarted.BindSelectedProcess(recoveryCtx, process, capability); err != nil {
+						t.Fatal(err)
+					}
+					recovered, err := restarted.RecoverSelectedForkContexts(recoveryCtx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
 					if err != nil || len(recovered) != 1 || recovered[0].RunID != forkID || recovered[0].Disposition != runfork.SelectedForkRecoveryTerminal || recovered[0].Operation != nil || recovered[0].Continuation != nil {
 						t.Fatalf("acknowledged fork restart recovery=%+v err=%v", recovered, err)
 					}
@@ -685,6 +692,8 @@ func selectedRuntimeOutcomeSQLiteOwner(t *testing.T, selected *store.SQLiteRunti
 
 func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected.(runtimestartupownership.Store))
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
 		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),

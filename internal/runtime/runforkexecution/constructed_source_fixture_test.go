@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selec
 		t.Fatal("source constructor requires its admitted artifact")
 	}
 	ctx = effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), mode)
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,

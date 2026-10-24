@@ -90,6 +90,7 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 				root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 				input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "task.assigned", "source-runtime", "", []byte(`{"entity_id":"`+runID+`"}`), 0, runID, events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), eventtest.RootRoutingSource(runID), at, executionmode.Live)
