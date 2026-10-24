@@ -693,6 +693,7 @@ func (p *PreparedSourceSetGenerationRefresh) Commit(
 			return fmt.Errorf("install successor activity journal: %w", err)
 		}
 	}
+	ctx = runtimestartupownership.WithGenerationGrantEvidence(ctx, evidence)
 	commitErr = p.topology.Commit(ctx, successor, evidence.GrantID)
 	if predecessor != nil {
 		commitErr = errors.Join(commitErr, predecessor.Retire(context.Background()))
@@ -1696,6 +1697,10 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 		return nil, err
 	}
 	rt.emitBootProgress(5, "startup_ownership_lease", "ok", "grant="+grantEvidence.GrantID)
+	startCtx = runtimestartupownership.WithGenerationGrantEvidence(startCtx, grantEvidence)
+	rt.lifecycleMu.Lock()
+	rt.startCtx = startCtx
+	rt.lifecycleMu.Unlock()
 	if rt.runLifecycleExecutor != nil {
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.SourceArtifactFact.BundleHash()}
 		registration, err := rt.runLifecycleCandidates.RegisterCompletionCandidateSink(

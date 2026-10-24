@@ -230,6 +230,9 @@ func requestPostgresCompletionCandidateTx(
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
 	}
+	if lifecycleState == runtimerunlifecycle.StateLive {
+		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRetainedLive}, nil
+	}
 	selectedRunID, err := selectedRunBinding(ctx, tx, true, runID)
 	if err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, err
@@ -315,6 +318,9 @@ func requestSQLiteCompletionCandidateTx(
 	}
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
+	}
+	if lifecycleState == runtimerunlifecycle.StateLive {
+		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRetainedLive}, nil
 	}
 	selectedRunID, err := selectedRunBinding(ctx, tx, false, runID)
 	if err != nil {

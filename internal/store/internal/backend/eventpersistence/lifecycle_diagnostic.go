@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -171,7 +172,7 @@ func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, attempt *muta
 	if err != nil {
 		return false, err
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement, runlifecycle.LiveRunScope{})
 	if err != nil {
 		return false, err
 	}

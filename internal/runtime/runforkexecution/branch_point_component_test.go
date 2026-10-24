@@ -98,6 +98,9 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 	ctx, request, _ := q1GateComponentSource(t, fixture.owner, !pending, pending, true)
 	attachment := q1StageBranchPointComponent(t, ctx, request)
 	p := attachment.prepared
+	if err := p.retainedRuntime.startExecution(attachment.container.attachment.ctx, attachment.container.attachment.pipeline, attachment.container.diagnostics, false); err != nil {
+		t.Fatal("start selected synchronous handoff runtime: ", err)
+	}
 	deliveries := p.owner.ports.busDurable.DeliveryLifecycle
 	parked := make(map[string]deliverylifecycle.Snapshot)
 	var inputs []committedSelectedInput

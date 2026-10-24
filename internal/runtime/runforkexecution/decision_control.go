@@ -69,6 +69,9 @@ func (o SelectedContractExecutionOwner) AcquireSelectedDecisionCardControl(ctx c
 		admission, _ := managedexecution.FromContext(ctx)
 		return nil, false, runfork.RequireDecisionControlForBinding(runID, operation, binding, false, admission)
 	}
+	if ordinary, err := o.ordinaryHandoff(ctx, runID, binding); err != nil || ordinary {
+		return nil, false, err
+	}
 	use, err := o.acquireDecisionControl(ctx, binding, operation)
 	return use, true, err
 }

@@ -36,7 +36,7 @@ func ObserveLiveHandoff(ctx context.Context, q RowQueryer, runID, bundleHash str
 			AND execution.fork_run_id=run.run_id AND execution.source_run_id=operation.source_run_id
 			AND execution.fork_point_kind=operation.fork_point_kind AND execution.fork_revision=operation.fork_revision
 			AND (execution.fork_event_id=operation.fork_event_id OR (execution.fork_event_id IS NULL AND operation.fork_event_id IS NULL))
-		WHERE run.run_id=$1 AND run.bundle_hash=$2 AND run.status='live' AND run.flow_path IS NOT NULL
+		WHERE run.run_id=$1 AND run.bundle_hash=$2 AND run.status IN ('live','paused') AND run.flow_path IS NOT NULL
 			AND operation.state='activated' AND execution.state='closed' AND execution.failure IS NULL
 			AND execution.lease_expires_at IS NULL AND execution.terminal_at IS NOT NULL
 			AND execution.generation=(SELECT MAX(current.generation) FROM run_fork_selected_contract_runtime_executions current WHERE current.fork_run_id=run.run_id)

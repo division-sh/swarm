@@ -28,6 +28,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 		InsertRunForkRunTx(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact) error
 		RunDispatchBlocked(context.Context, string) (bool, error)
 		RunDispatchParked(context.Context, string) (bool, error)
+		RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error)
 	})
 	reader := fixture.store.(runtimerunlifecycle.LiveRunReader)
 	scope := runtimerunlifecycle.LiveRunScope{FlowPath: "."}
@@ -43,6 +44,12 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	}
 	if _, err := owner.CreateRun(ctx, request); err != nil {
 		t.Fatalf("create live run: %v", err)
+	}
+	if observed, err := reader.LoadRunLiveScope(ctx, first); err != nil || observed != scope {
+		t.Fatalf("live scope does not retain the admitted source flow: %+v %v", observed, err)
+	}
+	if disposition, err := owner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(first)); err != nil || disposition != runtimerunlifecycle.CandidateRetainedLive {
+		t.Fatalf("settling live work requested run terminality: %s %v", disposition, err)
 	}
 	if disposition, err := owner.CreateRun(ctx, request); err != nil || disposition != runtimerunlifecycle.MutationExactNoop {
 		t.Fatalf("exact live creation replay: %s/%v", disposition, err)

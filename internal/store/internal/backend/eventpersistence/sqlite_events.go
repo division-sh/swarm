@@ -55,7 +55,7 @@ func (s *EventSQLiteOwner) ensureEventPayloadAdmission(ctx context.Context, admi
 	return restored, nil
 }
 
-func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement, scope runtimerunlifecycle.LiveRunScope) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -65,13 +65,13 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, att
 	var outcome runtimebus.EventAppendOutcome
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var writeErr error
-		outcome, writeErr = s.appendEventSpec(ctx, tx, attempt, admitted, settlement)
+		outcome, writeErr = s.appendEventSpec(ctx, tx, attempt, admitted, settlement, scope)
 		return writeErr
 	})
 	return outcome, err
 }
 
-func (s *EventSQLiteOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+func (s *EventSQLiteOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement, scope runtimerunlifecycle.LiveRunScope) (runtimebus.EventAppendOutcome, error) {
 	admitted, err := s.ensureEventPayloadAdmission(ctx, admitted)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -95,7 +95,7 @@ func (s *EventSQLiteOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, atte
 	var ensureErr error
 	switch admitted.RunDisposition() {
 	case events.AdmittedRunCreateAuthorized:
-		ensureErr = s.ensureActiveRunRow(ctx, tx, attempt, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
+		ensureErr = s.ensureActiveRunRow(ctx, tx, attempt, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt, scope)
 	case events.AdmittedRunRequireActive:
 		ensureErr = storerunstate.RequireSQLiteActiveTx(ctx, tx, wantIdentity.RunID)
 		if ensureErr == nil {
@@ -151,10 +151,10 @@ func (s *EventSQLiteOwner) AppendAdmittedEventTxOutcome(ctx context.Context, att
 	if admitted.Event().AdmissionClass() == events.EventAdmissionInheritedFanOut {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("inherited fan-out origin requires named chunk publication")
 	}
-	return s.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
+	return s.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement, runtimerunlifecycle.LiveRunScope{})
 }
 
-func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, triggerEventID, triggerEventType string, now time.Time) error {
+func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, triggerEventID, triggerEventType string, now time.Time, scope runtimerunlifecycle.LiveRunScope) error {
 	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("ensure active sqlite run row: executable bundle source fact is required")
@@ -165,6 +165,7 @@ func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, a
 	}
 	_, err = s.RunLifecycleSQLiteOwner.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: fact, StartedAt: runtimerunlifecycle.CanonicalTimestamp(now),
+		LiveScope: scope,
 	})
 	if err != nil {
 		return err
