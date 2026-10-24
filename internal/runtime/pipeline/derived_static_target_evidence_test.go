@@ -88,7 +88,7 @@ func TestDerivedStaticTargetRequiresCanonicalInstanceEvidence(t *testing.T) {
 		"parent/entities.yaml":        "parent:\n  parent_id: text\n",
 		"parent/receiver/schema.yaml": "name: receiver\npins:\n  inputs: [work.started]\n",
 		"parent/receiver/events.yaml": "work.started:\n",
-		"parent/receiver/nodes.yaml":  "receiver-node:\n  execution_type: system_node\n  event_handlers:\n    work.started: {}\n",
+		"parent/receiver/nodes.yaml":  "receiver-node:\n  work.started: {}\n",
 	})
 	bundle, _ := semanticview.Bundle(source)
 	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())

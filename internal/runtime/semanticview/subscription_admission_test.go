@@ -296,7 +296,7 @@ func TestResolveFlowNodeSubscriptionHandlerRejectsBareSubscriptionAsExecutableHa
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"listener": {SubscribesTo: []string{"task.requested"}},
+			"listener": {},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}

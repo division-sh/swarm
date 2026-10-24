@@ -21,9 +21,7 @@ func TestNewEventBusWithOptions_DoesNotUseAmbientWorkflowSemanticSource(t *testi
 			"score.dimension_complete": {},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scoring-node": {
-				SubscribesTo: []string{"score.dimension_complete"},
-			},
+			"scoring-node": {},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{scoring}}

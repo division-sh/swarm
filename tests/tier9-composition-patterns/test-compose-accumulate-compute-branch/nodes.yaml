@@ -1,19 +1,15 @@
 scorer:
-  execution_type: system_node
-  subscribes_to: [score.submitted]
-  produces: [result.high]
-  event_handlers:
-    score.submitted:
-      data_accumulation:
-        writes:
-          - source_field: value
-            target_field: score
-      on_complete:
-        - condition: payload.value >= 75.0
-          advances_to: high
-          emit:
-            event: result.high
-        - condition: payload.value >= 50.0
-          advances_to: mid
-        -
-          advances_to: low
+  score.submitted:
+    data_accumulation:
+      writes:
+        - source_field: value
+          target_field: score
+    on_complete:
+      - condition: payload.value >= 75.0
+        advances_to: high
+        emit:
+          event: result.high
+      - condition: payload.value >= 50.0
+        advances_to: mid
+      -
+        advances_to: low

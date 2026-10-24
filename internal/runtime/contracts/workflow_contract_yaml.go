@@ -23,15 +23,10 @@ var flowSchemaDocumentFields = map[string]struct{}{
 }
 
 var systemNodeContractFields = map[string]struct{}{
-	"description":    {},
-	"execution_type": {},
-	"subscribes_to":  {},
-	"produces":       {},
-	"state_table":    {},
-	"timers":         {},
-	"event_handlers": {},
-	"state_schema":   {},
-	"gate_state":     {},
+	"state_table":  {},
+	"timers":       {},
+	"state_schema": {},
+	"gate_state":   {},
 }
 
 func decodeStringListNode(node *yaml.Node) ([]string, error) {

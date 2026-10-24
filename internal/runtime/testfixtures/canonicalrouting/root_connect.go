@@ -33,10 +33,7 @@ pins:
   topic: text?
 `,
 		"nodes.yaml": `bootstrap-node:
-  execution_type: system_node
-  subscribes_to: [bootstrap.requested]
-  event_handlers:
-    bootstrap.requested: {}
+  bootstrap.requested: {}
 `,
 		"operating/schema.yaml": `name: operating
 instance: operating_id
@@ -53,12 +50,8 @@ pins:
   topic: text?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  event_handlers:
-    opco.product_initialization_requested:
-      guard:
-        check: _entity.id != ""
+  opco.product_initialization_requested:
+    guard: _entity.id != ""
 `,
 	}
 	for relative, source := range files {
@@ -87,7 +80,7 @@ platform_version: ">=0.7.0 <0.8.0"
 		if emit != RootConnectCanonicalEmit {
 			t.Fatalf("unsupported root connect emitter %d", emit)
 		}
-		rootNodes = "root-node:\n  execution_type: system_node\n  event_handlers:\n    root.start:\n" + emitBody
+		rootNodes = "root-node:\n  root.start:\n" + emitBody
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
 	writeClosedVariantFile(t, root, "events.yaml", "root.start:\n  entity_id: text\nroot.ready:\n  entity_id: text\n")
@@ -99,13 +92,8 @@ pins:
   inputs:
     - root.ready
 `, "", "", `consumer-node:
-  execution_type: system_node
-  subscribes_to: [root.ready]
-  event_handlers:
-    root.ready:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  root.ready:
+    guard: _entity.id != ""
 `)
 	return root
 }
@@ -123,13 +111,8 @@ func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  outputs: [root.ready]\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "root.ready:\n  entity_id: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `child-node:
-  execution_type: system_node
-  subscribes_to: [root.ready]
-  event_handlers:
-    root.ready:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  root.ready:
+    guard: _entity.id != ""
 `)
 	return root
 }
@@ -157,10 +140,7 @@ pins:
   inputs:
     - root.ready
 `, "", "", `consumer-node:
-  execution_type: system_node
-  subscribes_to: [root.ready]
-  event_handlers:
-    root.ready: {}
+  root.ready: {}
 `)
 	return root
 }
@@ -213,13 +193,8 @@ connect:
     to: .
 `, scoutPath))
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
-  execution_type: system_node
-  subscribes_to: [scout.completed]
-  event_handlers:
-    scout.completed:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  scout.completed:
+    guard: _entity.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, scoutPath, `name: scout
 pins:
@@ -256,13 +231,8 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "work.ping:\n  turn: integer\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-boomerang:
-  execution_type: system_node
-  subscribes_to: [work.pong]
-  event_handlers:
-    work.pong:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  work.pong:
+    guard: _entity.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, "boomerang", `name: boomerang
 pins:
@@ -271,13 +241,8 @@ pins:
   outputs:
     - work.pong
 `, "work.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
-  execution_type: system_node
-  subscribes_to: [work.ping]
-  event_handlers:
-    work.ping:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  work.ping:
+    guard: _entity.id != ""
 `)
 	return root
 }

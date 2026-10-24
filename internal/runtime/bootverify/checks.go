@@ -136,9 +136,6 @@ type checkerContext struct {
 	accumulatorSafetyLoaded       bool
 	accumulatorSafetyFindings     []Finding
 
-	producesDriftLoaded   bool
-	producesDriftFindings []Finding
-
 	nativeLoaded   bool
 	nativeFindings []Finding
 
@@ -152,9 +149,6 @@ type checkerContext struct {
 
 	mcpLoaded   bool
 	mcpFindings []Finding
-
-	phantomLoaded   bool
-	phantomFindings []Finding
 
 	singleNodeLoaded   bool
 	singleNodeFindings []Finding
@@ -235,14 +229,12 @@ var bootCheckRegistry = []Check{
 	{ID: "platform_tool_usage_hints", Mode: CheckMixed, Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},
 	{ID: "generated_tool_schema_closure", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkGeneratedToolSchemaClosure},
 	{ID: "intent_resolution", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkIntentResolution},
-	{ID: "produces_drift", Mode: CheckSource, Severity: "warning", Run: checkProducesDrift},
 	{ID: "invalid_field_detection", Mode: CheckMixed, Severity: "error", Run: checkInvalidFieldDetection},
 	{ID: "policy_conflict_detection", Mode: CheckSource, Severity: "warning", Run: checkPolicyConflictDetection},
 	{ID: "event_cycle_detection", Mode: CheckSource, Severity: "error", Run: checkEventCycleDetection},
 	{ID: "dialect_compliance", Mode: CheckSource, Severity: "error", Run: checkDialectCompliance},
 	{ID: "single_node_per_event", Mode: CheckSource, Severity: "error", Run: checkSingleNodePerEvent},
 	{ID: "data_accumulation_source_alignment", Mode: CheckSource, Severity: "error", Run: checkDataAccumulationSourceAlignment},
-	{ID: "phantom_produces", Mode: CheckSource, Severity: "warning", Run: checkPhantomProduces},
 	{ID: "native_tools_valid", Mode: CheckSource, Severity: "error", Run: checkNativeToolsValid},
 	{ID: "mcp_server_reachable", Mode: CheckDeployment, Severity: "warning", Run: checkMCPServerReachable},
 	{ID: "platform_namespace_violation", Mode: CheckSource, Severity: "error", Run: checkPlatformNamespaceViolation},
@@ -655,28 +647,6 @@ func (c *checkerContext) appendInvalidExecutableNodeFindings(record runtimecontr
 		})
 		return
 	}
-	nodeLabel := scopedObjectLabel(scopeLabel, nodeID)
-	if strings.TrimSpace(record.Entry.ExecutionType) != "" {
-		if err := runtimecontracts.ValidateSystemNodeExecutionType(record.Entry.ExecutionType); err != nil {
-			c.invalidFindings = append(c.invalidFindings, Finding{
-				CheckID: "invalid_field_detection", Severity: "error",
-				Message: fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType), Location: nodeLabel,
-			})
-		}
-	}
-	nodeRef, err := record.Identity()
-	if err == nil && len(c.source.ExecutableNodeRuntimeSubscriptions(nodeRef)) == 0 {
-		c.invalidFindings = append(c.invalidFindings, Finding{
-			CheckID: "invalid_field_detection", Severity: "error",
-			Message: fmt.Sprintf("node %s missing declared subscription surface", nodeLabel), Location: nodeLabel,
-		})
-	}
-	if len(record.Entry.EventHandlers) == 0 {
-		c.invalidFindings = append(c.invalidFindings, Finding{
-			CheckID: "invalid_field_detection", Severity: "error",
-			Message: fmt.Sprintf("node %s missing required field event_handlers", nodeLabel), Location: nodeLabel,
-		})
-	}
 }
 
 func appendAgentMemoryFindings(findings []Finding, scopeLabel string, proof semanticview.AgentMemoryProof, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
@@ -974,24 +944,6 @@ func (c *checkerContext) platformNamespace() []Finding {
 	}
 
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
-	for _, assertion := range census.ProducerAssertions() {
-		for _, eventType := range assertion.EventTypes {
-			eventType = strings.TrimSpace(eventType)
-			if finding, ok := platformProducerClaimFinding(
-				c.source,
-				eventType,
-				assertion.NodeID,
-				func(eventType string) string {
-					return fmt.Sprintf("node %s produces references platform-emitted event %s; platform owns this event", strings.TrimSpace(assertion.NodeID), eventType)
-				},
-				func(eventType string) string {
-					return fmt.Sprintf("node %s produces references reserved platform.* namespace event %s", strings.TrimSpace(assertion.NodeID), eventType)
-				},
-			); ok {
-				c.namespaceFindings = append(c.namespaceFindings, finding)
-			}
-		}
-	}
 	for _, endpoint := range census.Producers() {
 		c.namespaceFindings = append(c.namespaceFindings, platformProducerEndpointFindings(c.source, endpoint)...)
 	}

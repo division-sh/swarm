@@ -16,7 +16,7 @@ func TestVerifyMultipleEventOwnersTeachingError(t *testing.T) {
 	for name, body := range map[string]string{
 		"schema.yaml": "name: owner-diagnostic\nstages: {waiting: {}, done: {final: true}}\n",
 		"events.yaml": "work.requested:\n",
-		"nodes.yaml":  "alpha:\n  event_handlers:\n    work.requested:\n      advances_to: done\nbeta:\n  event_handlers:\n    work.requested:\n      advances_to: done\n",
+		"nodes.yaml":  "alpha:\n  work.requested:\n    advances_to: done\nbeta:\n  work.requested:\n    advances_to: done\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
 			t.Fatal(err)

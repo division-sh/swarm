@@ -783,7 +783,6 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 type runtimeTestWorkflowModule struct {
 	source       semanticview.Source
 	workflowNode []runtimepipeline.WorkflowNode
-	guards       runtimepipeline.GuardRegistry
 }
 
 func newRuntimeTestWorkflowModule(t *testing.T, source semanticview.Source) runtimepipeline.WorkflowModule {
@@ -802,7 +801,6 @@ func newRuntimeTestWorkflowModule(t *testing.T, source semanticview.Source) runt
 	return &runtimeTestWorkflowModule{
 		source:       source,
 		workflowNode: nodes,
-		guards:       runtimepipeline.NewContractGuardRegistry(source),
 	}
 }
 
@@ -811,9 +809,7 @@ func (m *runtimeTestWorkflowModule) SemanticSource() semanticview.Source { retur
 func (m *runtimeTestWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.workflowNode...)
 }
-func (m *runtimeTestWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
-}
+
 func loadRuntimeTempBundle(t *testing.T, files map[string]string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
@@ -873,12 +869,8 @@ opco.ceo_ready:
   entity_id: string?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  produces: [opco.ceo_ready]
-  event_handlers:
-    opco.product_initialization_requested:
-      emit: opco.ceo_ready
+  opco.product_initialization_requested:
+    emit: opco.ceo_ready
 `,
 	}
 }

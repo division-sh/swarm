@@ -2420,7 +2420,6 @@ func newNotifyAllChildrenRuntime(
 	module := conformanceLoadedWorkflowModule{
 		source: source,
 		nodes:  nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinatorOptions := runtimepipeline.PipelineCoordinatorOptions{

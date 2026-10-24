@@ -15,8 +15,7 @@ func CopyNestedRecordedActivityReply(t testing.TB, providerURL string) string {
 	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "inputs: [provider.requested]", "inputs: [t.requested]")
 	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "outputs: [provider.replied]", "outputs: [t.replied]")
 	applyClosedReplacement(t, filepath.Join(root, "t/events.yaml"), "provider.replied:", "t.replied:")
-	applyClosedReplacement(t, filepath.Join(root, "t/nodes.yaml"), "subscribes_to: [provider.requested,", "subscribes_to: [t.requested,")
-	applyClosedReplacement(t, filepath.Join(root, "t/nodes.yaml"), "    provider.requested:\n", "    t.requested:\n")
+	applyClosedReplacement(t, filepath.Join(root, "t/nodes.yaml"), "  provider.requested:\n", "  t.requested:\n")
 	applyClosedReplacement(t, filepath.Join(root, "t/nodes.yaml"), "provider.replied", "t.replied")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    correlation_key: request_id\n", `    correlation_key: request_id
   - {event: t.requested, from: provider, to: t}
@@ -41,22 +40,19 @@ provider.replied:
   result: text
 `)
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
-  execution_type: system_node
-  subscribes_to: [provider.requested, t.replied]
-  event_handlers:
-    provider.requested:
-      emit:
-        event: t.requested
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-    t.replied:
-      emit:
-        event: provider.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: payload.result
+  provider.requested:
+    emit:
+      event: t.requested
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+  t.replied:
+    emit:
+      event: provider.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: payload.result
 `)
 	return root
 }

@@ -1,9 +1,5 @@
 worker:
-  execution_type: system_node
-  subscribes_to: [task.start]
-  produces: [task.done]
-  event_handlers:
-    task.start:
-      advances_to: finished
-      emit:
-        event: task.done
+  task.start:
+    advances_to: finished
+    emit:
+      event: task.done

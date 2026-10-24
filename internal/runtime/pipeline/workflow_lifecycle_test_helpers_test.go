@@ -35,7 +35,7 @@ func lifecycleStateFixtureForTest(t *testing.T, flowID, from, to string, eventTy
 	}
 	files[prefix+"schema.yaml"] = fmt.Sprintf("name: lifecycle-state-fixture\nstages:\n  %s: {}\n  %s: {}\n", from, to)
 	files[prefix+"entities.yaml"] = "test_entity: {}\n"
-	nodes := "lifecycle-owner:\n  execution_type: system_node\n  event_handlers:\n"
+	nodes := "lifecycle-owner:\n  {}\n"
 	for _, eventType := range eventTypes {
 		files[prefix+"events.yaml"] += eventType + ":\n"
 		nodes += fmt.Sprintf("    %s: {advances_to: %s}\n", eventType, to)

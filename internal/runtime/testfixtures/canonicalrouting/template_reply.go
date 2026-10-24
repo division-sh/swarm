@@ -66,16 +66,16 @@ func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
 	initiatorNodes := filepath.Join(root, "initiator", "nodes.yaml")
 	applyClosedReplacement(t, initiatorNodes,
-		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n",
-		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n          provider_request_id: payload.provider_request_id\n")
+		"  request.submitted:\n    emit:\n      event: requester.requested\n      fields:\n        account_id: payload.account_id\n",
+		"  request.submitted:\n    emit:\n      event: requester.requested\n      fields:\n        account_id: payload.account_id\n        provider_request_id: payload.provider_request_id\n")
 	requesterNodes := filepath.Join(root, "requester", "nodes.yaml")
 	applyClosedReplacement(t, requesterNodes,
-		"          account_id: payload.account_id\n",
-		"          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
+		"        account_id: payload.account_id\n",
+		"        provider_request_id: payload.provider_request_id\n        account_id: payload.account_id\n")
 	providerNodes := filepath.Join(root, "provider", "nodes.yaml")
 	applyClosedReplacement(t, providerNodes,
-		"        fields:\n          account_id: payload.account_id\n",
-		"        fields:\n          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
+		"      fields:\n        account_id: payload.account_id\n",
+		"      fields:\n        provider_request_id: payload.provider_request_id\n        account_id: payload.account_id\n")
 }
 
 func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, accountID string) {
@@ -89,19 +89,15 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
   outputs:
 `)
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
-  execution_type: system_node
-  subscribes_to: [provider.requested, human_task.deferred, human_task.approved]
-  produces: [provider.replied]
-  event_handlers:
-    provider.requested: {}
-    human_task.deferred: {}
-    human_task.approved:
-      emit:
-        event: provider.replied
-        fields:
-          provider_request_id: `+strconv.Quote(requestKey)+`
-          account_id: `+strconv.Quote(accountID)+`
-          result: "approved"
+  provider.requested: {}
+  human_task.deferred: {}
+  human_task.approved:
+    emit:
+      event: provider.replied
+      fields:
+        provider_request_id: `+strconv.Quote(requestKey)+`
+        account_id: `+strconv.Quote(accountID)+`
+        result: "approved"
 `)
 }
 

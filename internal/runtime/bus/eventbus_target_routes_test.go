@@ -608,12 +608,12 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 		{name: "loop lifecycle", handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "waiting"}}},
 		{name: "payload accumulator", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
 		{name: "approval activity", handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
-			Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"},
+			ID: "target_node_task_started_review", Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"},
 		}}},
 		{name: "nested approval activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
 			Activity: runtimecontracts.ActivitySpec{ID: "target_node_task_started_rule_0_review", Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}},
 		}}}},
-		{name: "guard kill", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"}}},
+		{name: "termination", handler: runtimecontracts.SystemNodeEventHandler{Terminate: true}},
 		{name: "accumulator clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}}}},
 		{name: "pending dedup clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup"}}}},
 		{name: "unrooted entity field clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}}}},
@@ -1287,7 +1287,7 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			nodeID: {
-				ExecutionType: "system_node", SubscribesTo: []string{eventType},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventType: handler},
 			},
 		},
@@ -1391,7 +1391,7 @@ func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.Event
 	t.Helper()
 	event := strings.TrimSpace(string(eventType))
 	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: "system_node", SubscribesTo: []string{event},
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: {}},
 	}
 	rootSchema := runtimecontracts.FlowSchemaDocument{Name: "root"}
@@ -1502,7 +1502,7 @@ func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
 		"schema.yaml": "name: node-only-proof\npins:\n  inputs: [custom.node_only]\n",
 		"events.yaml": "custom.node_only:\n",
-		"nodes.yaml":  "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only]\n  event_handlers:\n    custom.node_only: {}\n",
+		"nodes.yaml":  "workflow-node:\n  custom.node_only: {}\n",
 	}))
 	runID := uuid.NewString()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -1624,7 +1624,7 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
 		"schema.yaml": "name: mixed-delivery\npins:\n  inputs: [custom.mixed_node_agent]\n",
 		"events.yaml": "custom.mixed_node_agent:\n",
-		"nodes.yaml":  "workflow-node:\n  execution_type: system_node\n  event_handlers:\n    custom.mixed_node_agent: {}\n",
+		"nodes.yaml":  "workflow-node:\n  custom.mixed_node_agent: {}\n",
 	}))
 	runID := agentidentitytest.RootRuntime(t, "agent-missing", "eventbus-target-test").RunID
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -1659,11 +1659,11 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 		"child-a/schema.yaml":   "instance: instance_key\n",
 		"child-a/events.yaml":   "output.done:\n",
 		"child-a/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
-		"child-a/nodes.yaml":    "child-a-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
+		"child-a/nodes.yaml":    "child-a-listener:\n  output.done: {}\n",
 		"child-b/schema.yaml":   "instance: instance_key\n",
 		"child-b/events.yaml":   "output.done:\n",
 		"child-b/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
-		"child-b/nodes.yaml":    "child-b-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
+		"child-b/nodes.yaml":    "child-b-listener:\n  output.done: {}\n",
 	}))
 	runID := uuid.NewString()
 	for _, flow := range []string{"child-a", "child-b"} {
@@ -1742,7 +1742,7 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 		"worker/schema.yaml":   "instance: instance_key\n",
 		"worker/events.yaml":   "work.assign:\n",
 		"worker/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
-		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
+		"worker/nodes.yaml":    "task-handler:\n  work.assign: {}\n",
 	}))
 	for key, entityID := range map[string]string{"w-001": workerOneID, "w-002": workerTwoID} {
 		installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "worker", key, busInternalTestRunID, entityID), key)
@@ -1804,7 +1804,7 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 		"worker/schema.yaml":   "instance: instance_key\n",
 		"worker/events.yaml":   "work.assign:\n",
 		"worker/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
-		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
+		"worker/nodes.yaml":    "task-handler:\n  work.assign: {}\n",
 	}))
 	installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "worker", "w-001", busInternalTestRunID, workerID), "w-001")
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -2179,7 +2179,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 	entityID := runtimeflowidentity.EntityID("validation")
 	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
 		id: "validation", mode: "static", nodes: map[string]runtimecontracts.SystemNodeContract{
-			"entity-writer": {SubscribesTo: []string{"thing.reviewed"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.reviewed": existingOwnerHandlerFixture()}},
+			"entity-writer": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.reviewed": existingOwnerHandlerFixture()}},
 		},
 	}}, nil))
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: entityID})
@@ -2244,7 +2244,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 	entityID := runtimeflowidentity.EntityID("validation")
 	source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
 		id: "validation", mode: "static", nodes: map[string]runtimecontracts.SystemNodeContract{
-			"entity-writer": {SubscribesTo: []string{"thing.reviewed"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.reviewed": existingOwnerHandlerFixture()}},
+			"entity-writer": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.reviewed": existingOwnerHandlerFixture()}},
 		},
 	}}, nil))
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: entityID})
@@ -2307,7 +2307,7 @@ func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforeP
 		id: "child", mode: runtimecontracts.FlowModeStatic,
 		nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-intake": {
-				SubscribesTo: []string{"child.start"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"child.start": existingOwnerHandlerFixture(),
 				},
@@ -2552,7 +2552,7 @@ func TestEventBusRootInputDoesNotDeliverToUnconnectedPrivateChild(t *testing.T) 
 			source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 				{id: ".", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
 				{id: "validation", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
-					"entity-writer": {SubscribesTo: []string{"thing.created"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
+					"entity-writer": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
 				}},
 			}, nil))
 			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
@@ -2784,10 +2784,10 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 			source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
 				{id: ".", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
 				{id: "validation", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
-					"entity-writer": {SubscribesTo: []string{"thing.created"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
+					"entity-writer": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
 				}},
 				{id: "audit", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
-					"audit-writer": {SubscribesTo: []string{"thing.created"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
+					"audit-writer": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()}},
 				}},
 			}, nil))
 			endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
@@ -2852,7 +2852,7 @@ func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Sour
 			Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"shared-writer": {
-					ExecutionType: "system_node", SubscribesTo: []string{"thing.created"},
+
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()},
 				},
 			},
@@ -3518,13 +3518,8 @@ platform_version: '*'
   entity_id: string
 `,
 		"nodes.yaml": `portfolio-node:
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  event_handlers:
-    opco.spinup_requested:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  opco.spinup_requested:
+    guard: _entity.id != ""
 `,
 	}
 }
@@ -3548,8 +3543,7 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"entity-writer": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"thing.created"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"thing.created": existingOwnerHandlerFixture(),
 				},
@@ -3589,13 +3583,8 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 		"schema.yaml":   "name: top-level-project-node\npins:\n  inputs:\n    - thing.created\n",
 		"events.yaml":   "thing.created:\n  entity_id: string\n",
 		"nodes.yaml": `reviewer:
-  execution_type: system_node
-  subscribes_to: [thing.created]
-  event_handlers:
-    thing.created:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  thing.created:
+    guard: _entity.id != ""
 `,
 	})
 }
@@ -3608,11 +3597,8 @@ func routedNodeTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContractBu
 		"operating/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
 		"operating/events.yaml":   "opco.product_initialization_requested:\n",
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  event_handlers:
-    opco.product_initialization_requested:
-      guard: {id: selected_owner, check: _entity.id != ""}
+  opco.product_initialization_requested:
+    guard: _entity.id != ""
 `,
 	})
 }
@@ -3625,13 +3611,10 @@ func routedCallbackTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContra
 		"repo-scaffold/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
 		"repo-scaffold/events.yaml":   "repo_scaffold.repo_commit_succeeded:\nrepo_scaffold.repo_commit_failed:\n",
 		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
-  execution_type: system_node
-  subscribes_to: [repo_scaffold.repo_commit_succeeded, repo_scaffold.repo_commit_failed]
-  event_handlers:
-    repo_scaffold.repo_commit_succeeded:
-      guard: {id: selected_owner, check: _entity.id != ""}
-    repo_scaffold.repo_commit_failed:
-      guard: {id: selected_owner, check: _entity.id != ""}
+  repo_scaffold.repo_commit_succeeded:
+    guard: _entity.id != ""
+  repo_scaffold.repo_commit_failed:
+    guard: _entity.id != ""
 `,
 	})
 }

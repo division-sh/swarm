@@ -167,35 +167,31 @@ func writePresenceLastFieldFixture(t *testing.T, root string) {
 	t.Helper()
 	writeReleaseFile(t, filepath.Join(root, "entities.yaml"), "work:\n  review_note:\n    type: text?\n    initial: seeded\n")
 	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), `owner:
-  execution_type: system_node
-  subscribes_to: [work.opened, work.annotated, work.assessed, work.consume, work.completed]
-  produces: [work.consume, work.completed]
-  event_handlers:
-    work.opened:
-      advances_to: assess
-    work.annotated:
-      guard: {check: _entity.current_state == 'assess'}
-      data_accumulation:
-        writes: [review_note]
-    work.assessed:
-      guard: {check: _entity.current_state == 'assess'}
-      advances_to: consume
-      emit: {event: work.consume}
-    work.consume:
-      guard: {check: _entity.current_state == 'consume'}
-      data_accumulation:
-        writes:
-          - op: clear
-            target: entity.review_note
-      emit:
-        event: work.completed
-        fields:
-          business_brief: "An assessed brief"
-          attempt_count: 1
-          note_supplied: has(entity.review_note)
-    work.completed:
-      guard: {check: _entity.current_state == 'consume' && !payload.note_supplied && !has(entity.review_note)}
-      advances_to: done
+  work.opened:
+    advances_to: assess
+  work.annotated:
+    guard: _entity.current_state == 'assess'
+    data_accumulation:
+      writes: [review_note]
+  work.assessed:
+    guard: _entity.current_state == 'assess'
+    advances_to: consume
+    emit: {event: work.consume}
+  work.consume:
+    guard: _entity.current_state == 'consume'
+    data_accumulation:
+      writes:
+        - op: clear
+          target: entity.review_note
+    emit:
+      event: work.completed
+      fields:
+        business_brief: "An assessed brief"
+        attempt_count: 1
+        note_supplied: has(entity.review_note)
+  work.completed:
+    guard: _entity.current_state == 'consume' && !payload.note_supplied && !has(entity.review_note)
+    advances_to: done
 `)
 }
 

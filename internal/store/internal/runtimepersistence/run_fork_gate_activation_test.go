@@ -53,7 +53,6 @@ type runForkGateWorkflowModule struct {
 func (m runForkGateWorkflowModule) SemanticSource() semanticview.Source { return m.source }
 
 func (runForkGateWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (runForkGateWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 
 type runForkGateSelectedStoreProof struct {
 	StageGatePending            bool

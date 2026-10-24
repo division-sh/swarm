@@ -346,25 +346,24 @@ func publishGitHubIssueCommentFromSender(t *testing.T, backend slackManagedConne
 func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{
-			Check:  `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
-			OnFail: "discard",
-		},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "github_create_issue_comment",
-			Tool: "github.create_issue_comment",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
-				"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
-				"repo":            runtimecontracts.CELExpression("payload.repository_name"),
-				"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
-				"body":            runtimecontracts.CELExpression("payload.body"),
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			Condition: `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
+			Activity: runtimecontracts.ActivitySpec{
+				ID:   "github_create_issue_comment",
+				Tool: "github.create_issue_comment",
+				Input: map[string]runtimecontracts.ExpressionValue{
+					"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
+					"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
+					"repo":            runtimecontracts.CELExpression("payload.repository_name"),
+					"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
+					"body":            runtimecontracts.CELExpression("payload.body"),
+				},
 			},
-		},
+		}},
 	}
 	const nodeID = "github-issue-comment-responder"
 	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"inbound.github.issue_comment_created": handler,
 		},

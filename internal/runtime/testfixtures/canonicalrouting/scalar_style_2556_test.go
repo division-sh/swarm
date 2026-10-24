@@ -24,8 +24,8 @@ func TestScalar2556GeneratedIdentifiersRemainData(t *testing.T) {
 func TestScalar2556RecordedReceiverSourceAnchors(t *testing.T) {
 	bundle := loadA2IndependentProducer(t, CopyForkReceiverRecordedConfig(t))
 	node := bundle.FlowTree.ByPath["account"].Nodes["collector"]
-	if !slices.Equal(node.SubscribesTo, []string{"work.ready", "account.initialized"}) {
-		t.Fatalf("recorded receiver overlay lost its exact subscriptions: %#v", node.SubscribesTo)
+	if subscriptions := contracts.EffectiveSystemNodeSubscriptions(node); !slices.Equal(subscriptions, []string{"account.initialized", "work.ready"}) {
+		t.Fatalf("recorded receiver overlay lost its exact subscriptions: %#v", subscriptions)
 	}
 	handler := node.EventHandlers["account.initialized"]
 	if len(handler.DataAccumulation.Writes) != 9 {

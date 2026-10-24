@@ -357,16 +357,13 @@ stages: []
 		}
 	}
 	writeStandingCandidateFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `independent-notifier:
-  execution_type: system_node
-  subscribes_to: [platform.boot]
-  event_handlers:
-    platform.boot:
-      activity:
-        id: independent_notice
-        tool: telegram.send_message
-        input:
-          chat_id: "1234"
-          text: "independent notice"
+  platform.boot:
+    activity:
+      id: independent_notice
+      tool: telegram.send_message
+      input:
+        chat_id: "1234"
+        text: "independent notice"
 `)
 	var output bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

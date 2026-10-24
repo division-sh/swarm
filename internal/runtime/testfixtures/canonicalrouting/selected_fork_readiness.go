@@ -82,9 +82,9 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 			addition = []byte(strings.ReplaceAll(string(addition), "terminal_probe.succeeded", "terminal_probe.failed"))
 		}
 		if frontier == "activity_loop_rule" && path == "worker-flow/nodes.yaml" {
-			addition = []byte(strings.ReplaceAll(string(addition), "      advances_to: executing\n", "      advances_to: working\n      rules:\n        - when: true\n          advances_to: executing\n"))
-			addition = []byte(strings.ReplaceAll(string(addition), "      activity:\n        id: terminal_probe\n        tool: terminal_probe\n        input: {}", "          activity:\n            id: terminal_probe\n            tool: terminal_probe\n            input: {}"))
-			addition = []byte(strings.ReplaceAll(string(addition), "            input: {}\n", "            input: {}\n        - advances_to: executing\n          activity:\n            id: unselected_probe\n            tool: terminal_probe\n            input: {}\n"))
+			addition = []byte(strings.ReplaceAll(string(addition), "    advances_to: executing\n", "    advances_to: working\n    rules:\n      - when: true\n        advances_to: executing\n"))
+			addition = []byte(strings.ReplaceAll(string(addition), "    activity:\n      id: terminal_probe\n      tool: terminal_probe\n      input: {}", "        activity:\n          id: terminal_probe\n          tool: terminal_probe\n          input: {}"))
+			addition = []byte(strings.ReplaceAll(string(addition), "          input: {}\n", "          input: {}\n      - advances_to: executing\n        activity:\n          id: unselected_probe\n          tool: terminal_probe\n          input: {}\n"))
 		}
 		file := filepath.Join(root, path)
 		data, err := os.ReadFile(file)
@@ -92,7 +92,7 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 			t.Fatal(err)
 		}
 		if strings.HasPrefix(frontier, "activity_loop") && path == "worker-flow/nodes.yaml" {
-			data = []byte(strings.ReplaceAll(string(data), "      advances_to: complete", "      loop: {close: inspection, from: executing}\n      advances_to: complete"))
+			data = []byte(strings.ReplaceAll(string(data), "    advances_to: complete", "    loop: {close: inspection, from: executing}\n    advances_to: complete"))
 		}
 		if err := os.WriteFile(file, append(data, addition...), 0600); err != nil {
 			t.Fatal(err)
@@ -190,7 +190,7 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 		childSchema = []byte(strings.Replace(string(childSchema), "- "+event+"\n", "- "+input+"\n", 1))
 		for file, addition := range map[string]string{
 			"worker-flow/events.yaml": event + ":\n  worker_id: text\n",
-			"worker-flow/nodes.yaml":  fmt.Sprintf("\n%s-entry:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit:\n        event: %s\n        fields:\n          worker_id: payload.worker_id\n", strings.ReplaceAll(event, ".", "-"), input, input, event),
+			"worker-flow/nodes.yaml":  fmt.Sprintf("\n%s-entry:\n  %s:\n    emit:\n      event: %s\n      fields:\n        worker_id: payload.worker_id\n", strings.ReplaceAll(event, ".", "-"), input, event),
 		} {
 			path := filepath.Join(root, file)
 			data, err := os.ReadFile(path)
@@ -233,11 +233,11 @@ func CopySelectedForkLocalReadiness(t testing.TB, declarations int, frontier str
 	childNodes := read("worker-flow/nodes.yaml")
 	if declarations == 2 && frontier == "agent" {
 		events = replaceSelectedReadiness(t, events, "worker.ready:\n  worker_id: text\n", "worker.ready:\n  worker_id: text\n  observed_count: integer?\n")
-		childNodes = replaceSelectedReadiness(t, childNodes, "    worker.observed:\n      advances_to: complete\n", "    worker.observed:\n      data_accumulation:\n        writes:\n          - target_field: observed_count\n            value: entity.observed_count + 1\n      on_complete:\n        - condition: entity.observed_count == 1\n          advances_to: complete\n")
+		childNodes = replaceSelectedReadiness(t, childNodes, "  worker.observed:\n    advances_to: complete\n", "  worker.observed:\n    data_accumulation:\n      writes:\n        - target_field: observed_count\n          value: entity.observed_count + 1\n    on_complete:\n      - condition: entity.observed_count == 1\n        advances_to: complete\n")
 		writeClosedVariantFile(t, root, "worker-flow/entities.yaml", read("worker-flow/entities.yaml")+"  observed_count: {type: integer, initial: 0}\n")
 	}
 	if frontier == "mixed" {
-		childNodes = replaceSelectedReadiness(t, childNodes, "    worker.ready:\n      advances_to: complete\n", "    worker.ready:\n      guard: {id: admitted, check: true}\n")
+		childNodes = replaceSelectedReadiness(t, childNodes, "  worker.ready:\n    advances_to: complete\n", "  worker.ready:\n    guard: true\n")
 	}
 	event := "worker.inspect"
 	if frontier != "node" && !strings.HasPrefix(frontier, "activity") {
@@ -249,7 +249,7 @@ func CopySelectedForkLocalReadiness(t testing.TB, declarations int, frontier str
 		schema = replaceSelectedReadiness(t, schema, "  - {event: worker.inspect, from: ., to: worker-flow, rename: worker.inspect.requested, resolution: select}\n", "")
 		events = replaceSelectedReadiness(t, events, "worker.inspect:\n  worker_id: text\n", "")
 		child = replaceSelectedReadiness(t, child, "    - worker.inspect.requested\n", "")
-		forwarder := fmt.Sprintf("\n%s-entry:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit:\n        event: %s\n        fields:\n          worker_id: payload.worker_id\n", strings.ReplaceAll(event, ".", "-"), event+".requested", event+".requested", event)
+		forwarder := fmt.Sprintf("\n%s-entry:\n  %s:\n    emit:\n      event: %s\n      fields:\n        worker_id: payload.worker_id\n", strings.ReplaceAll(event, ".", "-"), event+".requested", event)
 		childNodes = replaceSelectedReadiness(t, childNodes, forwarder, "")
 		child += "\nauto_emit_on_create:\n  event: " + event + "\n"
 	} else {
@@ -263,7 +263,7 @@ func CopySelectedForkLocalReadiness(t testing.TB, declarations int, frontier str
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+"\nprepare:\n  execution_type: system_node\n  subscribes_to: [source.recorded]\n  event_handlers:\n    source.recorded:\n      guard: {id: admitted, check: true}\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+"\nprepare:\n  source.recorded:\n    guard: true\n")
 	return root
 }
 

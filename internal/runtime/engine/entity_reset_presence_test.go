@@ -67,24 +67,20 @@ func TestEntityResetProjectionUsesWholeNodeOwnership(t *testing.T) {
 			writeEngineProjectionFixtureFile(t, filepath.Join(root, "entities.yaml"), entities)
 			writeEngineProjectionFixtureFile(t, filepath.Join(root, "events.yaml"), "work.first:\n  id: text\nwork.second:\n  id: text\nwork.peer:\n  id: text\n")
 			writeEngineProjectionFixtureFile(t, filepath.Join(root, "nodes.yaml"), `collector:
-  execution_type: system_node
   state_schema:
     fields:
       first_items: [Item]
       second_items: [Item]
-  event_handlers:
-    work.first:
-      accumulate: {into: first_items, key: payload.id}
-    work.second:
-      accumulate: {into: second_items, key: payload.id}
+  work.first:
+    accumulate: {into: first_items, key: payload.id}
+  work.second:
+    accumulate: {into: second_items, key: payload.id}
 peer:
-  execution_type: system_node
   state_schema:
     fields:
       peer_items: [Item]
-  event_handlers:
-    work.peer:
-      accumulate: {into: peer_items, key: payload.id}
+  work.peer:
+    accumulate: {into: peer_items, key: payload.id}
 `)
 			repo := repoRootForEngineProjectionTest(t)
 			bundle, err := c.LoadWorkflowContractBundleWithOverrides(repo, root, c.DefaultPlatformSpecFile(repo))

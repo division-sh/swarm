@@ -80,7 +80,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 					"schema.yaml": "name: child\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.ready\nrequired_agents:\n  - role: worker\n    subscribes_to: [work.ready]\n",
 					"events.yaml": "work.ready:\nwork.done:\n",
 					"agents.yaml": "worker:\n  model: regular\n  intent:\n    inline: Consume the exact selected input.\n  subscriptions: [work.ready]\n",
-					"nodes.yaml":  "sink:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n  produces: [work.done]\n  event_handlers:\n    work.ready:\n      advances_to: done\n      emit:\n        event: work.done\n",
+					"nodes.yaml":  "sink:\n  work.ready:\n    advances_to: done\n    emit:\n      event: work.done\n",
 				} {
 					path := filepath.Join(root, flow, name)
 					if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

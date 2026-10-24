@@ -235,7 +235,7 @@ func TestFiniteHostCannotRearmIndependentlyStandingClockBothStores(t *testing.T)
 			}
 			writeWorkflowValidationFixtureFile(t, path, string(updated))
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "poll.tick:\ninbound.partner:\n")
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  execution_type: system_node\n  subscribes_to: [inbound.partner]\n  event_handlers:\n    inbound.partner:\n      guard: {check: true}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  inbound.partner:\n    guard: true\n")
 			opts, start := clockDeploymentHarness(t, backend, root)
 			first, served := start()
 			rt := servedTestProcessRuntime(t, first)

@@ -24,9 +24,8 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `
 root-completion:
-  event_handlers:
-    flow.started:
-      advances_to: done
+  flow.started:
+    advances_to: done
 `)
 	writeClosedVariantFile(t, root, "discovery/schema.yaml", `name: discovery
 stages:
@@ -48,12 +47,8 @@ flow.started:
 `)
 	writeClosedVariantFile(t, root, "discovery/nodes.yaml", `
 pipeline:
-  execution_type: system_node
-  subscribes_to:
-    - flow.started
-  event_handlers:
-    flow.started:
-      advances_to: done
+  flow.started:
+    advances_to: done
 `)
 	return root
 }

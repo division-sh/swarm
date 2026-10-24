@@ -1,9 +1,5 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [item.requested]
-  produces: [item.done]
-  event_handlers:
-    item.requested:
-      advances_to: done
-      emit:
-        event: item.surprise
+  item.requested:
+    advances_to: done
+    emit:
+      event: item.surprise

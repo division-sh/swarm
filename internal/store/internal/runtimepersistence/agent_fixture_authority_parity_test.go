@@ -194,7 +194,6 @@ func configureAgentFixtureFlowLifecycle(
 		source := semanticview.Wrap(bundle)
 		module := sqliteFlowActivationWorkflowModule{
 			source: source,
-			guards: runtimepipeline.NewContractGuardRegistry(source),
 		}
 		options := runtimepipeline.PipelineCoordinatorOptions{
 			ExecutionPosture:        executionposture.Live,

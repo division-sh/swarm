@@ -27,7 +27,7 @@ func copyRootIngressServedCompletionAttribution(t testing.TB, sibling bool) stri
 	if sibling {
 		writeClosedVariantFile(t, root, "observation/agents.yaml", "load-agent:\n  role: load_agent\n  model: regular\n  intent: {inline: 'Observe the publication, then finish without tools.'}\n  subscriptions: [external.observed]\n")
 	} else {
-		writeClosedVariantFile(t, root, "observation/nodes.yaml", "observer:\n  execution_type: system_node\n  event_handlers:\n    external.observed:\n      guard: {id: record_observation, check: true}\n")
+		writeClosedVariantFile(t, root, "observation/nodes.yaml", "observer:\n  external.observed:\n    guard: true\n")
 	}
 	return root
 }

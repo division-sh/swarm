@@ -6,7 +6,7 @@ func VerifyQ10NativeFieldlessNoStagePrivateHistoryForTest(t *testing.T, open pip
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml": "name: q10-fieldless-no-stage\n",
 		"events.yaml": "observe:\n",
-		"nodes.yaml":  "observer:\n  execution_type: system_node\n  event_handlers:\n    observe: {}\n",
+		"nodes.yaml":  "observer:\n  observe: {}\n",
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

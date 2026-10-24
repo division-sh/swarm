@@ -31,7 +31,7 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				case "filter":
 					handler.Filter = &rc.FilterSpec{ItemsFrom: "payload.items", Condition: value + ` == "fallback"`, StoreAs: "computed.filtered"}
 				case "activity":
-					handler.Activity = rc.ActivitySpec{Tool: "notify", Input: map[string]rc.ExpressionValue{"value": rc.CELExpression(value)}}
+					handler.Activity = rc.ActivitySpec{ID: "worker_work_received_notify", Tool: "notify", Input: map[string]rc.ExpressionValue{"value": rc.CELExpression(value)}}
 				}
 				source := collectionItemSemanticsSource(handler)
 				bundle, _ := semanticview.Bundle(source)

@@ -43,8 +43,7 @@ pins:
     - work.ready
     - other.ready
 `, "", "observer_state:\n  item_id: {type: text}\n", `observe:
-  execution_type: system_node
-  subscribes_to: [work.ready, other.ready]
+  {}
 `)
 	return root
 }
@@ -89,9 +88,9 @@ observer.create:
 		if local != "" {
 			events += local + ":\n  item_id: text\n"
 		}
-		nodes := "constructor-receiver:\n  execution_type: system_node\n  subscribes_to: [item.created]\n  event_handlers:\n    item.created:\n      guard: {id: constructed, check: true}\n"
+		nodes := "constructor-receiver:\n  item.created:\n    guard: true\n"
 		if flow == "observer" {
-			nodes += "observe:\n  execution_type: system_node\n  subscribes_to: [work.ready, other.ready]\n  event_handlers:\n    work.ready:\n      guard: {id: observed, check: true}\n    other.ready:\n      guard: {id: observed, check: true}\n"
+			nodes += "observe:\n  work.ready:\n    guard: true\n  other.ready:\n    guard: true\n"
 		}
 		writeLegacyInstanceFlow(t, root, flow, schema, events, flow+"_state:\n  item_id: {type: text}\n", nodes)
 	}
@@ -136,11 +135,8 @@ observer.stop:
   item_id: text
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `observations:
-  execution_type: system_node
-  subscribes_to: [observation.logged]
-  event_handlers:
-    observation.logged:
-      guard: {id: recorded, check: true}
+  observation.logged:
+    guard: true
 `)
 	for _, flow := range []string{"producer", "other", "observer"} {
 		inputs, output, local := "[item.created, item.fired]", "work.ready", ""
@@ -148,17 +144,17 @@ observer.stop:
 		if flow == "other" {
 			output = "other.ready"
 		}
-		nodes := "constructor-receiver:\n  execution_type: system_node\n  subscribes_to: [item.created]\n  event_handlers:\n    item.created:\n      guard: {id: constructed, check: true}\n"
+		nodes := "constructor-receiver:\n  item.created:\n    guard: true\n"
 		if flow == "observer" {
 			inputs, output = "[item.created, work.ready, other.ready, stop]", "observation.logged"
 			stages += "  done: {final: true}\n"
-			nodes += "observe:\n  execution_type: system_node\n  subscribes_to: [work.ready, other.ready]\n  event_handlers:\n"
+			nodes += "observe:\n  {}\n"
 			for _, event := range []string{"work.ready", "other.ready"} {
 				nodes += "    " + event + ":\n      emit: {event: observation.logged, fields: {item_id: payload.item_id, marker: payload.marker}}\n"
 			}
-			nodes += "stop:\n  execution_type: system_node\n  subscribes_to: [stop]\n  event_handlers:\n    stop:\n      advances_to: done\n"
+			nodes += "stop:\n  stop:\n    advances_to: done\n"
 		} else {
-			local = "publisher:\n  execution_type: system_node\n  subscribes_to: [item.fired]\n  event_handlers:\n    item.fired:\n      emit: {event: " + output + ", fields: {item_id: payload.observer_id, marker: payload.marker}}\n"
+			local = "publisher:\n  item.fired:\n    emit: {event: " + output + ", fields: {item_id: payload.observer_id, marker: payload.marker}}\n"
 		}
 		schema := "name: " + flow + "\ninstance: item_id\n" + stages + "pins:\n  inputs: " + inputs + "\n  outputs: [" + output + "]\n"
 		events := output + ":\n  item_id: text\n  marker: text\n"

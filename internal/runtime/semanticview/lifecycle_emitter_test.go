@@ -290,8 +290,8 @@ func TestCompiledLifecycleEmitterExistingFamilies(t *testing.T) {
 	}{
 		{"handler_families", func(t *testing.T) string { return canonicalrouting.CopyLifecycleEmitterHandlerFamilies(t) }, []string{
 			".|gate_outcome||stages.review.gate.outcomes.approve.emit|work.completed",
-			"families|node_handler|worker|handler.emit|families/direct",
-			"families|node_handler|worker|handler.guard.on_fail.escalate|families/escalated",
+			"families|node_handler|worker|handler.rules[0].emit|families/direct",
+			"families|node_handler|worker|handler.rules[1].emit|families/escalated",
 			"families|node_handler|router|handler.rules[0].emit|families/routed",
 			"families|node_handler|router|handler.on_success.emit|families/audit",
 			"families|node_handler|template|handler.rules[0].emit_template|families/specialized",

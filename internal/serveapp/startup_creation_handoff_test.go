@@ -151,7 +151,7 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				})
 				root := t.TempDir()
 				copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "tests/tier5-flow-lifecycle/test-auto-emit-on-create"), root)
-				writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "spawner:\n  execution_type: system_node\n  subscribes_to: [flow.created]\n  produces: []\n  event_handlers:\n    flow.created: {}\n")
+				writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "spawner:\n  flow.created: {}\n")
 				schemaPath := filepath.Join(root, "schema.yaml")
 				schemaRaw, err := os.ReadFile(schemaPath)
 				if err != nil {

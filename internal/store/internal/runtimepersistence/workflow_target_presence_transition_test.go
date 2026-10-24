@@ -163,13 +163,10 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 		"review/entities.yaml": "review_item:\n  account_id: text\n  handled: {type: boolean, initial: false}\n",
 		"review/events.yaml":   "review.created:\n  account_id: text\nfinish.requested:\nsettle.requested:\n",
 		"review/nodes.yaml": `progress:
-  execution_type: system_node
-  subscribes_to: [finish.requested, settle.requested]
-  event_handlers:
-    finish.requested:
-      advances_to: done
-    settle.requested:
-      advances_to: settled
+  finish.requested:
+    advances_to: done
+  settle.requested:
+    advances_to: settled
 `,
 	}, nil)
 	f.ctx = runtimecorrelation.WithSourceArtifactFact(f.ctx, sourceartifactfixture.FactFor(f.bundle.SourceArtifact))

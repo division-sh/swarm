@@ -242,11 +242,9 @@ score.dimension_complete:
 `)
 	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  execution_type: system_node
-  event_handlers:
-    score.dimension_complete:
-      accumulate:
-        into: dimensions_received
+  score.dimension_complete:
+    accumulate:
+      into: dimensions_received
   state_schema:
     fields:
       dimensions_received: [DimensionScore]

@@ -1,16 +1,12 @@
 worker:
-  execution_type: system_node
-  subscribes_to: [item.requested]
-  produces: [item.reported]
-  event_handlers:
-    item.requested:
-      data_accumulation:
-        writes:
-          - {source_field: member_id, target_field: member_id}
-          - {source_field: values, target_field: values}
-      emit:
-        event: item.reported
-        fields:
-          member_id: payload.member_id
-          result: payload.values
-      advances_to: complete
+  item.requested:
+    data_accumulation:
+      writes:
+        - {source_field: member_id, target_field: member_id}
+        - {source_field: values, target_field: values}
+    emit:
+      event: item.reported
+      fields:
+        member_id: payload.member_id
+        result: payload.values
+    advances_to: complete

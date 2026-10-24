@@ -251,7 +251,7 @@ func newCatalogAssertionHarness(t *testing.T, initial string) *runtimeHarness {
 		"schema.yaml":   "name: catalog-assertion\npins:\n  inputs: [score.requested, assertion.finish]\nstages:\n  " + initial + ": {}\n  finished: {final: true}\n",
 		"entities.yaml": "assertion:\n  note: {type: 'text?', _unused_reason: assertion fixture}\n",
 		"events.yaml":   "score.requested:\n  entity_id: uuid?\nassertion.finish:\n",
-		"nodes.yaml":    "finisher:\n  execution_type: system_node\n  event_handlers:\n    score.requested: {}\n    assertion.finish:\n      advances_to: finished\n",
+		"nodes.yaml":    "finisher:\n  score.requested: {}\n  assertion.finish:\n    advances_to: finished\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
 			t.Fatal(err)

@@ -463,20 +463,16 @@ stages:
 		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
 		"orders/events.yaml":   "item.completed:\n  member_id: text\n  result: JoinResult\ndispatch.completed:\n",
 		"orders/nodes.yaml": `collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete: {advances_to: ready}
-        on_deadline: {advances_to: attention}
+  item.completed:
+    join:
+      stage: awaiting
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      on_complete: {advances_to: ready}
+      on_deadline: {advances_to: attention}
 dispatcher:
-  execution_type: system_node
-  event_handlers:
-    dispatch.completed: {advances_to: awaiting}
+  dispatch.completed: {advances_to: awaiting}
 `,
 	}
 }

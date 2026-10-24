@@ -19,7 +19,7 @@ func CopyStaticAgentOutputConnect(t testing.TB) string {
 		"producer/events.yaml": "deploy.done:\n",
 		"producer/agents.yaml": "producer-agent:\n  model: regular\n  intent: {inline: Report deployment completion.}\n  emit_events: [deploy.done]\n",
 		"consumer/schema.yaml": "name: consumer\npins:\n  inputs: [deploy.completed]\n",
-		"consumer/nodes.yaml":  "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.completed:\n      guard: {id: received, check: true}\n",
+		"consumer/nodes.yaml":  "consumer-node:\n  deploy.completed:\n    guard: true\n",
 	} {
 		writeClosedVariantFile(t, root, path, body)
 	}

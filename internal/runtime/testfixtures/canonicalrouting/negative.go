@@ -29,11 +29,8 @@ func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root stri
 		"    - deploy.completed\n",
 		"    - deploy.completed\n    - deploy.audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "nodes.yaml"),
-		"  subscribes_to: [deploy.completed]\n",
-		"  subscribes_to: [deploy.completed, deploy.audited]\n")
-	applyClosedReplacement(t, filepath.Join(root, "consumer", "nodes.yaml"),
-		"      advances_to: done\n",
-		"      advances_to: done\n    deploy.audited:\n      advances_to: done\n")
+		"    advances_to: done\n",
+		"    advances_to: done\n  deploy.audited:\n    advances_to: done\n")
 }
 
 // TemplateSelectOrCreateNegativeMutation is the closed fail-closed matrix for
@@ -60,16 +57,16 @@ func ApplyTemplateSelectOrCreateNegativeMutation(t testing.TB, root string, muta
 			"account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: text?\n")
 	case TemplateSelectOrCreateReceiverSelector:
 		applyClosedReplacement(t, receiverNodes,
-			"    account.ready:\n      data_accumulation:\n",
-			"    account.ready:\n      select_entity:\n        by:\n          account_id: payload.account_id\n      data_accumulation:\n")
+			"  account.ready:\n    data_accumulation:\n",
+			"  account.ready:\n    select_entity:\n      by:\n        account_id: payload.account_id\n    data_accumulation:\n")
 	case TemplateSelectOrCreateProducerTarget:
 		applyClosedReplacement(t, producerNodes,
-			"        event: account.ready\n        fields:\n",
-			"        event: account.ready\n        target:\n          flow: account\n          match:\n            account_id: payload.account_id\n        fields:\n")
+			"      event: account.ready\n      fields:\n",
+			"      event: account.ready\n      target:\n        flow: account\n        match:\n          account_id: payload.account_id\n      fields:\n")
 	case TemplateSelectOrCreateProducerBroadcast:
 		applyClosedReplacement(t, producerNodes,
-			"        event: account.ready\n        fields:\n",
-			"        event: account.ready\n        broadcast: true\n        fields:\n")
+			"      event: account.ready\n      fields:\n",
+			"      event: account.ready\n      broadcast: true\n      fields:\n")
 	default:
 		t.Fatalf("unsupported select-or-create negative mutation %d", mutation)
 	}

@@ -22,7 +22,6 @@ permissions_model: {permissions: [read]}
 vocabulary: {participant: {types: {agent: {execution: llm}}}}
 workflow_state: {ddl: "CREATE TABLE work (id TEXT);\n", fields: {id: {type: uuid}}}
 platform_tables: {tables: {work: {ddl: "CREATE TABLE work (id TEXT);\n", description: note}}}
-builtin_hooks: {guards: [{id: check}]}
 platform_events:
   catalog:
     sample.observed:
@@ -58,7 +57,6 @@ func TestPlatformConsumedLawAdmissionPresenceMatrix(t *testing.T) {
 		{[]string{"workflow_state", "fields", "id", "type"}, false, false, false, false},
 		{[]string{"platform_tables", "tables", "work", "ddl"}, false, false, false, false},
 		{[]string{"platform_tables", "tables", "work", "description"}, true, false, false, true},
-		{[]string{"builtin_hooks", "guards"}, true, false, true, false},
 		{[]string{"platform_events", "catalog", "sample.observed", "payload"}, true, true, false, false},
 		{[]string{"platform_events", "catalog", "sample.observed", "payload", "note", "type"}, true, false, false, false},
 		{[]string{"platform_events", "catalog", "sample.observed", "payload", "note", "description"}, true, false, false, true},

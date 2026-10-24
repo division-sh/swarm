@@ -121,7 +121,16 @@ func TestCompiledLifecycleEmitterInvalidPlansRejectedByValidationSurface(t *test
 		{"loop_missing_field", "loop_validation", "revision_id", canonicalrouting.LifecycleStaticLoopMissingField},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := lifecycleSurfaceSource(t, canonicalrouting.CopyLifecycleEmitterStatic(t, tc.variant))
+			root := canonicalrouting.CopyLifecycleEmitterStatic(t, tc.variant)
+			if tc.variant == canonicalrouting.LifecycleStaticLoopWrongFlow {
+				repo := canonicalrouting.RepoRoot(t)
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+				if bundle != nil || err == nil || !strings.Contains(err.Error(), `handler "loop.escaped"`) || !strings.Contains(err.Error(), "undeclared event") {
+					t.Fatalf("foreign event acquired receiver admission: %v, %v", bundle != nil, err)
+				}
+				return
+			}
+			source := lifecycleSurfaceSource(t, root)
 			_, err := runtime.ValidateWorkflowContractSurface(context.Background(), source, runtime.WorkflowContractValidationOptions{ExecutionPosture: executionposture.Live, FatalBootWarnings: true, StrictEmitSchemas: true})
 			if err == nil || !strings.Contains(err.Error(), tc.check) || !strings.Contains(err.Error(), tc.detail) {
 				t.Fatalf("invalid lifecycle plan reached validation success: %v", err)

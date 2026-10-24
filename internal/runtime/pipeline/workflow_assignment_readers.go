@@ -74,7 +74,6 @@ func AnnotateWorkflowEntityAssignmentReaders(node identity.ExecutableNode, event
 func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader WorkflowExecutableReader) (engine.EntityAssignmentPoint, error) {
 	point := engine.EntityAssignmentPoint{
 		WriteIndex: reader.WriteIndex, HasWriteIndex: reader.HasWriteIndex,
-		GuardCheckIndex: reader.GuardCheckIndex, HasGuardCheckIndex: reader.HasGuardCheckIndex,
 	}
 	if reader.EmitSite != nil {
 		site := reader.EmitSite
@@ -82,8 +81,6 @@ func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader Workfl
 		point.RuleIndex = site.RuleIndex
 		point.RuleRef = site.RuleRef
 		switch site.Source {
-		case "handler.guard.on_fail.escalate":
-			point.Step = engine.StepGuard
 		case "handler.emit", "handler.on_success":
 		case "handler.rules.emit":
 			point.RuleKind = c.HandlerAdvanceCarrierRules
@@ -143,10 +140,6 @@ func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader Workfl
 		if !point.RuleRef.Valid() {
 			return point, fmt.Errorf("rule %s[%d] has no exact declaration identity", reader.RuleCollection, reader.RuleIndex)
 		}
-	}
-	if reader.Phase == WorkflowEntityFieldLifecycleGuardEscalation {
-		point.Step = engine.StepGuard
-		return point, nil
 	}
 	switch field {
 	case "Query":

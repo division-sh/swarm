@@ -32,14 +32,11 @@ pins:
   enabled: boolean
 `)
 	writeClosedVariantFile(t, root, "telegram-chat/nodes.yaml", `receiver:
-  execution_type: system_node
-  subscribes_to: [inbound.telegram.text_message, chat.initialized]
-  event_handlers:
-    inbound.telegram.text_message:
-      guard: {check: payload.conversation_reference != ''}
-    chat.initialized:
-      data_accumulation:
-        writes: [text, provider_message_reference, enabled]
+  inbound.telegram.text_message:
+    guard: payload.conversation_reference != ''
+  chat.initialized:
+    data_accumulation:
+      writes: [text, provider_message_reference, enabled]
 `)
 	return root
 }

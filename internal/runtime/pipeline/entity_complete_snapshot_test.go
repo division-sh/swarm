@@ -18,14 +18,11 @@ func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open
 		"entities.yaml": "test_entity:\n  revision_count: integer?\n",
 		"events.yaml":   "work.clear:\n",
 		"nodes.yaml": `node-a:
-  execution_type: system_node
-  subscribes_to: [work.clear]
-  event_handlers:
-    work.clear:
-      data_accumulation:
-        writes:
-          - op: clear
-            target: entity.revision_count
+  work.clear:
+    data_accumulation:
+      writes:
+        - op: clear
+          target: entity.revision_count
 `,
 	})
 	fixture := open(t, source)
@@ -89,19 +86,16 @@ func VerifySelectedHandlerSparsePresenceWriteAndEmitBothStoresForTest(t *testing
 		"entities.yaml": "test_entity:\n  kill_reason: text?\n  observed_absence: boolean?\n",
 		"events.yaml":   "work.ready:\nwork.emitted:\n  observed_absence: boolean\n",
 		"nodes.yaml": `node-a:
-  execution_type: system_node
-  subscribes_to: [work.ready]
-  event_handlers:
-    work.ready:
-      data_accumulation:
-        writes:
-          - target_field: observed_absence
-            value: |-
-                     !has(entity.kill_reason)
-      emit:
-        event: work.emitted
-        fields:
-          observed_absence: entity.observed_absence
+  work.ready:
+    data_accumulation:
+      writes:
+        - target_field: observed_absence
+          value: |-
+                   !has(entity.kill_reason)
+    emit:
+      event: work.emitted
+      fields:
+        observed_absence: entity.observed_absence
 `,
 	})
 	fixture := open(t, source)
@@ -145,24 +139,21 @@ func VerifySelectedHandlerSparseEqualityMutationsBothStoresForTest(t *testing.T,
 `,
 				"events.yaml": "work.set:\nwork.clear:\n",
 				"nodes.yaml": `node-a:
-  execution_type: system_node
-  subscribes_to: [work.set, work.clear]
-  event_handlers:
-    work.set:
-      data_accumulation:
-        writes:
-          - target_field: left
-            value: |-
-                     'new'
-          - target_field: right
-            value: entity.left
-    work.clear:
-      data_accumulation:
-        writes:
-          - op: clear
-            target: entity.left
-          - op: clear
-            target: entity.right
+  work.set:
+    data_accumulation:
+      writes:
+        - target_field: left
+          value: |-
+                   'new'
+        - target_field: right
+          value: entity.left
+  work.clear:
+    data_accumulation:
+      writes:
+        - op: clear
+          target: entity.left
+        - op: clear
+          target: entity.right
 `,
 			})
 			fixture := open(t, source)

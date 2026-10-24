@@ -69,8 +69,7 @@ func TestResolveAllowsTypedSameFlowConsumerWithoutInventingRoute(t *testing.T) {
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"consumer": {
-			ExecutionType: "system_node",
-			SubscribesTo:  []string{"root.ready"},
+
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"root.ready": {}},
 		},
 	}

@@ -76,7 +76,7 @@ func TestRun_RequiresPrimaryEntityForActualOperation(t *testing.T) {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: operation-demand\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), "name: scoring\nstages:\n  pending: {}\n  done: {final: true}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), "work.ready:\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      "+handler+"\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), "worker:\n  work.ready:\n      "+handler+"\n")
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 			if !reportContains(report.Errors(), "primary_entity_validation", "no declared entity") {

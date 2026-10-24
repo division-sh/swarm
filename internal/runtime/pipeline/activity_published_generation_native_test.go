@@ -40,17 +40,14 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 				"entities.yaml": "work: {}\n",
 				"events.yaml":   "read.requested:\n  revision_id: text\n",
 				"nodes.yaml": `reader:
-  execution_type: system_node
-  subscribes_to: [read.requested, read.succeeded, read.failed]
-  event_handlers:
-    read.requested:
-      loop: {admit: revision, from: review}
-      activity: {id: read, tool: read}
-    read.succeeded:
-      loop: {repeat: revision, from: review}
-      advances_to: drafting
-    read.failed:
-      guard: {id: exact_activity, check: payload.activity_id == 'read'}
+  read.requested:
+    loop: {admit: revision, from: review}
+    activity: {id: read, tool: read}
+  read.succeeded:
+    loop: {repeat: revision, from: review}
+    advances_to: drafting
+  read.failed:
+    guard: payload.activity_id == 'read'
 `,
 				"tools.yaml": fmt.Sprintf("read:\n  handler_type: http\n  http: {method: GET, url: %q}\n", server.URL),
 			})

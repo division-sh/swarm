@@ -1,9 +1,5 @@
 dispatcher:
-  execution_type: system_node
-  subscribes_to: [task.requested, task.result]
-  produces: [child/task.assigned]
-  event_handlers:
-    task.requested:
-      emit: child/task.assigned
-    task.result:
-      advances_to: done
+  task.requested:
+    emit: child/task.assigned
+  task.result:
+    advances_to: done

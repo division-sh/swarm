@@ -25,13 +25,9 @@ pins:
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "item.received:\n  entity_id: uuid\nitem.processed:\n",
 		"nodes.yaml": `test-node:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: [item.processed]
-  event_handlers:
-    item.received:
-      advances_to: processed
-      emit: {event: item.processed}
+  item.received:
+    advances_to: processed
+    emit: {event: item.processed}
 `,
 	} {
 		writeClosedVariantFile(t, root, filepath.Clean(path), body)

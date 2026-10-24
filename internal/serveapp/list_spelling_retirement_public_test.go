@@ -73,22 +73,20 @@ func listRetirementPublicSource() map[string]string {
 		"entities.yaml": "probe:\n  entries: {type: '[ProbeItem]', initial: []}\n  snapshots:\n    type: '[ProbeItem]'\n    materialize_from: collector.observed\n",
 		"events.yaml":   "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
 		"nodes.yaml": `collector:
-  execution_type: system_node
   state_schema:
     fields:
       observed: [ProbeItem]
-  event_handlers:
-    proof.append:
-      accumulate:
-        into: observed
-        key: payload.name
-      data_accumulation:
-        writes:
-          - op: append
-            target: entity.entries
-            value: payload
-    proof.finish:
-      advances_to: done
+  proof.append:
+    accumulate:
+      into: observed
+      key: payload.name
+    data_accumulation:
+      writes:
+        - op: append
+          target: entity.entries
+          value: payload
+  proof.finish:
+    advances_to: done
 `,
 	}
 }

@@ -16,8 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/registry"
-	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -39,126 +37,106 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "direct:\ninherited:\nrule:\ncomplete:\nself:\nwrite_only:\nfallback:\nemit_only:\nobserved:\nkill:\nreject:\ndiscard:\nguarded:\nguard_observed:\n  marker: text\n",
 		"nodes.yaml": `router:
-  execution_type: system_node
-  event_handlers:
-    direct:
-      advances_to: done
-    inherited:
-      advances_to: done
-      rules:
-        - when: true
-    rule:
-      rules:
-        - when: |-
-            false
-          advances_to: done
-        - when: |-
-            true
-          advances_to: done
-        - advances_to: done
-    complete:
-      data_accumulation:
-        writes:
-          - target_field: marker
-            value: |-
-              'completed'
-      on_complete:
-        - advances_to: done
-    self:
-      advances_to: ready
-    write_only:
-      data_accumulation:
-        writes:
-          - target_field: marker
-            value: |-
-              'written'
-    fallback:
-      rules:
-        - when: |-
-            false
-          advances_to: done
-        - when: true
-    emit_only:
-      emit: observed
-    guarded:
-      guard:
-        checks:
-          - id: first-pass
-            check: |-
-              true
-          - check: |-
-              true
-      data_accumulation:
-        writes:
-          - target_field: marker
-            value: |-
-              'guarded'
-      rules:
-        - when: |-
-            true
-          advances_to: done
-          emit:
-            event: guard_observed
-            fields:
-              marker: "guard-output"
-    kill:
-      guard:
-        id: kill-check
-        check: |-
+  direct:
+    advances_to: done
+  inherited:
+    advances_to: done
+    rules:
+      - when: true
+  rule:
+    rules:
+      - when: |-
           false
-        on_fail: kill
-      advances_to: done
-    reject:
-      guard:
-        id: reject-check
-        check: |-
+        advances_to: done
+      - when: |-
+          true
+        advances_to: done
+      - advances_to: done
+  complete:
+    data_accumulation:
+      writes:
+        - target_field: marker
+          value: |-
+            'completed'
+    on_complete:
+      - advances_to: done
+  self:
+    advances_to: ready
+  write_only:
+    data_accumulation:
+      writes:
+        - target_field: marker
+          value: |-
+            'written'
+  fallback:
+    rules:
+      - when: |-
           false
-        on_fail: reject
-      advances_to: done
-    discard:
-      guard:
-        id: discard-check
-        check: |-
-          false
-        on_fail: discard
-      advances_to: done
-`,
+        advances_to: done
+      - when: true
+  emit_only:
+    emit: observed
+  guarded:
+    guard: (true) && (true)
+    data_accumulation:
+      writes:
+        - target_field: marker
+          value: |-
+            'guarded'
+    rules:
+      - when: |-
+          true
+        advances_to: done
+        emit:
+          event: guard_observed
+          fields:
+            marker: "guard-output"
+  kill:
+    rules:
+      - when: false
+        advances_to: done
+      - advances_to: killed
+        terminate: true
+  reject:
+    guard: false
+    data_accumulation:
+      writes: [{target_field: marker, value: 'must-not-write'}]
+    advances_to: done
+  discard:
+    rules:
+      - when: false
+        data_accumulation:
+          writes: [{target_field: marker, value: 'must-not-write'}]
+        emit: observed
+        advances_to: done
+    `,
 		"child/schema.yaml":   "name: child\ninstance: instance_key\nstages:\n  ready: {}\n  shared: {final: true}\n  foreign_only: {}\n  done: {final: true}\n  killed: {final: true}\n",
 		"child/entities.yaml": "test_entity:\n  marker: text\n  instance_key: text\n",
 		"child/events.yaml":   "direct:\nkill:\nguarded:\nguard_observed:\n  marker: text\n",
 		"child/nodes.yaml": `router:
-  execution_type: system_node
-  event_handlers:
-    direct:
-      advances_to: done
-    kill:
-      guard:
-        id: child-kill
-        check: |-
-          false
-        on_fail: kill
-      advances_to: done
-    guarded:
-      guard:
-        checks:
-          - id: first-pass
-            check: |-
-              true
-          - check: |-
-              true
-      data_accumulation:
-        writes:
-          - target_field: marker
-            value: |-
-              'guarded'
-      rules:
-        - when: |-
-            true
-          advances_to: done
-          emit:
-            event: guard_observed
-            fields:
-              marker: "guard-output"
+  direct:
+    advances_to: done
+  kill:
+    rules:
+      - when: false
+        advances_to: done
+      - advances_to: killed
+        terminate: true
+  guarded:
+    guard: (true) && (true)
+    data_accumulation:
+      writes:
+        - target_field: marker
+          value: |-
+            'guarded'
+    rules:
+      - when: |-
+          true
+        advances_to: done
+        emit:
+          event: guard_observed
+          fields:
+            marker: "guard-output"
 `,
 	}
 	if len(initialTimer) > 0 && initialTimer[0] {
@@ -438,13 +416,13 @@ func VerifyNativePipelineCompiledTransitionGuardDispositionOnBothStoresForTest(t
 					t.Fatal(err)
 				}
 				after, _ := f.load()
-				want := map[string]HandlerOutcomeStatus{"kill": HandlerOutcomeKilled, "reject": HandlerOutcomeRejected, "discard": HandlerOutcomeDiscarded}[event]
+				want := map[string]HandlerOutcomeStatus{"kill": HandlerOutcomeCompleted, "reject": HandlerOutcomeRejected, "discard": HandlerOutcomeCompleted}[event]
 				if result.Outcome == nil || result.Outcome.Status != want {
 					t.Fatalf("guard result = %#v, want %s", result.Outcome, want)
 				}
 				if event != "kill" {
-					if after.CurrentState != before.CurrentState || !reflect.DeepEqual(after.TransitionHistory, before.TransitionHistory) {
-						t.Fatal("reject/discard transitioned state")
+					if after.CurrentState != before.CurrentState || !reflect.DeepEqual(after.TransitionHistory, before.TransitionHistory) || !reflect.DeepEqual(after.Fields, before.Fields) || f.bus.publishedCount() != 0 {
+						t.Fatal("rejection/no-match changed business state or emitted work")
 					}
 					return
 				}
@@ -452,11 +430,11 @@ func VerifyNativePipelineCompiledTransitionGuardDispositionOnBothStoresForTest(t
 					t.Fatalf("guard kill = %#v", after)
 				}
 				record := after.TransitionHistory[0]
-				if _, ok := record.Evidence.Compiled(); ok {
-					t.Fatal("guard termination masquerades as ordinary compiled edge")
+				if edge, ok := record.Evidence.Compiled(); !ok || !edge.TerminatesAgentTurns() {
+					t.Fatal("termination lacks its selected compiled carrier")
 				}
 				if record.Evidence.FlowID() != "." || record.TriggerEventID != evt.ID() ||
-					!slices.Equal(record.GuardsEvaluated, result.GuardsEvaluated) || !slices.Contains(record.GuardsEvaluated, "kill-check") {
+					!slices.Equal(record.GuardsEvaluated, result.GuardsEvaluated) || !record.Evidence.RuleSelection().Equal(requireResolvedSelection(t, result.RuleSelection)) {
 					t.Fatalf("guard cause lost evaluated provenance: %#v", record)
 				}
 			})
@@ -469,49 +447,17 @@ func VerifyNativePipelineCompiledTransitionGuardDispositionOnBothStoresForTest(t
 				t.Fatal(err)
 			}
 			after, _ := f.load()
-			if result.Outcome == nil || result.Outcome.Status != HandlerOutcomeKilled || after.CurrentState != "killed" || len(after.TransitionHistory) != 1 {
+			if result.Outcome == nil || result.Outcome.Status != HandlerOutcomeCompleted || after.CurrentState != "killed" || len(after.TransitionHistory) != 1 {
 				t.Fatalf("child kill failed: %#v %#v", result, after)
 			}
 			cause := after.TransitionHistory[0].Evidence
-			if cause.FlowID() != "child" || !slices.Contains(cause.GuardsEvaluated(), "child-kill") {
-				t.Fatal("child kill borrowed root guard provenance")
+			if cause.FlowID() != "child" || !cause.RuleSelection().Equal(requireResolvedSelection(t, result.RuleSelection)) {
+				t.Fatal("child termination borrowed root selection provenance")
 			}
-			if _, compiled := cause.Compiled(); compiled {
-				t.Fatal("child guard kill became an ordinary edge")
+			if edge, compiled := cause.Compiled(); !compiled || !edge.TerminatesAgentTurns() {
+				t.Fatal("child termination lacks its selected compiled carrier")
 			}
 		})
-	}
-}
-
-func VerifyNativeGuardKillUsesExactStageInEitherDeclarationOrderBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, tc := range []struct {
-			name, stages, wantStage string
-		}{
-			{"lower_first", "  killed: {final: true}\n  Killed: {final: true}\n", "killed"},
-			{"upper_first", "  Killed: {final: true}\n  killed: {final: true}\n", "killed"},
-			{"upper_only", "  Killed: {final: true}\n", "ready"},
-		} {
-			t.Run(backend+"/"+tc.name, func(t *testing.T) {
-				bundle := compiledAdapterSourceWithKillStages(t, tc.stages)
-				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
-				evt := f.event("kill")
-				result, err := f.executeExistingRecipient("kill", evt)
-				if err != nil || result.Outcome == nil || result.Outcome.Status != HandlerOutcomeKilled {
-					t.Fatalf("kill disposition: result=%#v err=%v", result, err)
-				}
-				after, found := f.load()
-				if !found || after.CurrentState != tc.wantStage {
-					t.Fatalf("kill selected wrong-case stage: state=%#v found=%v", after, found)
-				}
-				if tc.wantStage == "ready" && len(after.TransitionHistory) != 0 {
-					t.Fatalf("absent exact killed invented a transition: %#v", after.TransitionHistory)
-				}
-				if tc.wantStage == "killed" && (len(after.TransitionHistory) != 1 || after.TransitionHistory[0].TriggerEventID != evt.ID()) {
-					t.Fatalf("exact kill transition lost history: %#v", after.TransitionHistory)
-				}
-			})
-		}
 	}
 }
 
@@ -593,44 +539,6 @@ func VerifyNativePipelineCompiledTransitionStageGuardsOnBothStoresForTest(t *tes
 				}
 			})
 		}
-		for _, tc := range []struct {
-			flow, stage string
-			terminal    bool
-		}{
-			{".", "ready", false}, {".", "Ready", true}, {".", "shared", false}, {"child", "shared", true},
-		} {
-			t.Run(backend+"/terminal_guard/"+tc.flow+"/"+tc.stage, func(t *testing.T) {
-				f := newNativeCompiledAdapterFixture(t, backend, bundle, tc.flow, tc.stage, true, open)
-				state, err := handlerExecutionStateSnapshot(contracts.SystemNodeEventHandler{}, f.entityID, f.state(), tc.flow, f.pc.SemanticSource().WorkflowVersion())
-				if err != nil {
-					t.Fatal(err)
-				}
-				request := engine.ExecutionRequest{Node: f.node, ExecutionFlowID: identity.NormalizeFlowID(tc.flow), State: state}
-				for _, builtin := range []string{"not_in_terminal_state", "not_in_terminal_stage"} {
-					got, handled, err := (pipelineEngineGuardRunner{coordinator: f.pc}).EvaluateGuard(f.ctx, identity.NormalizeGuardKey(builtin),
-						registry.GuardInstruction{Builtin: builtin}, engine.ExecutionContext{Request: request})
-					if err != nil || !handled || got != !tc.terminal {
-						t.Fatalf("%s: got=%v handled=%v err=%v", builtin, got, handled, err)
-					}
-				}
-			})
-		}
-		t.Run(backend+"/phase_policy", func(t *testing.T) {
-			f := newNativeCompiledAdapterFixture(t, backend, bundle, "child", "ready", true, open)
-			state, err := handlerExecutionStateSnapshot(contracts.SystemNodeEventHandler{}, f.entityID, f.state(), "child", f.pc.SemanticSource().WorkflowVersion())
-			if err != nil {
-				t.Fatal(err)
-			}
-			request := engine.ExecutionRequest{Node: f.node, ExecutionFlowID: identity.NormalizeFlowID("child"), State: state}
-			for _, required := range []string{"child", ".", "CHILD"} {
-				execCtx := engine.ExecutionContext{Request: request, Base: engine.BaseContext{Policy: values.Wrap(map[string]any{"approval": map[string]any{"phase": required}})}}
-				got, handled, err := (pipelineEngineGuardRunner{coordinator: f.pc}).EvaluateGuard(f.ctx, identity.NormalizeGuardKey("state_in_phase"),
-					registry.GuardInstruction{Builtin: "state_in_phase", PolicyRef: "approval.phase"}, execCtx)
-				if err != nil || !handled || got != (required == "child") {
-					t.Fatalf("phase policy %q: got=%v handled=%v err=%v", required, got, handled, err)
-				}
-			}
-		})
 	}
 }
 
@@ -854,8 +762,8 @@ func VerifyNativeGuardRefusalClaimSettlesWithoutBusinessTransitionBothStoresForT
 				before, _ := f.load()
 				attempt := withWorkflowNodeDeliveryRoute(f.ctx, route)
 				handled, err := f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
-				if err != nil || handled {
-					t.Fatalf("guard refusal must not claim handler admission: handled=%v err=%v", handled, err)
+				if err != nil || handled != (event == "discard") {
+					t.Fatalf("guard rejection must refuse and no-match must complete: handled=%v err=%v", handled, err)
 				}
 				after, _ := f.load()
 				if before.CurrentState != after.CurrentState || !reflect.DeepEqual(before.Fields, after.Fields) || len(after.TransitionHistory) != 0 || f.bus.publishedCount() != 0 {
@@ -1026,7 +934,7 @@ func statelessCompiledAdapterSource(t *testing.T) *contracts.WorkflowContractBun
 		"schema.yaml":   "name: stateless-proof\n",
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "noop:\n",
-		"nodes.yaml":    "router:\n  execution_type: system_node\n  event_handlers:\n    noop: {}\n",
+		"nodes.yaml":    "router:\n  noop: {}\n",
 	})
 }
 
@@ -1091,7 +999,7 @@ func requireGuardedPreviewEvidence(t *testing.T, f *compiledAdapterFixture, prev
 	if !qualified || requireResolvedSelection(t, preview.RuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, preview.RuleSelection).Ref().Equal(wantRef) || preview.RuleID != "rules[0]: when true" {
 		t.Fatal("preview selected a display-label alias instead of the exact authored rule")
 	}
-	if !slices.Equal(preview.GuardsEvaluated, []string{"first-pass", "true"}) || preview.Metadata["marker"] != "guarded" {
+	if !slices.Equal(preview.GuardsEvaluated, []string{"(true) && (true)"}) || preview.Metadata["marker"] != "guarded" {
 		t.Fatalf("guarded preview lost declared prefix or field output: %#v", preview)
 	}
 	var payload map[string]any
@@ -1148,8 +1056,11 @@ func VerifyNativeCompiledTransitionPreviewExecutionAgreementOnBothStoresForTest(
 				if event == "guarded" {
 					requireGuardedPreviewEvidence(t, f, preview)
 				}
-				if slices.Contains([]string{"kill", "reject", "discard"}, event) && !slices.Equal(preview.GuardsEvaluated, []string{event + "-check"}) {
-					t.Fatal("preview lost failed guard label")
+				if event == "reject" && !slices.Equal(preview.GuardsEvaluated, []string{"false"}) {
+					t.Fatal("preview lost the refused scalar predicate")
+				}
+				if (event == "kill" || event == "discard") && len(preview.GuardsEvaluated) != 0 {
+					t.Fatal("selected rows acquired retired guard identity")
 				}
 			})
 		}
@@ -1249,7 +1160,7 @@ func VerifyNativeCompiledTransitionPreviewExecutionAgreementOnBothStoresForTest(
 				"schema.yaml":   "name: loop-preview\nstages:\n  ready: {}\n  drafting: {}\n  review: {}\n  escaped: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 1\n    escape: {advances_to: escaped}\n",
 				"entities.yaml": "test_entity:\n  marker: text\n",
 				"events.yaml":   "start:\nadmit:\n  revision_id: text\nrepeat:\n  revision_id: text\n",
-				"nodes.yaml":    "router:\n  execution_type: system_node\n  event_handlers:\n    start:\n      loop: {start: revision, from: ready}\n      advances_to: drafting\n    admit:\n      loop: {admit: revision, from: drafting}\n      advances_to: review\n    repeat:\n      loop: {repeat: revision, from: review}\n      advances_to: drafting\n",
+				"nodes.yaml":    "router:\n  start:\n    loop: {start: revision, from: ready}\n    advances_to: drafting\n  admit:\n    loop: {admit: revision, from: drafting}\n    advances_to: review\n  repeat:\n    loop: {repeat: revision, from: review}\n    advances_to: drafting\n",
 			})
 			f := newNativeCompiledAdapterFixture(t, backend, loopBundle, ".", "ready", true, open)
 			if _, err := f.executeExistingRecipient("start", f.event("start")); err != nil {

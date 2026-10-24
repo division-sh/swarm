@@ -1,17 +1,12 @@
 worker-node:
-  execution_type: system_node
-  subscribes_to: [worker.ready, flow.spawned]
-  # Creation delivery and auto-emit must both settle before terminal completion.
-  event_handlers:
-    flow.spawned:
-      guard:
-        check: payload.worker_id != ''
-      rules:
-        - when: _entity.current_state == 'awaiting_spawned'
-          advances_to: complete
-        - advances_to: awaiting_ready
-    worker.ready:
-      rules:
-        - when: _entity.current_state == 'awaiting_ready'
-          advances_to: complete
-        - advances_to: awaiting_spawned
+  flow.spawned:
+    guard: payload.worker_id != ''
+    rules:
+      - when: _entity.current_state == 'awaiting_spawned'
+        advances_to: complete
+      - advances_to: awaiting_ready
+  worker.ready:
+    rules:
+      - when: _entity.current_state == 'awaiting_ready'
+        advances_to: complete
+      - advances_to: awaiting_spawned

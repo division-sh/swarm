@@ -234,10 +234,6 @@ func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
 	pipeline.VerifyNativePipelineCompiledTransitionGuardDispositionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
-func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T) {
-	pipeline.VerifyNativeGuardKillUsesExactStageInEitherDeclarationOrderBothStoresForTest(t, pipelineDeliveryNativeFixture)
-}
-
 func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 	pipeline.VerifyNativePipelineCompiledTransitionStageGuardsOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }

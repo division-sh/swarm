@@ -1,23 +1,14 @@
 start-portfolio:
-  execution_type: system_node
-  subscribes_to: [portfolio.opened]
-  event_handlers:
-    portfolio.opened:
-      emit:
-        event: portfolio.opened.forwarded
-        fields:
-          portfolio_id: payload.portfolio_id
-          threshold: payload.threshold
+  portfolio.opened:
+    emit:
+      event: portfolio.opened.forwarded
+      fields:
+        portfolio_id: payload.portfolio_id
+        threshold: payload.threshold
 numeric-registration-reporter:
-  execution_type: system_node
-  subscribes_to: [account.registered]
-  event_handlers:
-    account.registered: {}
+  account.registered: {}
 close-portfolio:
-  execution_type: system_node
-  subscribes_to: [portfolio.close.requested, portfolio.closed]
-  event_handlers:
-    portfolio.close.requested:
-      emit: {event: portfolio.close.forwarded}
-    portfolio.closed:
-      advances_to: done
+  portfolio.close.requested:
+    emit: {event: portfolio.close.forwarded}
+  portfolio.closed:
+    advances_to: done

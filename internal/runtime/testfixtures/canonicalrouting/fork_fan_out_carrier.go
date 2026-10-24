@@ -37,10 +37,7 @@ func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
 		t.Fatal(err)
 	}
 	consumer := `item-consumer:
-  execution_type: system_node
-  subscribes_to: [items.child]
-  event_handlers:
-    items.child:
+  items.child:
 `
 	if loop {
 		consumer += "      loop: {admit: revision, from: review}\n"
@@ -72,10 +69,7 @@ pins:
 `
 	events := "items.ready:\n  items: [text]\nitems.child:\n  value: text\nbatch.completed:\n  total: integer\n"
 	nodes := `fan-out-source:
-  execution_type: system_node
-  subscribes_to: [items.ready]
-  event_handlers:
-    items.ready:
+  items.ready:
 `
 	if loop {
 		schema += `loops:
@@ -115,18 +109,15 @@ pins:
 	}
 	if loop {
 		nodes += `loop-controller:
-  execution_type: system_node
-  subscribes_to: [review.start, review.retry, review.closed]
-  event_handlers:
-    review.start:
-      loop: {start: revision, from: pending}
-      advances_to: review
-    review.retry:
-      loop: {repeat: revision, from: review}
-      advances_to: review
-    review.closed:
-      loop: {close: revision, from: review}
-      advances_to: done
+  review.start:
+    loop: {start: revision, from: pending}
+    advances_to: review
+  review.retry:
+    loop: {repeat: revision, from: review}
+    advances_to: review
+  review.closed:
+    loop: {close: revision, from: review}
+    advances_to: done
 `
 	}
 	for path, body := range map[string]string{"schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes, "entities.yaml": "root: {}\n"} {
@@ -145,20 +136,17 @@ func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
 		writeClosedVariantFile(t, root, "types.yaml", "types:\n  ResourceRow:\n    slug: text\n    score: integer\n")
 		writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: [ResourceRow]\nitems.child:\n  value: text\n  integer_result: integer\n  double_result: numeric\n")
 		writeClosedVariantFile(t, root, "nodes.yaml", `fan-out-source:
-  execution_type: system_node
-  subscribes_to: [items.ready]
-  event_handlers:
-    items.ready:
-      fan_out:
-        items_from: payload.items
-        as: entry
-        identity: entry.slug
-        emit:
-          event: items.child
-          fields:
-            value: entry.slug
-            integer_result: entry.score + entity.integer + 1
-            double_result: double(entry.score) + double(entity.decimal)
+  items.ready:
+    fan_out:
+      items_from: payload.items
+      as: entry
+      identity: entry.slug
+      emit:
+        event: items.child
+        fields:
+          value: entry.slug
+          integer_result: entry.score + entity.integer + 1
+          double_result: double(entry.score) + double(entity.decimal)
 `)
 	}
 	return root

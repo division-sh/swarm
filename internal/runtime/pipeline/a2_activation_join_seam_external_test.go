@@ -499,20 +499,18 @@ func a2ActivationJoinFiles(count int) map[string]string {
 		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  final_count: {type: integer, initial: -1}\n",
 		"orders/events.yaml":   "order.created:\n  order_id: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: text\n",
 		"orders/nodes.yaml": fmt.Sprintf(`collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {count: %d, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete:
-          data_accumulation:
-            writes: [{target_field: final_count, value: join.completed}]
-        on_deadline:
-          data_accumulation:
-            writes: [{target_field: final_count, value: join.completed}]
+  item.completed:
+    join:
+      stage: awaiting
+      members: {count: %d, by: payload.member_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      on_complete:
+        data_accumulation:
+          writes: [{target_field: final_count, value: join.completed}]
+      on_deadline:
+        data_accumulation:
+          writes: [{target_field: final_count, value: join.completed}]
 `, count),
 	}
 }

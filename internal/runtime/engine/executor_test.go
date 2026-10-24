@@ -29,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -578,22 +577,6 @@ func stubSourceWithRootEntityContract() semanticview.Source {
 	})
 }
 
-func sourceWithKilledState() semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{
-			Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-				{ID: "pending"}, {ID: "killed", Final: true}, {ID: "done", Final: true},
-			},
-		}},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Stages: []runtimecontracts.WorkflowStageContract{
-				{ID: "pending"},
-				{ID: "killed"},
-			},
-		},
-	})
-}
-
 type stubStateRepo struct{}
 type recordingStateRepo struct {
 	saves    int
@@ -647,9 +630,6 @@ type stubEvaluator struct {
 }
 type contextualBoolEvaluator struct {
 	bools map[string]func(BaseContext) (bool, error)
-}
-type stubGuardRegistry struct {
-	entries map[identity.GuardKey]runtimeregistry.GuardInstruction
 }
 type stubPayloadShaper struct{}
 type recordingPayloadShaper struct {
@@ -762,12 +742,6 @@ func (s contextualBoolEvaluator) EvalBool(expression string, base BaseContext, _
 }
 func (s contextualBoolEvaluator) EvalValue(string, BaseContext) (any, error) {
 	return nil, ErrNotImplemented
-}
-func (r stubGuardRegistry) HasGuard(id identity.GuardKey) bool     { _, ok := r.entries[id]; return ok }
-func (r stubGuardRegistry) IsExecutable(id identity.GuardKey) bool { _, ok := r.entries[id]; return ok }
-func (r stubGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
-	entry, ok := r.entries[id]
-	return entry, ok
 }
 func (stubPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
 	out := cloneStringAnyMap(payload)
@@ -3535,6 +3509,7 @@ func TestExecutor_ActivityIntentPersistsBeforeFollowUpTransfer(t *testing.T) {
 		Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Activity: runtimecontracts.ActivitySpec{
+				ID:   "scanner_source_requested_source_scrape",
 				Tool: "source_scrape",
 				Input: map[string]runtimecontracts.ExpressionValue{
 					"url": runtimecontracts.CELExpression("payload.url"),
@@ -3663,6 +3638,7 @@ func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testin
 		Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "", json.RawMessage(`{"url":"https://example.com"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Activity: runtimecontracts.ActivitySpec{
+				ID:   "scanner_source_requested_source_scrape",
 				Tool: "source_scrape",
 				Input: map[string]runtimecontracts.ExpressionValue{
 					"url": runtimecontracts.CELExpression("payload.url"),
@@ -4450,54 +4426,6 @@ func entityCollectionExpressionSource() semanticview.Source {
 			"filter.requested": {Payload: runtimecontracts.EventPayloadSpec{}},
 		},
 	})
-}
-
-func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-		GuardRegistry: stubGuardRegistry{entries: map[identity.GuardKey]runtimeregistry.GuardInstruction{
-			identity.NormalizeGuardKey("registry_guard"): {
-				Key:   identity.NormalizeGuardKey("registry_guard"),
-				Check: "entity.allowed == true",
-			},
-		}},
-	}, stubEvaluator{bools: map[string]bool{
-		"payload.score > 5":      true,
-		"entity.allowed == true": true,
-	}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard: &runtimecontracts.GuardSpec{
-				Check: "shadowed.top.level.check",
-				Checks: []runtimecontracts.GuardCheck{
-					{},
-					{ID: " payload_score ", Check: "payload.score > 5"},
-					{Check: " payload.score > 5 "},
-					{ID: " registry_guard "},
-					{},
-				},
-			},
-		},
-		State: StateSnapshot{
-			StateCarrier: NewStateCarrier(map[string]any{"allowed": true}, nil, map[string]map[string]any{}),
-		},
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if got := result.GuardsEvaluated; !reflect.DeepEqual(got, []string{"payload_score", "payload.score > 5", "registry_guard"}) {
-		t.Fatalf("GuardsEvaluated = %#v", got)
-	}
 }
 
 func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
@@ -5478,7 +5406,7 @@ join:
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"dispatcher": {ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
+			"dispatcher": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"batch.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[text]"}}}},
@@ -5606,7 +5534,7 @@ join:
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"dispatcher": {ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
+			"dispatcher": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"batch.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[text]"}}}},
@@ -6956,8 +6884,7 @@ func sourceWithChildOutputPinAndRootConnect(t testing.TB) semanticview.Source {
 	connect := runtimecontracts.FlowConnect{Event: "child.done", From: "child", To: ".", SourceFile: "schema.yaml", SourceLine: 1}
 	rootSchema := runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{connect}}
 	rootNodes := map[string]runtimecontracts.SystemNodeContract{"root-receiver": {
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		SubscribesTo:  []string{"child.done"},
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child.done": {}},
 	}}
 	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"}, Schema: rootSchema, Nodes: rootNodes, Children: []runtimecontracts.FlowContractView{child}}
@@ -7581,45 +7508,6 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	}
 }
 
-func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithKilledState(),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, stubEvaluator{bools: map[string]bool{"payload.score >= policy.threshold": false}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		ExecutionFlowID: identity.NormalizeFlowID("."),
-		EntityID:        "entity-1",
-		Node:            testRootExecutableNode(t, "node-1"),
-		Event:           eventtest.RunCreatingRootIngress("evt-1", "check.requested", "", "", json.RawMessage(`{"score":50}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard: &runtimecontracts.GuardSpec{
-				Check:  "payload.score >= policy.threshold",
-				OnFail: "kill",
-			},
-			AdvancesTo: "done",
-			Emit:       runtimecontracts.EmitSpec{Event: "check.passed"},
-		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if got := result.Status; got != OutcomeKilled {
-		t.Fatalf("Status = %q", got)
-	}
-	if got := result.NextState; got != "killed" {
-		t.Fatalf("NextState = %q", got)
-	}
-	if got := result.StateMutation.NextState; got != "killed" {
-		t.Fatalf("StateMutation.NextState = %q", got)
-	}
-}
-
 func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: sourceWithFixtureStages(sourceWithPolicyEntity(".", nil, map[string]runtimecontracts.EntityFieldDecl{
@@ -7756,8 +7644,10 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-	}, stubEvaluator{bools: map[string]bool{
-		"_entity.gates.review == false": true,
+	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
+		"_entity.gates.review == false": func(base BaseContext) (bool, error) {
+			return base.Gates.Raw()["review"] == false, nil
+		},
 	}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -7768,9 +7658,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"review"},
-			Guard: &runtimecontracts.GuardSpec{
-				Check: "_entity.gates.review == false",
-			},
+			Guard:      &runtimecontracts.GuardSpec{Check: "_entity.gates.review == false"},
 		},
 		State: StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"review": true}, nil)},
 	})
@@ -7824,115 +7712,6 @@ func TestExecutor_RuleEmitRunsOnlyForSelectedRule(t *testing.T) {
 	}
 }
 
-func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
-	shaper := &recordingPayloadShaper{}
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-		PayloadShaper: shaper,
-		MaxChainDepth: 5,
-	}, stubEvaluator{bools: map[string]bool{
-		"payload.ok == true": false,
-	}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID:   "entity-1",
-		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
-		ChainDepth: 1,
-		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard: &runtimecontracts.GuardSpec{
-				Check:  "payload.ok == true",
-				OnFail: "escalate:guard.failed",
-			},
-		},
-		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if result.Status != OutcomeEscalated {
-		t.Fatalf("Status = %q", result.Status)
-	}
-	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type()) != "guard.failed" {
-		t.Fatalf("unexpected escalation intents: %#v", result.EmitIntents)
-	}
-	if result.ChainDepth != 2 {
-		t.Fatalf("ChainDepth = %d", result.ChainDepth)
-	}
-	if len(shaper.lastPayload) != 0 {
-		t.Fatalf("guard escalation payload = %#v, want empty explicit business payload", shaper.lastPayload)
-	}
-}
-
-func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing.T) {
-	shaper := &recordingPayloadShaper{}
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source: sourceWithFixtureStages(sourceWithEvents("flow-1", map[string]runtimecontracts.EventCatalogEntry{
-			"task.completed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
-				"ok": {Type: "boolean"}, "score": {Type: "integer"}, "legacy": {Type: "text"},
-			}),
-			"guard.failed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
-				"score": {Type: "integer"}, "reason": {Type: "text"},
-			}),
-		}), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-		PayloadShaper: shaper,
-		MaxChainDepth: 5,
-	}, stubEvaluator{bools: map[string]bool{
-		"payload.ok == true": false,
-	}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID:   "entity-1",
-		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
-		ChainDepth: 1,
-		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false,"score":42,"legacy":"should-not-pass"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard: &runtimecontracts.GuardSpec{
-				Check: "payload.ok == true",
-				OnFailSpec: runtimecontracts.GuardFailureSpec{
-					Action: runtimecontracts.GuardFailureActionEscalate,
-					Escalation: runtimecontracts.EmitSpec{
-						Event: "guard.failed",
-						Fields: map[string]runtimecontracts.ExpressionValue{
-							"score":  runtimecontracts.CELExpression("payload.score"),
-							"reason": runtimecontracts.CELExpression(`"score_below_threshold"`),
-						},
-					},
-				},
-			},
-		},
-		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if result.Status != OutcomeEscalated {
-		t.Fatalf("Status = %q", result.Status)
-	}
-	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type()) != "guard.failed" {
-		t.Fatalf("unexpected escalation intents: %#v", result.EmitIntents)
-	}
-	if got := asInt(shaper.lastPayload["score"]); got != 42 {
-		t.Fatalf("guard escalation score payload = %#v, want 42", shaper.lastPayload["score"])
-	}
-	if got := shaper.lastPayload["reason"]; got != "score_below_threshold" {
-		t.Fatalf("guard escalation reason payload = %#v, want score_below_threshold", got)
-	}
-	if _, ok := shaper.lastPayload["legacy"]; ok {
-		t.Fatalf("guard escalation leaked unmapped trigger payload: %#v", shaper.lastPayload)
-	}
-}
-
 func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
@@ -7973,23 +7752,19 @@ vertical.scored:
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  execution_type: system_node
-  event_handlers:
-    score.dimension_complete:
-      accumulate:
-        into: dimensions_received
-        key: payload.dimension
-      emit:
-        event: vertical.scored
-        fields:
-          scores: entity.scores
+  score.dimension_complete:
+    accumulate:
+      into: dimensions_received
+      key: payload.dimension
+    emit:
+      event: vertical.scored
+      fields:
+        scores: entity.scores
   state_schema:
     fields:
       dimensions_received: [DimensionScore]
 result-observer:
-  execution_type: system_node
-  event_handlers:
-    vertical.scored: {}
+  vertical.scored: {}
 `)
 
 	repoRoot := repoRootForEngineProjectionTest(t)
@@ -8032,8 +7807,7 @@ job.received:
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "nodes.yaml"), `
 coordinator-node:
-  execution_type: system_node
-  event_handlers: {}
+  {}
 `)
 
 	repoRoot := repoRootForEngineProjectionTest(t)

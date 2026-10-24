@@ -844,7 +844,6 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 	}
 	module := conformanceLoadedWorkflowModule{
 		source: source, nodes: nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{

@@ -1,8 +1,4 @@
 dispatcher:
-  execution_type: system_node
-  subscribes_to: [job.created]
-  produces: [work.assigned]
-  event_handlers:
-    job.created:
-      advances_to: done
-      emit: work.assigned
+  job.created:
+    advances_to: done
+    emit: work.assigned

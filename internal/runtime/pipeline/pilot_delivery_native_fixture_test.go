@@ -18,7 +18,7 @@ func nativePilotPipelineForTest(t *testing.T, backend string, bundle *contracts.
 	if err != nil {
 		t.Fatal(err)
 	}
-	module := &previewWorkflowModule{bundle: bundle, workflowNodes: nodes, guardRegistry: NewContractGuardRegistry(source)}
+	module := &previewWorkflowModule{bundle: bundle, workflowNodes: nodes}
 	pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, fixture, module)
 	run := uuid.NewString()
 	ctx = correlation.WithRunID(ctx, run)

@@ -411,31 +411,29 @@ func TestSystemNodeHandlerDecodeJoinCanonicalShape(t *testing.T) {
 	var nodes map[string]SystemNodeContract
 	err := decodeNodeTestYAML([]byte(`
 coordinator:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting_items
-        members:
-          from: state.expected_item_ids
-          by: payload.item_id
-        output: payload.result
-        until: items.cancelled
-        on_complete:
-          emit:
-            event: items.completed
-            fields:
-              results: join.results
-          advances_to: ready
-        deadline:
-          after: 24h
-          from: stage_entry
-        on_deadline:
-          emit:
-            event: items.timed_out
-            fields:
-              missing: join.missing
-          advances_to: attention
+  item.completed:
+    join:
+      stage: awaiting_items
+      members:
+        from: state.expected_item_ids
+        by: payload.item_id
+      output: payload.result
+      until: items.cancelled
+      on_complete:
+        emit:
+          event: items.completed
+          fields:
+            results: join.results
+        advances_to: ready
+      deadline:
+        after: 24h
+        from: stage_entry
+      on_deadline:
+        emit:
+          event: items.timed_out
+          fields:
+            missing: join.missing
+        advances_to: attention
 `), &nodes)
 	if err != nil {
 		t.Fatalf("yaml.Unmarshal join: %v", err)
@@ -1633,7 +1631,7 @@ handler:
 }
 
 func TestHandlerRuleMappingClassifierRejectsAliasCycles(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      rules: &cycle {selected: *cycle}\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  task.ready:\n    rules: &cycle {selected: *cycle}\n"))
 	if err == nil {
 		_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
 	}
@@ -1899,10 +1897,6 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T) {
 	var node SystemNodeContract
 	if err := decodeNodeTestYAML([]byte(`
-description: Worker node
-execution_type: system_node
-subscribes_to: [task.requested]
-produces: [task.completed]
 state_table: worker_state
 state_schema:
   fields:
@@ -1914,9 +1908,8 @@ timers:
     delay: 1m
 gate_state:
   ready: Worker is ready
-event_handlers:
-  task.requested:
-    advances_to: done
+task.requested:
+  advances_to: done
 `), &node); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2057,11 +2050,11 @@ func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 		wantErr      string
 		wantDiagCode string
 	}{
-		{name: "permissions", field: "permissions: [create_flow_instance]", wantErr: "is not supported"},
-		{name: "implementation", field: "implementation: builtin", wantErr: "is not supported"},
-		{name: "owned_transitions", field: "owned_transitions: [ticket-open]", wantErr: "is not supported"},
-		{name: "idempotency_table", field: "idempotency_table: worker_idempotency", wantErr: "is not supported"},
-		{name: "unknown", field: "legacy_owner: worker", wantErr: "node field \"legacy_owner\" is not supported.", wantDiagCode: "contract_loader.undefined_field"},
+		{name: "permissions", field: "permissions: [create_flow_instance]", wantErr: "must be a mapping"},
+		{name: "implementation", field: "implementation: builtin", wantErr: "must be a mapping"},
+		{name: "owned_transitions", field: "owned_transitions: [ticket-open]", wantErr: "must be a mapping"},
+		{name: "idempotency_table", field: "idempotency_table: worker_idempotency", wantErr: "must be a mapping"},
+		{name: "unknown", field: "legacy_owner: worker", wantErr: "must be a mapping"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2674,123 +2667,6 @@ fields:
 	}
 	if expr := spec.Fields["quoted_literal"]; !expr.HasLiteralValue() || expr.Literal != "ready" {
 		t.Fatalf("quoted_literal = %#v, want literal ready", expr)
-	}
-}
-
-func TestGuardSpecDecode_OnFailEscalateObjectFields(t *testing.T) {
-	var spec GuardSpec
-	if err := decodeNodeTestYAML([]byte(`
-id: score_check
-check: payload.score >= policy.threshold
-on_fail:
-  escalate:
-    event: check.escalated
-    fields:
-      score: payload.score
-      threshold: policy.threshold
-      reason:
-        "score_below_threshold"
-`), &spec); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := strings.TrimSpace(spec.OnFail); got != "escalate:check.escalated" {
-		t.Fatalf("OnFail = %q, want scalar shorthand mirror", got)
-	}
-	failure, err := spec.FailureSpec()
-	if err != nil {
-		t.Fatalf("FailureSpec error: %v", err)
-	}
-	if failure.Action != GuardFailureActionEscalate {
-		t.Fatalf("failure action = %q, want %q", failure.Action, GuardFailureActionEscalate)
-	}
-	emit := failure.EscalationEmitSpec()
-	if got := emit.Event; got != "check.escalated" {
-		t.Fatalf("escalation event = %q, want check.escalated", got)
-	}
-	if expr := emit.Fields["score"]; expr.Kind != ExpressionKindCEL || expr.CEL != "payload.score" {
-		t.Fatalf("score field = %#v, want CEL payload.score", expr)
-	}
-	if expr := emit.Fields["threshold"]; expr.Kind != ExpressionKindCEL || expr.CEL != "policy.threshold" {
-		t.Fatalf("threshold field = %#v, want CEL policy.threshold", expr)
-	}
-	if expr := emit.Fields["reason"]; expr.Kind != ExpressionKindLiteral || expr.Literal != "score_below_threshold" {
-		t.Fatalf("reason field = %#v, want literal score_below_threshold", expr)
-	}
-}
-
-func TestGuardSpecDecode_RejectsNestedScalarEscalateShortcut(t *testing.T) {
-	var spec GuardSpec
-	err := decodeNodeTestYAML([]byte(`
-id: score_check
-check: payload.score >= policy.threshold
-on_fail:
-  escalate: check.escalated
-`), &spec)
-	if err == nil {
-		t.Fatal("expected nested scalar guard escalation shortcut to be rejected")
-	}
-	if !strings.Contains(err.Error(), "guard.on_fail.escalate must be a mapping") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestGuardSpecDecode_RejectsMalformedOnFailObjectForms(t *testing.T) {
-	tests := []struct {
-		name    string
-		body    string
-		wantErr string
-	}{
-		{
-			name: "empty object",
-			body: `
-id: score_check
-check: payload.score >= policy.threshold
-on_fail: {}
-`,
-			wantErr: "guard.on_fail object form requires escalate",
-		},
-		{
-			name: "missing escalate key",
-			body: `
-id: score_check
-check: payload.score >= policy.threshold
-on_fail:
-  reject: true
-`,
-			wantErr: `guard.on_fail field "reject" is not supported.`,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var spec GuardSpec
-			err := decodeNodeTestYAML([]byte(tc.body), &spec)
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
-			}
-		})
-	}
-}
-
-func TestGuardSpecDecode_RejectsUnknownOnFailFieldWithCanonicalOptions(t *testing.T) {
-	var spec GuardSpec
-	err := decodeNodeTestYAML([]byte(`
-id: score_check
-check: payload.score >= policy.threshold
-on_fail:
-  reject: true
-`), &spec)
-	if err == nil {
-		t.Fatal("expected unknown guard.on_fail field rejection")
-	}
-	diagnostic, ok := AsLoaderDiagnostic(err)
-	if !ok {
-		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
-	}
-	if got := diagnostic.Problem; got != `guard.on_fail field "reject" is not supported.` {
-		t.Fatalf("diagnostic problem = %q, want unknown guard.on_fail field problem", got)
-	}
-	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"escalate"}) {
-		t.Fatalf("diagnostic valid options = %#v, want only escalate", diagnostic.ValidOptions)
 	}
 }
 

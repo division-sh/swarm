@@ -183,20 +183,16 @@ func issue642TimerContinuationSource(t *testing.T) string {
 	// Its first publication revision, unlike the creating ingress, contains the arm.
 	for name, body := range map[string]string{
 		"nodes.yaml": `test-node:
-  execution_type: system_node
-  subscribes_to: [timer.scheduled, timer.check]
-  produces: [timer.armed]
   timers:
     - id: check_timer
       event: timer.check
       delay: 1s
       start_on: event:timer.scheduled
-  event_handlers:
-    timer.scheduled:
-      advances_to: waiting
-      emit: {event: timer.armed}
-    timer.check:
-      advances_to: checked
+  timer.scheduled:
+    advances_to: waiting
+    emit: {event: timer.armed}
+  timer.check:
+    advances_to: checked
 `,
 		"events.yaml": "timer.scheduled:\ntimer.check:\ntimer.armed:\n",
 	} {

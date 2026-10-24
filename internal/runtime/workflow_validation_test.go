@@ -261,6 +261,7 @@ func TestValidateWorkflowContractSurface_KeyFreeDurableActivityHTTPAccepted(t *t
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"source.requested": {
 					Activity: runtimecontracts.ActivitySpec{
+						ID:   "scanner_source_requested_source_scrape",
 						Tool: "source_scrape",
 						Input: map[string]runtimecontracts.ExpressionValue{
 							"url": runtimecontracts.CELExpression("payload.url"),
@@ -291,7 +292,7 @@ func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t 
 		"scanner": {
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{Tool: "mcp_source_scrape"},
+					Activity: runtimecontracts.ActivitySpec{ID: "scanner_source_requested_mcp_source_scrape", Tool: "mcp_source_scrape"},
 				},
 			},
 		},
@@ -325,6 +326,7 @@ func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *t
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"source.requested": {
 					Activity: runtimecontracts.ActivitySpec{
+						ID:   "scanner_source_requested_source_scrape",
 						Tool: "source_scrape",
 						Input: map[string]runtimecontracts.ExpressionValue{
 							"url": runtimecontracts.CELExpression("payload.url"),
@@ -355,7 +357,7 @@ func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitt
 		"scanner": {
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
+					Activity: runtimecontracts.ActivitySpec{ID: "scanner_source_requested_source_scrape", Tool: "source_scrape"},
 				},
 			},
 		},
@@ -512,6 +514,7 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"inbound.telegram": {
 					Activity: runtimecontracts.ActivitySpec{
+						ID:   "responder_inbound_telegram_telegram_send_message",
 						Tool: "telegram.send_message",
 						Input: map[string]runtimecontracts.ExpressionValue{
 							"chat_id": runtimecontracts.CELExpression("payload.payload.message.chat.id"),
@@ -576,6 +579,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"inbound.telegram": {
 					Activity: runtimecontracts.ActivitySpec{
+						ID:   "responder_inbound_telegram_slack_post_message",
 						Tool: "slack.post_message",
 						Input: map[string]runtimecontracts.ExpressionValue{
 							"channel": runtimecontracts.CELExpression(`"C123"`),
@@ -624,6 +628,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"inbound.telegram": {
 					Activity: runtimecontracts.ActivitySpec{
+						ID:   "responder_inbound_telegram_slack_post_message",
 						Tool: "slack.post_message",
 						Input: map[string]runtimecontracts.ExpressionValue{
 							"channel": runtimecontracts.CELExpression(`"C123"`),
@@ -721,7 +726,7 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGenera
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicate := "\nother:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: payload.message}\n"
+	duplicate := "\nother:\n  activity.requested:\n    activity:\n      id: send\n      tool: send\n      input: {message: payload.message}\n"
 	if err := os.WriteFile(path, append(raw, []byte(duplicate)...), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -787,6 +792,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 						"source.requested": {
 							Activity: runtimecontracts.ActivitySpec{
+								ID:   "scanner_source_requested_source_scrape",
 								Tool: "source_scrape",
 								Input: map[string]runtimecontracts.ExpressionValue{
 									"url": runtimecontracts.CELExpression("payload.url"),

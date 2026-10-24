@@ -110,40 +110,36 @@ item.ready:
   result: [integer]
 `,
 		"nodes.yaml": `writer:
-  execution_type: system_node
-  event_handlers:
-    seed: {}
-    batch.ready:
-      data_accumulation:
-        writes: [{target_field: items, value: payload.items}]
-      fan_out:
-        items_from: entity.items
-        as: key
-        emit:
-          event: item.ready
-          fields:
-            member_id: key
-            index: fan_out.index
-            count: fan_out.count
-            result: payload.items[?key].orValue([])
-    batch.replace:
-      data_accumulation:
-        writes: [{target_field: items, value: payload.items}]
+  seed: {}
+  batch.ready:
+    data_accumulation:
+      writes: [{target_field: items, value: payload.items}]
+    fan_out:
+      items_from: entity.items
+      as: key
+      emit:
+        event: item.ready
+        fields:
+          member_id: key
+          index: fan_out.index
+          count: fan_out.count
+          result: payload.items[?key].orValue([])
+  batch.replace:
+    data_accumulation:
+      writes: [{target_field: items, value: payload.items}]
 `,
 	}
 	if gather {
-		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    batch.ready:\n", "    batch.ready:\n      advances_to: awaiting\n", 1)
+		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "  batch.ready:\n", "  batch.ready:\n    advances_to: awaiting\n", 1)
 		files["nodes.yaml"] += `collector:
-  execution_type: system_node
-  event_handlers:
-    item.ready:
-      join:
-        stage: awaiting
-        members: {from: state.items, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete: {advances_to: ready}
-        on_deadline: {advances_to: attention}
+  item.ready:
+    join:
+      stage: awaiting
+      members: {from: state.items, by: payload.member_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      on_complete: {advances_to: ready}
+      on_deadline: {advances_to: attention}
 `
 	}
 	return files
@@ -684,37 +680,33 @@ func runA2MapToListDuplicateOrdinals(t *testing.T, selected gateRecoveryStoreCas
   count: integer
   value: integer
 `
-	files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    batch.ready:\n", "    batch.ready:\n      advances_to: awaiting\n", 1)
+	files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "  batch.ready:\n", "  batch.ready:\n    advances_to: awaiting\n", 1)
 	files["nodes.yaml"] += `expander:
-  execution_type: system_node
-  event_handlers:
-    item.ready:
-      fan_out:
-        items_from: payload.result
-        as: entry
-        emit:
-          event: leaf.ready
-          fields:
-            member_id: payload.member_id + ':' + string(fan_out.index)
-            parent_key: payload.member_id
-            parent_index: payload.index
-            index: fan_out.index
-            count: fan_out.count
-            value: entry
+  item.ready:
+    fan_out:
+      items_from: payload.result
+      as: entry
+      emit:
+        event: leaf.ready
+        fields:
+          member_id: payload.member_id + ':' + string(fan_out.index)
+          parent_key: payload.member_id
+          parent_index: payload.index
+          index: fan_out.index
+          count: fan_out.count
+          value: entry
 leaf-collector:
-  execution_type: system_node
-  event_handlers:
-    leaf.ready:
-      join:
-        stage: awaiting
-        members: {count: 6, by: payload.member_id}
-        output: payload.value
-        deadline: {after: 1h, from: stage_entry}
-        on_complete:
-          advances_to: ready
-          data_accumulation:
-            writes: [{target_field: leaf_results, value: join.results}]
-        on_deadline: {advances_to: attention}
+  leaf.ready:
+    join:
+      stage: awaiting
+      members: {count: 6, by: payload.member_id}
+      output: payload.value
+      deadline: {after: 1h, from: stage_entry}
+      on_complete:
+        advances_to: ready
+        data_accumulation:
+          writes: [{target_field: leaf_results, value: join.results}]
+      on_deadline: {advances_to: attention}
 `
 	p := newA2MapFanOutExecutionFromFiles(t, selected, true, files)
 	original := map[string]any{"A": []int64{11, 11, 12}, "a": []int64{21, 21, 22}}

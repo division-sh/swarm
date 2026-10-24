@@ -34,7 +34,6 @@ type HandlerPreview struct {
 type previewWorkflowModule struct {
 	bundle        *runtimecontracts.WorkflowContractBundle
 	workflowNodes []WorkflowNode
-	guardRegistry GuardRegistry
 }
 
 func (m *previewWorkflowModule) SemanticSource() semanticview.Source {
@@ -47,10 +46,6 @@ func (m *previewWorkflowModule) WorkflowNodes() []WorkflowNode {
 		out = append(out, node)
 	}
 	return out
-}
-
-func (m *previewWorkflowModule) GuardRegistry() GuardRegistry {
-	return m.guardRegistry
 }
 
 type previewBus struct{}
@@ -87,7 +82,6 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	module := &previewWorkflowModule{
 		bundle:        previewBundle,
 		workflowNodes: nodes,
-		guardRegistry: NewContractGuardRegistry(source),
 	}
 	pc := newPreviewPipelineCoordinator(previewBus{}, PipelineCoordinatorOptions{Module: module})
 	if pc == nil {

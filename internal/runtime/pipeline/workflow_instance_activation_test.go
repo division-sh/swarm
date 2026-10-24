@@ -127,8 +127,7 @@ pins:
     - scoring.requested
 `,
 		"scoring/nodes.yaml": `scoring-node:
-  execution_type: system_node
-  event_handlers: {}
+  {}
 `,
 	})
 	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
@@ -181,12 +180,8 @@ opco.ceo_ready:
   entity_id: string?
 `,
 				"operating/nodes.yaml": `lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  produces: [opco.ceo_ready]
-  event_handlers:
-    opco.product_initialization_requested:
-      emit: opco.ceo_ready
+  opco.product_initialization_requested:
+    emit: opco.ceo_ready
 `,
 			})
 			bundle, found := semanticview.Bundle(source)
@@ -294,4 +289,3 @@ type staticSemanticWorkflowModule struct {
 
 func (m staticSemanticWorkflowModule) SemanticSource() semanticview.Source { return m.source }
 func (staticSemanticWorkflowModule) WorkflowNodes() []WorkflowNode         { return nil }
-func (staticSemanticWorkflowModule) GuardRegistry() GuardRegistry          { return nil }

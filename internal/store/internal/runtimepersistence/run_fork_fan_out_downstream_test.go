@@ -34,9 +34,7 @@ type forkFanOutConsumerModule struct {
 func (m forkFanOutConsumerModule) WorkflowNodes() []pipeline.WorkflowNode {
 	return append([]pipeline.WorkflowNode(nil), m.nodes...)
 }
-func (m forkFanOutConsumerModule) GuardRegistry() pipeline.GuardRegistry {
-	return pipeline.NewContractGuardRegistry(m.source)
-}
+
 func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixture, backend string, source semanticview.Source, ctx context.Context, owner pipeline.FanOutObligationOwner, intent fanoutobligation.Intent, claim fanoutobligation.Claim, emissions []engine.EmitIntent, expectedFailure string, completeBarrier bool) {
 	t.Helper()
 	selected := fixture.store.(storeTestDurableEventBusStore)

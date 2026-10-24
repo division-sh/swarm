@@ -9,8 +9,8 @@ import (
 func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	bundle := loadGenericSwarmBundle(t)
 	created := mustHandler(t, bundle, "intake-router", "item.created")
-	if created.Guard == nil || created.Guard.ID != "accept_item" {
-		t.Fatalf("expected inline guard id on item.created, got %+v", created.Guard)
+	if created.Guard == nil || created.Guard.Check != "payload.item_id != ''" {
+		t.Fatalf("expected scalar guard on item.created, got %+v", created.Guard)
 	}
 	if created.FanOut == nil {
 		t.Fatal("expected fan_out on item.created")

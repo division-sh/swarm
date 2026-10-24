@@ -54,34 +54,25 @@ repo_scaffold.repo_commit_failed:
   request_copy: string
 `,
 		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
-  execution_type: system_node
-  subscribes_to:
-    - repo_scaffold.repo_commit_requested
-    - repo_scaffold.repo_commit_succeeded
-    - repo_scaffold.repo_commit_failed
-  produces:
-    - repo_scaffold.repo_commit_succeeded
-    - repo_scaffold.repo_commit_failed
-  event_handlers:
-    repo_scaffold.repo_commit_requested:
-      rules:
-        - when: |-
-                  payload.mvp_yaml == "name: Demo\n"
-          emit:
-            event: repo_scaffold.repo_commit_succeeded
-            fields:
-              request_id: payload.request_id
-              result_kind: "ready"
-        - emit:
-            event: repo_scaffold.repo_commit_failed
-            fields:
-              request_id: payload.request_id
-              request_copy: payload.request_id
-              result_kind: "failed"
-    repo_scaffold.repo_commit_succeeded:
-      sets_gate: result_callback_observed
-    repo_scaffold.repo_commit_failed:
-      sets_gate: result_callback_observed
+  repo_scaffold.repo_commit_requested:
+    rules:
+      - when: |-
+                payload.mvp_yaml == "name: Demo\n"
+        emit:
+          event: repo_scaffold.repo_commit_succeeded
+          fields:
+            request_id: payload.request_id
+            result_kind: "ready"
+      - emit:
+          event: repo_scaffold.repo_commit_failed
+          fields:
+            request_id: payload.request_id
+            request_copy: payload.request_id
+            result_kind: "failed"
+  repo_scaffold.repo_commit_succeeded:
+    sets_gate: result_callback_observed
+  repo_scaffold.repo_commit_failed:
+    sets_gate: result_callback_observed
 `,
 	}
 }
@@ -114,12 +105,9 @@ pins:
   mvp_yaml: text
 `
 	files["repo-scaffold/child-1/nodes.yaml"] = `requester:
-  execution_type: system_node
-  subscribes_to: [start.requested]
-  event_handlers:
-    start.requested:
-      emit:
-        event: repo_scaffold.repo_commit_requested
-        fields: {request_id: payload.request_id, mvp_yaml: payload.mvp_yaml}
+  start.requested:
+    emit:
+      event: repo_scaffold.repo_commit_requested
+      fields: {request_id: payload.request_id, mvp_yaml: payload.mvp_yaml}
 `
 }

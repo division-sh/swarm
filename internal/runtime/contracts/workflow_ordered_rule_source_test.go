@@ -28,7 +28,7 @@ func TestOrderedRuleRetirementReachesDiskCatalogAndRetainedChildren(t *testing.T
 				}
 				writeFixtureFile(t, filepath.Join(root, scope, "events.yaml"), "request:\ndone:\n")
 				writeFixtureFile(t, filepath.Join(root, scope, "nodes.yaml"),
-					"worker:\n  execution_type: system_node\n  event_handlers:\n    request:\n      "+strings.ReplaceAll(tc.body, "\n", "\n      ")+"\n")
+					"worker:\n  request:\n      "+strings.ReplaceAll(tc.body, "\n", "\n      ")+"\n")
 				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 				if bundle != nil || err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "nodes.yaml") {
 					t.Fatalf("disk admission must refuse its exact rule owner: bundle=%v err=%v", bundle, err)

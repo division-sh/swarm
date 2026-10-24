@@ -262,7 +262,7 @@ func loadTransitionRelationFixture(t *testing.T, family string, reordered bool) 
 			"schema.yaml":   schema,
 			"entities.yaml": "item:\n  expected: {type: '[text]', initial: []}\n  window: {type: text, initial: window}\n",
 			"events.yaml":   events,
-			"nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n" + handlers,
+			"nodes.yaml":    "worker:\n" + strings.TrimPrefix(strings.ReplaceAll(handlers, "\n  ", "\n"), "  "),
 		}
 		for name, content := range files {
 			if reordered {

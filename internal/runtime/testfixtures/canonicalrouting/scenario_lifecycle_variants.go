@@ -20,22 +20,15 @@ fulfillment.completed:
   explicit_double: numeric
 `)
 	writeClosedVariantFile(t, root, "fulfillment/nodes.yaml", `complete-request:
-  execution_type: system_node
-  subscribes_to: [fulfillment.requested]
-  produces: [fulfillment.completed]
-  event_handlers:
-    fulfillment.requested:
-      emit:
-        event: fulfillment.completed
-        fields:
-          value: payload.value + 1
-          fraction: double(payload.fraction) + 0.5
-          explicit_double: double(payload.value) + 1.0
+  fulfillment.requested:
+    emit:
+      event: fulfillment.completed
+      fields:
+        value: payload.value + 1
+        fraction: double(payload.fraction) + 0.5
+        explicit_double: double(payload.value) + 1.0
 collector:
-  execution_type: system_node
-  subscribes_to: [fulfillment.completed]
-  event_handlers:
-    fulfillment.completed: {advances_to: done}
+  fulfillment.completed: {advances_to: done}
 `)
 }
 
@@ -56,10 +49,7 @@ func InstallNovelAuthoredScenarioLifecycle(t testing.TB, root string) {
 		"inputs: [fulfillment.requested]", "inputs: [fulfillment.requested, "+ScenarioFixtureCloseEvent+"]")
 	writeClosedVariantFile(t, root, "entities.yaml", "scenario_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `close-scenario:
-  execution_type: system_node
-  subscribes_to: [fulfillment.close_requested]
-  event_handlers:
-    fulfillment.close_requested: {advances_to: done}
+  fulfillment.close_requested: {advances_to: done}
 `)
 	writeClosedVariantFile(t, root, "tools.yaml", `
 scenario.send:
@@ -76,21 +66,12 @@ scenario.send:
 `)
 	writeClosedVariantFile(t, root, "fulfillment/nodes.yaml", `
 complete-request:
-  execution_type: system_node
-  subscribes_to: [fulfillment.requested]
-  event_handlers:
-    fulfillment.requested:
-      activity: {id: send, tool: scenario.send, input: {}}
+  fulfillment.requested:
+    activity: {id: send, tool: scenario.send, input: {}}
 response:
-  execution_type: system_node
-  subscribes_to: [send.succeeded]
-  event_handlers:
-    send.succeeded: {}
+  send.succeeded: {}
 close-scenario:
-  execution_type: system_node
-  subscribes_to: [fulfillment.close_requested]
-  event_handlers:
-    fulfillment.close_requested: {advances_to: done}
+  fulfillment.close_requested: {advances_to: done}
 `)
 }
 

@@ -403,7 +403,7 @@ func constructInboundPublicationProofTree(t *testing.T, ctx context.Context, sto
 	source := semanticview.Wrap(bundle)
 	options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
 	options.SourceArtifactFact = fact
-	options.Module = sqliteFlowActivationWorkflowModule{source: source, guards: runtimepipeline.NewContractGuardRegistry(source)}
+	options.Module = sqliteFlowActivationWorkflowModule{source: source}
 	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
 	if workflow == nil {
 		t.Fatal("construct inbound source-bound lifecycle owner")

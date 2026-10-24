@@ -16,7 +16,7 @@ func TestDescribeClockScheduleCompiledProjection(t *testing.T) {
 	writeDescribeTestFile(t, filepath.Join(root, "events.yaml"), "poll.tick:\n")
 	writeDescribeTestFile(t, filepath.Join(root, "worker/schema.yaml"), "stages: []\nschedules:\n  poll: {every: 1m, emit: poll.tick}\n")
 	writeDescribeTestFile(t, filepath.Join(root, "worker/events.yaml"), "poll.tick:\n")
-	writeDescribeTestFile(t, filepath.Join(root, "worker/nodes.yaml"), "observer:\n  event_handlers:\n    poll.tick: {}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "worker/nodes.yaml"), "observer:\n  poll.tick: {}\n")
 	var jsonOut, stderr bytes.Buffer
 	if code := executeRootCommandWithOptions(t.Context(), RepoRoot(), []string{"describe", root, "--json"}, &jsonOut, &stderr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe clock JSON: code=%d stderr=%s", code, stderr.String())

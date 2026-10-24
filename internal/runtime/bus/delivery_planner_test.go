@@ -59,9 +59,7 @@ func testSelectedOwnerPolicy(owners ...ActiveTargetDescriptor) deliveryRecipient
 }
 
 func existingOwnerHandlerFixture() runtimecontracts.SystemNodeEventHandler {
-	return runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
-		ID: "selected_owner", Check: `_entity.id != ""`,
-	}}
+	return runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`}}
 }
 
 type deliveryPlannerHandlerFixture struct {
@@ -177,7 +175,7 @@ func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
 			handler = existingOwnerHandlerFixture()
 		}
 		node := runtimecontracts.SystemNodeContract{
-			ExecutionType: "system_node", SubscribesTo: []string{fixture.event},
+
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{fixture.event: handler},
 		}
 		if fixture.flowID == "root" {

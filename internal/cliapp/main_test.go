@@ -3082,7 +3082,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
-				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers:\n    z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n    a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
+				"nodes.yaml":  "sender:\n  z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n  a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
 			},
 			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:6:", `handlers "sender/z.request" and "sender/a.request"`, "give each activity in this flow a unique id"},
 			notWants: []string{"provider connector pack import failed", "multiple declaration owners"},
@@ -3092,7 +3092,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
-				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers: {z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}, a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}}\n",
+				"nodes.yaml":  "sender:\n  z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n  a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
 			},
 			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:4:172", `handlers "sender/z.request" and "sender/a.request"`},
 			notWants: []string{"provider connector pack import failed", "multiple declaration owners"},
@@ -3435,12 +3435,9 @@ timer.reminder:
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 support-node:
-  execution_type: system_node
-  subscribes_to: [timer.reminder]
   timers:
-`+timerBlock+`  event_handlers:
-    timer.reminder:
-      advances_to: done
+`+timerBlock+`  timer.reminder:
+    advances_to: done
 `)
 	return root
 }
@@ -3545,11 +3542,8 @@ task.assigned:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 closer:
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      advances_to: done
+  task.assigned:
+    advances_to: done
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "prompts", "writer.md"), `
 Use save_entity_field for `+"`business_brief`"+`.
@@ -3580,7 +3574,6 @@ func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
-  execution_type: system_node
   state_schema:
     fields:
       dimensions_received: dimension score receipts keyed by dimension name
@@ -3693,14 +3686,11 @@ item.arrived:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item: {}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
-  execution_type: system_node
-  subscribes_to: [item.arrived]
-  event_handlers:
-    item.arrived:
-      accumulate:
-        into: items
-        from: payload
-      advances_to: done
+  item.arrived:
+    accumulate:
+      into: items
+      from: payload
+    advances_to: done
 `)
 	return root
 }
@@ -4275,7 +4265,7 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"dispatcher": {
-				SubscribesTo: []string{"scan.corpus_dispatch"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.corpus_dispatch": {
 						Emit: runtimecontracts.EmitSpec{Event: "market_research.scan_assigned"},

@@ -8,11 +8,8 @@ func CopyReceiverInitializationAgentGeometry(t testing.TB) string {
 	t.Helper()
 	root := CopyReceiverInitializationGeometry(t)
 	writeClosedVariantFile(t, root, "worker/nodes.yaml", `receiver:
-  execution_type: system_node
-  subscribes_to: [worker.requested]
-  event_handlers:
-    worker.requested:
-      guard: {check: payload.worker_id != ''}
+  worker.requested:
+    guard: payload.worker_id != ''
 `)
 	writeClosedVariantFile(t, root, "worker/agents.yaml", `bridge:
   model: regular
@@ -51,17 +48,13 @@ worker.requested:
   count: integer
 `,
 		"nodes.yaml": `root:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  produces: [worker.requested]
-  event_handlers:
-    work.requested:
-      emit:
-        event: worker.requested
-        fields:
-          worker_id: payload.worker_id
-          label: payload.label
-          count: payload.count
+  work.requested:
+    emit:
+      event: worker.requested
+      fields:
+        worker_id: payload.worker_id
+        label: payload.label
+        count: payload.count
 `,
 		"worker/schema.yaml": `name: worker
 instance: worker_id
@@ -90,20 +83,16 @@ leaf.requested:
   count: integer
 `,
 		"worker/nodes.yaml": `receiver:
-  execution_type: system_node
-  subscribes_to: [worker.requested, worker.ready]
-  produces: [leaf.requested]
-  event_handlers:
-    worker.requested:
-      guard: {check: payload.worker_id != ''}
-    worker.ready:
-      emit:
-        event: leaf.requested
-        fields:
-          worker_id: payload.worker_id + '-leaf'
-          label: |-
-                   'leaf-' + payload.label
-          count: payload.count + 1
+  worker.requested:
+    guard: payload.worker_id != ''
+  worker.ready:
+    emit:
+      event: leaf.requested
+      fields:
+        worker_id: payload.worker_id + '-leaf'
+        label: |-
+                 'leaf-' + payload.label
+        count: payload.count + 1
 `,
 		"worker/leaf/schema.yaml": `name: leaf
 instance: worker_id
@@ -124,15 +113,12 @@ pins:
   count: integer
 `,
 		"worker/leaf/nodes.yaml": `receiver:
-  execution_type: system_node
-  subscribes_to: [leaf.requested, leaf.ready]
-  event_handlers:
-    leaf.requested:
-      guard: {check: payload.worker_id != ''}
-    leaf.ready:
-      data_accumulation:
-        source_event: leaf.ready
-        writes: [label, count]
+  leaf.requested:
+    guard: payload.worker_id != ''
+  leaf.ready:
+    data_accumulation:
+      source_event: leaf.ready
+      writes: [label, count]
 `,
 	}
 	for relative, body := range files {
@@ -147,21 +133,17 @@ func CopyReceiverStateMutationGeometry(t testing.TB) string {
 	t.Helper()
 	root := CopyReceiverInitializationGeometry(t)
 	writeClosedVariantFile(t, root, "worker/nodes.yaml", `receiver:
-  execution_type: system_node
-  subscribes_to: [worker.requested, worker.ready]
-  produces: [leaf.requested]
-  event_handlers:
-    worker.requested:
-      data_accumulation:
-        source_event: worker.requested
-        writes: [label, count]
-    worker.ready:
-      emit:
-        event: leaf.requested
-        fields:
-          worker_id: payload.worker_id + '-leaf'
-          label: "'leaf-' + payload.label"
-          count: payload.count + 1
+  worker.requested:
+    data_accumulation:
+      source_event: worker.requested
+      writes: [label, count]
+  worker.ready:
+    emit:
+      event: leaf.requested
+      fields:
+        worker_id: payload.worker_id + '-leaf'
+        label: "'leaf-' + payload.label"
+        count: payload.count + 1
 `)
 	return root
 }

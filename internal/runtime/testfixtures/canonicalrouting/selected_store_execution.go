@@ -36,11 +36,8 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "item.received:\nreview.ready:\nstate.seeded:\n  name: text\nstate.closed:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `test-node:
-  execution_type: system_node
-  subscribes_to: [item.received, review.ready]
-  event_handlers:
-    item.received: {}
-    review.ready: {}
+  item.received: {}
+  review.ready: {}
 `)
 	writeClosedVariantFile(t, root, "flow-a/schema.yaml", "name: flow-a\n")
 	writeClosedVariantFile(t, root, "selected-state-flow/schema.yaml", "name: selected-state-flow\n")
@@ -56,16 +53,13 @@ pins:
 `)
 		writeClosedVariantFile(t, root, owner.path+"/entities.yaml", owner.entity+":\n  name: text\n")
 		writeClosedVariantFile(t, root, owner.path+"/nodes.yaml", `state-owner:
-  execution_type: system_node
-  subscribes_to: [state.seeded, state.closed]
-  event_handlers:
-    state.seeded:
-      advances_to: pending
-      data_accumulation:
-        writes:
-          - {target_field: name, value: payload.name}
-    state.closed:
-      advances_to: done
+  state.seeded:
+    advances_to: pending
+    data_accumulation:
+      writes:
+        - {target_field: name, value: payload.name}
+  state.closed:
+    advances_to: done
 `)
 	}
 	return root

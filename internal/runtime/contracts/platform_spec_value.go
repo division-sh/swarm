@@ -79,11 +79,6 @@ func AdmitPlatformSpecValue(root yamlsource.Value) (PlatformSpecDocument, error)
 			return out, err
 		}
 	}
-	if v, ok := f["builtin_hooks"]; ok {
-		if err := admitPlatformGuards(v, &out); err != nil {
-			return out, err
-		}
-	}
 	return out, nil
 }
 
@@ -293,34 +288,6 @@ func admitPlatformTables(v yamlsource.Value, out *PlatformSpecDocument) error {
 		})
 		if err != nil {
 			return err
-		}
-	}
-
-	return nil
-}
-
-func admitPlatformGuards(v yamlsource.Value, out *PlatformSpecDocument) error {
-	members, e := platformValueFields(v)
-	if e != nil {
-		return e
-	}
-	if guards, ok := members["guards"]; ok {
-		rows, e := guards.Sequence()
-		if e != nil {
-			return e
-		}
-		for _, row := range rows {
-			m, e := platformValueFields(row)
-			if e != nil {
-				return e
-			}
-			var guard struct {
-				ID string `yaml:"id"`
-			}
-			if e = schemaValueRequiredTexts(row, m, map[string]*string{"id": &guard.ID}); e != nil {
-				return e
-			}
-			out.BuiltinHooks.Guards = append(out.BuiltinHooks.Guards, guard)
 		}
 	}
 

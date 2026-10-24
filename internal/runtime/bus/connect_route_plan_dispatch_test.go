@@ -595,7 +595,7 @@ func mixedPubsubConnectStaticSource(t testing.TB) semanticview.Source {
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"local-observer": {
-					SubscribesTo:  []string{"deploy.done"},
+
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": existingOwnerHandlerFixture()},
 				},
 			},
@@ -624,7 +624,7 @@ func mixedPubsubConnectNoMatchSource(t testing.TB) semanticview.Source {
 			},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"local-observer": {
-					SubscribesTo:  []string{"local.done"},
+
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"local.done": existingOwnerHandlerFixture()},
 				},
 			},
@@ -650,7 +650,7 @@ func mixedPubsubConnectFailureSource(t testing.TB) semanticview.Source {
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"local-observer": {
-					SubscribesTo:  []string{"deploy.done"},
+
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": existingOwnerHandlerFixture()},
 				},
 			},

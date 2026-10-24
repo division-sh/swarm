@@ -18,24 +18,15 @@ func (c *checkerContext) transitionReferences() []Finding {
 		return c.transitionRefFindings
 	}
 	c.transitionRefLoaded = true
-	// Handler declarations own guard references even without an advance.
+	// Handler keys own their event references even without an advance.
 	for _, record := range c.source.ExecutableNodeRecords() {
 		node, err := record.Identity()
 		if err != nil {
 			continue
 		}
-		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
+		for event := range c.source.ExecutableNodeEventHandlers(node) {
 			location := node.Key() + ":" + event
 			c.checkTransitionEventReference(node.FlowPath(), location, event)
-			for _, check := range handler.Guard.EffectiveChecks() {
-				// Inline expressions are executable declarations, not registry references.
-				if strings.TrimSpace(check.Check) != "" || strings.TrimSpace(check.ID) == "" {
-					continue
-				}
-				if _, ok := c.source.GuardInstructionByID(check.ID); !ok {
-					c.transitionReferenceFinding(location, "references unknown guard %s", check.ID)
-				}
-			}
 		}
 	}
 	for _, flow := range lifecycleFlowSchemas(c.source) {

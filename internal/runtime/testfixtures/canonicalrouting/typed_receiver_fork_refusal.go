@@ -35,20 +35,16 @@ work.ready:
   attributes: json
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `producer:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  produces: [work.ready]
-  event_handlers:
-    work.requested:
-      emit:
-        event: work.ready
-        fields:
-          account_id: payload.account_id
-          count: payload.values.count
-          label: payload.values.label
-          ratio: payload.values.ratio
-          active: payload.values.active
-          attributes: payload.values.attributes
+  work.requested:
+    emit:
+      event: work.ready
+      fields:
+        account_id: payload.account_id
+        count: payload.values.count
+        label: payload.values.label
+        ratio: payload.values.ratio
+        active: payload.values.active
+        attributes: payload.values.attributes
 `)
 	writeClosedVariantFile(t, root, "account/events.yaml", `account.initialized:
   account_id: text
@@ -75,11 +71,10 @@ work.ready:
   instance_id: {type: text, initial: 'business-instance'}
   workflow_version: {type: numeric, initial: 7.0}
 `)
-	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  subscribes_to:\n    - work.ready\n", "  subscribes_to:\n    - work.ready\n    - account.initialized\n")
-	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  event_handlers:\n", `  event_handlers:
-    account.initialized:
-      data_accumulation:
-        writes: [count, label, ratio, active, attributes, status, flow_path, instance_id, workflow_version]
+	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "collector:\n", `collector:
+  account.initialized:
+    data_accumulation:
+      writes: [count, label, ratio, active, attributes, status, flow_path, instance_id, workflow_version]
 `)
 	return root
 }

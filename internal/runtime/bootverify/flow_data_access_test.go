@@ -76,12 +76,6 @@ func TestCatalogRejectsNestedPhysicalFlowDataDeclarationExactlyOnce(t *testing.T
 	}
 }
 
-func TestBootCheckRegistry_HasFlowDataAccessCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 69 {
-		t.Fatalf("bootCheckRegistry count = %d, want 69", got)
-	}
-}
-
 func writeFlowDataAccessFixture(t *testing.T, access []string, files map[string]string, rootAgent bool) string {
 	t.Helper()
 	root := t.TempDir()

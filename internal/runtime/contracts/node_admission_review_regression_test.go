@@ -43,7 +43,7 @@ func TestReviewer2492ValidControls(t *testing.T) {
 		"data_accumulation: {writes: [{source_field: items, target_field: items}]}",
 		"fan_out: {items_from: payload.rows, as: row, max_items: 2, emit: {event: task.done, fields: {id: row}}}",
 		"reduce: {operation: sum, items_from: payload.rows}",
-		"activity: {tool: search}",
+		"activity: {id: worker_task_ready_search, tool: search}",
 	} {
 		if _, err := admitReviewNode(t, body); err != nil {
 			t.Fatalf("%s: %v", body, err)
@@ -53,16 +53,16 @@ func TestReviewer2492ValidControls(t *testing.T) {
 
 func TestReviewer2492NestedDiagnosticPath(t *testing.T) {
 	_, err := admitReviewNode(t, "rules:\n  - when: 'true'")
-	const path = `$["worker"]["event_handlers"]["task.ready"]["rules"][0]["when"]`
+	const path = `$["worker"]["task.ready"]["rules"][0]["when"]`
 	if err == nil || !strings.Contains(err.Error(), path) {
 		t.Fatalf("want semantic path %s, got %v", path, err)
 	}
-	snapshot, err := yamlsource.Load([]byte("worker:\n  execution_type: system_node\n  event_handlers:\n    start:\n      rules:\n        - when: 'true'\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  start:\n    rules:\n      - when: 'true'\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
-	if err == nil || !strings.Contains(err.Error(), `$["worker"]["event_handlers"]["start"]["rules"][0]["when"]`) {
+	if err == nil || !strings.Contains(err.Error(), `$["worker"]["start"]["rules"][0]["when"]`) {
 		t.Fatalf("original motivating diagnostic must retain its exact path: %v", err)
 	}
 }
@@ -190,7 +190,7 @@ func TestNodeClosedComputeAndCompletionPresence(t *testing.T) {
 			}
 		}
 	}
-	for _, body := range []string{"activity: {tool: search}", "rules: [{when: true, activity: {id: worker_task_ready_rule_0_search, tool: search}}]", "on_complete: [{condition: true, emit: task.done}]", "sets_gate: done"} {
+	for _, body := range []string{"activity: {id: worker_task_ready_search, tool: search}", "rules: [{when: true, activity: {id: worker_task_ready_rule_0_search, tool: search}}]", "on_complete: [{condition: true, emit: task.done}]", "sets_gate: done"} {
 		if _, err := admitReviewNode(t, body); err != nil {
 			t.Fatalf("supported context %s: %v", body, err)
 		}
@@ -252,7 +252,7 @@ func TestNodeAnnotationAliasDoesNotExemptActiveData(t *testing.T) {
 
 func admitReviewNode(t *testing.T, body string) (SystemNodeContract, error) {
 	t.Helper()
-	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      " + strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n      ") + "\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  task.ready:\n      " + strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n      ") + "\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

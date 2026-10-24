@@ -80,18 +80,14 @@ provider.send:
 	if includeActivity {
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 stub-agent-node:
-  execution_type: system_node
-  subscribes_to: [task.requested]
-  produces: [task.completed]
-  event_handlers:
-    task.requested:
-      advances_to: done
-      emit:
-        event: task.completed
-      activity:
-        id: provider_send
-        tool: provider.send
-        input: {}
+  task.requested:
+    advances_to: done
+    emit:
+      event: task.completed
+    activity:
+      id: provider_send
+      tool: provider.send
+      input: {}
 `)
 	}
 	if _, ok := loadWorkflowValidationBundleAt(t, root).Tools["provider.send"]; !ok {

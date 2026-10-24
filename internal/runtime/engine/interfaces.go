@@ -8,7 +8,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -150,16 +149,6 @@ type ActivityIntentWriter interface {
 	WriteActivityIntents(ctx context.Context, intents []ActivityIntent) error
 }
 
-type GuardRegistry interface {
-	HasGuard(id identity.GuardKey) bool
-	IsExecutable(id identity.GuardKey) bool
-	Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool)
-}
-
-type GuardRunner interface {
-	EvaluateGuard(ctx context.Context, id identity.GuardKey, entry runtimeregistry.GuardInstruction, execCtx ExecutionContext) (bool, bool, error)
-}
-
 type PayloadShaper interface {
 	ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error)
 }
@@ -171,8 +160,6 @@ type RuntimeDependencies struct {
 	MutationOwner     EngineMutationOwner
 	Locker            EntityLocker
 	WorkflowLifecycle WorkflowLifecycleEffectOwner
-	GuardRegistry     GuardRegistry
-	GuardRunner       GuardRunner
 	PayloadShaper     PayloadShaper
 	EmitNow           func() time.Time
 	MaxChainDepth     int

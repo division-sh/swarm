@@ -50,14 +50,11 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 		for _, first := range []string{"selected", "fallback", "evaluation_failed"} {
 			t.Run(backend+"/"+first, func(t *testing.T) {
 				nodes := `router:
-  execution_type: system_node
-  subscribes_to: [source.evt]
-  event_handlers:
-    source.evt:
-      rules:
-        - {when: entity.marker == 'first', advances_to: done}
-        - {when: entity.marker == 'second', advances_to: done}
-        - {when: true}
+  source.evt:
+    rules:
+      - {when: entity.marker == 'first', advances_to: done}
+      - {when: entity.marker == 'second', advances_to: done}
+      - {when: true}
 `
 				if first == "evaluation_failed" {
 					nodes = strings.Replace(nodes, "entity.marker == 'first'", "query_entities(marker == 'first').count == 1", 1)

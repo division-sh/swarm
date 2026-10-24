@@ -96,7 +96,7 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 		Config: &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4}, LLM: config.LLMConfig{Backend: "anthropic"}},
 		Options: rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 			SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
-			WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}},
+			WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes}},
 		WorkflowPersistence: p.workflow, EventStore: p.events, EventBusDurable: p.busDurable,
 		EventPayloadAdmissionBinder: selected.(rootruntime.EventPayloadAdmissionBinder), AuthorActivityRegistrars: []rootruntime.AuthorActivityCatalogRegistrar{p.fork},
 		RunBundleAvailability: p.fork, RunControlStore: selected.(runcontrol.Store), RunLifecycleCandidates: p.candidates,

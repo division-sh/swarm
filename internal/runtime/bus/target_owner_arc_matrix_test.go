@@ -402,7 +402,7 @@ func targetOwnerArcFixture(
 		inputs: []runtimecontracts.FlowInputEventPin{{Event: localEvent}},
 		nodes: map[string]runtimecontracts.SystemNodeContract{
 			"arc-receiver": {
-				SubscribesTo: []string{localEvent},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					localEvent: targetOwnerArcHandler(test.receiverMode),
 				},

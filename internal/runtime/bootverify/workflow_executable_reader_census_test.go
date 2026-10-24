@@ -142,21 +142,6 @@ func TestExecutableReaderCensusHonorsItemsFromPrecedence(t *testing.T) {
 	}
 }
 
-func TestExecutableReaderCensusHonorsGuardChecksPrecedence(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
-		Check:  "entity.verticals",
-		Checks: []runtimecontracts.GuardCheck{{ID: "ready", Check: "payload.ready"}},
-	}}
-	readers := handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler)
-	if len(readers) != 1 || readers[0].Kind != "guard.checks[0]" || readers[0].Expression != "payload.ready" {
-		t.Fatalf("reader census = %#v, want only guard.checks[0] payload.ready", readers)
-	}
-	conditions := handlerConditionExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler)
-	if len(conditions) != 1 || conditions[0].Expression != "payload.ready" || conditions[0].ConditionContext != runtimepipeline.WorkflowConditionContextGuard {
-		t.Fatalf("handler conditions = %#v, want only active guard collection check", conditions)
-	}
-}
-
 func TestExecutableReaderCensusAssignsEveryConditionCompilerDisposition(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Guard:      &runtimecontracts.GuardSpec{Check: "payload.ready"},
@@ -167,7 +152,7 @@ func TestExecutableReaderCensusAssignsEveryConditionCompilerDisposition(t *testi
 		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "payload.ready"}},
 	}
 	want := map[string]runtimepipeline.WorkflowConditionContext{
-		"guard.check":                            runtimepipeline.WorkflowConditionContextGuard,
+		"guard":                                  runtimepipeline.WorkflowConditionContextGuard,
 		"query.filter":                           runtimepipeline.WorkflowConditionContextQueryFilter,
 		"filter.condition":                       runtimepipeline.WorkflowConditionContextFilter,
 		"count.condition":                        runtimepipeline.WorkflowConditionContextCount,
@@ -306,13 +291,9 @@ func TestRun_ExpressionValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
 	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "nodes.yaml"), `
 shared-node:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  event_handlers:
-    item.received:
-      guard:
-        check: entity.missing == 'x'
-        on_fail: discard
+  item.received:
+    rules:
+      - when: entity.missing == 'x'
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -320,7 +301,7 @@ shared-node:
 	}
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "flow a", "shared-node", "guard.check", "entity.missing") {
+	if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "flow a", "shared-node", "rules[0]", "entity.missing") {
 		t.Fatalf("expression reference findings = %#v, want exact flow a shared-node guard failure", report.Errors())
 	}
 }

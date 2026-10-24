@@ -366,9 +366,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		bundle := runStartTestBundle(eventName)
 		bundle.Nodes, bundle.FlowTree.Root.Nodes = nil, nil
 		bundle.FlowTree.Root.Children[0].Events = map[string]runtimecontracts.EventCatalogEntry{"scan.other_requested": {}}
-		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
-			SubscribesTo: []string{"scan.other_requested"},
-		}
+		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{}
 		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 			t.Fatalf("compile declared but unroutable input fixture: %v", err)
 		}
@@ -898,8 +896,7 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{eventName},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {AdvancesTo: "done"}},
 			},
 		},
@@ -920,7 +917,7 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 			closeEvent: {},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"run-owner": {ExecutionType: "system_node", SubscribesTo: []string{closeEvent}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{closeEvent: {AdvancesTo: "done"}}},
+			"run-owner": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{closeEvent: {AdvancesTo: "done"}}},
 		},
 		Children: []runtimecontracts.FlowContractView{flow},
 	}

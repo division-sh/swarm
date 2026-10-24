@@ -1,11 +1,7 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: [item.scored]
-  event_handlers:
-    item.received:
-      advances_to: done
-      emit:
-        event: item.scored
-        fields:
-          score: payload.raw_score * 2
+  item.received:
+    advances_to: done
+    emit:
+      event: item.scored
+      fields:
+        score: payload.raw_score * 2

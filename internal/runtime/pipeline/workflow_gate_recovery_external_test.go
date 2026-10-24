@@ -67,7 +67,6 @@ type gateRecoveryModule struct {
 
 func (m gateRecoveryModule) SemanticSource() semanticview.Source         { return m.source }
 func (gateRecoveryModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (gateRecoveryModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 
 type proposedEffectProofModule struct {
 	source semanticview.Source
@@ -79,7 +78,6 @@ func (m proposedEffectProofModule) SemanticSource() semanticview.Source { return
 func (m proposedEffectProofModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }
-func (proposedEffectProofModule) GuardRegistry() runtimepipeline.GuardRegistry { return nil }
 
 type gateRecoveryStoreCase struct {
 	name        string
@@ -1620,17 +1618,14 @@ func proposedEffectProofBundleForMethod(t *testing.T, serverURL string, queueAft
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "support.reply_drafted:\n  chat_id: text\n  text: text\n",
 		"nodes.yaml": `support:
-  execution_type: system_node
-  subscribes_to: [support.reply_drafted, send_support_reply.revision_requested, send_support_reply.rejected]
-  event_handlers:
-    support.reply_drafted:
-      activity:
-        id: send_support_reply
-        tool: provider_write
-        input: {chat_id: payload.chat_id, text: payload.text}
-        approval: {decision: support_reply}
-    send_support_reply.revision_requested: {}
-    send_support_reply.rejected: {}
+  support.reply_drafted:
+    activity:
+      id: send_support_reply
+      tool: provider_write
+      input: {chat_id: payload.chat_id, text: payload.text}
+      approval: {decision: support_reply}
+  send_support_reply.revision_requested: {}
+  send_support_reply.rejected: {}
 `,
 		"tools.yaml": fmt.Sprintf(`provider_write:
   description: Send the approved support reply.
@@ -1651,7 +1646,7 @@ func proposedEffectProofBundleForMethod(t *testing.T, serverURL string, queueAft
 	}
 	if queueAfterProposal {
 		files["schema.yaml"] += "  queued: {}\n"
-		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    support.reply_drafted:\n", "    support.reply_drafted:\n      advances_to: queued\n", 1)
+		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "  support.reply_drafted:\n", "  support.reply_drafted:\n    advances_to: queued\n", 1)
 	}
 	return loadPipelineLifecycleFixtureBundle(t, files)
 }

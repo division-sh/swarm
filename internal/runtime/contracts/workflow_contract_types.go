@@ -86,8 +86,6 @@ type WorkflowSemanticView struct {
 	Joins                  []WorkflowJoinPlan
 	Loops                  []WorkflowLoopPlan
 	Gates                  []WorkflowGatePlan
-	Guards                 []GuardActionEntry
-	GuardByID              map[string]GuardActionEntry
 	FlowNamespace          map[string]string
 	FlowPrefix             map[string]string
 	FlowRules              map[string]string
@@ -336,18 +334,7 @@ type WorkflowStageTopology struct {
 	Edges               []WorkflowStageTopologyEdge
 	Handlers            []WorkflowHandlerStageScope
 	stageCatalog        *workflowStageCatalog
-	guardTerminations   []WorkflowGuardTerminationPossibility
 	handlerSourceErrors []string
-}
-
-// WorkflowGuardTerminationPossibility describes a possible failed-guard outcome,
-// not evidence that a guard ran or authority to execute a transition.
-type WorkflowGuardTerminationPossibility struct {
-	From         string
-	To           string
-	Node         runtimeidentity.ExecutableNode
-	HandlerEvent string
-	GuardID      string
 }
 
 type WorkflowHandlerStageScope struct {
@@ -457,98 +444,8 @@ func NormalizeActivityEffectClass(raw string) ActivityEffectClass {
 }
 
 type GuardSpec struct {
-	ID         string           `yaml:"id"`
-	Check      string           `yaml:"check"`
-	OnFail     string           `yaml:"on_fail"`
-	OnFailSpec GuardFailureSpec `yaml:"-"`
-	Checks     []GuardCheck     `yaml:"checks"`
-	PolicyRef  string           `yaml:"policy_ref"`
+	Check string `yaml:"-"`
 }
-type GuardCheck struct {
-	ID    string `yaml:"id"`
-	Check string `yaml:"check"`
-}
-
-// EffectiveIdentity is the evaluated check's evidence label. An empty label
-// denotes a no-op, not an executable check or a possible failure.
-func (c GuardCheck) EffectiveIdentity() string {
-	if id := strings.TrimSpace(c.ID); id != "" {
-		return id
-	}
-	return strings.TrimSpace(c.Check)
-}
-
-// EffectiveChecks returns the exact checks evaluated by a guard. An authored
-// checks collection replaces the legacy top-level id/check pair.
-func (g *GuardSpec) EffectiveChecks() []GuardCheck {
-	if g == nil {
-		return nil
-	}
-	if len(g.Checks) > 0 {
-		return append([]GuardCheck(nil), g.Checks...)
-	}
-	return []GuardCheck{{ID: g.ID, Check: g.Check}}
-}
-
-type GuardFailureAction string
-
-const (
-	GuardFailureActionReject   GuardFailureAction = "reject"
-	GuardFailureActionDiscard  GuardFailureAction = "discard"
-	GuardFailureActionKill     GuardFailureAction = "kill"
-	GuardFailureActionEscalate GuardFailureAction = "escalate"
-)
-
-type GuardFailureSpec struct {
-	Action          GuardFailureAction `yaml:"action"`
-	Escalation      EmitSpec           `yaml:"escalate"`
-	AuthoredMapping bool               `yaml:"-"`
-}
-
-func (s GuardFailureSpec) Empty() bool {
-	return strings.TrimSpace(string(s.Action)) == "" && s.Escalation.Empty() && len(s.Escalation.Fields) == 0
-}
-
-func (s GuardFailureSpec) EscalationEmitSpec() EmitSpec {
-	if s.Action != GuardFailureActionEscalate {
-		return EmitSpec{}
-	}
-	return cloneEmitSpec(s.Escalation)
-}
-
-func (g *GuardSpec) FailureSpec() (GuardFailureSpec, error) {
-	if g == nil {
-		return ParseGuardFailureSpec("")
-	}
-	if !g.OnFailSpec.Empty() || g.OnFailSpec.AuthoredMapping {
-		return g.OnFailSpec, nil
-	}
-	return ParseGuardFailureSpec(g.OnFail)
-}
-
-func ParseGuardFailureSpec(action string) (GuardFailureSpec, error) {
-	normalized := strings.TrimSpace(strings.ToLower(action))
-	switch normalized {
-	case "", "reject":
-		return GuardFailureSpec{Action: GuardFailureActionReject}, nil
-	case "discard":
-		return GuardFailureSpec{Action: GuardFailureActionDiscard}, nil
-	case "kill":
-		return GuardFailureSpec{Action: GuardFailureActionKill}, nil
-	}
-	if strings.HasPrefix(normalized, "escalate:") {
-		eventType := strings.TrimSpace(strings.TrimPrefix(normalized, "escalate:"))
-		if eventType == "" {
-			return GuardFailureSpec{}, fmt.Errorf("guard on_fail escalate requires event type")
-		}
-		return GuardFailureSpec{
-			Action:     GuardFailureActionEscalate,
-			Escalation: EmitSpec{Event: eventType},
-		}, nil
-	}
-	return GuardFailureSpec{}, fmt.Errorf("unsupported guard on_fail action %q", action)
-}
-
 type AccumulateSpec struct {
 	Into        string     `yaml:"into"`
 	From        string     `yaml:"from"`
@@ -1440,27 +1337,13 @@ func cloneEmitSpec(spec EmitSpec) EmitSpec {
 	}
 }
 
-type GuardActionEntry struct {
-	ID              string `yaml:"id"`
-	Category        string `yaml:"category"`
-	Description     string `yaml:"description"`
-	Input           string `yaml:"input"`
-	Check           string `yaml:"check"`
-	PolicyRef       string `yaml:"policy_ref"`
-	PlatformBuiltin string `yaml:"platform_builtin"`
-	Effect          string `yaml:"effect"`
-}
 type SystemNodeContract struct {
 	Description      string                            `yaml:"description"`
-	ExecutionType    string                            `yaml:"execution_type"`
 	Implementation   string                            `yaml:"-"`
-	SubscribesTo     []string                          `yaml:"subscribes_to"`
-	Produces         []string                          `yaml:"produces"`
-	ProducesDeclared bool                              `yaml:"-" json:"-"`
 	StateTable       string                            `yaml:"state_table"`
 	IdempotencyTable string                            `yaml:"-"`
 	Timers           []WorkflowTimerContract           `yaml:"timers"`
-	EventHandlers    map[string]SystemNodeEventHandler `yaml:"event_handlers"`
+	EventHandlers    map[string]SystemNodeEventHandler `yaml:"-"`
 	StateSchema      NodeStateSchema                   `yaml:"state_schema"`
 	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
@@ -1611,11 +1494,6 @@ type PlatformSpecDocument struct {
 			DDL         string `yaml:"ddl"`
 		} `yaml:"tables"`
 	} `yaml:"platform_tables"`
-	BuiltinHooks struct {
-		Guards []struct {
-			ID string `yaml:"id"`
-		} `yaml:"guards"`
-	} `yaml:"builtin_hooks"`
 }
 
 type PackInterfaceDefinition struct {

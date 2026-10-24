@@ -237,22 +237,20 @@ types:
 `,
 		"events.yaml": fmt.Sprintf("item.completed:\n  member_id: text\n  result: %s\nhalt.requested:\n", resultType),
 		"nodes.yaml": `collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {count: 2, by: payload.member_id}
-        output: payload.result
-        until: halt.requested
-        on_complete:
-          advances_to: ready
-          data_accumulation:
-            writes:
-              - {target_field: final_expected, value: join.expected}
-              - {target_field: final_completed, value: join.completed}
-              - {target_field: final_results, value: join.results}
-              - {target_field: final_reason, value: join.close_reason}
+  item.completed:
+    join:
+      stage: awaiting
+      members: {count: 2, by: payload.member_id}
+      output: payload.result
+      until: halt.requested
+      on_complete:
+        advances_to: ready
+        data_accumulation:
+          writes:
+            - {target_field: final_expected, value: join.expected}
+            - {target_field: final_completed, value: join.completed}
+            - {target_field: final_results, value: join.results}
+            - {target_field: final_reason, value: join.close_reason}
 `,
 	}
 }

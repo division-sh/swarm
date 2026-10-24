@@ -216,17 +216,14 @@ item.received:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "nodes.yaml"), `
 shared-node:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  event_handlers:
-    item.received:
-      join:
-        stage: missing
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        on_complete: {advances_to: done}
-        deadline: {after: 1h, from: stage_entry}
-        on_deadline: {advances_to: failed}
+  item.received:
+    join:
+      stage: missing
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      on_complete: {advances_to: done}
+      deadline: {after: 1h, from: stage_entry}
+      on_deadline: {advances_to: failed}
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

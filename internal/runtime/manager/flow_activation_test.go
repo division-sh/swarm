@@ -1497,9 +1497,7 @@ func testFlowRouteRevisionBundle(t *testing.T, nodeEvent string) *runtimecontrac
 		},
 	}
 	review.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"route-observer": {
-			SubscribesTo: []string{nodeEvent},
-		},
+		"route-observer": {},
 	}
 	bundle.FlowTree.Root.Children[0] = *review
 	compileFlowActivationFixture(t, bundle)

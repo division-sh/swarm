@@ -4,7 +4,6 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 )
 
 type Source interface {
@@ -31,8 +30,6 @@ type Source interface {
 	WorkflowGates() []runtimecontracts.WorkflowGatePlan
 	WorkflowGateForStage(flowID, stage string) (runtimecontracts.WorkflowGatePlan, bool)
 	WorkflowStageTimerByID(flowID, id string) (runtimecontracts.WorkflowTimerContract, bool)
-	GuardInstructions() []runtimeregistry.GuardInstruction
-	GuardInstructionByID(id string) (runtimeregistry.GuardInstruction, bool)
 	FlowSchemaEntries() map[string]runtimecontracts.FlowSchemaDocument
 	FlowInitialStage(flowID string) string
 	FlowStates(flowID string) []string

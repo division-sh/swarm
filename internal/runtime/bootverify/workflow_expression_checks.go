@@ -7,7 +7,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -42,16 +41,6 @@ func (c *checkerContext) conditionExpressions() []Finding {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
 			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
-			if handler.Guard != nil {
-				if err := validateGuardOnFailLocal(handler.Guard); err != nil {
-					c.conditionExprFindings = append(c.conditionExprFindings, Finding{
-						CheckID:  "condition_expression_validation",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s guard %v", nodeID, eventType, err),
-						Location: nodeID,
-					})
-				}
-			}
 			for _, cond := range c.entityAssignmentReaders(nodeRef, eventType, handler) {
 				if !cond.HasConditionContext {
 					continue
@@ -216,8 +205,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
 			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
 			for _, expr := range c.entityAssignmentReaders(nodeRef, eventType, handler) {
-				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields &&
-					expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation {
+				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields {
 					continue
 				}
 				if payloadTypeErr != nil && workflowexpr.ExpressionReferencesRoot(expr.Expression, "payload") {
@@ -318,8 +306,7 @@ func executableReaderHasSpecializedExpressionCheck(expr expressionReference) boo
 	}
 	switch expr.Phase {
 	case runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation,
-		runtimepipeline.WorkflowEntityFieldLifecycleEmitFields,
-		runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation:
+		runtimepipeline.WorkflowEntityFieldLifecycleEmitFields:
 		return true
 	default:
 		return false
@@ -431,30 +418,6 @@ func handlerExecutableReaderExpressionsForSource(source semanticview.Source, nod
 
 func handlerConditionExpressionsForSource(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
 	return runtimepipeline.WorkflowHandlerConditionExpressions(source, node, eventType, handler)
-}
-
-func validateGuardOnFailLocal(spec *runtimecontracts.GuardSpec) error {
-	failureSpec, err := spec.FailureSpec()
-	if err != nil {
-		return err
-	}
-	parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec)
-	if err != nil {
-		return err
-	}
-	switch parsed.Action {
-	case runtimeengine.GuardFailureReject,
-		runtimeengine.GuardFailureDiscard,
-		runtimeengine.GuardFailureKill:
-		return nil
-	case runtimeengine.GuardFailureEscalate:
-		if strings.TrimSpace(parsed.EventType) == "" {
-			return fmt.Errorf("on_fail escalate requires event type")
-		}
-		return nil
-	default:
-		return fmt.Errorf("on_fail %q is not supported", failureSpec.Action)
-	}
 }
 
 func conditionMissingRecognizedPrefixLocal(expression string, context runtimepipeline.WorkflowConditionContext) bool {

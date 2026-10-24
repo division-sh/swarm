@@ -187,18 +187,15 @@ func VerifyIssue2564H2BaselineMechanismsForTest(t *testing.T, factory WorkflowTi
 					"entities.yaml": "hub:\n  count: integer\n  c1: integer\n  c2: integer\n",
 					"events.yaml":   "hub.bump: {n: integer}\n",
 					"nodes.yaml": `hub-node:
-  execution_type: system_node
-  subscribes_to: [hub.bump]
-  event_handlers:
-    hub.bump:
-      data_accumulation:
-        writes: [{target_field: count, value: entity.count + 1}]
-      rules:
-        - when: _entity.current_state == 's1'
-          data_accumulation:
-            writes: [{target_field: c1, value: entity.c1 + 1}]
-        - data_accumulation:
-            writes: [{target_field: c2, value: entity.c2 + 1}]
+  hub.bump:
+    data_accumulation:
+      writes: [{target_field: count, value: entity.count + 1}]
+    rules:
+      - when: _entity.current_state == 's1'
+        data_accumulation:
+          writes: [{target_field: c1, value: entity.c1 + 1}]
+      - data_accumulation:
+          writes: [{target_field: c2, value: entity.c2 + 1}]
 `,
 				})
 				fixture := factory(t, backend, bundle)

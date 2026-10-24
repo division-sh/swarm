@@ -96,21 +96,12 @@ type InvalidAuthoredSubscription struct {
 	Admission AuthoredSubscriptionAdmission `json:"-"`
 }
 
-type NodeProducerAssertion struct {
-	NodeID     string                         `json:"node_id"`
-	FlowID     string                         `json:"flow_id,omitempty"`
-	Node       runtimeidentity.ExecutableNode `json:"-"`
-	Declared   bool                           `json:"declared"`
-	EventTypes []string                       `json:"event_types"`
-}
-
 type AuthoredEventEndpointCensus struct {
 	source       Source
 	producers    []AuthoredEventEndpoint
 	consumers    []AuthoredEventEndpoint
 	inputPins    []AuthoredEventEndpoint
 	outputPins   []AuthoredEventEndpoint
-	assertions   []NodeProducerAssertion
 	endpointByID map[string]AuthoredEventEndpoint
 }
 
@@ -147,15 +138,6 @@ func (c AuthoredEventEndpointCensus) InputPins() []AuthoredEventEndpoint {
 
 func (c AuthoredEventEndpointCensus) OutputPins() []AuthoredEventEndpoint {
 	return cloneEventEndpoints(c.outputPins)
-}
-
-func (c AuthoredEventEndpointCensus) ProducerAssertions() []NodeProducerAssertion {
-	out := make([]NodeProducerAssertion, len(c.assertions))
-	for i := range c.assertions {
-		out[i] = c.assertions[i]
-		out[i].EventTypes = append([]string(nil), c.assertions[i].EventTypes...)
-	}
-	return out
 }
 
 func (c AuthoredEventEndpointCensus) Endpoint(id string) (AuthoredEventEndpoint, bool) {
@@ -427,7 +409,6 @@ type endpointCensusBuilder struct {
 	consumers  []AuthoredEventEndpoint
 	inputPins  []AuthoredEventEndpoint
 	outputPins []AuthoredEventEndpoint
-	assertions []NodeProducerAssertion
 }
 
 func (b *endpointCensusBuilder) addNodeEndpoints() {
@@ -454,16 +435,8 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 			continue
 		}
 		nodeID := nodeRef.NodeID()
-		node := record.Entry
 		source := record.Source
 		flowID := nodeRef.FlowPath()
-		b.assertions = append(b.assertions, NodeProducerAssertion{
-			NodeID:     nodeID,
-			FlowID:     flowID,
-			Node:       nodeRef,
-			Declared:   node.ProducesDeclared || node.Produces != nil,
-			EventTypes: normalizedSortedStrings(node.Produces),
-		})
 		for _, eventType := range ExecutableNodeEffectiveProduces(b.source, nodeRef) {
 			proof := ResolveFlowEventProof(b.source, flowID, eventType)
 			if _, exists := authoredByNodeEvent[nodeEventKey(nodeRef.Key(), proof.EventKey())]; exists {
@@ -484,7 +457,7 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 			endpoint.HandlerEvent = plan.HandlerEvent
 			endpoint.Site = "join.until"
 			endpoint.SourceFile = strings.TrimSpace(source.File)
-			endpoint.SourceLocation = "event_handlers." + plan.HandlerEvent + ".join.until"
+			endpoint.SourceLocation = runtimecontracts.NodeProvenanceMapPath("", plan.HandlerEvent) + ".join.until"
 			b.add(endpoint)
 			untilEvents[endpoint.Event.EventKey()] = true
 		}
@@ -505,7 +478,7 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 			endpoint.HandlerEvent = handlerEvent
 			endpoint.SourceFile = strings.TrimSpace(source.File)
 			endpoint.Pattern = strings.Contains(eventType, "*")
-			endpoint.SourceLocation = "event_handlers." + eventType
+			endpoint.SourceLocation = runtimecontracts.NodeProvenanceMapPath("", eventType)
 			b.add(endpoint)
 		}
 	}
@@ -742,7 +715,7 @@ func (b *endpointCensusBuilder) endpointSourceLine(endpoint AuthoredEventEndpoin
 	eventType := eventidentity.Normalize(endpoint.Event.Authored)
 	switch endpoint.Kind {
 	case EventEndpointNodeHandler, EventEndpointNodeGenerated:
-		return yamlActorEventLine(root, endpoint.NodeID, []string{"subscribes_to", "event_handlers"}, eventType)
+		return yamlActorEventLine(root, endpoint.NodeID, nil, eventType)
 	case EventEndpointAgent:
 		if endpoint.Site == "turn_timeout.emit" {
 			actor := yamlMappingValue(yamlDocumentMapping(root), endpoint.AgentLocalID)
@@ -782,6 +755,16 @@ func yamlActorEventLine(root yamlsource.Node, actorID string, fields []string, e
 	document := yamlDocumentMapping(root)
 	actor := yamlMappingValue(document, strings.TrimSpace(actorID))
 	if actor.Kind() != yamlsource.MappingNode {
+		return 0
+	}
+	// Node handlers are direct actor entries; only agents have nested lists.
+	if fields == nil {
+		for i := 0; i+1 < actor.Len(); i += 2 {
+			key, _ := actor.Child(i)
+			if eventidentity.Normalize(key.Value()) == eventType {
+				return key.Line()
+			}
+		}
 		return 0
 	}
 	for _, field := range fields {
@@ -836,12 +819,6 @@ func (b *endpointCensusBuilder) build() AuthoredEventEndpointCensus {
 	sortEventEndpoints(b.consumers)
 	sortEventEndpoints(b.inputPins)
 	sortEventEndpoints(b.outputPins)
-	sort.SliceStable(b.assertions, func(i, j int) bool {
-		if b.assertions[i].FlowID != b.assertions[j].FlowID {
-			return b.assertions[i].FlowID < b.assertions[j].FlowID
-		}
-		return b.assertions[i].NodeID < b.assertions[j].NodeID
-	})
 	index := map[string]AuthoredEventEndpoint{}
 	for _, endpoints := range [][]AuthoredEventEndpoint{b.producers, b.consumers, b.inputPins, b.outputPins} {
 		for _, endpoint := range endpoints {
@@ -854,7 +831,6 @@ func (b *endpointCensusBuilder) build() AuthoredEventEndpointCensus {
 		consumers:    cloneEventEndpoints(b.consumers),
 		inputPins:    cloneEventEndpoints(b.inputPins),
 		outputPins:   cloneEventEndpoints(b.outputPins),
-		assertions:   append([]NodeProducerAssertion(nil), b.assertions...),
 		endpointByID: index,
 	}
 }

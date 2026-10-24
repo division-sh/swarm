@@ -549,13 +549,9 @@ downstream-agent:
   subscriptions: [task.finalized]
 `,
 		"nodes.yaml": `bridge-node:
-  execution_type: system_node
-  subscribes_to: [task.completed]
-  produces: [task.finalized]
-  event_handlers:
-    task.completed:
-      advances_to: done
-      emit: task.finalized
+  task.completed:
+    advances_to: done
+    emit: task.finalized
 `,
 	}
 }

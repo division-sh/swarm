@@ -1,13 +1,9 @@
 filter-node:
-  execution_type: system_node
-  subscribes_to: [items.submitted]
-  produces: [items.filtered]
-  event_handlers:
-    items.submitted:
-      filter:
-        items_from: payload.items
-        condition: item.score > 50
-        store_as: entity.filtered
-      emit:
-        event: items.filtered
-      advances_to: done
+  items.submitted:
+    filter:
+      items_from: payload.items
+      condition: item.score > 50
+      store_as: entity.filtered
+    emit:
+      event: items.filtered
+    advances_to: done

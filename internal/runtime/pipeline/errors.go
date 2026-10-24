@@ -6,10 +6,9 @@ import (
 )
 
 var (
-	ErrContractBundleNil              = errors.New("pipeline: workflow contract bundle is nil")
-	ErrGuardEscalateRequiresEventType = errors.New("pipeline: guard on_fail escalate requires event type")
-	ErrMissingRequiredAgent           = errors.New("pipeline: required agent missing from merged agents")
-	ErrWorkflowValidation             = errors.New("pipeline: workflow contract validation failed")
+	ErrContractBundleNil    = errors.New("pipeline: workflow contract bundle is nil")
+	ErrMissingRequiredAgent = errors.New("pipeline: required agent missing from merged agents")
+	ErrWorkflowValidation   = errors.New("pipeline: workflow contract validation failed")
 )
 
 type WorkflowContractValidationError struct {

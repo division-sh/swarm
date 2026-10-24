@@ -25,16 +25,12 @@ opco.spinup_created:
   product_id: string
 `,
 		"nodes.yaml": `portfolio-node:
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  produces: [opco.spinup_created]
-  event_handlers:
-    opco.spinup_requested:
-      emit:
-        event: opco.spinup_created
-        fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+  opco.spinup_requested:
+    emit:
+      event: opco.spinup_created
+      fields:
+        instance_id: payload.instance_id
+        product_id: payload.product_id
 `,
 		"operating/schema.yaml": `name: operating
 instance: instance_id
@@ -55,16 +51,12 @@ component_scaffold.spawn_requested:
   product_id: string
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  produces: [component_scaffold.spawn_requested]
-  event_handlers:
-    opco.product_initialization_requested:
-      advances_to: ready
-      emit:
-        event: component_scaffold.spawn_requested
-        fields:
-          product_id: payload.product_id
+  opco.product_initialization_requested:
+    advances_to: ready
+    emit:
+      event: component_scaffold.spawn_requested
+      fields:
+        product_id: payload.product_id
 `,
 	} {
 		writeClosedVariantFile(t, root, path, contents)
@@ -95,16 +87,12 @@ opco.spinup_created:
   product_id: string
 `,
 		"nodes.yaml": `portfolio-node:
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  produces: [opco.spinup_created]
-  event_handlers:
-    opco.spinup_requested:
-      emit:
-        event: opco.spinup_created
-        fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+  opco.spinup_requested:
+    emit:
+      event: opco.spinup_created
+      fields:
+        instance_id: payload.instance_id
+        product_id: payload.product_id
 `,
 		"operating/schema.yaml": `name: operating
 instance: instance_id

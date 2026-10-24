@@ -1,24 +1,17 @@
 timer-node:
-  execution_type: system_node
-  subscribes_to: [timer.scheduled, timer.check]
   timers:
     - id: check_timer
       event: timer.check
       delay: 1h
       start_on: event:timer.scheduled
       cancel_on: event:timer.cancel_requested
-  event_handlers:
-    timer.scheduled:
-      advances_to: waiting
-    timer.check:
-      advances_to: done
+  timer.scheduled:
+    advances_to: waiting
+  timer.check:
+    advances_to: done
 
 cancel-node:
-  execution_type: system_node
-  subscribes_to: [timer.cancel_requested]
-  produces: [timer.cancelled]
-  event_handlers:
-    timer.cancel_requested:
-      advances_to: cancelled
-      emit:
-        event: timer.cancelled
+  timer.cancel_requested:
+    advances_to: cancelled
+    emit:
+      event: timer.cancelled

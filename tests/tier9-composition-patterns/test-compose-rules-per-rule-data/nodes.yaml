@@ -1,39 +1,35 @@
 resolver:
-  execution_type: system_node
-  subscribes_to: [conflict.submitted]
-  produces: [conflict.resolved]
-  event_handlers:
-    conflict.submitted:
-      rules:
-        - when: payload.strategy == 'keep_first'
-          data_accumulation:
-            writes:
-              - source_field: value_a
-                target_field: resolved_value
-              - target_field: resolution_method
-                value: "first"
-          advances_to: resolved
-          emit:
-            event: conflict.resolved
-        - when: payload.strategy == 'keep_best'
-          data_accumulation:
-            writes:
-              - source_field: value_b
-                target_field: resolved_value
-              - target_field: resolution_method
-                value: "best"
-          advances_to: resolved
-          emit:
-            event: conflict.resolved
-        - when: payload.strategy == 'merge'
-          data_accumulation:
-            writes:
-              - source_field: value_a
-                target_field: resolved_value_a
-              - source_field: value_b
-                target_field: resolved_value_b
-              - target_field: resolution_method
-                value: "merged"
-          advances_to: resolved
-          emit:
-            event: conflict.resolved
+  conflict.submitted:
+    rules:
+      - when: payload.strategy == 'keep_first'
+        data_accumulation:
+          writes:
+            - source_field: value_a
+              target_field: resolved_value
+            - target_field: resolution_method
+              value: "first"
+        advances_to: resolved
+        emit:
+          event: conflict.resolved
+      - when: payload.strategy == 'keep_best'
+        data_accumulation:
+          writes:
+            - source_field: value_b
+              target_field: resolved_value
+            - target_field: resolution_method
+              value: "best"
+        advances_to: resolved
+        emit:
+          event: conflict.resolved
+      - when: payload.strategy == 'merge'
+        data_accumulation:
+          writes:
+            - source_field: value_a
+              target_field: resolved_value_a
+            - source_field: value_b
+              target_field: resolved_value_b
+            - target_field: resolution_method
+              value: "merged"
+        advances_to: resolved
+        emit:
+          event: conflict.resolved

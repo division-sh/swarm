@@ -1,5 +1,2 @@
 account-node:
-  execution_type: system_node
-  subscribes_to: [account.ready]
-  event_handlers:
-    account.ready: {}
+  account.ready: {}

@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -945,8 +944,6 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		MutationOwner:     pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
 		Locker:            pipelineEngineLocker{coordinator: pc},
 		WorkflowLifecycle: lifecycleOwner,
-		GuardRegistry:     pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
-		GuardRunner:       pipelineEngineGuardRunner{coordinator: pc},
 		PayloadShaper:     pipelineEnginePayloadShaper{coordinator: pc},
 		EmitNow:           pc.testEngineEmitNow,
 		MaxChainDepth:     workflowMaxChainDepthPolicy(source),
@@ -1004,83 +1001,6 @@ func workflowMaxChainDepthPolicy(source semanticview.Source) int {
 		}
 	}
 	return runtimeengine.DefaultMaxChainDepth
-}
-
-type pipelineEngineGuardRegistry struct{ registry GuardRegistry }
-
-func (r pipelineEngineGuardRegistry) HasGuard(id identity.GuardKey) bool {
-	return r.registry != nil && r.registry.HasGuard(id)
-}
-func (r pipelineEngineGuardRegistry) IsExecutable(id identity.GuardKey) bool {
-	return r.registry != nil && r.registry.IsExecutable(id)
-}
-func (r pipelineEngineGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
-	if r.registry == nil {
-		return runtimeregistry.GuardInstruction{}, false
-	}
-	return r.registry.Guard(id)
-}
-
-type pipelineEngineGuardRunner struct {
-	coordinator *PipelineCoordinator
-}
-
-func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identity.GuardKey, entry runtimeregistry.GuardInstruction, execCtx runtimeengine.ExecutionContext) (bool, bool, error) {
-	pc := r.coordinator
-	if pc == nil {
-		return false, false, nil
-	}
-	builtin := strings.TrimSpace(firstNonEmptyString(entry.Builtin, id.String()))
-	state := workflowStateFromEngine(execCtx.Request.State)
-	payload := parsePayloadMap(execCtx.Request.Event.Payload())
-	switch builtin {
-	case "has_entity_id":
-		return strings.TrimSpace(execCtx.Request.EntityID.String()) != "", true, nil
-	case "has_human_decision":
-		event := execCtx.Request.Event
-		if hasHumanDecisionProducer(event) {
-			return true, true, nil
-		}
-		if strings.EqualFold(strings.TrimSpace(asString(payload["decision_path"])), "mailbox") {
-			return true, true, nil
-		}
-		return strings.TrimSpace(asString(payload["mailbox_decision_id"])) != "", true, nil
-	case "not_in_terminal_state", "not_in_terminal_stage", "state_in_phase":
-		graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), execCtx.Request.ExecutionFlowID.String())
-		if !ok {
-			return false, true, fmt.Errorf("%w: execution flow has no stage topology", runtimeengine.ErrInvalidConfig)
-		}
-		currentState := string(state.Stage)
-		if currentState == "" && builtin != "state_in_phase" {
-			return true, true, nil
-		}
-		stage, err := graph.ResolveStoredStage(currentState)
-		if err != nil {
-			return false, true, fmt.Errorf("%w: stage %q is not declared in flow %s", runtimeengine.ErrInvalidConfig, currentState, graph.FlowID)
-		}
-		if builtin != "state_in_phase" {
-			return !stage.IsFinal(), true, nil
-		}
-		required := strings.TrimSpace(entry.PolicyRef)
-		if required != "" {
-			if value, ok := workflowExpressionLookupPath(execCtx.Base.Policy.Raw(), required); ok {
-				required = strings.TrimSpace(asString(value))
-			}
-		}
-		if required == "" {
-			required = strings.TrimSpace(asString(execCtx.Base.Policy.Raw()["required_phase"]))
-		}
-		if required == "" {
-			return false, true, runtimeengine.ErrInvalidConfig
-		}
-		return graph.FlowID == required, true, nil
-	default:
-		return false, false, nil
-	}
-}
-
-func hasHumanDecisionProducer(event events.Event) bool {
-	return events.ProducerIs(event, events.EventProducerExternal, "human") || events.ProducerIs(event, events.EventProducerExternal, "mailbox")
 }
 
 type pipelineEnginePayloadShaper struct {

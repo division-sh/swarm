@@ -68,7 +68,6 @@ type standingDispatchWorkflowModule struct{}
 func (standingDispatchWorkflowModule) SemanticSource() semanticview.Source { return nil }
 
 func (standingDispatchWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (standingDispatchWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 
 type completeEventDispatchFixture struct {
 	store            completeEventDispatchStore

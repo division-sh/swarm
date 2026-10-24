@@ -39,32 +39,27 @@ loops:
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "loop.start:\nloop.rule:\n  revision_id: text\nloop.complete:\n  revision_id: text\nloop.repeat:\n  revision_id: text\nloop.close:\n  revision_id: text\n",
 		"nodes.yaml": `starter:
-  event_handlers:
-    loop.start:
-      loop: {start: revision, from: waiting}
-      advances_to: drafting
+  loop.start:
+    loop: {start: revision, from: waiting}
+    advances_to: drafting
 reviewer:
-  event_handlers:
-    loop.rule:
-      loop: {admit: revision, from: drafting}
-      rules:
-        - advances_to: review
+  loop.rule:
+    loop: {admit: revision, from: drafting}
+    rules:
+      - advances_to: review
 collector:
-  event_handlers:
-    loop.complete:
-      loop: {admit: revision, from: drafting}
-      on_complete:
-        - advances_to: review
+  loop.complete:
+    loop: {admit: revision, from: drafting}
+    on_complete:
+      - advances_to: review
 repeater:
-  event_handlers:
-    loop.repeat:
-      loop: {repeat: revision, from: review}
-      advances_to: drafting
+  loop.repeat:
+    loop: {repeat: revision, from: review}
+    advances_to: drafting
 closer:
-  event_handlers:
-    loop.close:
-      loop: {close: revision, from: review}
-      advances_to: done
+  loop.close:
+    loop: {close: revision, from: review}
+    advances_to: done
 `,
 	})
 }

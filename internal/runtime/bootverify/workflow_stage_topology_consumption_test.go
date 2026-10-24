@@ -43,10 +43,10 @@ func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodes := strings.Replace(string(nodesRaw), `        on_complete:
-          emit:`, `        on_complete:
-          advances_to: done
-          emit:`, 1)
+	nodes := strings.Replace(string(nodesRaw), `      on_complete:
+        emit:`, `      on_complete:
+        advances_to: done
+        emit:`, 1)
 	if nodes == string(nodesRaw) {
 		t.Fatal("delivery join completion fixture replacement did not apply")
 	}

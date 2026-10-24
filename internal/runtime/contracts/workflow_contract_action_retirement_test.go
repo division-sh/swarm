@@ -137,12 +137,12 @@ func TestLoadWorkflowContractBundleRejectsRetiredHandlerActions(t *testing.T) {
 		} {
 			t.Run(key+"/"+handler, func(t *testing.T) {
 				root := t.TempDir()
-				writeFieldReconciliationBundle(t, root, "", "worker:\n  event_handlers:\n    work.requested: "+handler+"\n")
+				writeFieldReconciliationBundle(t, root, "", "worker:\n  work.requested: "+handler+"\n")
 				_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 				if handler == "{rules: {selected: {"+key+": {}}}}" {
 					requireRetiredHandlerCollectionShape(t, err)
 					canonical := "{rules: [{" + key + ": {}}]}"
-					writeFieldReconciliationBundle(t, root, "", "worker:\n  event_handlers:\n    work.requested: "+canonical+"\n")
+					writeFieldReconciliationBundle(t, root, "", "worker:\n  work.requested: "+canonical+"\n")
 					_, err = LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 				}
 				requireRetiredHandlerAction(t, err, key)
@@ -186,7 +186,7 @@ rules:
 	})
 	t.Run("activity_and_business_field_names", func(t *testing.T) {
 		var handler SystemNodeEventHandler
-		err := decodeNodeTestYAML([]byte("activity: {tool: notify_human, input: {action: payload.action, template: payload.template, config_from: payload.config_from}}\n"), &handler)
+		err := decodeNodeTestYAML([]byte("activity: {id: notify, tool: notify_human, input: {action: payload.action, template: payload.template, config_from: payload.config_from}}\n"), &handler)
 		if err != nil || handler.Activity.Tool != "notify_human" || len(handler.Activity.Input) != 3 {
 			t.Fatalf("activity input rejected as handler action: %#v, %v", handler.Activity, err)
 		}

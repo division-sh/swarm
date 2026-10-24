@@ -97,19 +97,13 @@ func writeStateOnlyAcquisitionFlow(t testing.TB, root, workflowName, rootSchema,
 		}
 	}
 	nodes := `selector:
-  execution_type: system_node
-  subscribes_to: [test.node_emitted.selector]
-  event_handlers:
-    test.node_emitted.selector:
-      accumulate: {into: items, from: payload}
+  test.node_emitted.selector:
+    accumulate: {into: items, from: payload}
 upserter:
-  execution_type: system_node
-  subscribes_to: [test.node_emitted.upserter]
-  event_handlers:
-    test.node_emitted.upserter: {}
+  test.node_emitted.upserter: {}
 `
 	if parentConstructor {
-		nodes += "parent_constructor:\n  execution_type: system_node\n  event_handlers:\n    test.fixture_parent.construct: {}\n"
+		nodes += "parent_constructor:\n  test.fixture_parent.construct: {}\n"
 	}
 	writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "nodes.yaml")), nodes)
 }

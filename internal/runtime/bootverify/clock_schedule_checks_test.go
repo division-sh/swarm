@@ -18,7 +18,7 @@ func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
 		name, fields, pins, nodes, agents, want string
 	}{
 		{name: "root export", pins: "pins:\n  outputs: [poll.tick]\n"},
-		{name: "actual local handler", nodes: "observer:\n  event_handlers:\n    poll.tick: {}\n"},
+		{name: "actual local handler", nodes: "observer:\n  poll.tick: {}\n"},
 		{name: "actual local agent", agents: "observer:\n  intent: {inline: 'Observe the clock.'}\n  model: regular\n  subscriptions: [poll.tick]\n  emit_events: []\n"},
 		{name: "unsubscribed local agent", agents: "observer:\n  intent: {inline: 'Observe nothing.'}\n  model: regular\n  subscriptions: []\n  emit_events: []\n", want: "actual consumer"},
 		{name: "dangling emission", want: "actual consumer"},

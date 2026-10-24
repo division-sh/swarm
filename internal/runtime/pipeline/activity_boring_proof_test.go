@@ -428,13 +428,12 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 		"research/entities.yaml": "test_entity:\n  marker: text\n",
 		"research/events.yaml":   "source.requested:\n  url: text\n",
 		"research/nodes.yaml": `scanner:
-  subscribes_to: [source.requested]
-  event_handlers:
-    source.requested:
-      activity:
-        tool: source_scrape
-        input:
-          url: payload.url
+  source.requested:
+    activity:
+      id: scanner_source_requested_source_scrape
+      tool: source_scrape
+      input:
+        url: payload.url
 `,
 		"tools.yaml": fmt.Sprintf(`source_scrape:
   description: Read a source.
@@ -484,6 +483,7 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 		Kind:            runtimecontracts.ActivitySiteHandler,
 		RuleIndex:       -1,
 		Spec: runtimecontracts.ActivitySpec{
+			ID:   "scanner_source_requested_source_scrape",
 			Tool: "source_scrape",
 			Input: map[string]runtimecontracts.ExpressionValue{
 				"url": runtimecontracts.CELExpression("payload.url"),
@@ -532,14 +532,14 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 	entityID := uuid.NewString()
 	resultEvents, err := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{
 		Node: mustActivityBoringNode("scanner"), HandlerEventKey: "source.requested", Kind: runtimecontracts.ActivitySiteHandler, RuleIndex: -1,
-		Spec: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
+		Spec: runtimecontracts.ActivitySpec{ID: "scanner_source_requested_source_scrape", Tool: "source_scrape"},
 	})
 	if err != nil {
 		panic(err)
 	}
 	return runtimeengine.ActivityIntent{
 		RoutingSource: mustActivityBoringRoutingSource(entityID),
-		ActivityID:    "scanner_source_scrape",
+		ActivityID:    resultEvents.ActivityID,
 		Tool:          "source_scrape",
 		Input:         mustActivityInput(map[string]any{"url": inputURL}),
 

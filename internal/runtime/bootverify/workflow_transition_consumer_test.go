@@ -8,59 +8,9 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
-
-func TestCompiledTransitionHandlerReferenceGuards(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		mutate func(*runtimecontracts.WorkflowContractBundle, *runtimecontracts.SystemNodeEventHandler)
-		check  string
-		want   string
-	}{
-		{name: "valid"},
-		{name: "unknown_guard", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			h.Guard.ID = "missing_guard"
-		}, check: "transition_reference_validation", want: "references unknown guard missing_guard"},
-		{name: "unknown_collection_guard_without_advance", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			h.AdvancesTo = ""
-			h.Guard.Checks = []runtimecontracts.GuardCheck{{ID: "allow_ticket"}, {ID: "missing_guard"}}
-		}, check: "transition_reference_validation", want: "references unknown guard missing_guard"},
-		{name: "nonexecutable_collection_guard", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			b.Semantics.GuardByID["empty_guard"] = runtimecontracts.GuardActionEntry{ID: "empty_guard"}
-			h.Guard.Checks = []runtimecontracts.GuardCheck{{ID: "allow_ticket"}, {ID: "empty_guard"}}
-		}, check: "handler_field_compliance", want: "guard empty_guard has no executable runtime implementation"},
-		{name: "inline_guard_label_is_not_registry_reference", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			h.Guard = &runtimecontracts.GuardSpec{ID: "inline_label", Check: "true"}
-		}},
-		{name: "checks_replace_top_level_guard", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			h.Guard = &runtimecontracts.GuardSpec{ID: "unused_unknown", Checks: []runtimecontracts.GuardCheck{{ID: "allow_ticket"}, {ID: "inline_label", Check: "true"}}}
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := bootverifyTransitionRuntimeOwnershipBundle()
-			node := identitytest.RootNode(t, "dispatcher")
-			handler := bundle.Semantics.NodeHandlers[node.Key()]["ticket.created"]
-			if tc.mutate != nil {
-				tc.mutate(bundle, &handler)
-			}
-			bundle.Semantics.NodeHandlers[node.Key()]["ticket.created"] = handler
-			c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
-			findings := append(c.transitionReferences(), c.handlerFieldCompliance()...)
-			if tc.want == "" {
-				if len(findings) != 0 {
-					t.Fatalf("valid handler rejected: %#v", findings)
-				}
-				return
-			}
-			if !reportContains(findings, tc.check, tc.want) {
-				t.Fatalf("missing %s %q: %#v", tc.check, tc.want, findings)
-			}
-		})
-	}
-}
 
 func TestCompiledTransitionStrictCarrierReferences(t *testing.T) {
 	for _, tc := range []struct {
@@ -282,30 +232,28 @@ arrived:
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "nodes.yaml"), `
 worker:
-  execution_type: system_node
-  event_handlers:
-    direct: {advances_to: awaiting}
-    selected:
-      rules:
-        - {when: true, advances_to: done}
-        - {advances_to: done}
-    inherited:
-      advances_to: done
-      rules:
-        - {when: true}
-        - {when: false}
-    completed:
-      on_complete:
-        - {condition: true, advances_to: done}
-    tick: {}
-    arrived:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member}
-        output: payload.result
-        on_complete: {advances_to: done}
-        deadline: {after: 3h, from: stage_entry}
-        on_deadline: {advances_to: done}
+  direct: {advances_to: awaiting}
+  selected:
+    rules:
+      - {when: true, advances_to: done}
+      - {advances_to: done}
+  inherited:
+    advances_to: done
+    rules:
+      - {when: true}
+      - {when: false}
+  completed:
+    on_complete:
+      - {condition: true, advances_to: done}
+  tick: {}
+  arrived:
+    join:
+      stage: awaiting
+      members: {from: state.expected, by: payload.member}
+      output: payload.result
+      on_complete: {advances_to: done}
+      deadline: {after: 3h, from: stage_entry}
+      on_deadline: {advances_to: done}
 `)
 	}
 	repo := repoRootForBootverifyTest(t)

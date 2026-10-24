@@ -31,15 +31,15 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 				if name == "nodes.yaml" {
 					switch variant {
 					case "missing assessment write":
-						contents = strings.Replace(contents, "          - business_brief\n", "", 1)
+						contents = strings.Replace(contents, "        - business_brief\n", "", 1)
 					case "read before write":
-						contents = strings.Replace(contents, `check: _entity.current_state == 'assess'`, `check: _entity.current_state == 'assess' && entity.business_brief != ''`, 1)
+						contents = strings.Replace(contents, `guard: _entity.current_state == 'assess'`, `guard: _entity.current_state == 'assess' && entity.business_brief != ''`, 1)
 					case "retired stage spelling":
 						contents = strings.ReplaceAll(contents, "_entity.current_state", "_entity.stage")
 					case "naive optional without decision", "naive optional fallback":
-						contents = strings.Replace(contents, "          - business_brief\n", "", 1)
-						contents = strings.Replace(contents, "    work.assessed:\n", "    work.assessed:\n      rules:\n        - when: payload.business_brief != ''\n          data_accumulation:\n            writes: [business_brief]\n          advances_to: consume\n          emit: {event: work.consume}\n        - advances_to: consume\n          emit: {event: work.consume}\n", 1)
-						contents = strings.Replace(contents, "      advances_to: consume\n      emit:\n        event: work.consume\n", "", 1)
+						contents = strings.Replace(contents, "        - business_brief\n", "", 1)
+						contents = strings.Replace(contents, "  work.assessed:\n", "  work.assessed:\n    rules:\n      - when: payload.business_brief != ''\n        data_accumulation:\n          writes: [business_brief]\n        advances_to: consume\n        emit: {event: work.consume}\n      - advances_to: consume\n        emit: {event: work.consume}\n", 1)
+						contents = strings.Replace(contents, "    advances_to: consume\n    emit:\n      event: work.consume\n", "", 1)
 						if variant == "naive optional fallback" {
 							contents = strings.ReplaceAll(contents, "entity.business_brief", "entity.?business_brief.orValue('fallback')")
 						}
@@ -79,12 +79,12 @@ func TestEntityDefiniteAssignmentLoops(t *testing.T) {
 				t.Fatal(err)
 			}
 			nodes := string(data)
-			writer := "    work.started:\n"
+			writer := "  work.started:\n"
 			switch variant {
 			case "backedge only":
-				writer = "    review.retry:\n"
+				writer = "  review.retry:\n"
 			}
-			nodes = strings.Replace(nodes, writer, writer+"      data_accumulation:\n        writes:\n          - {source_field: token, target_field: brief}\n", 1)
+			nodes = strings.Replace(nodes, writer, writer+"    data_accumulation:\n      writes:\n        - {source_field: token, target_field: brief}\n", 1)
 			writeBootverifyFixtureFile(t, path, nodes)
 			repo := repoRootForBootverifyTest(t)
 			bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
@@ -132,13 +132,13 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(7)}}
 		}, true},
 		{"earlier guard proves later check", func(h *c.SystemNodeEventHandler) {
-			h.Guard = &c.GuardSpec{Checks: []c.GuardCheck{{Check: "has(entity.base_score)"}, {Check: "entity.base_score > 0"}}}
+			h.Guard = &c.GuardSpec{Check: "(has(entity.base_score)) && (entity.base_score > 0)"}
 		}, false},
 		{"later guard cannot prove earlier check", func(h *c.SystemNodeEventHandler) {
-			h.Guard = &c.GuardSpec{Checks: []c.GuardCheck{{Check: "entity.base_score > 0"}, {Check: "has(entity.base_score)"}}}
+			h.Guard = &c.GuardSpec{Check: "(entity.base_score > 0) && (has(entity.base_score))"}
 		}, true},
 		{"guard OR is not assignment", func(h *c.SystemNodeEventHandler) {
-			h.Guard = &c.GuardSpec{Checks: []c.GuardCheck{{Check: "has(entity.base_score) || payload.score > 0"}, {Check: "entity.base_score > 0"}}}
+			h.Guard = &c.GuardSpec{Check: "(has(entity.base_score) || payload.score > 0) && (entity.base_score > 0)"}
 		}, true},
 		{"RHS cannot prove itself", func(h *c.SystemNodeEventHandler) {
 			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.CELExpression("entity.base_score + 1")}}
@@ -182,17 +182,14 @@ func TestEntityOnCompleteCannotBorrowLaterTopLevelWrite(t *testing.T) {
 	root := writeWave1ExpressionFixture(t)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 worker:
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      on_complete:
-        - condition: entity.base_score > 0
-          advances_to: done
-      data_accumulation:
-        writes:
-          - target_field: base_score
-            value: 7
+  task.assigned:
+    on_complete:
+      - condition: entity.base_score > 0
+        advances_to: done
+    data_accumulation:
+      writes:
+        - target_field: base_score
+          value: 7
 `)
 	repo := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
@@ -228,83 +225,72 @@ work.result:
   score: integer
 `)
 			nodes := `owner:
-  execution_type: system_node
-  subscribes_to: [work.opened, work.scored, work.consume, work.bypass]
-  produces: [work.result]
-  event_handlers:
-    work.opened:
-      advances_to: assess
-    work.scored:
-      guard: {check: _entity.current_state == 'assess'}
-      data_accumulation:
-        writes: [score]
-      advances_to: consume
-    work.consume:
-      guard: {check: _entity.current_state == 'consume'}
-      emit:
-        event: work.result
-        fields:
-          score: entity.score
-      advances_to: done
+  work.opened:
+    advances_to: assess
+  work.scored:
+    guard: _entity.current_state == 'assess'
+    data_accumulation:
+      writes: [score]
+    advances_to: consume
+  work.consume:
+    guard: _entity.current_state == 'consume'
+    emit:
+      event: work.result
+      fields:
+        score: entity.score
+    advances_to: done
 `
 			if variant == "bypass" {
-				nodes += "    work.bypass:\n      guard: {check: _entity.current_state == 'assess'}\n      advances_to: consume\n"
+				nodes += "  work.bypass:\n    guard: _entity.current_state == 'assess'\n    advances_to: consume\n"
 			}
 			if variant == "guard stage then value" {
-				nodes = strings.Replace(nodes, `guard: {check: _entity.current_state == 'consume'}`, `guard:
-        checks:
-          - check: _entity.current_state == 'consume'
-          - check: entity.score > 0`, 1)
+				nodes = strings.Replace(nodes, `guard: _entity.current_state == 'consume'`, `guard: (_entity.current_state == 'consume') && (entity.score > 0)`, 1)
 			}
 			if variant == "guard short circuit" {
-				nodes = strings.Replace(nodes, `guard: {check: _entity.current_state == 'consume'}`, `guard: {check: _entity.current_state == 'consume' && entity.score > 0}`, 1)
+				nodes = strings.Replace(nodes, `guard: _entity.current_state == 'consume'`, `guard: _entity.current_state == 'consume' && entity.score > 0`, 1)
 			}
 			if variant == "nontransitioning guarded reader" {
-				nodes = strings.Replace(nodes, "      advances_to: done\n", "", 1)
+				nodes = strings.Replace(nodes, "    advances_to: done\n", "", 1)
 			}
 			if variant == "nontransitioning clear" {
-				nodes = strings.Replace(nodes, "subscribes_to: [work.opened, work.scored, work.consume, work.bypass]", "subscribes_to: [work.opened, work.scored, work.consume, work.bypass, work.clear]", 1)
-				nodes += `    work.clear:
-      guard: {check: _entity.current_state == 'consume'}
-      data_accumulation:
-        writes:
-          - {op: clear, target: entity.score}
+				nodes += `  work.clear:
+    guard: _entity.current_state == 'consume'
+    data_accumulation:
+      writes:
+        - {op: clear, target: entity.score}
 `
 			}
 			if variant == "same destination outcomes" || variant == "on_complete outcomes" {
-				replacement := `      rules:
-        - when: payload.score >= 0
-          data_accumulation:
-            writes: [score]
-          advances_to: consume
-        - advances_to: consume`
+				replacement := `    rules:
+      - when: payload.score >= 0
+        data_accumulation:
+          writes: [score]
+        advances_to: consume
+      - advances_to: consume`
 				if variant == "on_complete outcomes" {
-					replacement = `      on_complete:
-        - condition: payload.score >= 0
-          data_accumulation:
-            writes: [score]
-          advances_to: consume
-        -
-          advances_to: consume`
+					replacement = `    on_complete:
+      - condition: payload.score >= 0
+        data_accumulation:
+          writes: [score]
+        advances_to: consume
+      -
+        advances_to: consume`
 				}
-				nodes = strings.Replace(nodes, "      data_accumulation:\n        writes: [score]\n      advances_to: consume", replacement, 1)
+				nodes = strings.Replace(nodes, "    data_accumulation:\n      writes: [score]\n    advances_to: consume", replacement, 1)
 			}
 			if variant == "same event different node" {
 				nodes += `other-owner:
-  execution_type: system_node
-  subscribes_to: [work.scored]
-  event_handlers:
-    work.scored:
-      guard: {check: _entity.current_state == 'assess'}
-      advances_to: consume
+  work.scored:
+    guard: _entity.current_state == 'assess'
+    advances_to: consume
 `
 			}
 			if variant == "zero trip" {
-				nodes = strings.Replace(nodes, "      advances_to: assess", "      advances_to: consume", 1)
+				nodes = strings.Replace(nodes, "    advances_to: assess", "    advances_to: consume", 1)
 			}
 			if variant == "backedge cannot prove first entry" {
-				nodes = strings.Replace(nodes, "      advances_to: assess", "      advances_to: consume", 1)
-				nodes += "    work.bypass:\n      guard: {check: _entity.current_state == 'consume'}\n      advances_to: assess\n"
+				nodes = strings.Replace(nodes, "    advances_to: assess", "    advances_to: consume", 1)
+				nodes += "  work.bypass:\n    guard: _entity.current_state == 'consume'\n    advances_to: assess\n"
 			}
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), nodes)
 			if variant == "same event different node" {
@@ -378,12 +364,9 @@ func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "work:\n  profile: Profile\n  observed: text\n  notes: [text]\n  by_id: map[text]Profile\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `owner:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      data_accumulation:
-        writes:
+  work.requested:
+    data_accumulation:
+      writes:
 `+tc.writes)
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, c.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 			checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}

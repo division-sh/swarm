@@ -269,13 +269,22 @@ func TestCompiledPublicationBindingsIgnoreUnconnectedSiblingChanges(t *testing.T
 			}
 			// Moving this incompatible declaration first or last in the source
 			// census must not influence the connected source's exact binding.
-			if err := os.Rename(filepath.Join(root, "sibling"), filepath.Join(root, "aaa_sibling")); err != nil {
-				t.Fatal(err)
+			renameSibling := func(from, to string) {
+				t.Helper()
+				if err := os.Rename(filepath.Join(root, from), filepath.Join(root, to)); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(root, "schema.yaml")
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Keep this independent flow's own producer-owned inputs bound.
+				writeFixtureFile(t, path, strings.ReplaceAll(string(raw), "to: "+from+"}", "to: "+to+"}"))
 			}
+			renameSibling("sibling", "aaa_sibling")
 			check(load())
-			if err := os.Rename(filepath.Join(root, "aaa_sibling"), filepath.Join(root, "zzz_sibling")); err != nil {
-				t.Fatal(err)
-			}
+			renameSibling("aaa_sibling", "zzz_sibling")
 			check(load())
 			if err := os.RemoveAll(filepath.Join(root, "zzz_sibling")); err != nil {
 				t.Fatal(err)

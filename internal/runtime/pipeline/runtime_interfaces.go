@@ -3,8 +3,6 @@ package pipeline
 import (
 	"context"
 
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -13,7 +11,6 @@ const runtimeWorkflowID = "workflow-runtime"
 type WorkflowRuntime interface {
 	SemanticSource() semanticview.Source
 	WorkflowNodes() []WorkflowNode
-	GuardRegistry() GuardRegistry
 }
 
 type BackgroundNode interface {
@@ -29,13 +26,6 @@ type SubscriptionReadyBackgroundNode interface {
 	AddSubscriptionReadyHook(func())
 }
 
-type GuardRegistry interface {
-	HasGuard(id identity.GuardKey) bool
-	IsExecutable(id identity.GuardKey) bool
-	GuardIDs() []string
-	Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool)
-}
-
 func (pc *PipelineCoordinator) SemanticSource() semanticview.Source {
 	if pc == nil || pc.module == nil {
 		return nil
@@ -48,11 +38,4 @@ func (pc *PipelineCoordinator) WorkflowNodes() []WorkflowNode {
 		return nil
 	}
 	return pc.module.WorkflowNodes()
-}
-
-func (pc *PipelineCoordinator) GuardRegistry() GuardRegistry {
-	if pc == nil || pc.module == nil {
-		return nil
-	}
-	return pc.module.GuardRegistry()
 }

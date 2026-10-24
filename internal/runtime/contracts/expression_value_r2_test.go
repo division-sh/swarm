@@ -119,18 +119,13 @@ func TestExpressionValueR2SharedAuthoringSurfaces(t *testing.T) {
 		}},
 		{"activity.input", func(source string) (ExpressionValue, error) {
 			var spec ActivitySpec
-			err := decodeNodeTestYAML([]byte("tool: record\ninput:\n  value: "+source+"\n"), &spec)
+			err := decodeNodeTestYAML([]byte("id: record\ntool: record\ninput:\n  value: "+source+"\n"), &spec)
 			return spec.Input["value"], err
 		}},
 		{"stage gate context", func(source string) (ExpressionValue, error) {
 			var spec FlowStageGateDeclaration
 			err := decodeNodeTestYAML([]byte("decision: review\ncontext:\n  value: "+source+"\noutcomes:\n  accepted: {advances_to: done}\n"), &spec)
 			return spec.Context["value"], err
-		}},
-		{"guard escalation", func(source string) (ExpressionValue, error) {
-			var spec GuardSpec
-			err := decodeNodeTestYAML([]byte("check: false\non_fail:\n  escalate:\n    event: review.failed\n    fields:\n      value: "+source+"\n"), &spec)
-			return spec.OnFailSpec.Escalation.Fields["value"], err
 		}},
 		{"data write value", func(source string) (ExpressionValue, error) {
 			var write WorkflowDataWrite

@@ -79,14 +79,11 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
 			numeric = strings.ReplaceAll(numeric, "payload.value", "payload.result.value")
 			numeric = strings.ReplaceAll(numeric, "payload.nested", "payload.result.nested")
 			numeric += `requester:
-  execution_type: system_node
-  subscribes_to: [numeric.requested]
-  event_handlers:
-    numeric.requested:
-      activity:
-        id: fetch
-        tool: numeric_provider
-        input: {}
+  numeric.requested:
+    activity:
+      id: fetch
+      tool: numeric_provider
+      input: {}
 `
 			if mock {
 				numeric = strings.ReplaceAll(numeric, "tool: numeric_provider", "tool: numeric.fetch")
@@ -144,21 +141,15 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
 				copyReleaseFixtureTree(t, root, targetRoot)
 				targetTool := strings.ReplaceAll(tool, "enum: [7]", "enum: [11]")
 				targetNodes := strings.Split(string(nodes), "collector:")[0] + `requester:
-  execution_type: system_node
-  subscribes_to: [numeric.completed]
-  event_handlers:
-    numeric.completed:
-      activity: {id: fetch, tool: numeric.fetch, input: {}}
+  numeric.completed:
+    activity: {id: fetch, tool: numeric.fetch, input: {}}
 collector:
-  execution_type: system_node
-  subscribes_to: [fetch.succeeded]
-  event_handlers:
-    fetch.succeeded:
-      data_accumulation:
-        source_event: fetch.succeeded
-        writes:
-          - target_field: score
-            value: payload.result.value + payload.result.nested.numbers[?0].value() + 2
+  fetch.succeeded:
+    data_accumulation:
+      source_event: fetch.succeeded
+      writes:
+        - target_field: score
+          value: payload.result.value + payload.result.nested.numbers[?0].value() + 2
 `
 				for name, raw := range map[string]string{"nodes.yaml": targetNodes, "tools.yaml": targetTool} {
 					if err := os.WriteFile(filepath.Join(targetRoot, name), []byte(raw), 0600); err != nil {

@@ -644,7 +644,7 @@ func catalogFactoringScopedBundle(t *testing.T) *WorkflowContractBundle {
 		"child/schema.yaml": "name: child\nstages: {done: {final: true}}\n",
 		"child/types.yaml":  "scalars: {Label: integer}\n",
 		"child/events.yaml": "record.ready:\n  item: Box\n  items: [Box]\n",
-		"child/nodes.yaml":  "consumer:\n  execution_type: system_node\n  event_handlers:\n    record.ready: {}\n",
+		"child/nodes.yaml":  "consumer:\n  record.ready: {}\n",
 	} {
 		writeFixtureFile(t, filepath.Join(root, file), body)
 	}

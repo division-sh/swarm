@@ -6,7 +6,6 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 )
 
 type bundleSource struct {
@@ -129,21 +128,6 @@ func WorkflowStageTopology(source Source, flowID string) (runtimecontracts.Workf
 }
 func (s bundleSource) WorkflowStageTimerByID(flowID, id string) (runtimecontracts.WorkflowTimerContract, bool) {
 	return s.bundle.WorkflowStageTimerByID(flowID, id)
-}
-func (s bundleSource) GuardInstructions() []runtimeregistry.GuardInstruction {
-	entries := s.bundle.GuardEntries()
-	out := make([]runtimeregistry.GuardInstruction, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, runtimeregistry.GuardFromContract(entry))
-	}
-	return out
-}
-func (s bundleSource) GuardInstructionByID(id string) (runtimeregistry.GuardInstruction, bool) {
-	entry, ok := s.bundle.GuardEntryByID(id)
-	if !ok {
-		return runtimeregistry.GuardInstruction{}, false
-	}
-	return runtimeregistry.GuardFromContract(entry), true
 }
 func (s bundleSource) FlowSchemaEntries() map[string]runtimecontracts.FlowSchemaDocument {
 	if s.bundle == nil {
@@ -340,10 +324,7 @@ func (s bundleSource) ExecutableNodeEffectiveProduces(node runtimeidentity.Execu
 	if !ok {
 		return nil
 	}
-	return append(
-		runtimecontracts.EffectiveSystemNodeProduces(s.bundle, node, record.Entry),
-		s.bundle.GeneratedActivityEventsForExecutableNode(node)...,
-	)
+	return runtimecontracts.EffectiveSystemNodeProduces(s.bundle, node, record.Entry)
 }
 func (s bundleSource) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.AuthoredEventEntries()

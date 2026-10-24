@@ -7,12 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-var guardOnFailFieldOptions = map[string]struct{}{"escalate": {}}
-
-var guardOnFailEscalateFieldOptions = map[string]struct{}{
-	"event": {}, "from": {}, "fields": {},
-}
-
 var fanOutFieldOptions = map[string]struct{}{
 	"items_from": {}, "as": {}, "identity": {}, "max_items": {}, "emit": {},
 }
@@ -121,34 +115,6 @@ func nodeValueStringSequence(value yamlsource.Value, owner string) ([]string, er
 		out = append(out, text)
 	}
 	return out, nil
-}
-
-func projectNodeScalarFields(fields map[string]yamlsource.Value, node *SystemNodeContract) error {
-	if err := nodeValueTexts(fields, map[string]*string{
-		"description": &node.Description, "execution_type": &node.ExecutionType,
-		"state_table": &node.StateTable,
-	}, false); err != nil {
-		return err
-	}
-	for _, entry := range []struct {
-		key    string
-		target *[]string
-	}{
-		{"subscribes_to", &node.SubscribesTo},
-		{"produces", &node.Produces},
-	} {
-		value, present := fields[entry.key]
-		if !present {
-			continue
-		}
-		items, err := nodeValueStringSequence(value, entry.key)
-		if err != nil {
-			return err
-		}
-		*entry.target = items
-	}
-	_, node.ProducesDeclared = fields["produces"]
-	return nil
 }
 
 var nodeTimerFields = map[string]struct{}{

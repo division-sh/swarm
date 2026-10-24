@@ -22,29 +22,16 @@ func VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest(t *testi
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "observe:\nkill:\nkill_chain:\n",
 		"nodes.yaml": `router:
-  event_handlers:
-    observe:
-      data_accumulation:
-        writes:
-          - target_field: marker
-            value: |-
-              'observed'
-    kill:
-      guard:
-        id: declared-kill
-        check: |-
-          false
-        on_fail: kill
-    kill_chain:
-      guard:
-        checks:
-          - id: leading-pass
-            check: |-
-              true
-          - id: declared-kill
-            check: |-
-              false
-        on_fail: kill
+  observe:
+    data_accumulation:
+      writes:
+        - target_field: marker
+          value: |-
+            'observed'
+  kill:
+    guard: false
+  kill_chain:
+    guard: (true) && (false)
 `,
 	})
 	graph, found := semanticview.WorkflowStageTopology(source, ".")
@@ -57,13 +44,13 @@ func VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest(t *testi
 			evaluated                          []string
 			wantError                          string
 		}{
-			{"nonexistent_guard", "router", "observe", "fabricated-guard", "killed", []string{"fabricated-guard"}, "kill disposition"},
+			{"nonexistent_guard", "router", "observe", "fabricated-guard", "killed", []string{"fabricated-guard"}, "scalar guards reject"},
 			{"declared_guard_wrong_target", "router", "kill", "declared-kill", "done", []string{"declared-kill"}, "kill target"},
 			{"nonexistent_node_and_handler", "missing", "observe", "fabricated-guard", "killed", []string{"fabricated-guard"}, "no exact compiled handler"},
-			{"declared_handler_wrong_guard_name", "router", "kill", "fabricated-guard", "killed", []string{"fabricated-guard"}, "guard checks"},
-			{"declared_handler_extra_prefix", "router", "kill", "declared-kill", "killed", []string{"extra-label", "declared-kill"}, "guard checks"},
-			{"declared_handler_wrong_prefix", "router", "kill_chain", "declared-kill", "killed", []string{"extra-label", "declared-kill"}, "guard checks"},
-			{"failed_guard_not_last", "router", "kill_chain", "leading-pass", "killed", []string{"leading-pass", "declared-kill"}, "guard checks"},
+			{"declared_handler_wrong_guard_name", "router", "kill", "fabricated-guard", "killed", []string{"fabricated-guard"}, "scalar guards reject"},
+			{"declared_handler_extra_prefix", "router", "kill", "declared-kill", "killed", []string{"extra-label", "declared-kill"}, "scalar guards reject"},
+			{"declared_handler_wrong_prefix", "router", "kill_chain", "declared-kill", "killed", []string{"extra-label", "declared-kill"}, "scalar guards reject"},
+			{"failed_guard_not_last", "router", "kill_chain", "leading-pass", "killed", []string{"leading-pass", "declared-kill"}, "scalar guards reject"},
 		} {
 			t.Run(backend.name+"/"+tc.name, func(t *testing.T) {
 				bundle, found := semanticview.Bundle(source)

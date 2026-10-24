@@ -17,8 +17,8 @@ func CopyPublishedFanOutReply(t testing.TB) string {
 		"provider.requested:\n  account_id: text\n  request_id: text\n",
 		"provider.requested:\n  account_id: text\n  request_id: text\n  items: [text]\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
-		"          account_id: payload.account_id\n          request_id: payload.request_id\n",
-		"          account_id: payload.account_id\n          request_id: payload.request_id\n          items: payload.items\n")
+		"        account_id: payload.account_id\n        request_id: payload.request_id\n",
+		"        account_id: payload.account_id\n        request_id: payload.request_id\n        items: payload.items\n")
 	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
 pins:
   inputs: [provider.requested]
@@ -33,26 +33,23 @@ item.ready:
   request_id: text
 `)
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
-  execution_type: system_node
-  subscribes_to: [provider.requested, item.ready]
-  event_handlers:
-    provider.requested:
-      fan_out:
-        items_from: payload.items
-        as: entry
-        identity: entry
-        emit:
-          event: item.ready
-          fields:
-            account_id: payload.account_id
-            request_id: entry
-    item.ready:
+  provider.requested:
+    fan_out:
+      items_from: payload.items
+      as: entry
+      identity: entry
       emit:
-        event: provider.replied
+        event: item.ready
         fields:
           account_id: payload.account_id
-          request_id: payload.request_id
-          result: "from-own-ordinal"
+          request_id: entry
+  item.ready:
+    emit:
+      event: provider.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: "from-own-ordinal"
 `)
 	return root
 }
@@ -66,14 +63,11 @@ func CopyUnissuedFanOutReply(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.stop:\n", "request.stop:\nrequest.checkpoint:\n  note: text\nrequest.checkpointed:\n  note: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `checkpoint-node:
-  execution_type: system_node
-  subscribes_to: [request.checkpoint, request.checkpointed]
-  event_handlers:
-    request.checkpoint:
-      emit:
-        event: request.checkpointed
-        fields: {note: payload.note}
-    request.checkpointed: {}
+  request.checkpoint:
+    emit:
+      event: request.checkpointed
+      fields: {note: payload.note}
+  request.checkpointed: {}
 result-observer:
 `)
 	return root
@@ -89,8 +83,7 @@ func CopyNestedFanOutReply(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "provider.requested", "t.requested")
 	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "provider.replied", "t.replied")
 	applyClosedReplacement(t, filepath.Join(root, "t/events.yaml"), "provider.replied", "t.replied")
-	applyClosedReplacement(t, filepath.Join(root, "t/nodes.yaml"), "subscribes_to: [provider.requested,", "subscribes_to: [t.requested,")
-	applyClosedReplacement(t, filepath.Join(root, "t/nodes.yaml"), "    provider.requested:\n", "    t.requested:\n")
+	applyClosedReplacement(t, filepath.Join(root, "t/nodes.yaml"), "  provider.requested:\n", "  t.requested:\n")
 	applyClosedReplacement(t, filepath.Join(root, "t/nodes.yaml"), "provider.replied", "t.replied")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    correlation_key: request_id\n", `    correlation_key: request_id
   - {event: t.requested, from: provider, to: t}
@@ -115,23 +108,20 @@ provider.replied:
   result: text
 `)
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
-  execution_type: system_node
-  subscribes_to: [provider.requested, t.replied]
-  event_handlers:
-    provider.requested:
-      emit:
-        event: t.requested
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          items: payload.items
-    t.replied:
-      emit:
-        event: provider.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: payload.result
+  provider.requested:
+    emit:
+      event: t.requested
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        items: payload.items
+  t.replied:
+    emit:
+      event: provider.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: payload.result
 `)
 	return root
 }
