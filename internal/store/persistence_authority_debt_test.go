@@ -834,7 +834,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if collector == debtSelectedFixtureComposedCollectorTo {
+		if collector == debtSelectedFixtureComposedCollectorTo || collector == debtSelectedFixtureLandedCollectorTo {
 			if err := debtSelectedFixtureSourcePins(root, baseRoot); err != nil {
 				t.Fatal(err)
 			}
@@ -936,6 +936,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
+		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2727/6388897450: exact landed-inert repair; both source endpoints remain authenticated.
 	}
 	if base == debtDeploymentRegistrationCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureComposedCollectorTo && reviewedTransition == current && head.Collector == current &&
