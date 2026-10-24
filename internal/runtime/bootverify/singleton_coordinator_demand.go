@@ -173,13 +173,9 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 	}
 
 	for _, record := range wave1ScopedAgentRecords(source) {
-		for entityType, decl := range record.Entry.EntityWrites {
-			contract, ok := wave1ResolveEntityWriteContract(source, record.Source, entityType)
-			if !ok {
-				continue
-			}
-			appendAgentSingletonWriteDemands(add, flows, contract, record, "create", decl.Create)
-			appendAgentSingletonWriteDemands(add, flows, contract, record, "save", decl.Save)
+		contract := wave1EntityContractForFlow(source, record.Source.FlowPath)
+		if contract.Defined {
+			appendAgentSingletonWriteDemands(add, flows, contract, record, record.Entry.Writes)
 		}
 	}
 
@@ -211,7 +207,7 @@ func singletonDemandEntityRefs(source semanticview.Source, flows map[string]sing
 	return out
 }
 
-func appendAgentSingletonWriteDemands(add func(SingletonCoordinatorDemand, bool), flows map[string]singletonDemandFlow, contract wave1EntityContractView, record wave1ScopedAgentRecord, action string, rule runtimecontracts.AgentEntityWriteRule) {
+func appendAgentSingletonWriteDemands(add func(SingletonCoordinatorDemand, bool), flows map[string]singletonDemandFlow, contract wave1EntityContractView, record wave1ScopedAgentRecord, rule runtimecontracts.AgentWriteGrant) {
 	fields := append([]string{}, rule.Fields...)
 	if rule.All {
 		for field := range flows[contract.FlowID].fields {
@@ -222,7 +218,7 @@ func appendAgentSingletonWriteDemands(add func(SingletonCoordinatorDemand, bool)
 		root, _, _ := strings.Cut(strings.TrimSpace(field), ".")
 		add(SingletonCoordinatorDemand{
 			FlowID: contract.FlowID, SourceFile: record.Source.File, Location: record.LogicalID,
-			AgentID: record.LogicalID, Kind: "agent_entity_writes." + action,
+			AgentID: record.LogicalID, Kind: "agent_writes",
 			Field: root, Target: strings.TrimSpace(field),
 		}, true)
 	}

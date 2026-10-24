@@ -112,20 +112,20 @@ func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState s
 		"        account_id: payload.account_id\n",
 		"        account_id: payload.account_id\n        score: payload.score\n        decision: payload.decision\n")
 	applyClosedReplacement(t, filepath.Join(root, "account", "state.yaml"),
-		"    _unused_reason: receiver instance identity\n",
-		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
+		"account_id: text\n",
+		"account_id: text\nscore: text\ndecision: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "account", "nodes.yaml"),
 		"  account.ready: {}\n",
-		`    account.ready:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: account_id
-          - source_field: score
-            target_field: score
-          - source_field: decision
-            target_field: decision
-      advances_to: `+terminalState+"\n")
+		`  account.ready:
+    data_accumulation:
+      writes:
+        - source_field: account_id
+          target_field: account_id
+        - source_field: score
+          target_field: score
+        - source_field: decision
+          target_field: decision
+    advances_to: `+terminalState+"\n")
 }
 
 // CopyTemplateSelectResolution derives the closed select validation/lowering

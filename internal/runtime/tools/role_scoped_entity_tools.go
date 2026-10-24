@@ -264,19 +264,17 @@ func roleScopedWritableFields(source semanticview.Source, actor models.AgentConf
 	if !ok {
 		return nil
 	}
-	decl, ok := roleScopedEntityWriteDecl(entry, contract)
-	if !ok {
+	grant := entry.Writes
+	if !grant.Declared() {
 		return nil
 	}
 	seen := map[string]struct{}{}
-	add := func(rule runtimecontracts.AgentEntityWriteRule) {
-		if rule.All {
-			for _, field := range entityruntime.FieldNames(contract) {
-				seen[field] = struct{}{}
-			}
-			return
+	if grant.All {
+		for _, field := range entityruntime.FieldNames(contract) {
+			seen[field] = struct{}{}
 		}
-		for _, field := range rule.Fields {
+	} else {
+		for _, field := range grant.Fields {
 			field = strings.TrimSpace(field)
 			if field == "" {
 				continue
@@ -286,26 +284,12 @@ func roleScopedWritableFields(source semanticview.Source, actor models.AgentConf
 			}
 		}
 	}
-	add(decl.Save)
 	out := make([]string, 0, len(seen))
 	for field := range seen {
 		out = append(out, field)
 	}
 	sort.Strings(out)
 	return out
-}
-
-func roleScopedEntityWriteDecl(entry runtimecontracts.AgentRegistryEntry, contract entityruntime.Contract) (runtimecontracts.AgentEntityWriteDecl, bool) {
-	if len(entry.EntityWrites) == 0 {
-		return runtimecontracts.AgentEntityWriteDecl{}, false
-	}
-	if contract.FlowID != "" {
-		if decl, ok := entry.EntityWrites[contract.FlowID+"."+contract.EntityType]; ok {
-			return decl, true
-		}
-	}
-	decl, ok := entry.EntityWrites[contract.EntityType]
-	return decl, ok
 }
 
 func roleScopedTopLevelSubpaths(contract entityruntime.Contract, field string) []string {

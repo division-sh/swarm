@@ -78,7 +78,7 @@ func newOperationSurfaceFixture(t *testing.T) (context.Context, models.AgentConf
 		"review": {
 			SchemaYAML:   "name: review\nstages:\n  queued: {}\n  marginal_review: {}\n  closed: {final: true}\n",
 			EntitiesYAML: "case:\n  status: text\n  items: [text]\n  labels: map[text]text\n  protected: text\n",
-			AgentsYAML:   "writer:\n  role: operator\n  intent: {inline: Write declared fields.}\n  entity_writes:\n    case:\n      save: [status, items, labels]\n",
+			AgentsYAML:   "writer:\n  role: operator\n  intent: {inline: Write declared fields.}\n  writes: [status, items, labels]\n",
 		},
 	})
 	source := semanticview.Wrap(bundle)
