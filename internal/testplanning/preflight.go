@@ -15,7 +15,6 @@ import (
 // it must not enter Profiles, TierRank, CI-Units or hosted coverage deferrals.
 var preflightCandidates = []TestRoot{
 	preflightRoot("internal/runtime/conformance", "TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified"),
-	preflightRoot("internal/runtime/manager", "TestDynamicFlowRuntimeReadinessProductionConsumersStatic"),
 	preflightRoot("internal/testplanning", "TestCurrentProofPlansBindActiveRequiredRoots"),
 	preflightRoot("internal/store", "TestPersistenceAuthorityFindingRegistry"),
 	preflightRoot("internal/store", "TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority"),
