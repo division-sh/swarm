@@ -944,6 +944,24 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		current == debtNativeFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // #642/6190983544 + 6191476293: exact fixture/custody policy, no baseline edit.
 	}
+	// LEAD authorization 2026-10-24 ~21:40Z (via orchestrator), corrected to
+	// f765afc073439ecaa3e031c497a8bee3f06af9d9a0b3a816e97ab28f366c4834 ->
+	// 7d682075bfbe1ebc76cc06342531e2db5e9052fdfe317fa363f66c3d1f9ecb81.
+	// TestIssue642MixedFanOutCrashRestartBothStores body:
+	// 48de2ed84a9b34a5844c95cdcb86632eb993301293e411f0c9e0692b9bfc1114 ->
+	// aae38c6a5aac352700649dc4f2d3a1cc066bc0384e4f7e8e8264593601506bbf.
+	// verifyBarrierCrashRestartBothStores body:
+	// 218f10b3b0a7877d4a8533bef6ad4004c1ebdb28767c8666f25c7b8683094f3a ->
+	// c8bd05905f4a017fc2b304c002bff08af28b6e986fdd4c264a23aba1082c27a7.
+	// Both remove only the retired StatePlans bootstrap argument; reviewer-d
+	// confirmed at #2293/6389824000 and 6389945653. The repins-only intermediate
+	// 31ecbee95cd28edeab6e58a1562d8a67d3e1c712b39fed0f6ad1d5c186870190
+	// is not a destination: registering the origin/checks changes the digest.
+	// The baseline remains byte-identical: no allowance, debt credit or dual seal.
+	if base == debtDeploymentRegistrationCollectorTo && trusted.Collector == base &&
+		current == debtR18FixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil
+	}
 	if base == debtDeploymentRegistrationCollectorFrom && trusted.Collector == base &&
 		current == debtDeploymentRegistrationCollectorTo && head.Collector == current &&
 		authorityDebtCount(head.Sites) == authorityDebtCount(trusted.Sites)+2 &&
