@@ -2,7 +2,9 @@ package runforkexecution
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -119,8 +121,15 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 			}
 			for _, handoff := range handoffs {
 				snapshot, err := deliveries.Snapshot(ctx, handoff.DeliveryID())
-				if err != nil || !snapshot.ContinuationHandoffAt.IsZero() || snapshot.Status != deliverylifecycle.StatusPending {
+				if err != nil || snapshot.Status != deliverylifecycle.StatusPending {
 					t.Fatalf("selected input is not at the unacknowledged publication cut: %+v %v", snapshot, err)
+				}
+				receipt, err := storetest.ReadExactPipelineReceiptOutcomeReason(ctx, p.owner.ports.fork, snapshot.EventID)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					t.Fatal(err)
+				}
+				if receipt.Outcome == "success" {
+					t.Fatal("selected input already has a pipeline ACK before synchronous dispatch")
 				}
 				parked[handoff.DeliveryID()] = snapshot
 			}
@@ -211,7 +220,11 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 				t.Fatal(err)
 			}
 			parked[id] = actual
-			acknowledged = acknowledged && !actual.ContinuationHandoffAt.IsZero()
+			receipt, err := storetest.ReadExactPipelineReceiptOutcomeReason(ctx, p.owner.ports.fork, actual.EventID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				t.Fatal(err)
+			}
+			acknowledged = acknowledged && receipt.Outcome == "success"
 		}
 	}
 	if err := p.retainedRuntime.manager.Shutdown(); err != nil {
