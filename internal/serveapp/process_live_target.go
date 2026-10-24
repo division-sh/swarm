@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -189,9 +190,23 @@ func (s *processLifecycleSupervisor) prepareLiveRunRuntime(ctx context.Context, 
 	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
+	liveRuns := s.selectedRecoveryEnvironment.LiveRuns
 	s.mu.RUnlock()
-	if manager == nil {
+	if manager == nil || liveRuns == nil {
 		return errors.New("continue requires its process runtime contexts")
+	}
+	scope, err := liveRuns.LoadRunLiveScope(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !scope.Empty() {
+		live, found, err := liveRuns.LoadLiveRun(ctx, scope)
+		if err != nil {
+			return err
+		}
+		if found && live.RunID != runID {
+			return &runlifecycle.LiveRunConflictError{Scope: scope, LiveRunID: live.RunID}
+		}
 	}
 	_, availability, err := manager.LookupRunStatus(ctx, runID)
 	if err != nil {
