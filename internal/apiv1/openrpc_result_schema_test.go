@@ -184,13 +184,13 @@ func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
 			"notes":       []any{"a", map[string]any{"text": "probe"}},
 		},
 	}
-	validator.validateMethodResult(t, "state.get", result)
+	validator.validateMethodResult(t, "entity.get", result)
 }
 
 func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(repoRoot(t)))
 	validator := newOpenRPCResultSchemaValidator(t, openRPC)
-	validator.preflightMethodResultSchemas(t, []string{"state.get", "state.list", "state.aggregate"})
+	validator.preflightMethodResultSchemas(t, []string{"entity.get", "entity.list", "entity.aggregate"})
 	for _, kind := range []string{"data_only", "constructed_no_stage", "constructed_unknown_stage"} {
 		t.Run(kind, func(t *testing.T) {
 			summary := map[string]any{
@@ -211,13 +211,13 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 			if kind == "constructed_unknown_stage" {
 				summary["stage_defined"], summary["current_state"], summary["entered_state_at"] = true, "unknown", "2026-10-10T01:00:00Z"
 			}
-			validator.validateMethodResult(t, "state.get", result)
-			validator.validateMethodResult(t, "state.list", map[string]any{"entities": []any{summary}})
+			validator.validateMethodResult(t, "entity.get", result)
+			validator.validateMethodResult(t, "entity.list", map[string]any{"entities": []any{summary}})
 			for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
 				t.Run("missing_"+key, func(t *testing.T) {
 					original := summary[key]
 					delete(summary, key)
-					err := validator.validateValue("$.state.get.result", validator.methods["state.get"].Result.Schema, result)
+					err := validator.validateValue("$.entity.get.result", validator.methods["entity.get"].Result.Schema, result)
 					summary[key] = original
 					if err == nil || !strings.Contains(err.Error(), key) {
 						t.Fatalf("missing lifecycle property %s: %v", key, err)
@@ -228,7 +228,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 				t.Run("invalid_"+key, func(t *testing.T) {
 					original := summary[key]
 					summary[key] = value
-					err := validator.validateValue("$.state.get.result", validator.methods["state.get"].Result.Schema, result)
+					err := validator.validateValue("$.entity.get.result", validator.methods["entity.get"].Result.Schema, result)
 					summary[key] = original
 					if err == nil || !strings.Contains(err.Error(), key) {
 						t.Fatalf("invalid lifecycle property %s: %v", key, err)
@@ -239,7 +239,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 				t.Run("missing_"+key, func(t *testing.T) {
 					original := result[key]
 					delete(result, key)
-					err := validator.validateValue("$.state.get.result", validator.methods["state.get"].Result.Schema, result)
+					err := validator.validateValue("$.entity.get.result", validator.methods["entity.get"].Result.Schema, result)
 					result[key] = original
 					if err == nil || !strings.Contains(err.Error(), key) {
 						t.Fatalf("missing full lifecycle property %s: %v", key, err)
@@ -250,7 +250,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 				t.Run("invalid_"+key, func(t *testing.T) {
 					original := result[key]
 					result[key] = value
-					err := validator.validateValue("$.state.get.result", validator.methods["state.get"].Result.Schema, result)
+					err := validator.validateValue("$.entity.get.result", validator.methods["entity.get"].Result.Schema, result)
 					result[key] = original
 					if err == nil || !strings.Contains(err.Error(), key) {
 						t.Fatalf("invalid full lifecycle property %s: %v", key, err)
@@ -260,10 +260,10 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 		})
 	}
 	for _, count := range []int{0, 2} {
-		validator.validateMethodResult(t, "state.aggregate", map[string]any{"counts": map[string]any{"unknown": float64(1)}, "absent_count": float64(count)})
+		validator.validateMethodResult(t, "entity.aggregate", map[string]any{"counts": map[string]any{"unknown": float64(1)}, "absent_count": float64(count)})
 	}
 	for _, result := range []map[string]any{{"counts": map[string]any{}}, {"counts": map[string]any{}, "absent_count": float64(-1)}} {
-		if err := validator.validateValue("$.state.aggregate.result", validator.methods["state.aggregate"].Result.Schema, result); err == nil || !strings.Contains(err.Error(), "absent_count") {
+		if err := validator.validateValue("$.entity.aggregate.result", validator.methods["entity.aggregate"].Result.Schema, result); err == nil || !strings.Contains(err.Error(), "absent_count") {
 			t.Fatalf("invalid absent group count: %v", err)
 		}
 	}

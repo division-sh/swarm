@@ -58,7 +58,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 						t.Fatalf("nested gate lost its exact compiled cause: %+v", gateRecord)
 					}
 					var entity operatorread.OperatorEntityFull
-					requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
+					requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 					if entity.Fields["result"] != "approved" {
 						t.Fatalf("nested gate final public result: %+v", entity)
 					}
@@ -118,7 +118,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					t.Fatalf("cap escaped through the wrong compiled carrier: %+v", last)
 				}
 				var entity operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": receiver}, &entity)
+				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": receiver}, &entity)
 				if entity.Fields["revision_id"] != closed.RevisionID {
 					t.Fatalf("connected public result lost escaped revision: %+v", entity)
 				}

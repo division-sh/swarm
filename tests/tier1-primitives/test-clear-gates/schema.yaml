@@ -1,5 +1,5 @@
 stages: []
 inputs:
-  - state.clear_requested
+  - gates.clear_requested
 outputs:
-  - state.cleared
+  - gates.cleared

@@ -136,7 +136,7 @@ func assertNumericFeedPublic(t *testing.T, ctx context.Context, rpc *releaseRPCC
 		var detail struct {
 			Fields map[string]any `json:"fields"`
 		}
-		if err := rpc.call(ctx, "state.get", map[string]any{"entity_id": entity.EntityID, "run_id": runID}, &detail); err != nil {
+		if err := rpc.call(ctx, "entity.get", map[string]any{"entity_id": entity.EntityID, "run_id": runID}, &detail); err != nil {
 			t.Fatal(err)
 		}
 		key, _ := detail.Fields["item_id"].(string)

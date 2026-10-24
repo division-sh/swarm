@@ -14,7 +14,10 @@ func Test2293Q2CatalogFieldsRefuseRetiredMetadata(t *testing.T) {
 		admit func(yamlsource.Value) error
 	}{
 		{"type", func(value yamlsource.Value) error { _, err := projectTypeFieldSpec(value); return err }},
-		{"state", func(value yamlsource.Value) error { _, err := projectEntityFieldDecl(value); return err }},
+		{"state", func(value yamlsource.Value) error {
+			_, err := projectStateField(value, TypeCatalogDocument{})
+			return err
+		}},
 	} {
 		for _, key := range []string{"description", "pattern", "length", "range", "equal_to", "immutable", "citation"} {
 			for _, value := range []string{"null", "''", "[]", "{}", "false"} {
@@ -34,7 +37,7 @@ func Test2293Q1StateFieldsRefuseRetiredProjectionKeys(t *testing.T) {
 	for _, key := range []string{"materialize_from", "project"} {
 		for _, value := range []string{"null", "''", "[]", "{}", "false", "collector.reviews"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
-				_, err := projectEntityFieldDecl(fieldRetirementValue2293(t, "{type: '[text]', "+key+": "+value+"}"))
+				_, err := projectStateField(fieldRetirementValue2293(t, "{type: '[text]', "+key+": "+value+"}"), TypeCatalogDocument{})
 				diagnostic, ok := AsLoaderDiagnostic(err)
 				if !ok || diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(diagnostic.Remediation, "accumulate target") || !strings.Contains(diagnostic.Remediation, "op: append") {
 					t.Fatalf("projection key needs list/append teaching refusal: %v", err)
@@ -45,7 +48,7 @@ func Test2293Q1StateFieldsRefuseRetiredProjectionKeys(t *testing.T) {
 }
 
 func Test2293Q2CatalogFieldCommentsAndStateIndexingSurvive(t *testing.T) {
-	state, err := projectEntityFieldDecl(fieldRetirementValue2293(t, "\n  type: text? # prose\n  indexed: true\n"))
+	state, err := projectStateField(fieldRetirementValue2293(t, "\n  type: text? # prose\n  indexed: true\n"), TypeCatalogDocument{})
 	if err != nil || !state.IsOptional || !state.Indexed || state.Type != "text" {
 		t.Fatalf("state indexing/presence changed: %#v error=%v", state, err)
 	}
@@ -61,7 +64,10 @@ func Test2293Q2CatalogFieldCommentsAndStateIndexingSurvive(t *testing.T) {
 		admit func(yamlsource.Value) error
 	}{
 		{"type", func(value yamlsource.Value) error { _, err := projectNamedTypeDeclaration(value); return err }},
-		{"state", func(value yamlsource.Value) error { _, err := projectEntityContract(value); return err }},
+		{"state", func(value yamlsource.Value) error {
+			_, err := projectStateContract(value, TypeCatalogDocument{})
+			return err
+		}},
 	} {
 		t.Run(entrance.name+"_description", func(t *testing.T) {
 			err := entrance.admit(fieldRetirementValue2293(t, "{_description: null, value: text}"))

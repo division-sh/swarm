@@ -162,7 +162,7 @@ func listAllEntityIdentifierCandidates(ctx context.Context, client *cliAPIClient
 			candidates = append(candidates, cliIdentifierCandidate{ID: entity.EntityID, Status: entityLifecycleStageText(entity), CreatedAt: entity.CreatedAt})
 		}
 		return candidates, result.NextCursor, nil
-	}, "state.list")
+	}, "entity.list")
 }
 
 func listAllCLIIdentifierCandidatePages(

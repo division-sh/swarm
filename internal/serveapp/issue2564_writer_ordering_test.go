@@ -493,7 +493,7 @@ func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provid
 func issue2564Entity(t *testing.T, rt issue2564ServedFixture, runID, entityID string) operatorread.OperatorEntityFull {
 	t.Helper()
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
+	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
 	return entity
 }
 

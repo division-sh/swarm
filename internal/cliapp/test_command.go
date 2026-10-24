@@ -743,7 +743,7 @@ func scenarioSetupEntityID(seed, runID string, entity evaluatedScenarioSetupEnti
 	if flowID == "" || flowID == "." {
 		return runtimeflowidentity.EntityID(runID)
 	}
-	return scenarioUUID(seed, "setup.state."+entity.Alias)
+	return scenarioUUID(seed, "setup.entity."+entity.Alias)
 }
 
 func (r scenarioRunner) runInvalidVariants(file scenarioTestFile, doc scenarioDocument, evaluator *scenarioExpressionEvaluator) error {
@@ -1887,7 +1887,7 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scen
 			break
 		}
 		if _, ok := seen[cursor]; ok {
-			return fmt.Errorf("malformed state.list result: repeated next_cursor %q", cursor)
+			return fmt.Errorf("malformed entity.list result: repeated next_cursor %q", cursor)
 		}
 		seen[cursor] = struct{}{}
 		params["cursor"] = cursor
@@ -1914,17 +1914,17 @@ func (r scenarioRunner) assertEntityDetailExpectation(ctx context.Context, runID
 	if err := r.client.call(ctx, entityGetMethod, map[string]any{"entity_id": entityID, "run_id": runID}, &full); err != nil {
 		return err
 	}
-	if err := validateEntityFullResult("state.get result", full); err != nil {
+	if err := validateEntityFullResult("entity.get result", full); err != nil {
 		return err
 	}
 	if full.Entity.EntityID != entityID {
-		return fmt.Errorf("malformed state.get result: state.entity_id = %q, want %q", full.Entity.EntityID, entityID)
+		return fmt.Errorf("malformed entity.get result: entity.entity_id = %q, want %q", full.Entity.EntityID, entityID)
 	}
 	if full.Entity.RunID != runID {
-		return fmt.Errorf("malformed state.get result: state.run_id = %q, want %q", full.Entity.RunID, runID)
+		return fmt.Errorf("malformed entity.get result: entity.run_id = %q, want %q", full.Entity.RunID, runID)
 	}
 	if full.Entity.EntityType != entityType {
-		return fmt.Errorf("malformed state.get result: state.entity_type = %q, want %q", full.Entity.EntityType, entityType)
+		return fmt.Errorf("malformed entity.get result: entity.entity_type = %q, want %q", full.Entity.EntityType, entityType)
 	}
 	if detail.State != nil && (full.Entity.CurrentState == nil || *full.Entity.CurrentState != *detail.State) {
 		return fmt.Errorf("entity %s current_state = %s, want %q", entityID, entityLifecycleStageText(full.Entity), *detail.State)

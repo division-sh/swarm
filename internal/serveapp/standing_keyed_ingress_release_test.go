@@ -67,7 +67,7 @@ func TestA9ReleaseKeyedIngressConstructionBothStores(t *testing.T) {
 							t.Fatalf("release delivery escaped nested declaration scope: %+v", event)
 						}
 						var entity operatorread.OperatorEntityFull
-						requireServedJSONRPCResult(t, rpcEndpoint, "state.get", map[string]any{"run_id": runID, "entity_id": delivery.Target.EntityID}, &entity)
+						requireServedJSONRPCResult(t, rpcEndpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": delivery.Target.EntityID}, &entity)
 						if entity.Fields["seen"] != float64(1) {
 							t.Fatalf("release nested consumer=%+v", entity)
 						}
@@ -80,7 +80,7 @@ func TestA9ReleaseKeyedIngressConstructionBothStores(t *testing.T) {
 					}
 					a9RequireRootIngressSettlement(t, rpcEndpoint, runID, created[0].EventID)
 					var entity operatorread.OperatorEntityFull
-					requireServedJSONRPCResult(t, rpcEndpoint, "state.get", map[string]any{"run_id": runID, "entity_id": runID}, &entity)
+					requireServedJSONRPCResult(t, rpcEndpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &entity)
 					if entity.Fields["processed_count"] != float64(1) || entity.Fields["creation_count"] != float64(1) {
 						t.Fatalf("release root consumer=%+v", entity)
 					}

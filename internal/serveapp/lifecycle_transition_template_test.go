@@ -177,7 +177,7 @@ func prepareLifecycleTemplateSiblingsFromReader(t *testing.T, rt lifecycleTempla
 		requireStep("start", seed, "waiting", "drafting")
 		requireLifecycleTemplateInstance(t, rt.ReceiverStateReader, runID, s.instance, s.flow)
 		var keyed operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": s.entity}, &keyed)
+		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": s.entity}, &keyed)
 		if keyed.Fields["case_id"] != "shared" || s.instance == s.flow {
 			t.Fatalf("actual template key/instance missing: entity=%#v instance=%s", keyed, s.instance)
 		}
@@ -218,7 +218,7 @@ func prepareLifecycleTemplateSiblingsFromReader(t *testing.T, rt lifecycleTempla
 			t.Fatalf("nested receiver lost exact concrete parent: %s", rawConfig)
 		}
 		var entity operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": s.gateEntity}, &entity)
+		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": s.gateEntity}, &entity)
 		if entity.Fields["revision_id"] != s.revision {
 			t.Fatalf("%s nested gate consumed wrong revision: %#v", side, entity)
 		}
@@ -263,7 +263,7 @@ func requireLifecycleTemplateVerdict(t *testing.T, rt lifecycleTemplateObservati
 	requireLifecycleTemplateEntity(t, rt.ReceiverStateReader, runID, s.flow+"/sink", "approved")
 	final, _ := requireLifecycleTemplateEntity(t, rt.ReceiverStateReader, runID, s.flow+"/sink/final", "done")
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": final}, &entity)
+	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": final}, &entity)
 	if entity.Fields["result"] != s.side {
 		t.Fatalf("%s verdict reached wrong concrete consumer: %#v", s.side, entity)
 	}

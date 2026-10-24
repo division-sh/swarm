@@ -71,7 +71,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt, seed.RunID), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 								}
 								var entity operatorread.OperatorEntityFull
-								requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
+								requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 								if entity.Fields["result"] != recipient+handler+"/"+choice {
 									t.Fatalf("wrong public output: %#v", entity)
 								}
@@ -363,7 +363,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				requireLifecycleCurrentTransition(t, currentHistory(), capRepeat.EventID, "review", state)
 				ordinaryID = rt.waitEntityStage(t, started.RunID, "", "observed")
 				var ordinary operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": started.RunID, "entity_id": ordinaryID}, &ordinary)
+				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": started.RunID, "entity_id": ordinaryID}, &ordinary)
 				if ordinary.Fields["token"] != "ordinary" {
 					t.Fatalf("ordinary consumer=%#v", ordinary)
 				}
@@ -380,7 +380,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			}
 			receipt := rt.waitEntityStage(t, started.RunID, "", "done")
 			var received operatorread.OperatorEntityFull
-			requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": started.RunID, "entity_id": receipt}, &received)
+			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": started.RunID, "entity_id": receipt}, &received)
 			if receipt == entityID || received.Fields["revision_id"] != closed.RevisionID {
 				t.Fatalf("escape consumer=%#v loop=%#v", received, closed)
 			}

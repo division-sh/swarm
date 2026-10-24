@@ -16,7 +16,7 @@ policy:
   notification_schema_runtime_validation_policy: "#898 adds generated notification-schema publication and supported-surface runtime validation for all four subscription methods; examples and rpc.discover are covered by later closed policy child slices."
   examples_policy: "#904 adds merge-bearing catalog-wide OpenRPC examples deferral policy; method examples are intentionally omitted until a future approved source model exists."
   service_discovery_policy: "#915 adds merge-bearing catalog-wide rpc.discover non-publication policy; method publication remains the generated OpenRPC artifact."
-  entity_accumulated_schema_hardening_policy: "#930 aligned EntityFull.accumulated schema ownership to the runtime accumulator-state owner across /v1/rpc state.get, the historical retired Builder state.get_entity consumer, the historical retired dashboard /api/instances/{id} consumer, CLI, store, generated OpenRPC proof, and matrix accounting."
+  entity_accumulated_schema_hardening_policy: "#930 aligned EntityFull.accumulated schema ownership to the runtime accumulator-state owner across /v1/rpc entity.get, the historical retired Builder state.get_entity consumer, the historical retired dashboard /api/instances/{id} consumer, CLI, store, generated OpenRPC proof, and matrix accounting."
 methods:
   - method: agent.diagnose
     transport: http
@@ -483,7 +483,7 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
-  - method: state.aggregate
+  - method: entity.aggregate
     transport: http
     required_params: []
     declared_errors: []
@@ -498,7 +498,7 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
-  - method: state.get
+  - method: entity.get
     transport: http
     required_params: [entity_id]
     declared_errors: [ENTITY_NOT_FOUND]
@@ -513,7 +513,7 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
-  - method: state.list
+  - method: entity.list
     transport: http
     required_params: [run_id]
     declared_errors: []

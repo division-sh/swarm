@@ -54,7 +54,7 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 	if entityID != "" {
 		row := readForkReceiverRows(t, rt, runID)[path]
 		var entity operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
+		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
 		graph, found := semanticview.WorkflowStageTopology(rt.Runtime.Options.WorkflowModule.SemanticSource(), path)
 		if !found {
 			t.Fatalf("authored receiver %s has no compiled topology", path)

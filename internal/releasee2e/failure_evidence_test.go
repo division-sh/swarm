@@ -170,7 +170,7 @@ func TestReleaseRPCContextFailureEvidence(t *testing.T) {
 			}
 			rpc := &releaseRPCClient{endpoint: server.URL, client: client}
 			var result any
-			err := rpc.call(ctx, "state.list", map[string]any{"private": "private-parameter"}, &result)
+			err := rpc.call(ctx, "entity.list", map[string]any{"private": "private-parameter"}, &result)
 			if !errors.Is(err, wantCause) || calls.Load() != wantCalls {
 				t.Fatalf("mode=%s calls=%d cause=%v", mode, calls.Load(), err)
 			}
@@ -222,7 +222,7 @@ func TestGoldenFailureEvidenceSurvivesCollectorFailure(t *testing.T) {
 						}
 						envelope["result"] = result
 					}
-				case "state.list":
+				case "entity.list":
 					if !eventsFlushed.Load() {
 						t.Error("entity collection began before public event evidence was flushed")
 					}

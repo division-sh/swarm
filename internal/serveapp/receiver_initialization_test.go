@@ -174,7 +174,7 @@ func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRunt
 		t.Fatalf("persisted initialization=%#v, want %#v (raw %s)", got, want, raw)
 	}
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
+	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 	publicRaw, err := json.Marshal(want["values"])
 	if err != nil {
 		t.Fatal(err)

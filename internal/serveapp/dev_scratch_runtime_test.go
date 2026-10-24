@@ -138,7 +138,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	var runReadback map[string]any
 	requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": fork.ForkRunID}, &runReadback)
 	for method, params := range map[string]map[string]any{
-		"state.list":        {"run_id": fork.ForkRunID, "limit": 500},
+		"entity.list":       {"run_id": fork.ForkRunID, "limit": 500},
 		"event.list":        {"filter": map[string]any{"run_id": fork.ForkRunID}, "limit": 500},
 		"conversation.list": {"run_id": fork.ForkRunID, "limit": 500},
 	} {

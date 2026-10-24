@@ -260,7 +260,7 @@ func testSetupGatesParam(entity map[string]any, i int) (map[string]bool, error) 
 	for name, rawValue := range gates {
 		value, ok := rawValue.(bool)
 		if !ok {
-			return nil, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].state.%s", i, name), "reason": "must be boolean"})
+			return nil, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].gates.%s", i, name), "reason": "must be boolean"})
 		}
 		out[name] = value
 	}

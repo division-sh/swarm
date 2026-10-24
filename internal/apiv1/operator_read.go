@@ -1014,7 +1014,7 @@ func OperatorEntityHandlers(opts EntityHandlerOptions) map[string]MethodHandler 
 		return nil
 	}
 	return map[string]MethodHandler{
-		"state.list": func(ctx context.Context, req Request) (any, error) {
+		"entity.list": func(ctx context.Context, req Request) (any, error) {
 			reads, err := requireEntityReadStore(opts.Entities)
 			if err != nil {
 				return nil, err
@@ -1035,7 +1035,7 @@ func OperatorEntityHandlers(opts EntityHandlerOptions) map[string]MethodHandler 
 			}
 			return result, nil
 		},
-		"state.get": func(ctx context.Context, req Request) (any, error) {
+		"entity.get": func(ctx context.Context, req Request) (any, error) {
 			reads, err := requireEntityReadStore(opts.Entities)
 			if err != nil {
 				return nil, err
@@ -1060,7 +1060,7 @@ func OperatorEntityHandlers(opts EntityHandlerOptions) map[string]MethodHandler 
 			}
 			return entity, nil
 		},
-		"state.aggregate": func(ctx context.Context, req Request) (any, error) {
+		"entity.aggregate": func(ctx context.Context, req Request) (any, error) {
 			reads, err := requireEntityReadStore(opts.Entities)
 			if err != nil {
 				return nil, err

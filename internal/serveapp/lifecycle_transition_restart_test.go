@@ -155,7 +155,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var entity operatorread.OperatorEntityFull
-			requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
+			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 			if entity.Fields["result"] != "approved" {
 				t.Fatalf("ambient gate replaced frozen result: %#v", entity)
 			}
@@ -276,7 +276,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 					t.Fatalf("restart loop=%#v", closed)
 				}
 				var entity operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": receipt}, &entity)
+				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": receipt}, &entity)
 				if entity.Fields["revision_id"] != capRevision {
 					t.Fatalf("consumer=%#v", entity)
 				}

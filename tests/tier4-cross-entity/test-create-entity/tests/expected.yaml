@@ -1,5 +1,5 @@
 trigger:
-  event: state.create_requested
+  event: entity.create_requested
   payload:
     child_id: child-001
 
@@ -8,7 +8,7 @@ expected:
   handler_outcome: success
   entity_state: creating
   emitted_events:
-    - state.created
+    - entity.created
 
 conformance:
   disposition: retired

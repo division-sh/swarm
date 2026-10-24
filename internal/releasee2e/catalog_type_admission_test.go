@@ -150,7 +150,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 				t.Fatalf("public fan-out lost exact lexical key order: %v; events=%+v\n%s", keys, events, process.output.String())
 			}
 			var entity map[string]any
-			if err := process.rpc.call(ctx, "state.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
 			stateFields, ok := entity["fields"].(map[string]any)
@@ -172,7 +172,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 				t.Fatalf("restart source identity changed: %s != %s", got, hash)
 			}
 			entity = nil
-			if err := process.rpc.call(ctx, "state.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
 			after, _ := json.Marshal(entity)
@@ -320,7 +320,7 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 				t.Fatalf("alias template route lost exact acquisition/payload: %+v", routed)
 			}
 			var entity map[string]any
-			if err := process.rpc.call(ctx, "state.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatalf("alias template identity readback: %+v %v", entity, err)
 			}
 			summary, ok := entity["entity"].(map[string]any)
@@ -336,7 +336,7 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 				t.Fatalf("alias template restart: %v\n%s", err, process.output.String())
 			}
 			entity = nil
-			if err := process.rpc.call(ctx, "state.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
 			after, _ := json.Marshal(entity)

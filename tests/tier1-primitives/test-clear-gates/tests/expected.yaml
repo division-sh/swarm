@@ -1,5 +1,5 @@
 trigger:
-  event: state.clear_requested
+  event: gates.clear_requested
   payload:
   gates_before:
     g1_check: true
@@ -11,7 +11,7 @@ expected:
     g1_check: false
   entity_state: pending
   emitted_events:
-    - state.cleared
+    - gates.cleared
 
 conformance:
   disposition: runtime

@@ -4,12 +4,12 @@ setup:
   - as: entity
     type: test_entity
 steps:
-- publish: state.clear_requested
+- publish: gates.clear_requested
   payload: {}
 expect:
   events:
     include:
-    - state.cleared
+    - gates.cleared
   entities:
   - ref: entity
     current_state: pending

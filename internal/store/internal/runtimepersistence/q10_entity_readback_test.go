@@ -186,7 +186,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				}
 				return response.Result
 			}
-			importWire := readRPC("state.get", map[string]any{"run_id": runID, "entity_id": importID})
+			importWire := readRPC("entity.get", map[string]any{"run_id": runID, "entity_id": importID})
 			var summaryWire map[string]json.RawMessage
 			if err := json.Unmarshal(importWire["entity"], &summaryWire); err != nil {
 				t.Fatal(err)
@@ -201,7 +201,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 					t.Fatalf("public imported %s must be an explicit null: %s", key, importWire[key])
 				}
 			}
-			aggregateWire := readRPC("state.aggregate", map[string]any{"run_id": runID, "group_by": "current_state"})
+			aggregateWire := readRPC("entity.aggregate", map[string]any{"run_id": runID, "group_by": "current_state"})
 			if string(aggregateWire["absent_count"]) != "2" || string(aggregateWire["counts"]) != `{"unknown":1}` {
 				t.Fatalf("public stage aggregate fabricated an absence bucket: %v", aggregateWire)
 			}

@@ -232,7 +232,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				EntityID string `json:"entity_id"`
 			} `json:"entities"`
 		}
-		if err := process.rpc.call(ctx, "state.list", map[string]any{"run_id": runID, "type": "work"}, &list); err != nil {
+		if err := process.rpc.call(ctx, "entity.list", map[string]any{"run_id": runID, "type": "work"}, &list); err != nil {
 			t.Fatal(err)
 		}
 		if len(list.Entities) > 1 {
@@ -246,7 +246,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				Fields map[string]any `json:"fields"`
 			}
 			id := list.Entities[0].EntityID
-			if err := process.rpc.call(ctx, "state.get", map[string]any{"run_id": runID, "entity_id": id}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "entity.get", map[string]any{"run_id": runID, "entity_id": id}, &entity); err != nil {
 				t.Fatal(err)
 			}
 			last = entity
@@ -254,7 +254,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				var aggregate struct {
 					Counts map[string]int `json:"counts"`
 				}
-				if err := process.rpc.call(ctx, "state.aggregate", map[string]any{"run_id": runID, "type": "work", "group_by": "current_state"}, &aggregate); err != nil {
+				if err := process.rpc.call(ctx, "entity.aggregate", map[string]any{"run_id": runID, "type": "work", "group_by": "current_state"}, &aggregate); err != nil {
 					t.Fatal(err)
 				}
 				if !reflect.DeepEqual(aggregate.Counts, map[string]int{stage: 1}) {

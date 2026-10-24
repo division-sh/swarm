@@ -1,5 +1,5 @@
 test-node:
-  state.clear_requested:
+  gates.clear_requested:
     clear_gates: true
     emit:
-      event: state.cleared
+      event: gates.cleared

@@ -1,8 +1,8 @@
 test-node:
-  state.create_requested:
+  entity.create_requested:
     action: create_flow_instance
     template: child-flow
     instance_id_from: payload.child_id
     emit:
-      event: state.created
+      event: entity.created
     advances_to: creating

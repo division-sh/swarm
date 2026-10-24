@@ -1,5 +1,5 @@
 trigger:
-  event: state.clear_requested
+  event: gates.clear_requested
   payload:
   entity_fields_before:
     accumulated_count: 5
@@ -10,7 +10,7 @@ expected:
   handler_outcome: success
   entity_state: cleared
   emitted_events:
-    - state.cleared
+    - gates.cleared
 
 conformance:
   disposition: runtime
