@@ -244,16 +244,6 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				}{{runID, frozenSource, sourceDomain}, {firstID, firstHeader, firstDomain}} {
 					header, err := headers.LoadRunHeader(ctx, conservation.id)
 					if err != nil || !reflect.DeepEqual(header, conservation.header) {
-						after, readErr := storetest.ReadSelectedForkSourceDomain(ctx, selected, conservation.id)
-						prior := map[string]bool{}
-						for _, row := range conservation.domain["events"].Rows {
-							prior[row] = true
-						}
-						for _, row := range after["events"].Rows {
-							if !prior[row] {
-								t.Logf("source event added after settled snapshot: %s read_error=%v", row, readErr)
-							}
-						}
 						t.Fatalf("sibling/refork rewrote source lifecycle: before=%+v after=%+v err=%v", conservation.header, header, err)
 					}
 					domain, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, conservation.id)
