@@ -639,7 +639,8 @@ func TestConnectorPackImportApplicationSurvivesSemanticSourceWrappers(t *testing
 
 func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
 	explicit := providerConnectorScopedSource{
-		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
+		Source:     semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
+		flowScopes: []semanticview.FlowScope{{ID: "child", Path: "child"}},
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "github", "github.create_issue"),
 		},
@@ -678,6 +679,49 @@ func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *test
 	}
 	if !generationVisible {
 		t.Fatalf("connector generation hidden through overlay: %#v", subjects[0].Evidence)
+	}
+	const toolID = "github.create_issue"
+	capabilities := revalidated.SemanticCapabilities()
+	importSource, present := capabilities.ConnectorImportSource("child", toolID)
+	if !present {
+		t.Fatal("inherited tool lost its exact import source")
+	}
+	provenance, present := capabilities.ConnectorPackProvenance("child", toolID)
+	if !present {
+		t.Fatal("inherited tool lost its exact pack identity")
+	}
+	generation, present := capabilities.ConnectorGeneration("child", toolID)
+	if !present {
+		t.Fatal("inherited tool lost its generation")
+	}
+	for _, fault := range []string{"source", "identity", "hash", "generation_absent", "provenance_absent"} {
+		t.Run(fault, func(t *testing.T) {
+			child := connectorPackSource{Source: revalidated,
+				importedByFlowScope: map[string]map[string]runtimecontracts.ToolSchemaEntry{"child": {toolID: revalidated.ToolEntries()[toolID]}},
+				importSources:       map[string]semanticview.ConnectorImportSource{toolID: importSource},
+				importProvenance:    map[string]semanticview.ConnectorPackProvenance{toolID: provenance},
+				importedGeneration:  map[string]GenerationSurface{toolID: generation},
+			}
+			switch fault {
+			case "source":
+				child.importSources[toolID] = semanticview.MustConnectorImportSource("foreign/connector.yaml")
+			case "identity":
+				identity := provenance
+				identity.PackID = "foreign"
+				child.importProvenance[toolID] = identity
+			case "hash":
+				identity := provenance
+				identity.ManifestHash = "sha256:" + strings.Repeat("f", 64)
+				child.importProvenance[toolID] = identity
+			case "generation_absent":
+				child.importedGeneration = nil
+			case "provenance_absent":
+				child.importProvenance = nil
+			}
+			if subjects, err := CapabilitySubjects(context.Background(), child, CapabilityOptions{Registry: testPackRegistry(t)}); err == nil || !strings.Contains(err.Error(), "ambiguous flow credential scopes") || len(subjects) != 0 {
+				t.Fatalf("contradictory scoped evidence coalesced: subjects=%+v err=%v", subjects, err)
+			}
+		})
 	}
 }
 

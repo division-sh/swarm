@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +38,12 @@ func TestSelectedOperationReplayRetainsOriginalLatestCutBothStores(t *testing.T)
 				t.Fatalf("source advancement precondition failed: point=%+v err=%v", latest.ForkPoint, err)
 			}
 			replay := *request.ForkOperation
-			replay.OperationID, replay.TargetBundleHash = uuid.NewString(), "sha256:stale-loser-alias"
+			loser, _ := sourceartifactfixture.Rooted(t, "losing-selection", sourceartifactfixture.Artifact())
+			if loser.Admission().BundleHash() == replay.TargetBundleHash {
+				t.Fatal("losing selection must have distinct captured content")
+			}
+			replay.OperationID, replay.TargetBundleHash = uuid.NewString(), loser.Admission().BundleHash()
+			replay.TargetRootReference = loser.Admission().Reference()
 			request.ForkOperation, request.ExpectedBundleHash = &replay, replay.TargetBundleHash
 			result, err := ExecuteSelectedContractRunFork(ctx, request)
 			if err != nil || !result.Activation.Activated || result.Materialization.ForkRunID != materialized.ForkRunID ||

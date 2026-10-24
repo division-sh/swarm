@@ -73,28 +73,21 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
 		t.Fatalf("decode standing describe json: %v\n%s", err, stdout.String())
 	}
-	if len(view.Flows) != 2 || view.Flows[0].ID != "telegram-chat" || view.Flows[1].ID != "telegram-ingress" {
+	if len(view.Flows) != 1 || view.Flows[0].ID != "telegram-chat" {
 		t.Fatalf("standing describe flows = %#v", view.Flows)
 	}
-	var flow authoringview.FlowView
-	for _, candidate := range view.Flows {
-		if candidate.ID == "telegram-ingress" {
-			flow = candidate
-			break
-		}
+	if view.Root.Ingress == nil || view.Root.Ingress.Alias != filepath.Base(sourceRoot) || len(view.Root.Ingress.Providers) != 1 {
+		t.Fatalf("standing describe root = %#v", view.Root)
 	}
-	if flow.Ingress == nil || flow.Ingress.Alias != "chat" || len(flow.Ingress.Providers) != 1 {
-		t.Fatalf("standing describe flow = %#v", flow)
-	}
-	provider := flow.Ingress.Providers[0]
-	if provider.Provider != "telegram" || provider.SigningSecret != "webhook_signing.telegram" || provider.AdmissionKind != "pack-required" || provider.PackID != "" || provider.RequestAuthentication != "" {
+	provider := view.Root.Ingress.Providers[0]
+	if provider.Provider != "telegram" || provider.SigningSecret != "telegram.webhook_signing_secret" || provider.AdmissionKind != "pack" || provider.PackID != "telegram" || provider.RequestAuthentication != "TOKEN_EQUALITY" {
 		t.Fatalf("standing describe provider = %#v", provider)
 	}
 	if len(view.RoutingTopology.RootInputSources) != 1 {
 		t.Fatalf("standing root input sources = %#v", view.RoutingTopology.RootInputSources)
 	}
 	source := view.RoutingTopology.RootInputSources[0]
-	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != "chat" || source.Provider != "telegram" || source.Target.FlowPath != "telegram-ingress" || source.Admission.Kind != "pack-required" || source.Admission.PackID != "" {
+	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != filepath.Base(sourceRoot) || source.Provider != "telegram" || source.Target.FlowPath != "." || source.Admission.Kind != "pack" || source.Admission.PackID != "telegram" {
 		t.Fatalf("standing root input source = %#v", source)
 	}
 	for _, edge := range view.RoutingTopology.Edges {
@@ -122,7 +115,7 @@ func TestDescribeRoutesProjectsStandingIngressAsRootInputAdmission(t *testing.T)
 	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stdout=%s stderr=%s", code, humanOut.String(), humanErr.String())
 	}
-	for _, want := range []string{"root input sources:", "[standing_ingress] chat/telegram -> flow telegram-ingress admission=pack-required"} {
+	for _, want := range []string{"root input sources:", fmt.Sprintf("[standing_ingress] %s/telegram -> flow . admission=pack", filepath.Base(sourceRoot))} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("standing routes human output missing %q:\n%s", want, humanOut.String())
 		}

@@ -69,11 +69,7 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 	if err != nil {
 		return nil, err
 	}
-	projectPacks, err := packartifact.LoadProjectPackSet(root.Path())
-	if err != nil {
-		return nil, err
-	}
-	inventory, err := packartifact.NewEffectivePackInventory(base, projectPacks.Sources)
+	inventory, err := packartifact.NewEffectivePackInventory(base)
 	if err != nil {
 		return nil, err
 	}

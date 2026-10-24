@@ -183,9 +183,10 @@ func TestHistoricalPlanningContextRejectsConcurrentPrivateReaders(t *testing.T) 
 
 func TestHistoricalEvidenceReconstructionCannotAdmitOrEscape(t *testing.T) {
 	tx, _ := startSnapshotTransaction(t)
+	root := forkOperationTargetRoot(t)
 	run := runlifecycle.Snapshot{
 		RunID: eventtest.UUID("evidence-private-lifetime"), State: runlifecycle.StateRunning,
-		Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), StartedAt: time.Now().UTC(),
+		Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: root.BundleHash, RootReference: root, StartedAt: time.Now().UTC(),
 	}
 	base := context.Background()
 	ctx, done, err := beginHistoricalEvidenceRead(base, tx, run)

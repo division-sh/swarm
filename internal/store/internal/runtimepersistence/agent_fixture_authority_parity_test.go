@@ -488,6 +488,9 @@ func agentFixtureStaticRecord(t *testing.T, identity runtimeagentidentity.Identi
 func proveAgentFixtureMixedAuthorityRejection(t *testing.T, ctx context.Context, selected agentFixtureFlowStore) {
 	t.Helper()
 	staticIdentity := testAgentIdentity(t, "static-survivor", "global")
+	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: staticIdentity.RunID,
+	})
 	staticRecord := agentFixtureStaticRecord(t, staticIdentity)
 	if err := agentfixture.UpsertStatic(t, ctx, selected, staticRecord); err != nil {
 		t.Fatalf("seed static fixture survivor: %v", err)
@@ -615,7 +618,7 @@ func seedExactAgentFixtureFlowState(
 	}
 	revision = strings.TrimPrefix(revision, "sha256:")
 	runID := identity.RunID
-	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
+	ctx = requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	readinessPlan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{
 			TemplateID: "review", ScopeKey: "review", InstanceID: "fixture", InstancePath: identity.FlowInstance(),

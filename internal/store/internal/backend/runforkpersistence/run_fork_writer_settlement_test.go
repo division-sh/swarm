@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -146,7 +147,8 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 		t.Run(cut, func(t *testing.T) {
 			dsn, db, _ := testutil.StartEmptyPostgres(t)
 			s, probe, _ := selectedWriterProbeDatabase(t, dsn, db)
-			runs, lease := selectedClaimNativeRunOwner(t, s, db)
+			rooted, _ := sourceartifactfixture.Rooted(t, "selected-claim", sourceartifactfixture.Artifact())
+			runs, lease := selectedClaimNativeRunOwner(t, s, db, rooted)
 			// Minimal relational fixture; the existing selected-store matrix covers
 			// schema/admission parity. Here the real claim SQL and COMMIT are used.
 			if _, err := db.Exec(`
@@ -191,14 +193,14 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			setup := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), hash))
+			setup := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), hash)), source), rooted.Admission())
 			if _, err := runs.CreateRun(setup, runlifecycle.CreateRequest{
-				RunID: issued.SourceRunID, Source: source, Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
+				RunID: issued.SourceRunID, Source: source, RootAdmission: rooted.Admission(), Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
 			}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := runs.CreateRun(setup, runlifecycle.CreateRequest{
-				RunID: issued.ForkRunID, Source: source, Origin: origin, StartedAt: time.Now().UTC(),
+				RunID: issued.ForkRunID, Source: source, RootAdmission: rooted.Admission(), Origin: origin, StartedAt: time.Now().UTC(),
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -277,7 +279,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 
 // Only valid run/source setup is shared here. The prepared-execution rows remain
 // an explicit lower-storage claim/acknowledgment oracle, not issued runtime proof.
-func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner, observer *sql.DB) (*runstore.RunLifecyclePostgresOwner, *postgresbackend.AdvisoryLockLease) {
+func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner, observer *sql.DB, rooted sourceartifact.RootedSource) (*runstore.RunLifecyclePostgresOwner, *postgresbackend.AdvisoryLockLease) {
 	t.Helper()
 	// Keep the claim/ack oracle's one-connection writer unchanged. Its existing
 	// independent observer holds the real native process lease through cleanup.
@@ -301,12 +303,12 @@ func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner, o
 	var runPlans []schemastore.SchemaTableDDL
 	for _, plan := range plans {
 		switch plan.TableName {
-		case "runtime_store_metadata", "runtime_process_generation", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
+		case "runtime_store_metadata", "runtime_process_generation", "runs", "source_artifacts", "source_root_admissions", "author_activity_order", "author_activity_occurrences", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
 			runPlans = append(runPlans, plan)
 		}
 	}
-	if len(runPlans) != 9 {
-		t.Fatalf("native selected-claim run plans=%d, want 9", len(runPlans))
+	if len(runPlans) != 10 {
+		t.Fatalf("native selected-claim run plans=%d, want 10", len(runPlans))
 	}
 	schema, err := schemastore.NewPostgres(selected.backend)
 	if err != nil {
@@ -326,7 +328,7 @@ func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner, o
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := artifacts.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
+	if _, err := artifacts.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
 	runs, err := runstore.NewPostgres(selected.backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())

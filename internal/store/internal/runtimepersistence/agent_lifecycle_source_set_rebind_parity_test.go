@@ -66,7 +66,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			}
 			ctx := testAuthorActivityContext()
 			identity := testAgentIdentity(t, "removed-source-agent", "")
-			requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
+			ctx = requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 			record := runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "sonnet", Model: "regular",
@@ -162,7 +162,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					db = selected.backend.ConstructionHandle()
 				}
 				identity := testAgentIdentity(t, "census-drift-agent", "")
-				requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
+				ctx = requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 				seedTestAgentRow(t, ctx, db, postgres, identity, "active")
 				fields := testAgentIdentityStorageFields(t, identity)
 				identityArgs := []any{
@@ -838,7 +838,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "source-set-rebind-agent"
 	identity := testAgentIdentity(t, agentID, "global")
-	requireRunningRunForTest(t, ctx, store, identity.RunID, now)
+	ctx = requireRunningRunForTest(t, ctx, store, identity.RunID, now)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
