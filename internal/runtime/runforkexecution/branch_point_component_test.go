@@ -98,8 +98,17 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 	p := attachment.prepared
 	deliveries := p.owner.ports.busDurable.DeliveryLifecycle
 	parked := make(map[string]deliverylifecycle.Snapshot)
+	var inputs []committedSelectedInput
+	defer func() {
+		for _, input := range inputs {
+			if err := attachment.container.attachment.runtime.bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
 	if pending {
-		inputs, err := attachment.container.commitSelectedInputs()
+		var err error
+		inputs, err = attachment.container.commitSelectedInputs()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -114,9 +123,6 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 					t.Fatalf("selected input is not at the unacknowledged publication cut: %+v %v", snapshot, err)
 				}
 				parked[handoff.DeliveryID()] = snapshot
-			}
-			if err := attachment.container.attachment.runtime.bus.AbandonPreparedPublish(input.ctx, input.prepared); err != nil {
-				t.Fatal(err)
 			}
 		}
 		if len(parked) == 0 {
@@ -159,10 +165,6 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 	if err != nil || selectedEvidence.State != startupownership.GrantAdmitted {
 		t.Fatalf("selected grant was not admitted before self-release: %+v %v", selectedEvidence, err)
 	}
-	if err := p.retainedRuntime.manager.Shutdown(); err != nil {
-		t.Fatal(err)
-	}
-	p.retainedRuntime.manager = nil
 	activationRequest := runfork.RunForkSelectedContractExecutionActivateRequest{
 		LiveHandoff: true, InheritedSchedules: p.readiness, ForkOperation: p.forkOperation,
 		DataPins: attachment.materialized.DataPins, ExecutionSource: p.loadedSource.Source,
@@ -187,6 +189,7 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 		}
 	}
 	activationContext = startupownership.WithGenerationGrantEvidence(activationContext, evidence)
+	acknowledged := true
 	if pending {
 		activation, err := p.owner.ports.fork.ActivateRunForkForSelectedContractExecution(activationContext, activationRequest)
 		if err == nil || activation.Activated || !strings.Contains(err.Error(), "unparked or foreign continuations") {
@@ -195,11 +198,54 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 		if !reflect.DeepEqual(before, q1ComponentSnapshot(t, p.owner.ports.fork)) {
 			t.Fatal("transfer refusal failed to roll back executor closure, live selection or immutable ACK")
 		}
+		for len(inputs) > 0 {
+			input := inputs[0]
+			inputs = inputs[1:]
+			if err := attachment.container.dispatchCommittedInput(input); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for id := range parked {
+			actual, err := deliveries.Snapshot(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parked[id] = actual
+			acknowledged = acknowledged && !actual.ContinuationHandoffAt.IsZero()
+		}
+	}
+	if err := p.retainedRuntime.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	p.retainedRuntime.manager = nil
+	before = q1ComponentSnapshot(t, p.owner.ports.fork)
+	if !acknowledged {
+		if activation, err := p.owner.ports.fork.ActivateRunForkForSelectedContractExecution(activationContext, activationRequest); err == nil || activation.Activated || !strings.Contains(err.Error(), "unparked or foreign continuations") {
+			t.Fatalf("nil selected dispatch was mistaken for a pipeline ACK: %+v %v", activation, err)
+		}
+		if !reflect.DeepEqual(before, q1ComponentSnapshot(t, p.owner.ports.fork)) {
+			t.Fatal("pending pipeline allowed a partial live handoff")
+		}
 		return
 	}
 	activation, err := p.owner.ports.fork.ActivateRunForkForSelectedContractExecution(activationContext, activationRequest)
 	if err != nil || !activation.Activated || activation.ForkRunStatus != runfork.RunForkLiveStatus || activation.SourceRunStatus != string(runlifecycle.StatePaused) || activation.SourceFrozen {
 		t.Fatalf("exact selected-to-live handoff failed: %+v err=%v", activation, err)
+	}
+	for id, prior := range parked {
+		got, err := deliveries.Snapshot(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prior.Status == deliverylifecycle.StatusPending || prior.Status == deliverylifecycle.StatusFailed {
+			if got.Authority.Kind() != deliverylifecycle.ExecutionAuthorityNormalRuntime || got.Authority.ExecutionID() != evidence.GrantID || got.Authority.Generation() != evidence.RuntimeGeneration {
+				t.Fatalf("parked continuation lacks its exact ordinary generation: %+v", got)
+			}
+			prior.Authority = got.Authority
+		}
+		if !reflect.DeepEqual(prior, got) {
+			t.Fatalf("live handoff rewrote route, claim or terminal evidence: before=%+v after=%+v", prior, got)
+		}
 	}
 	actual, err := ordinary.InspectRunExecutionOwnership(ctx, attachment.materialized.ForkRunID)
 	if err != nil || actual != manager.RunExecutionOwned {
@@ -223,6 +269,9 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 		t.Fatal(err)
 	}
 	attachment.closed = true
+	if pending {
+		return
+	}
 
 	secondRequest := request
 	secondOperation := *request.ForkOperation

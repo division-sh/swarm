@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
@@ -95,6 +96,13 @@ func commitSelectedLiveHandoffTx(ctx context.Context, tx *sql.Tx, attempt *mutat
 	}
 	if err := deliveries.TransferSelectedLiveAuthority(ctx, attempt, authority, successor); err != nil {
 		return "", err
+	}
+	unfinished, err := pipelinepersistence.UnacknowledgedRunPipelineCountTx(ctx, tx, evidence.lineage.ForkRunID)
+	if err != nil {
+		return "", err
+	}
+	if unfinished != 0 {
+		return "", errors.New("live handoff awaits canonical pipeline acknowledgement")
 	}
 	return sourceStatus, nil
 }

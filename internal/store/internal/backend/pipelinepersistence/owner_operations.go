@@ -605,13 +605,24 @@ func SelectedDeploymentPipelineDrainCountsTx(ctx context.Context, tx *sql.Tx, ru
 	if err != nil {
 		return 0, 0, fmt.Errorf("read selected deployment event scopes: %w", err)
 	}
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes s
-		LEFT JOIN event_receipts r ON r.event_id=s.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
-		WHERE s.run_id=$1 AND COALESCE(r.outcome,'')<>'success'`, runID).Scan(&unfinishedPipeline)
-	if err != nil {
-		return 0, 0, fmt.Errorf("read selected deployment pipeline outcomes: %w", err)
+	unfinishedPipeline, err = UnacknowledgedRunPipelineCountTx(ctx, tx, runID)
+	return missingScope, unfinishedPipeline, err
+}
+
+// UnacknowledgedRunPipelineCountTx observes publication settlement, not receiver
+// terminality. A delivered receiver alone cannot acknowledge its event pipeline.
+func UnacknowledgedRunPipelineCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	if tx == nil || runID == "" {
+		return 0, fmt.Errorf("pipeline acknowledgement observation requires transaction and run")
 	}
-	return missingScope, unfinishedPipeline, nil
+	var unfinished int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes s
+		LEFT JOIN event_receipts r ON r.event_id=s.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
+		WHERE s.run_id=$1 AND COALESCE(r.outcome,'')<>'success'`, runID).Scan(&unfinished)
+	if err != nil {
+		return 0, fmt.Errorf("read run pipeline acknowledgements: %w", err)
+	}
+	return unfinished, nil
 }
 
 func (s *PipelinePostgresOwner) postgresPipelineClaims() *postgresPipelineClaimRegistry {
