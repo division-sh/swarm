@@ -42,6 +42,13 @@ func ProcessCoordinatesCurrentTx(ctx context.Context, tx *sql.Tx, expected proce
 	if err := expected.Validate(); err != nil {
 		return false, err
 	}
+	if ctx != nil && ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if admission := exactNativeMutationAdmission(ctx, tx, sqlite); admission != nil &&
+		admission.original.ProcessAuthority().LeaseStamp().Coordinates() == expected {
+		return true, nil
+	}
 	current, err := ReadProcessGenerationTx(ctx, tx, sqlite)
 	return err == nil && current.Generation != 0 && current.Coordinates() == expected, err
 }
