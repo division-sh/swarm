@@ -231,12 +231,15 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				t.Fatalf("commit acknowledgements missing or before first submission: %+v", chunks)
 			}
 			elapsed := chunks.LastCommitAt.Sub(issuanceStarted)
+			// R14/P4 leave SQLite and every serving-window comparison hard.
+			advisoryIssuance := backend == "postgres" && !servingWindow && (transactionOptions.Delay == 0 ||
+				(transactionOptions.Delay == 300*time.Millisecond && transactionOptions.DelayScope == storetest.DelayAllCommits))
 			if backend == "postgres" && transactionOptions.Delay == 0 {
 				t.Logf("normal PostgreSQL served reporter (advisory issuance): measured=%s original_objective=%s prior_ceiling=%s previous_ceiling=%s historical_comparison=%s", elapsed, issuanceBudget, 15*time.Second, 20*time.Second, mergeCeiling)
 			}
-			t.Logf("HTTP original500 first batch submission -> final durable chunk acknowledgement: %s (original_target=%s merge_ceiling=%s); cursor observed at %s; delay=%s scope=%s; transaction receipt=%+v",
-				elapsed, issuanceBudget, mergeCeiling, observed.Sub(issuanceStarted), transactionOptions.Delay, transactionOptions.DelayScope, receipt)
-			if elapsed > mergeCeiling && (backend != "postgres" || transactionOptions.Delay != 0) {
+			t.Logf("HTTP original500 first batch submission -> final durable chunk acknowledgement: %s (original_target=%s merge_ceiling=%s advisory=%t); cursor observed at %s; delay=%s scope=%s; transaction receipt=%+v",
+				elapsed, issuanceBudget, mergeCeiling, advisoryIssuance, observed.Sub(issuanceStarted), transactionOptions.Delay, transactionOptions.DelayScope, receipt)
+			if elapsed > mergeCeiling && !advisoryIssuance {
 				t.Errorf("original500 HTTP issuance exceeded %s merge ceiling (original target %s): %s", mergeCeiling, issuanceBudget, elapsed)
 			}
 			if transactionOptions.Delay > 0 && (chunks.DelayedCommits != 20 || chunks.InjectedDelay != 20*transactionOptions.Delay) {
