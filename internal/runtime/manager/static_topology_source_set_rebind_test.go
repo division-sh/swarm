@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -43,7 +44,14 @@ func newSourceSetTestManager(t *testing.T, source semanticview.Source) (*AgentMa
 
 func removedSourceSetCoordinate(t *testing.T) runtimeagenttopology.SourceCoordinate {
 	t.Helper()
-	rooted, _ := sourceartifactfixture.Rooted(t, "removed", sourceartifactfixture.New("schema.yaml", []byte("{}\n")))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "removed", artifact)
 	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 	if err != nil {
 		t.Fatal(err)
