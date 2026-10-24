@@ -107,7 +107,7 @@ func applyMaterializedEngineStateMutationForTest(
 func TestApplyEngineStateMutationUsesOnlyCanonicalEntityFields(t *testing.T) {
 	source := testRootEntityContractSource("root", "test_entity")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["test_entity"].Fields["research_context"] = runtimecontracts.EntityFieldDecl{Type: "json"}
+	bundle.RootEntities["state"].Fields["research_context"] = runtimecontracts.EntityFieldDecl{Type: "json"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"research_context": map[string]any{"summary": "done"}},
 		StateBuckets: map[string]any{},
@@ -207,7 +207,7 @@ func authoredControlCollisionSource() semanticview.Source {
 	source := testRootEntityContractSource("root", "test_entity")
 	bundle, _ := semanticview.Bundle(source)
 	for _, name := range []string{"business_status", "parent_flow_id", "parent_flow_instance", "parent_entity_id"} {
-		bundle.RootEntities["test_entity"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "text"}
+		bundle.RootEntities["state"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	}
 	return source
 }
@@ -368,8 +368,8 @@ func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
 func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(t *testing.T) {
 	source := testRootEntityContractSource("root", "test_entity")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["test_entity"].Fields["composite_score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
-	bundle.RootEntities["test_entity"].Fields["scoring_rubric"] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	bundle.RootEntities["state"].Fields["composite_score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	bundle.RootEntities["state"].Fields["scoring_rubric"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"composite_score": 0},
 		Gates:        map[string]bool{"g_ready": true},
@@ -1377,21 +1377,21 @@ func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *te
 		"state.yaml":  "id: text\nstatus: text\n",
 	})
 	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{
-		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "items", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},
+		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "state", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},
 	}}
 	reader := pipelineEngineEntityCollectionReader{coordinator: &PipelineCoordinator{
 		module:        &pipelineFixtureWorkflowModule{source: source},
 		workflowStore: &workflowInstanceStore{entityCollectionReader: persisted},
 	}}
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
-	rows, err := reader.QueryEntityCollection(ctx, runID, ".", "items")
+	rows, err := reader.QueryEntityCollection(ctx, runID, ".", "state")
 	if err != nil {
 		t.Fatalf("QueryEntityCollection: %v", err)
 	}
 	if persisted.calls != 1 || len(rows) != 1 || rows[0]["id"] != "a" || rows[0]["status"] != "queued" {
 		t.Fatalf("rows = %#v", rows)
 	}
-	if _, err := reader.QueryEntityCollection(ctx, "", ".", "items"); err == nil || persisted.calls != 1 {
+	if _, err := reader.QueryEntityCollection(ctx, "", ".", "state"); err == nil || persisted.calls != 1 {
 		t.Fatalf("missing explicit run read persistence: error=%v calls=%d", err, persisted.calls)
 	}
 	if _, survives := rows[0]["undeclared"]; survives {

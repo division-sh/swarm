@@ -359,7 +359,7 @@ func mustEncodeJSON(t *testing.T, value any) []byte {
 
 func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"composite": {Type: "number"}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"composite": {Type: "number"}}}},
 	})
 	repo := &persistentStateRepo{
 		found: true,
@@ -428,7 +428,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 
 func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T) {
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.completed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
 			"item_id": {Type: "text"}, "marker": {Type: "text"},
 		})},

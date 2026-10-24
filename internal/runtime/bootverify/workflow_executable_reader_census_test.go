@@ -234,7 +234,7 @@ func canonicalFanOutExecutableReaders(t testing.TB, handler runtimecontracts.Sys
 	field := strings.TrimPrefix(strings.TrimSpace(handler.FanOut.ItemsFrom), "state.")
 	if field != handler.FanOut.ItemsFrom {
 		bundle.RootEntities = runtimecontracts.EntityContractsDocument{
-			"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{field: {Type: "[LineItem]"}}},
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{field: {Type: "[LineItem]"}}},
 		}
 	}
 	node := bundle.Nodes["dispatcher"]

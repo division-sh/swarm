@@ -62,7 +62,7 @@ func TestA2IndependentRetainedJoinProducerAdmitsMembershipAndDeadline(t *testing
 			if handler.Loop == nil || handler.Loop.Admit != "revision" || handler.Loop.From != "working" {
 				t.Fatalf("generated join lost captured loop owner: %#v", handler.Loop)
 			}
-			if _, found := bundle.RootEntities["work"].Fields["window"]; !found {
+			if _, found := bundle.RootEntities["state"].Fields["window"]; !found {
 				t.Fatal("business generation readback field was mistaken for join grammar")
 			}
 			wantOutcomeEvent := "join.observed"

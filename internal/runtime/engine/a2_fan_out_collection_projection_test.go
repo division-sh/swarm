@@ -38,7 +38,7 @@ func a2FanOutCollectionFixture(t *testing.T, sourcePath, typ string, payload, st
 		FlowTree:     rc.FlowTree{Root: root, ByID: map[string]*rc.FlowContractView{".": root}, ByPath: map[string]*rc.FlowContractView{".": root}},
 		Nodes:        map[string]rc.SystemNodeContract{"scatter": {EventHandlers: map[string]rc.SystemNodeEventHandler{"batch.ready": handler}}},
 		Semantics:    rc.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]rc.SystemNodeEventHandler{"scatter": {"batch.ready": handler}}},
-		RootEntities: rc.EntityContractsDocument{"subject": {Fields: map[string]rc.EntityFieldDecl{"items": {Type: typ}}}},
+		RootEntities: rc.EntityContractsDocument{"state": {Fields: map[string]rc.EntityFieldDecl{"items": {Type: typ}}}},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{Source: fanOutSourceWithBundleIdentity(t, bundle), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, PayloadShaper: stubPayloadShaper{}}, nil)
 	if err != nil {

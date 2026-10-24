@@ -1,7 +1,4 @@
 delivery-node:
-  state_table: delivery_node_state
-  gate_state:
-    delivery_ready: gate set when delivery is ready
   timers:
     - event: timer.item.timeout
       delay: 30m
@@ -9,10 +6,14 @@ delivery-node:
       cancel_on: state:completed
       recurring: false
   item.completed:
-    sets_gate: delivery_ready
-    clear_gates:
-      - intake_ready
-      - score_ready
+    data_accumulation:
+      writes:
+        - target_field: delivery_ready
+          value: true
+        - target_field: intake_ready
+          value: false
+        - target_field: score_ready
+          value: false
   timer.item.timeout:
     advances_to: completed
     emit:

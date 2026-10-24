@@ -75,7 +75,7 @@ func TestSharedRefinementBoundPresenceMatrix(t *testing.T) {
 							case "types":
 								r = bundle.RootTypes.Types["Probe"].Fields["value"].Refinements
 							case "entities":
-								r = bundle.RootEntities["probe"].Fields["value"].Refinements
+								r = bundle.RootEntities["state"].Fields["value"].Refinements
 							case "events":
 								r = bundle.Events["probe.ready"].Payload.Properties["value"].Refinements
 							}

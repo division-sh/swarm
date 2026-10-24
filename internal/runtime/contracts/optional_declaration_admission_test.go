@@ -30,7 +30,7 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			},
 		},
 		{
-			name: "entities", fileName: "state.yaml", valid: "item: {}\n", merged: "<<: &declarations\n  item: {}\n", blank: "\"\": {}\n", collide: "item: {}\n\" item \": {}\n",
+			name: "entities", fileName: "state.yaml", valid: "item: text\n", merged: "<<: &declarations\n  item: text\n", blank: "\"\": text\n", collide: "item: text\n\" item \": text\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalEntityDeclarations(path)
 				return len(value), err
@@ -193,7 +193,7 @@ func assertMergedDeclarationIdentity(t *testing.T, role, path string) {
 		}
 	case "entities":
 		value, err := loadOptionalEntityDeclarations(path)
-		_, hasDeclaration := value["item"]
+		_, hasDeclaration := value[stateEntityType].Fields["item"]
 		_, hasPseudoKey := value["<<"]
 		if err != nil || !hasDeclaration || hasPseudoKey {
 			t.Fatalf("merged entities = %#v, %v", value, err)

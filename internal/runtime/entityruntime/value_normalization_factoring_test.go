@@ -268,7 +268,7 @@ func TestEntityValueFactoringProjectionAndCloning(t *testing.T) {
 	if declared["value"].(map[string]any)["nested"].([]any)[0] != "original" {
 		t.Fatal("declared projection retains input")
 	}
-	for _, source := range []semanticview.Source{nil, semanticview.Wrap(&c.WorkflowContractBundle{RootEntities: c.EntityContractsDocument{"item": contract.Entity}})} {
+	for _, source := range []semanticview.Source{nil, semanticview.Wrap(&c.WorkflowContractBundle{RootEntities: c.EntityContractsDocument{"state": contract.Entity}})} {
 		got, err := NormalizeMetadataForFlow(source, "", input)
 		if err != nil || got["run_id"] != "retained" {
 			t.Fatalf("metadata projection: %#v %v", got, err)

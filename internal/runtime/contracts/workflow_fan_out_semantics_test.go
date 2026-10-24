@@ -40,7 +40,7 @@ func TestResolveHandlerCollectionItemTypeOwnsDirectAndIntermediateSources(t *tes
 			}},
 		}},
 		RootEntities: EntityContractsDocument{
-			"work_state": {Fields: map[string]EntityFieldDecl{"items": {Type: "[WorkItem]"}}},
+			"state": {Fields: map[string]EntityFieldDecl{"items": {Type: "[WorkItem]"}}},
 		},
 		Events: map[string]EventCatalogEntry{
 			"work.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[WorkItem]"}}, Required: []string{"items"}}},
@@ -294,7 +294,7 @@ func collectionSemanticsTestBundle() *WorkflowContractBundle {
 			"OtherItem": {Fields: map[string]TypeFieldSpec{"value": {Type: "integer"}}},
 		}},
 		RootEntities: EntityContractsDocument{
-			"items": {Fields: map[string]EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
+			"state": {Fields: map[string]EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
 		},
 		Events: map[string]EventCatalogEntry{
 			"work.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[WorkItem]"}, "other_items": {Type: "[OtherItem]"}}, Required: []string{"items", "other_items"}}},

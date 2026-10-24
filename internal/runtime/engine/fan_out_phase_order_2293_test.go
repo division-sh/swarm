@@ -40,7 +40,7 @@ func Test2293FanOutAssignmentBoundariesMatchExecution(t *testing.T) {
 			}
 			bundle, _ := semanticview.Bundle(executor.deps.Source)
 			for _, name := range []string{"early", "late"} {
-				bundle.RootEntities["subject"].Fields[name] = rc.EntityFieldDecl{Type: "boolean", IsOptional: true}
+				bundle.RootEntities["state"].Fields[name] = rc.EntityFieldDecl{Type: "boolean", IsOptional: true}
 			}
 			fan := func() *rc.FanOutSpec {
 				return &rc.FanOutSpec{ItemsFrom: "payload.items", As: "key", Emit: rc.EmitSpec{Event: "item.ready"}}
@@ -96,9 +96,9 @@ func Test2293HandlerFanOutContinuesThroughSelectionAndEffects(t *testing.T) {
 					}
 					bundle, _ := semanticview.Bundle(executor.deps.Source)
 					bundle.Tools = sourceWithActivityTool().ToolEntries()
-					entity := bundle.RootEntities["subject"]
+					entity := bundle.RootEntities["state"]
 					entity.Fields["selected"] = rc.EntityFieldDecl{Type: "boolean"}
-					bundle.RootEntities["subject"] = entity
+					bundle.RootEntities["state"] = entity
 					executor.deps.Source = sourceWithFixtureStages(executor.deps.Source, ".", "pending", "pending", "handler_stage", "selected_stage")
 					executor.evaluator = contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 						"state.selected": func(base BaseContext) (bool, error) {

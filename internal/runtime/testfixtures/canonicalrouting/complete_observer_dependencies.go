@@ -22,7 +22,7 @@ stages:
   done: {final: true}
 outputs:
   - work.ready
-`, "work.ready:\n  item_id: text\n", "producer_state:\n  item_id: {type: text}\n", "")
+`, "work.ready:\n  item_id: text\n", "item_id: text\n", "")
 	writeLegacyInstanceFlow(t, root, "other", `name: other
 instance: item_id
 stages:
@@ -30,7 +30,7 @@ stages:
   done: {final: true}
 outputs:
   - other.ready
-`, "other.ready:\n  item_id: text\n", "other_state:\n  item_id: {type: text}\n", "")
+`, "other.ready:\n  item_id: text\n", "item_id: text\n", "")
 	writeLegacyInstanceFlow(t, root, "observer", `name: observer
 instance: item_id
 stages:
@@ -39,7 +39,7 @@ stages:
 inputs:
   - work.ready
   - other.ready
-`, "", "observer_state:\n  item_id: {type: text}\n", `observe:
+`, "", "item_id: text\n", `observe:
   {}
 `)
 	return root

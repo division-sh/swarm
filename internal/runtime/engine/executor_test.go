@@ -126,7 +126,7 @@ func fanOutEntitySource(t testing.TB) semanticview.Source {
 	return fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test"},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 				"items": {Type: "[text]"}, "rule_count": {Type: "integer"},
 			}},
 		},
@@ -521,13 +521,13 @@ func sourceWithPolicy(flowID string, values map[string]any) semanticview.Source 
 func sourceWithPolicyEntity(flowID string, values map[string]any, fields map[string]runtimecontracts.EntityFieldDecl) semanticview.Source {
 	source := sourceWithPolicy(flowID, values)
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"subject": {Fields: fields}}
+	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"state": {Fields: fields}}
 	return source
 }
 
 func rootHandlerOrderSource(fields map[string]runtimecontracts.EntityFieldDecl, event runtimecontracts.EventCatalogEntry) semanticview.Source {
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: fields}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: fields}},
 		Events:       map[string]runtimecontracts.EventCatalogEntry{"task.completed": event},
 	})
 	return sourceWithFixtureStages(source, ".", "pending", "pending")
@@ -565,7 +565,7 @@ func stubSourceWithRootEntityContract() semanticview.Source {
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"analysis":  {Type: "Analysis"},
 					"verticals": {Type: "map[text]VerticalState"},
@@ -1249,7 +1249,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 		"composite_score": 0, "dimensions_requested": []any{"build_complexity"},
 	}, nil, nil)
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 			"composite_score": {Type: "integer"}, "dimensions_requested": {Type: "[text]"},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -1339,7 +1339,7 @@ func accumulatorProjectionTestSource(t testing.TB) semanticview.Source {
 			"projection": {Value: map[string]any{"default_confidence": "medium"}},
 		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"vertical": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"handler_marker": {Type: "text"},
 					"rule_marker":    {Type: "text"},
@@ -1969,7 +1969,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "operating"},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"product": {Fields: map[string]runtimecontracts.EntityFieldDecl{"component_count": {Type: "integer"}}},
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"component_count": {Type: "integer"}}},
 		},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -3554,7 +3554,7 @@ func numericProjectionSource() semanticview.Source {
 	source := sourceWithFixtureStages(mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
 		RootTypes:    runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{"NumericItem": item}},
 		Events:       map[string]runtimecontracts.EventCatalogEntry{"items.ready": entry, "scores.ready": entry},
-		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"matches": {Type: "[NumericItem]"}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"matches": {Type: "[NumericItem]"}}}},
 	}), ".", "pending", "pending", "ready")
 	bundle, _ := semanticview.Bundle(source)
 	bundle.Semantics.StageTopologies["."] = runtimecontracts.BuildWorkflowStageTopology(".", "pending", []string{"pending", "ready"}, nil, nil, nil, nil)
@@ -3766,7 +3766,7 @@ func collectionExecutionSource() semanticview.Source {
 			}},
 		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"items": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"work.received": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[WorkItem]"}}),
@@ -3777,7 +3777,7 @@ func collectionExecutionSource() semanticview.Source {
 func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 	source := sourceWithPolicy(".", map[string]any{"score": 6})
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"score": {Type: "integer"}, "query_rows": {Type: "[ScoredItem]"}}}}
+	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"score": {Type: "integer"}, "query_rows": {Type: "[ScoredItem]"}}}}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
@@ -3921,7 +3921,7 @@ func entityCollectionExpressionSource() semanticview.Source {
 			"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
 		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"work_state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 				"items":    {Type: "[ScoredItem]"},
 				"filtered": {Type: "[ScoredItem]"},
 			}},
@@ -4394,7 +4394,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 func emitFromExecutorSource() semanticview.Source {
 	return mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"account": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"account_id": {Type: "string"},
 					"bucket":     {Type: "string"},
@@ -5173,7 +5173,7 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 			}},
 		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"threshold": {Type: "integer"}}},
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"threshold": {Type: "integer"}}},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 			"numeric-fan-out-node": {"batch.ready": qualified},
@@ -5281,7 +5281,7 @@ func TestExecutor_FanOutCountPreservesRuleThenTopLevelWriteSnapshots(t *testing.
 	source := fanOutEntitySource(t)
 	bundle, _ := semanticview.Bundle(source)
 	for _, name := range []string{"rule_count", "top_count", "top_saw_rule"} {
-		bundle.RootEntities["subject"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+		bundle.RootEntities["state"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "integer"}
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
@@ -5650,7 +5650,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 		}),
 	})
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 		"name": {Type: "text"}, "scoring_rubric": {Type: "text"}, "dimensions_requested": {Type: "[text]"},
 	}}}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -6767,7 +6767,7 @@ func TestExecutor_PrivateResetPreservesBusinessFields(t *testing.T) {
 	for name, field := range map[string]runtimecontracts.EntityFieldDecl{
 		"dedup_key": {Type: "text"}, "accumulated_total": {Type: "integer"}, "received_items": {Type: "[text]"},
 	} {
-		bundle.RootEntities["subject"].Fields[name] = field
+		bundle.RootEntities["state"].Fields[name] = field
 	}
 	node := testRootExecutableNode(t, "node-1")
 	initial := testStateSnapshot("pending", map[string]any{

@@ -95,7 +95,7 @@ inputs:
 outputs:
   - item.ready
 `,
-		"state.yaml": "items: {\"before\":[999]}\n",
+		"state.yaml": "before: [999]\n",
 		"events.yaml": `seed:
 batch.ready:
   items: map[text][integer]

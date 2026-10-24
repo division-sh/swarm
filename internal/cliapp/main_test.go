@@ -4090,7 +4090,7 @@ func TestExecutionValidation_CreateEntityAccumulatePreemptsDynamicComputeWarning
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	bundle.RootEntities = runtimecontracts.EntityContractsDocument{
-		"tracking": {
+		"state": {
 			Fields: map[string]runtimecontracts.EntityFieldDecl{
 				"expected_count":  {Type: "integer", Initial: 1},
 				"composite_score": {Type: "numeric"},
@@ -4132,7 +4132,7 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Platform: runtimecontracts.PlatformSpecDocument{},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"scan": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"scan_id":   {Type: "string"},
 					"geography": {Type: "string"},

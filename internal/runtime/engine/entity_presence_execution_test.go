@@ -38,7 +38,7 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 				}
 				bundle := &rc.WorkflowContractBundle{
 					RootTypes:    rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}},
-					RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}, "captured": {Type: "text"}}}},
+					RootEntities: rc.EntityContractsDocument{"state": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}, "captured": {Type: "text"}}}},
 					Events: map[string]rc.EventCatalogEntry{
 						"work.received": {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"items": {Type: "[text]"}}, Required: []string{"items"}}},
 						"work.result":   {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"note": {Type: "text"}}, Required: []string{"note"}}},

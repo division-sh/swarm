@@ -1474,7 +1474,7 @@ func TestRun_MapsDataAccumulationSourcePayloadMismatchToNamedError(t *testing.T)
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"score": {Type: "integer"},
 				},
@@ -1512,7 +1512,7 @@ func TestRun_MapsEmptyDataAccumulationSourcePayloadSchemaToNamedError(t *testing
 			"item.received": {},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"score": {Type: "integer"},
 				},
@@ -1556,7 +1556,7 @@ func TestRun_AllowsDeclaredDataAccumulationSourcePayloadField(t *testing.T) {
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"score": {Type: "integer"},
 				},
@@ -1597,7 +1597,7 @@ func TestRun_MapsUndeclaredNestedEntityWriteTargetToEntityWriteTargetComplianceE
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"analysis": {Type: "Analysis"},
 				},
@@ -2275,7 +2275,7 @@ func TestRunCollectionItemConditionsUseSharedSourceOwner(t *testing.T) {
 					"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
 				}},
 				RootEntities: runtimecontracts.EntityContractsDocument{
-					"work_state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"items": {Type: "[ScoredItem]"}}},
+					"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"items": {Type: "[ScoredItem]"}}},
 				},
 				Events: map[string]runtimecontracts.EventCatalogEntry{
 					"work.received": {Payload: runtimecontracts.EventPayloadSpec{
@@ -2342,7 +2342,7 @@ func TestRun_RejectsItemNamespaceOutsideFilterConditions(t *testing.T) {
 func TestRun_RejectsAccumulatedNamespaceInDataAccumulationExpressions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"tracking": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"expected_count": {Type: "integer"},
 				},
@@ -4592,7 +4592,7 @@ treasury-node:
 func TestRun_RejectsPlatformEntityDataAccumulationWriteTarget(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"business": {Type: "text"},
 				},
@@ -4625,7 +4625,7 @@ func TestRun_RejectsPlatformEntityDataAccumulationWriteTarget(t *testing.T) {
 func TestRun_RejectsPlatformEntityStoreAsWriteTarget(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"business": {Type: "text"},
 				},
@@ -5958,7 +5958,7 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Platform: runtimecontracts.PlatformSpecDocument{},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"scan": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"scan_id":   {Type: "string"},
 					"geography": {Type: "string"},

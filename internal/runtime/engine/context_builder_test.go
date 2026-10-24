@@ -194,7 +194,7 @@ func TestBuildBaseContext_PropagatesPresentEntityValidationFailure(t *testing.T)
 	input := ContextBuilderInput{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			RootEntities: runtimecontracts.EntityContractsDocument{
-				"ticket": {
+				"state": {
 					Fields: map[string]runtimecontracts.EntityFieldDecl{
 						"status": {Type: "order_status"},
 					},

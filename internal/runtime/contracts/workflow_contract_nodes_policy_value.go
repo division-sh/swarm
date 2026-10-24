@@ -95,7 +95,7 @@ func projectNodePolicyInputsValue(value yamlsource.Value, label string) (map[str
 			return nil, nil, err
 		}
 		ref = strings.TrimSpace(ref)
-		if err := validatePolicySheetPath(ref, label+"."+name, []string{"payload", "entity", "event", "computed"}); err != nil {
+		if err := validatePolicySheetPath(ref, label+"."+name, []string{"payload", "state", "instance", "event", "computed"}); err != nil {
 			return nil, nil, err
 		}
 		out[name], parsed[name] = ref, paths.Parse(ref)

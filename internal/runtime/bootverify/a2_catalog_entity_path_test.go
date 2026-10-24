@@ -76,7 +76,7 @@ func TestA2CatalogEntityPathRejectsMissingDeclaredTypes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := a2CatalogPathBundle()
-			contract := bundle.RootEntities["work"]
+			contract := bundle.RootEntities["state"]
 			contract.Fields["name"] = runtimecontracts.EntityFieldDecl{Type: tc.typeRef}
 			bundle.RootTypes.Scalars["Empty"] = runtimecontracts.ScalarTypeDecl{}
 			bundle.RootTypes.Scalars["Cycle"] = runtimecontracts.ScalarTypeDecl{Base: "Cycle"}
@@ -167,7 +167,7 @@ func TestA2CatalogEntityPathConsumersRetainMapOwner(t *testing.T) {
 func a2CatalogPathBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"work": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 				"name":           {Type: "text"},
 				"total":          {Type: "integer"},
 				"score":          {Type: "Score"},

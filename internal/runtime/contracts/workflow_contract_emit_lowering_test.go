@@ -159,7 +159,7 @@ func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 	bundle := &WorkflowContractBundle{
 		RootSchema: &rootSchema,
 		RootEntities: EntityContractsDocument{
-			"account": {
+			"state": {
 				Fields: map[string]EntityFieldDecl{
 					"account_id": {Type: "string"},
 					"bucket":     {Type: "string"},

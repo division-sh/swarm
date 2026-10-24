@@ -167,7 +167,7 @@ func containedStateOperationBundle(write runtimecontracts.WorkflowDataWrite) *ru
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"verticals": {Type: "map[text]VerticalState"},
 				},

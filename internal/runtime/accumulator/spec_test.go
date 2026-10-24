@@ -16,7 +16,7 @@ func TestA2AccumulatorKeyRequiresRequiredCatalogScalarField(t *testing.T) {
 			"BusinessRecord": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}, "number": {Type: "integer"}}},
 			"CollectedItem":  {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}, "number": {Type: "integer"}, "record": {Type: "BusinessRecord"}, "event_id": {Type: "text"}}},
 		}},
-		RootEntities: runtimecontracts.EntityContractsDocument{"work": {Fields: map[string]runtimecontracts.EntityFieldDecl{"items": {Type: "[CollectedItem]", IsOptional: true}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"items": {Type: "[CollectedItem]", IsOptional: true}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"item.received": {Payload: runtimecontracts.EventPayloadSpec{Type: "object", Properties: map[string]runtimecontracts.EventFieldSpec{
 				"id": {Type: "text"}, "number": {Type: "integer"}, "record": {Type: "BusinessRecord"}, "event_id": {Type: "text"},

@@ -121,7 +121,7 @@ inputs:
   - deploy.done
 `+secondPin,
 		"",
-		"deployment:\n  vertical_id:\n    type: string\n",
+		"vertical_id: text\n",
 		consumerNodes)
 	if consumerAgents != "" {
 		writeClosedVariantFile(t, root, "consumer/agents.yaml", consumerAgents)

@@ -2,3 +2,5 @@ processed_items: [ProcessedItem]
 item_id: string
 status: string
 priority: string
+intake_ready: false
+needs_revision: false

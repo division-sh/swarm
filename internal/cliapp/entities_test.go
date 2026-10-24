@@ -47,7 +47,6 @@ func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 		"entity", "list",
 		"--run-id", "run-1",
 		"--flow", "review",
-		"--type", "vertical",
 		"--current-state", "collecting",
 		"--limit", "25",
 		"--cursor", "cursor-1",
@@ -61,7 +60,6 @@ func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 	wantParams := map[string]any{
 		"run_id":        "run-1",
 		"flow":          "review",
-		"type":          "vertical",
 		"current_state": "collecting",
 		"limit":         float64(25),
 		"cursor":        "cursor-1",
@@ -169,7 +167,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entity", "list", "--run-id", runID, "--type", "vertical", "--limit", "10"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entity", "list", "--run-id", runID, "--limit", "10"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("entities list code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -199,11 +197,11 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entity", "aggregate", "--run-id", runID, "--group-by", "entity_type"}, &stdout, &stderr, testRootCommandOptions(server))
+	code = executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entity", "aggregate", "--run-id", runID, "--group-by", "flow"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("entity aggregate code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"GROUP", "COUNT", "vertical  2"} {
+	for _, want := range []string{"GROUP", "COUNT", "scoring  2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("entity aggregate stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -435,12 +433,11 @@ func TestEntityAggregateUsesEntityAggregateDefaultsAndFilters(t *testing.T) {
 		"entity", "aggregate",
 		"--run-id", "run-1",
 		"--group-by", "fields.priority",
-		"--type", "vertical",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("filtered code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	wantParams := map[string]any{"run_id": "run-1", "group_by": "fields.priority", "type": "vertical"}
+	wantParams := map[string]any{"run_id": "run-1", "group_by": "fields.priority"}
 	if !reflect.DeepEqual(captured[1].Params, wantParams) {
 		t.Fatalf("filtered params = %#v, want %#v", captured[1].Params, wantParams)
 	}
@@ -467,8 +464,11 @@ func TestEntityCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "view blank id", args: []string{"entity", "view", " "}, wantStderr: "entity id is required"},
 		{name: "view invalid id", args: []string{"entity", "view", "bad id!"}, wantStderr: "entity id must match OpaqueId pattern"},
 		{name: "view invalid run id", args: []string{"entity", "view", "entity-1", "--run-id", "bad id!"}, wantStderr: "--run-id must match OpaqueId pattern"},
-		{name: "aggregate invalid group", args: []string{"entity", "aggregate", "--group-by", "bad field"}, wantStderr: "--group-by must be one of"},
-		{name: "aggregate blank type", args: []string{"entity", "aggregate", "--type", " "}, wantStderr: "--type must not be empty"},
+		{name: "aggregate invalid group", args: []string{"entity", "aggregate", "--group-by", "bad field"}, wantStderr: "unsupported --group-by"},
+		{name: "aggregate retired type", args: []string{"entity", "aggregate", "--type", "vertical"}, wantStderr: "unknown flag: --type"},
+		{name: "list retired type", args: []string{"entity", "list", "--type", "vertical"}, wantStderr: "unknown flag: --type"},
+		{name: "aggregate retired type group", args: []string{"entity", "aggregate", "--group-by", "type"}, wantStderr: "unsupported"},
+		{name: "aggregate retired entity_type group", args: []string{"entity", "aggregate", "--group-by", "entity_type"}, wantStderr: "unsupported"},
 		{name: "aggregate extra arg", args: []string{"entity", "aggregate", "extra"}, wantStderr: "unknown command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

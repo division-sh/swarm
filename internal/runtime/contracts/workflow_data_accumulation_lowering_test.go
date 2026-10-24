@@ -24,9 +24,9 @@ func TestDataAccumulationPayloadLoweringPreservesExplicitWrites(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			bundle := emitFieldLoweringTestBundle()
-			bundle.RootEntities["account"].Fields["computed_tier"] = EntityFieldDecl{Type: "number"}
+			bundle.RootEntities["state"].Fields["computed_tier"] = EntityFieldDecl{Type: "number"}
 			if test.targetType != "" {
-				bundle.RootEntities["account"].Fields["account_id"] = EntityFieldDecl{Type: test.targetType}
+				bundle.RootEntities["state"].Fields["account_id"] = EntityFieldDecl{Type: test.targetType}
 			}
 			ctx := EmitFieldLoweringContext{Node: identitytest.RootNode(t, "bucket-node"), TriggerEventType: "account.scored", Site: "handler.data_accumulation"}
 			spec := WorkflowDataAccumulation{From: "payload", SourceEvent: test.source, Writes: test.writes}
@@ -67,7 +67,7 @@ func TestDataAccumulationPayloadLoweringPreservesExplicitWrites(t *testing.T) {
 		}
 	}
 	bundle := emitFieldLoweringTestBundle()
-	delete(bundle.RootEntities["account"].Fields, "account_id")
+	delete(bundle.RootEntities["state"].Fields, "account_id")
 	_, err := bundle.compileHandlerWrites(identitytest.RootNode(t, "bucket-node"), "account.scored", SystemNodeEventHandler{
 		Rules: []HandlerRuleEntry{{PolicyRow: PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}, DataAccumulation: WorkflowDataAccumulation{From: "payload"}}},
 	})

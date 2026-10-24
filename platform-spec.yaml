@@ -2751,19 +2751,19 @@ contract_formats:
         an actor, but a no-current startup MCP tools/list probe MUST be compared against the concrete startup turn context
         and MUST NOT require generated current-entity tools to appear without a valid current state.'
       generated_reads:
-        read_entity: 'read_{entity_type}() returns the complete current entity envelope and fields for the actor''s flow-owned
+        read_entity: 'read_state() returns the complete current entity envelope and fields for the actor''s flow-owned
           entity contract.'
-        read_field: 'read_{entity_type}_{field}() returns the complete typed value of one declared field. If that
+        read_field: 'read_state_{field}() returns the complete typed value of one declared field. If that
           field is unassigned, return a typed not_found error identifying the field and unassigned reason, never
           successful null. Whole-entity reads preserve omission; explicit zero, false and empty values remain values.'
         non_lossy_invariant: 'Generated typed reads return the complete typed value or fail closed with an explicit typed-read
           error. They MUST NOT silently return preview, truncated, omitted, or follow-up-file placeholder shapes as the value.'
       generated_writes:
-        save_field: 'save_{entity_type}_{field}({value, op?, index?, key?}) operates on exactly one top-level declared field
+        save_field: 'save_state_{field}({value, op?, index?, key?}) operates on exactly one top-level declared field
           authorized by the declaring agent''s agents.yaml writes grant for its own flow.
           Default/explicit set, list append, integer-index update and map-key set share runtime_enforcement.save_entity_field;
           each generated branch carries the exact value/key/index types and excludes unrelated operands.'
-        update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
+        update_path: 'update_state_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
           named-object field. The value schema is the exact declared subpath type. Runtime lowering consumes the same
           declared typed mutation plan as handlers. A missing named parent rejects; the tool never synthesizes it.'
         transactional_validation: 'Generated writes and internal entity creation carry the admitted source to the selected
@@ -2830,13 +2830,9 @@ contract_formats:
       event documentation; a leading underscore does not grant a metadata or routing exemption.
 rule:
   statement: |
-    Entity contracts are the authoritative source of truth for what
-    persists in entity_state. Entity type names are flow-scoped: each
-    entity type is declared in exactly one owner flow's entities.yaml,
-    and the owner flow is determined by the file location under
-    <flow-path>/entities.yaml. Different flows may reuse the
-    same short local name; the fully-qualified form is
-    <flow>.<entity_name>.
+    A flow's state.yaml is the authoritative source for its persisted authored
+    fields. Every flow's state identity is state; ownership comes from the exact
+    flow, never that shared identity. There is no authored entity type or wrapper.
 
     A shared type system declared in types.yaml is used by entity
     contracts, event payloads, and policy. Scalars, enums, named types,
@@ -2845,9 +2841,8 @@ rule:
     surface.
   consequences:
     flow_scoped_entity_types: |
-      Entity type names are flow-scoped, not bundle-global. Cross-flow
-      references use the fully-qualified form; inside the owner flow the
-      short form is sufficient.
+      The identity is state in every flow. Reads and writes retain their exact
+      flow owner; the shared type never grants access to another flow's state.
     declared_is_authority: |
       Writers and readers conform to the declared contract. Writer drift,
       reader drift, and dead contract fields are verification failures.
@@ -3178,52 +3173,26 @@ type_system:
       for their required members; missing parents are never synthesized.
 entity_contracts:
   description: |
-    Entity contracts are declared in entities.yaml owned by a single
-    flow. Ownership is implicit from file location. Bundle-root
-    entities.yaml remains a rare bundle-scope exception.
+    A flow declares its one state record directly in state.yaml. There is no
+    entity-name wrapper. Ownership is implied by that file's exact flow location.
   ownership: |
-    Exactly one flow owns each entity type. Only the owner flow edits
-    the contract and creates instances of that type.
+    Each flow owns only its own state. The internal and persisted identity is
+    state in every flow; identity never grants cross-flow access.
   grammar:
     form: |
-      <entity_type>:
-        _description: Human-readable description
-        <field_name>: <type>
-        <field_name>:
-          type: <type>
-          initial: <value>
-          immutable: <bool>
-          indexed: <bool>
-          description: <text>
-          pattern: <regular expression>
-          length:
-            min: <non-negative integer>
-            max: <non-negative integer>
-          range:
-            min: <number>
-            max: <number>
-          equal_to: <sibling_field>
-          materialize_from: <node_id>.<accumulator_name>
-          project:
-            <target_item_field>: source.<source_item_field>
-            <target_policy_field>: policy.<policy_path>
-            <target_literal_field>: <literal>
-          _unused_reason: <reason>
-          _unused_reader_reason: <reason>
+      <field_name>: <type>
+      <field_name>: <literal>
+      <indexed_field_name>:
+        type: <type>
+        indexed: true
     notes:
-    - Entity-level metadata is underscore-prefixed.
-    - State does not live in entity contracts.
-    - Envelope names are reserved and must not be author-declared.
-    - '`materialize_from` is valid only for a list of a declared named type.'
-    - '`materialize_from` and `_unused_reason` are mutually exclusive.'
-    - '`_unused_reader_reason` documents that a field is intentionally read only outside platform-visible internal handlers.
-      It suppresses only the informational `entity_reader_coverage` slice; it does not count as writer coverage, authorize
-      runtime/API reads, or change persistence semantics.'
-    - '`indexed: true` declares a top-level entity field for supported query/index consumers.
+    - A plain scalar names a visible catalog type; a scalar literal supplies an internal initial value.
+    - Prose is a YAML comment, not metadata. Retired field mappings fail on presence.
+    - State names have no implicit envelope meaning; runtime coordinates are instance.id, instance.stage and instance.path.
+    - '`indexed: true` declares a top-level state field for supported query/index consumers.
       It does not make that field receiver-routing authority. Template receiver selection consumes only the
       flow''s declared scalar instance identity; arbitrary business-field descriptor routing is retired.'
-    - 'A `materialize_from` field is runtime-owned and not agent-writable.'
-    - 'A trailing ? marks an optional field edge, not a nullable value. Bare entity roots may remain progressively
+    - 'A trailing ? marks an optional field edge, not a nullable value. Bare state roots may remain progressively
       unassigned until a proven write; supplied named records still require every bare member.'
     - 'Explicit initial values apply once through the canonical keyed/keyless constructor and never during reads,
       reload, attachment retry, replay or fork hydration. Ordinary handlers cannot construct missing state.
@@ -3233,14 +3202,6 @@ entity_contracts:
     - 'A root runtime instance resolves its entity contract only when its flow_instance equals the active run_id
       and the admitted source declares a root flow. UUID shape alone is not root ownership; child instances resolve
       through their declared flow path.'
-  sparse_refinements: |
-    Entity-root equal_to pairs may both remain unassigned, establishing no assignment fact.
-    Exactly one present participant rejects. Two present participants must satisfy the existing typed equality.
-    A supplied named record retains required-member completeness and its structural equality refinements.
-    Ordered paired writes or optional paired clears validate equality at the end of EACH executed mutation list.
-    No intermediate invalid pair escapes to a read phase, emitted event or committed state. An isolated same-value
-    write may preserve an existing pair; it is not prohibited merely because the field participates in equality.
-    Bare fields cannot be cleared; mixed bare/optional pairs can restrict otherwise optional clears.
   routing_indexes:
     status: non_routing_query_evidence
     retired_routing_slice: '#1479/#2087'
@@ -3253,21 +3214,16 @@ entity_contracts:
       Input address, connect map, arbitrary entity-field targets, and the old
       business-field materializer are invalid and cannot be repaired by an
       indexed field.
-  one_entity_type_per_flow: |
-    For normal flow-instance-centered authoring (stateful schemas with no
-    static/template mode), a stateful normal flow declares exactly one entity
-    type in its flow-owned entities.yaml. That single entity type is the
-    flow's primary entity; there is no normal-flow primary/secondary split and
-    no schema.yaml `entity: <Type>` selector. Bundle-root entity declarations,
-    when present, use the same single-entity/no-schema-selector resolver so
-    root read/tool surfaces cannot silently disappear behind a local
-    interpretation. A missing normal child-flow entity type, multiple root or
-    flow entity types, or a schema-level entity selector is fail-closed.
-    Static package/service flows and template instance-key behavior remain
-    separate explicit classifications; they are not silent fallback semantics
-    for normal flows. Static multi-entity ownership is retired rather than a
-    future escape hatch. The old Wave 1 rule is preserved as a product decision
-    for normal flow authoring, not as a temporary limitation.
+  state_identity: |
+    Every flow has at most one state record, declared directly in its state.yaml
+    without an entity-type wrapper. Its identity, including persisted entity_type,
+    is the constant state. A flow without state.yaml has no state record or state
+    tools. Generated tools are read_state(), read_state_<field>(),
+    save_state_<field>(...) and update_state_<field>_<subpath>(...); descriptions
+    say "this flow's state". The old zero/several INVALID-PRIMARY-ENTITY arms retire.
+    Entity collection readers select the exact owning flow, not the shared type;
+    entity list uses --flow and aggregate splits with --group-by flow. Type filters
+    and the type/entity_type aggregate groups are retired. No migration or alias.
   state_machine_link:
     description: |
       State is flow-scoped and declared in schema.yaml. The entity
@@ -10655,7 +10611,7 @@ tool_model:
       ship a Go handler for each of these. Any tool not on this list MUST NOT have a Go handler in the generic runtime.
     tools:
       get_entity: Read an entity by ID. Legacy trusted runtime-internal compatibility surface; not provider-visible or
-        callable for normal agents in favor of generated read_{entity_type} tools.
+        callable for normal agents in favor of generated read_state tools.
       ask_human:
         description: Create a typed decision card when admitted work requires a human verdict.
         grant: Requires the exact ask_human permission.
@@ -32498,10 +32454,6 @@ cli_specification:
         flag: --flow <flow-instance>
         required: false
         api_param: flow
-      - name: type
-        flag: --type <entity-type>
-        required: false
-        api_param: type
       - name: current_state
         flag: --current-state <state>
         required: false
@@ -32530,7 +32482,7 @@ cli_specification:
         transport_or_malformed_response: 3
         auth_or_missing_token: 4
       proof_expectations:
-      - exact /v1/rpc entity.list call with run_id, flow, type, current_state, limit, and cursor params only when supplied
+      - exact /v1/rpc entity.list call with run_id, flow, current_state, limit, and cursor params only when supplied
       - missing explicit token for non-loopback API targets, blank optional flags, invalid run_id OpaqueId envelope, invalid limit, invalid args, and unsupported flags make zero API calls
       - empty result, next_cursor rendering, auth/HTTP/RPC failures, malformed result, and malformed EntitySummary rows fail closed with tested exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
@@ -32590,13 +32542,9 @@ cli_specification:
         api_param: group_by
         default: current_state
         validation: >
-          CLI accepts current_state, flow, flow_instance, workflow_name, workflow_version, type,
-          entity_type, slug, name, or fields.<path> where path segments match [A-Za-z0-9_]+.
+          CLI accepts current_state, flow, flow_instance, workflow_name, workflow_version,
+          slug, name, or fields.<path> where path segments match [A-Za-z0-9_]+.
           When omitted, the CLI sends no group_by and lets the server apply the API default.
-      - name: type
-        flag: --type <entity-type>
-        required: false
-        api_param: type
       output:
         table: GROUP / COUNT sorted by group value, with '-' for an empty group key
         empty: No entity aggregate rows match the filter.
@@ -32606,7 +32554,7 @@ cli_specification:
         transport_or_malformed_response: 3
         auth_or_missing_token: 4
       proof_expectations:
-      - exact /v1/rpc entity.aggregate call with run_id, group_by, and type params only when supplied
+      - exact /v1/rpc entity.aggregate call with run_id and group_by params only when supplied
       - missing explicit token for non-loopback API targets, blank optional flags, invalid run_id OpaqueId envelope, unsupported group_by, invalid args, and unsupported flags make zero API calls
       - omitted --group-by sends no group_by and relies on the server default current_state
       - empty result, deterministic aggregate rendering, auth/HTTP/RPC failures, missing counts, and negative counts fail closed with tested exit-code behavior
@@ -40652,10 +40600,6 @@ api_specification:
         required: false
         schema:
           type: string
-      - name: type
-        required: false
-        schema:
-          type: string
       - name: current_state
         required: false
         schema:
@@ -40727,10 +40671,6 @@ api_specification:
         schema:
           type: string
           default: current_state
-      - name: type
-        required: false
-        schema:
-          type: string
       result:
         name: result
         required: true
