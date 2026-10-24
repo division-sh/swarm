@@ -347,7 +347,8 @@ func requireForkSourceSelfReleaseConservation(t *testing.T, owner runtimebus.Eve
 	details, _ := payload["details"].(map[string]any)
 	if text("run_id") != runID || text("event_name") != "platform.runtime_log" || text("event_class") != "diagnostic_direct" ||
 		details["action"] != "platform.agent_lifecycle_transition" ||
-		details["previous_phase"] != "running" || details["phase"] != "registered" || details["run_mode"] != "stopped" {
+		details["previous_phase"] != "running" || details["phase"] != "registered" || details["run_mode"] != "stopped" ||
+		details["previous_generation"] != details["generation"] || details["previous_epoch"] != details["runtime_epoch"] {
 		t.Fatalf("source handoff added something other than its exact self-release: %+v", payload)
 	}
 	operations, err := storetest.DecodeSelectedForkSnapshotRows(readWorkspaceProofApplication(t, owner)["agent_lifecycle_operations"])
