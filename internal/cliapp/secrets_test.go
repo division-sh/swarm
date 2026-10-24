@@ -117,6 +117,25 @@ func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
 	if strings.Contains(stdout+stderr, "stored-openai-key") || strings.Contains(stdout+stderr, "env-only-openai-key") {
 		t.Fatalf("set provider output leaked secret stdout=%q stderr=%q", stdout, stderr)
 	}
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--json"}, "")
+	if code != 0 {
+		t.Fatalf("shared-key list code = %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var shared secretsListResult
+	if err := json.Unmarshal([]byte(stdout), &shared); err != nil {
+		t.Fatalf("decode shared-key list: %v", err)
+	}
+	if len(shared.Secrets) != 2 {
+		t.Fatalf("shared-key readback lost a consumer observation: %+v", shared)
+	}
+	inventory, required := shared.Secrets[0], shared.Secrets[1]
+	if inventory.Key != "OPENAI_API_KEY" || inventory.Source != "env" || !inventory.Present || !inventory.Shadowed || len(inventory.RequiredBy) != 0 ||
+		required.Key != inventory.Key || required.Source != "file" || !required.Present || len(required.RequiredBy) != 1 || required.RequiredBy[0].Kind != "provider" {
+		t.Fatalf("inventory/provider observations were conflated: %+v", shared)
+	}
+	if strings.Contains(stdout+stderr, "stored-openai-key") || strings.Contains(stdout+stderr, "env-only-openai-key") {
+		t.Fatal("shared-key readback disclosed credential bytes")
+	}
 
 	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--json"}, "")
 	if code != 0 {
@@ -166,7 +185,7 @@ func TestSecretsListShowsEnvShadowingAndRemoveKeepsEnvEffective(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("rm code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	for _, want := range []string{"source=env", "shadowed=no", "present=yes"} {
+	for _, want := range []string{"source=env", "shadowed=no", "present=yes", "inventory only", "file tier"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("rm output missing %q:\n%s", want, stdout)
 		}

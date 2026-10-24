@@ -11591,6 +11591,9 @@ tool_model:
         credentials. `SWARM_CREDENTIALS_FILE` selects an explicit per-instance file tier for both secrets commands and serve;
         it does not scope environment credentials or managed/OAuth stores. Existing environment candidate order and
         file-only provider/channel credential policies are unchanged.
+        Inventory presence does not establish provider/channel admission; shared-key consumer observations remain
+        separate when their source or presence differs. Provider session material lives under --swarm-dir by connection
+        ID, so per-instance session isolation requires a separate --swarm-dir for each serve.
       list_rule: List returns merged keys from both tiers. Each entry includes the source tier (env or file) and whether
         it is writable (env = false, file = true). If a key exists in both tiers, source shows "env" (effective source)
         and shadowed is true to show that a file-tier value exists but is ignored by env precedence.
