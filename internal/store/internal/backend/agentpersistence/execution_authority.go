@@ -412,7 +412,7 @@ func observeOrdinaryRunSource(ctx context.Context, source correlation.SourceArti
 			return err
 		}
 		if binding.Valid && hash == source.BundleHash() {
-			matches, err = sourceadmission.ObserveLiveHandoff(ctx, tx, runID, hash)
+			matches, err = sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, runID, hash)
 			return err
 		}
 		matches = classifyOrdinaryRunSource(hash, binding, source.BundleHash()) == manager.RunExecutionOwned
