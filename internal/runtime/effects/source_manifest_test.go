@@ -39,6 +39,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/sessionprovider/runtime_logout_unix.go:executeSessionLogout:sdk_logout:1":                                                   ownerOperatorInfra,
 	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:1":             ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:2":             ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/fixture.go:CopyExample:filesystem_write:1":                                            ownerBuildTest,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                                  ownerRuntimeDependency,
 	"internal/runtime/channelactivation/owner.go:Release:http_do:1":                                                                       ownerRuntimeDependency,
 	"internal/runtime/channelactivation/presentation.go:Acquire:http_do:1":                                                                ownerRuntimeDependency, // sync.Once request release, not HTTP.
