@@ -17,7 +17,7 @@ import (
 )
 
 func TestS1StaticTopologyRequiresExactSourceWithoutAgents(t *testing.T) {
-	first, _ := sourceartifactfixture.Rooted(t, "first", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	first, _ := sourceartifactfixture.Rooted(t, "first", sourceartifactfixture.Artifact())
 	second, _ := sourceartifactfixture.Rooted(t, "second", first.Artifact())
 	coordinate, err := agenttopology.NewSourceCoordinate(first.Admission())
 	if err != nil {
@@ -56,7 +56,7 @@ func TestS1StaticTopologyRequiresExactSourceWithoutAgents(t *testing.T) {
 }
 
 func TestS1ZeroAgentSourceSetRebindRequiresExactRoot(t *testing.T) {
-	first, _ := sourceartifactfixture.Rooted(t, "first", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	first, _ := sourceartifactfixture.Rooted(t, "first", sourceartifactfixture.Artifact())
 	second, _ := sourceartifactfixture.Rooted(t, "second", first.Artifact())
 	options := runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory}
 	compiled, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(runtimepipeline.WorkflowRepoRoot(), first, "", options)
