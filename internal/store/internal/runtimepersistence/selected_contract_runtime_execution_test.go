@@ -1523,7 +1523,7 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 		ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(artifact.BundleHash()), ctx)
 		ctx = requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
 	} else {
-		requireRunningRunForTest(t, ctx, store, sourceRun, now)
+		ctx = requireRunningRunForTest(t, ctx, store, sourceRun, now)
 	}
 	eventStore, ok := any(store).(semanticEventFixtureStore)
 	if !ok {

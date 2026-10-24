@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 )
 
 func TestSelectedHistoricalSourceAdmissionRequiresCanonicalFreezeLineageBothDialects(t *testing.T) {
+	root := forkOperationTargetRoot(t)
 	for _, postgres := range []bool{false, true} {
 		for _, name := range []string{"completed_successor", "running_successor", "foreign_successor", "crossed_successor_id", "missing_successor", "malformed_successor", "missing_pointer", "wrong_source", "uncommitted_cut", "cancelled_reader"} {
 			t.Run(map[bool]string{false: "sqlite", true: "postgres"}[postgres]+"/"+name, func(t *testing.T) {
@@ -28,8 +28,8 @@ func TestSelectedHistoricalSourceAdmissionRequiresCanonicalFreezeLineageBothDial
 				if err != nil {
 					t.Fatal(err)
 				}
-				source := runlifecycle.Snapshot{RunID: sourceID, State: runlifecycle.StateForked, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), StartedAt: at, EndedAt: &ended, ContinuedAsRunID: successorID}
-				successor := runlifecycle.Snapshot{RunID: successorID, State: runlifecycle.StateCompleted, Origin: origin, BundleHash: source.BundleHash, StartedAt: at, EndedAt: &ended}
+				source := runlifecycle.Snapshot{RunID: sourceID, State: runlifecycle.StateForked, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: root.BundleHash, RootReference: root, StartedAt: at, EndedAt: &ended, ContinuedAsRunID: successorID}
+				successor := runlifecycle.Snapshot{RunID: successorID, State: runlifecycle.StateCompleted, Origin: origin, BundleHash: source.BundleHash, RootReference: root, StartedAt: at, EndedAt: &ended}
 				readErr := errors.New("original successor missing")
 				switch name {
 				case "running_successor":
@@ -90,10 +90,11 @@ func TestSelectedHistoricalSourceAdmissionRequiresCanonicalFreezeLineageBothDial
 }
 
 func TestSelectedUnfrozenSourceAdmissionNeverUsesHistoricalFallback(t *testing.T) {
+	root := forkOperationTargetRoot(t)
 	for _, state := range []runlifecycle.State{runlifecycle.StateRunning, runlifecycle.StatePaused, runlifecycle.StateCompleted, runlifecycle.StateCancelled} {
 		t.Run(string(state), func(t *testing.T) {
 			at := time.Unix(100, 0).UTC()
-			source := runlifecycle.Snapshot{RunID: uuid.NewString(), State: state, Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), StartedAt: at}
+			source := runlifecycle.Snapshot{RunID: uuid.NewString(), State: state, Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: root.BundleHash, RootReference: root, StartedAt: at}
 			if state.Terminal() {
 				source.EndedAt = &at
 			}
@@ -103,6 +104,125 @@ func TestSelectedUnfrozenSourceAdmissionNeverUsesHistoricalFallback(t *testing.T
 			}, false)
 			if got != selectedForkUnfrozenSource || err != nil {
 				t.Fatalf("admission=%v err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestSelectedHistoricalSourceAdmissionNativeConservesFreezeBothStores(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			f := openTimerHistoryNativeFixture(t, dialect)
+			if owner, ok := f.runs.(*storerunlifecycle.RunLifecyclePostgresOwner); ok {
+				decisions, err := decisionpersistence.NewPostgres(f.postgres, f.requireCurrent, owner, owner.CompletionCandidateCoordinator())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := owner.BindDecisionCards(decisions); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				owner := f.runs.(*storerunlifecycle.RunLifecycleSQLiteOwner)
+				decisions, err := decisionpersistence.NewSQLite(f.sqlite, f.requireCurrent, owner, owner.CompletionCandidateCoordinator(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := owner.BindDecisionCards(decisions); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx := correlation.WithRootAdmission(authoractivity.WithScope(correlation.WithSourceArtifactFact(t.Context(), sourceartifactfixture.Fact()), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash)), f.rooted.Admission())
+			at := runlifecycle.CanonicalTimestamp(time.Now().Add(-time.Minute))
+			sourceID, firstID, otherID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			for _, id := range []string{sourceID, firstID, otherID} {
+				origin := runlifecycle.DeploymentRunOrigin()
+				if id != sourceID {
+					var err error
+					origin, err = runlifecycle.ForkMaterializationRunOrigin(sourceID, runfork.RunForkPointDeploymentRevision, 1, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if got, err := f.runs.CreateRun(ctx, runlifecycle.CreateRequest{RunID: id, Origin: origin, Source: sourceartifactfixture.Fact(), RootAdmission: f.rooted.Admission(), StartedAt: at}); err != nil || got != runlifecycle.MutationApplied {
+					t.Fatalf("create canonical lineage: %s %v", got, err)
+				}
+			}
+			lifecycle := f.runs.(interface {
+				ForkRunSource(context.Context, runlifecycle.ForkSourceRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
+				CompleteRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time, *storerunlifecycle.ChannelCardChanges) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
+			})
+			frozen, disposition, err := lifecycle.ForkRunSource(ctx, runlifecycle.ForkSourceRequest{RunID: sourceID, ContinuedAsRunID: firstID, EndedAt: at.Add(time.Second)})
+			if err != nil || disposition != runlifecycle.MutationApplied {
+				t.Fatalf("canonical initial freeze: %s %v", disposition, err)
+			}
+			var loadLocked, read runForkLifecycleSnapshotLoader
+			var requireActive func(context.Context, *sql.Tx, string) (correlation.SourceArtifactFact, error)
+			if owner, ok := f.runs.(*storerunlifecycle.RunLifecyclePostgresOwner); ok {
+				loadLocked = func(ctx context.Context, tx *sql.Tx, id string) (runlifecycle.Snapshot, error) {
+					return owner.LoadSnapshotTx(ctx, tx, id, true)
+				}
+				read = func(ctx context.Context, tx *sql.Tx, id string) (runlifecycle.Snapshot, error) {
+					return owner.LoadSnapshotTx(ctx, tx, id, false)
+				}
+				requireActive = owner.RequireActiveSourceTx
+			} else {
+				owner := f.runs.(*storerunlifecycle.RunLifecycleSQLiteOwner)
+				loadLocked, read, requireActive = owner.LoadSnapshotTx, owner.LoadSnapshotTx, owner.RequireActiveSourceTx
+			}
+			for _, phase := range []string{"running_successor", "completed_successor"} {
+				if phase == "completed_successor" {
+					complete := func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+						_, disposition, err := lifecycle.CompleteRunTx(ctx, attempt, firstID, at.Add(2*time.Second), nil)
+						if err == nil && disposition != runlifecycle.MutationApplied {
+							return struct{}{}, errors.New("original successor completion was not applied")
+						}
+						return struct{}{}, err
+					}
+					var completion mutationprotocol.Result[struct{}]
+					if f.postgres != nil {
+						completion = mutationprotocol.RunPostgres(ctx, f.postgres, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, complete)
+					} else {
+						completion = mutationprotocol.RunSQLite(ctx, f.sqlite, "complete empty native lineage fixture", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, complete)
+					}
+					if err := completion.Err(); err != nil || !completion.Acknowledged() {
+						t.Fatalf("complete original successor: %v", err)
+					}
+				}
+				outcome := f.run(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runfork.RunForkReplayResumeAdmission, error) {
+					err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+						source, err := loadLocked(ctx, tx, sourceID)
+						if err != nil {
+							return err
+						}
+						before, err := read(ctx, tx, firstID)
+						if err != nil {
+							return err
+						}
+						got, err := admitSelectedForkSource(ctx, tx, sourceID, source, read, dialect == "postgres")
+						if err != nil || got != selectedForkHistoricalSource {
+							t.Fatalf("native admission %s: %v %v", phase, got, err)
+						}
+						if _, err := requireActive(ctx, tx, sourceID); !errors.Is(err, runlifecycle.ErrRunNotActive) {
+							t.Fatalf("historical admission allowed source execution: %v", err)
+						}
+						afterSource, err := read(ctx, tx, sourceID)
+						if err != nil || !reflect.DeepEqual(afterSource, frozen) {
+							t.Fatalf("source freeze changed: %+v %v", afterSource, err)
+						}
+						after, err := read(ctx, tx, firstID)
+						if err != nil || !reflect.DeepEqual(before, after) {
+							t.Fatalf("original successor changed: %+v %v", after, err)
+						}
+						return nil
+					})
+					return runfork.RunForkReplayResumeAdmission{}, err
+				})
+				if err := outcome.Err(); err != nil || !outcome.Acknowledged() {
+					t.Fatalf("native historical admission %s: %v", phase, err)
+				}
+			}
+			if _, _, err := lifecycle.ForkRunSource(ctx, runlifecycle.ForkSourceRequest{RunID: sourceID, ContinuedAsRunID: otherID, EndedAt: at.Add(3 * time.Second)}); err == nil {
+				t.Fatal("historical admission permitted re-freezing the source into another child")
 			}
 		})
 	}

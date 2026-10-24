@@ -376,13 +376,14 @@ func requireRunningRunForTest(
 	selected any,
 	runID string,
 	startedAt time.Time,
-) {
+) context.Context {
 	t.Helper()
 	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID:     runID,
 		State:     runtimerunlifecycle.StateRunning,
 		StartedAt: startedAt,
 	})
+	return ctx
 }
 
 func requirePausedRunForTest(
@@ -408,7 +409,7 @@ func requireRunningPostgresRunForTest(
 	startedAt time.Time,
 ) {
 	t.Helper()
-	requireRunningRunForTest(t, ctx, admitTestPostgresStore(t, db), runID, startedAt)
+	ctx = requireRunningRunForTest(t, ctx, admitTestPostgresStore(t, db), runID, startedAt)
 }
 
 func requireRunningSQLiteRunForTest(
@@ -423,7 +424,7 @@ func requireRunningSQLiteRunForTest(
 	if err := selected.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}
-	requireRunningRunForTest(t, ctx, selected, runID, startedAt)
+	ctx = requireRunningRunForTest(t, ctx, selected, runID, startedAt)
 }
 
 func ensureEphemeralRunForTest(

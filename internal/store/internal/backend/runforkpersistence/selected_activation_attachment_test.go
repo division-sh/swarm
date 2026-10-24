@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -19,9 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )

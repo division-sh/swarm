@@ -427,7 +427,7 @@ func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcqui
 	t.Cleanup(cleanup)
 	selected := newTestPostgresStore(t, db)
 	ctx = originalStoreFixtureContext(t, ctx, selected)
-	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
+	ctx = requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	return selected, db, ctx, runID
 }
 

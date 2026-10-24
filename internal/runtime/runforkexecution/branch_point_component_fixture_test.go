@@ -90,7 +90,8 @@ func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, 
 		t.Fatal("native component admission: ", err)
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
-		OriginalLoopCarriage: p.originalLoopCarriage, Prepared: p, Operation: p.operation, Owner: p.owner,
+		OriginalRootAdmission: p.originalSource.RootedSource.Admission(),
+		OriginalLoopCarriage:  p.originalLoopCarriage, Prepared: p, Operation: p.operation, Owner: p.owner,
 		Admission: admission, LoadedSource: p.loadedSource, RecipientPlanning: *p.model.RecipientPlanning,
 		AgentRuntime: agents, SourceRunID: p.plan.SourceRunID, ForkRunID: materialized.ForkRunID,
 		DataPins: materialized.DataPins, ForkEventID: p.plan.ForkPoint.EventID,
@@ -111,8 +112,13 @@ func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, 
 
 func (f *q1BranchPointAttachment) activate() (runfork.RunForkActivation, error) {
 	p := f.prepared
+	process, err := p.agentRuntime.Options.ProcessCapability.Evidence()
+	if err != nil {
+		return runfork.RunForkActivation{}, err
+	}
 	return p.owner.ports.fork.ActivateRunForkForSelectedContractExecution(effects.WithAuthority(p.operation.Context(), f.container.authority), runfork.RunForkSelectedContractExecutionActivateRequest{
 		OriginalRootAdmission: p.originalSource.RootedSource.Admission(),
+		Process:               process.LeaseStamp(),
 		InheritedSchedules:    p.readiness, ForkOperation: p.forkOperation, DataPins: f.materialized.DataPins,
 		ExecutionSource: p.loadedSource.Source, ForkRunID: f.materialized.ForkRunID, AllowSourceFreeze: true,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
@@ -390,7 +396,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:branch-point-proof",
 		SourceRunID: runID, TargetBundleHash: catalog.BundleHash, TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: testContractSelection(), AllowSourceFreeze: true}
 	request := SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, ForkOperation: &operation, AllowSourceFreeze: true,
-		SourceLoader: loader, ContractSelection: testContractSelection(), AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
+		SourceLoader: loader, ExpectedBundleHash: catalog.BundleHash, ContractSelection: testContractSelection(), AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
 	return ctx, request, func() {
 		if _, err := selected.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state}); err != nil {
 			t.Fatal(err)

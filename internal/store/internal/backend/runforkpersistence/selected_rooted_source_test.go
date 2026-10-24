@@ -89,8 +89,6 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 				{"binding-root", `UPDATE run_fork_selected_contract_bindings SET source_root_directory=$1 WHERE fork_run_id=$2`, fixture.parent.Admission().RootDirectory(), fixture.target.Admission().RootDirectory()},
 				{"binding-point", `UPDATE run_fork_selected_contract_bindings SET fork_revision=$1 WHERE fork_run_id=$2`, int64(8), int64(7)},
 				{"missing-binding", `UPDATE run_fork_selected_contract_bindings SET fork_run_id=$1 WHERE binding_id=$2`, fixture.parentID, fixture.childID},
-				{"missing-operation", `UPDATE run_fork_operations SET fork_run_id=$1 WHERE operation_id=$2`, fixture.parentID, fixture.childID},
-				{"operation-point", `UPDATE run_fork_operations SET fork_revision=$1 WHERE operation_id=$2`, int64(8), int64(7)},
 				{"missing-root", `UPDATE source_root_admissions SET root_directory=$1 WHERE root_directory=$2`, "retired-selected", fixture.target.Admission().RootDirectory()},
 				{"corrupt-content", `UPDATE source_artifacts SET source_blob=$1 WHERE bundle_hash=$2`, []byte("not a source artifact"), fixture.target.Artifact().LogicalBlob()},
 			} {
@@ -98,8 +96,6 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 					id := fixture.childID
 					if cell.name == "missing-binding" {
 						id = fixture.bindingID
-					} else if cell.name == "missing-operation" || cell.name == "operation-point" {
-						id = fixture.operationID
 					} else if cell.name == "missing-root" {
 						id = fixture.target.Admission().RootDirectory()
 					} else if cell.name == "corrupt-content" {

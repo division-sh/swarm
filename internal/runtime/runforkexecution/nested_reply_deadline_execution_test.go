@@ -382,7 +382,7 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				for _, row := range immediateRows {
 					immediateArms[row.ID] = nestedDeadlineArm(t, ctx, owner, row)
 				}
-				staged, operation = stageContextOnlyDeadlineDescendant(t, ctx, selected, owner, loader, selection, options, loaded.SourceArtifactFact.BundleHash(), staged)
+				staged, operation = stageContextOnlyDeadlineDescendant(t, ctx, selected, owner, loader, selection, options, loaded.RootedSource, staged)
 			}
 			childRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
 			if err != nil || len(childRows) != levels {

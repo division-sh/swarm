@@ -546,18 +546,41 @@ func connectorToolFlowID(source semanticview.Source, toolID string, tool runtime
 	if len(flowIDs) == 0 {
 		return "", nil
 	}
-	if len(flowIDs) > 1 {
-		ids := make([]string, 0, len(flowIDs))
-		for id := range flowIDs {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		return "", fmt.Errorf("provider connector tool %q has ambiguous flow credential scopes: %s", toolID, strings.Join(ids, ", "))
-	}
+	ids := make([]string, 0, len(flowIDs))
 	for id := range flowIDs {
-		return id, nil
+		ids = append(ids, id)
 	}
-	return "", nil
+	sort.Strings(ids)
+	for _, id := range ids[1:] {
+		if !connectorToolScopesEqual(source, toolID, tool, ids[0], id) {
+			return "", fmt.Errorf("provider connector tool %q has ambiguous flow credential scopes: %s", toolID, strings.Join(ids, ", "))
+		}
+	}
+	return ids[0], nil
+}
+
+func connectorToolScopesEqual(source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry, left, right string) bool {
+	keys := append([]string(nil), tool.Credentials()...)
+	if managed, ok := tool.ManagedCredentialExecution(); ok {
+		keys = append(keys, managed.Key())
+	}
+	for _, key := range keys {
+		leftKey, leftPresent := semanticview.CredentialStoreKeyForFlow(source, left, key)
+		rightKey, rightPresent := semanticview.CredentialStoreKeyForFlow(source, right, key)
+		if leftKey != rightKey || leftPresent != rightPresent {
+			return false
+		}
+	}
+	capabilities := source.SemanticCapabilities()
+	leftSource, leftHasSource := capabilities.ConnectorImportSource(left, toolID)
+	rightSource, rightHasSource := capabilities.ConnectorImportSource(right, toolID)
+	leftProvenance, leftHasProvenance := capabilities.ConnectorPackProvenance(left, toolID)
+	rightProvenance, rightHasProvenance := capabilities.ConnectorPackProvenance(right, toolID)
+	leftGeneration, leftHasGeneration := capabilities.ConnectorGeneration(left, toolID)
+	rightGeneration, rightHasGeneration := capabilities.ConnectorGeneration(right, toolID)
+	return leftHasSource && rightHasSource && leftSource == rightSource &&
+		leftHasProvenance && rightHasProvenance && leftProvenance == rightProvenance &&
+		leftHasGeneration == rightHasGeneration && reflect.DeepEqual(leftGeneration, rightGeneration)
 }
 
 func scopedToolMatches(tools map[string]runtimecontracts.ToolSchemaEntry, toolID string, tool runtimecontracts.ToolSchemaEntry) bool {
