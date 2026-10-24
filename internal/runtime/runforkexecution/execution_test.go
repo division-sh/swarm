@@ -3937,6 +3937,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 func TestActivateSelectedContractRunForkKeepsPostTReplayScopeSourceLocal(t *testing.T) {
 	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
 	ctx := runForkTestContext(t)
+	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}

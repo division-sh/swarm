@@ -33,6 +33,7 @@ import (
 
 func prepareArmedArrivalSourceAtCut(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRun, initialMarker string, armed genericschedule.Activation, originalJoin joinruntime.Activation) (string, genericschedule.Activation) {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 	ctx = effects.WithExecutionMode(correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), sourceRun), executionmode.Mock)
 	schedules := selected.(genericschedule.Store)
 	wakeup, err := genericschedule.NewWakeup(armed.ID, armed.CurrentDueAt)
