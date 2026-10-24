@@ -24,13 +24,15 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		ctx := testAuthorActivityContext()
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		seedSelectedStoreIntentAgent(t, ctx, store)
+		ctx = requireDefaultSourceArtifactForTest(t, ctx, store)
+		seedSelectedStoreIntentAgent(t, ctx, store, sourceartifactfixture.Fact())
 		if _, err := store.backend.ExecContext(ctx, `
 			UPDATE agents
 			SET runtime_descriptor = json_set(runtime_descriptor, '$.derived_system_prompt', ?)
@@ -47,7 +49,8 @@ func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		ctx := testAuthorActivityContext()
 		store := admitTestPostgresStore(t, db)
-		seedSelectedStoreIntentAgent(t, ctx, store)
+		ctx = requireDefaultSourceArtifactForTest(t, ctx, store)
+		seedSelectedStoreIntentAgent(t, ctx, store, sourceartifactfixture.Fact())
 		if _, err := db.ExecContext(ctx, `
 			UPDATE agents
 			SET runtime_descriptor = jsonb_set(runtime_descriptor, '{derived_system_prompt}', to_jsonb($1::text), true)
@@ -79,11 +82,11 @@ func TestSelectedStoresRejectCriteriaMismatchBeforeProviderRecovery(t *testing.T
 type selectedIntentAgentStore interface {
 	runtimemanager.ManagerPersistence
 	agentfixture.Store
+	sourceartifactfixture.RootedWriter
 }
 
 func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t *testing.T, ctx context.Context, store selectedIntentAgentStore) {
 	t.Helper()
-	seedSelectedStoreIntentAgent(t, ctx, store)
 	source := selectedIntentRecoverySource(t)
 	bundle, _ := semanticview.Bundle(source)
 	rooted, err := bundle.RootedSource()
@@ -91,14 +94,18 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t *testing.T, ctx 
 		t.Fatal(err)
 	}
 	fact := mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())
-	sourceCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
+	ctx = runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(fact.BundleHash()), rooted.Admission())
+	if _, err := store.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	seedSelectedStoreIntentAgent(t, ctx, store, fact)
 	providerCalls := 0
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		providerCalls++
 		return selectedIntentRecoveryAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
 		SemanticSource:     source,
-		BaseContext:        sourceCtx,
+		BaseContext:        ctx,
 		SourceArtifactFact: fact,
 		ReceiverExecution:  eventreceiver.NormalExecution(),
 		ExecutionPosture:   executionposture.Live,
@@ -132,7 +139,7 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t *testing.T, ctx 
 	if err := manager.InstallStartupTopology(grant, topology, plan); err != nil {
 		t.Fatalf("install startup topology: %v", err)
 	}
-	if err := manager.ReconcileStaticTopologyForStartup(sourceCtx, source); err == nil || !strings.Contains(err.Error(), "differs from complete source-set plan") {
+	if err := manager.ReconcileStaticTopologyForStartup(ctx, source); err == nil || !strings.Contains(err.Error(), "differs from complete source-set plan") {
 		t.Fatalf("ReconcileStaticTopologyForStartup error = %v, want source-set mismatch rejection", err)
 	}
 	if providerCalls != 0 {
@@ -140,9 +147,8 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t *testing.T, ctx 
 	}
 }
 
-func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agentfixture.Store) {
+func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agentfixture.Store, source runtimecorrelation.SourceArtifactFact) {
 	t.Helper()
-	ctx = requireDefaultSourceArtifactForTest(t, ctx, store)
 	intent := selectedStoreIntent(t)
 	prompt, err := runtimeagentintent.ContractCriteriaPrompt(intent, []string{"hostile-replacement"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
 		"hostile-replacement": {
@@ -168,7 +174,7 @@ func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agent
 		Prompt:             prompt,
 		Criteria:           []string{"hostile-replacement"},
 	}
-	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}); err != nil {
+	if err := agentfixture.UpsertStaticForSource(t, ctx, store, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}, source); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 }

@@ -95,7 +95,7 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 			var interfaceKey string
 			telegramIdentities := 0
 			for _, channel := range channels.Channels {
-				if channel.Identity.Interface.ChannelPackID == "provider.telegram.hitl_channel" {
+				if channel.Identity.Interface.ChannelPackID == "telegram" {
 					telegramIdentities++
 					interfaceKey = channel.Identity.Interface.Key()
 				}

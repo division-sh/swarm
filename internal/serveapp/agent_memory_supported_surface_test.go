@@ -643,7 +643,7 @@ func loadStandingTelegramEvidenceCounts(t testing.TB, backend, location string) 
 		query string
 		out   *int
 	}{
-		{label: "raw events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram'`, out: &counts.Raw},
+		{label: "raw events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.raw'`, out: &counts.Raw},
 		{label: "normalized events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.text_message'`, out: &counts.Normalized},
 		{label: "reply events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'telegram.reply_requested' OR event_name LIKE '%/telegram.reply_requested'`, out: &counts.Replies},
 		{label: "Telegram activities", query: `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message'`, out: &counts.Activities},
@@ -676,7 +676,7 @@ func requireStandingTelegramPublicationSettlement(t *testing.T, baseURL string, 
 	normalizedID := ""
 	for index, name := range publication.EventNames {
 		switch name {
-		case "inbound.telegram":
+		case "inbound.telegram.raw":
 			if rawID != "" {
 				t.Fatalf("Telegram publication has duplicate raw outputs: %#v", publication)
 			}
@@ -702,7 +702,7 @@ func requireStandingTelegramPublicationSettlement(t *testing.T, baseURL string, 
 	requireStandingConsumerlessRawSettlement(t, raw, rawID)
 	var listed operatorread.OperatorEventListResult
 	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
-		"filter": map[string]any{"run_id": raw.RunID, "event_name": "inbound.telegram"},
+		"filter": map[string]any{"run_id": raw.RunID, "event_name": "inbound.telegram.raw"},
 		"limit":  500,
 	}, &listed)
 	matches := 0
@@ -727,7 +727,7 @@ func requireStandingTelegramPublicationSettlement(t *testing.T, baseURL string, 
 
 func requireStandingConsumerlessRawSettlement(t testing.TB, observed operatorread.OperatorEventFull, eventID string) {
 	t.Helper()
-	if observed.EventID != eventID || observed.EventName != "inbound.telegram" || len(observed.Deliveries) != 0 || len(observed.DeadLetters) != 0 ||
+	if observed.EventID != eventID || observed.EventName != "inbound.telegram.raw" || len(observed.Deliveries) != 0 || len(observed.DeadLetters) != 0 ||
 		observed.NoDelivery == nil || observed.NoDelivery.Reason != events.NoDeliveryNoSubscriberByDesign.Code() {
 		t.Fatalf("raw Telegram settlement = %#v, want no_subscriber_by_design without delivery/dead letter", observed)
 	}
@@ -737,7 +737,7 @@ func requireStandingDeclarationPublicationReadback(t *testing.T, baseURL string,
 	t.Helper()
 	var listed operatorread.OperatorEventListResult
 	requireServedJSONRPCResult(t, baseURL+"/v1/rpc", "event.list", map[string]any{
-		"filter": map[string]any{"run_id": binding.RunID, "event_name": "inbound.telegram"}, "limit": 500,
+		"filter": map[string]any{"run_id": binding.RunID, "event_name": "inbound.telegram.raw"}, "limit": 500,
 	}, &listed)
 	if len(listed.Events) != len(deliveries) || listed.NextCursor != "" {
 		t.Fatalf("declaration raw event cardinality=%d cursor=%s, want %d", len(listed.Events), listed.NextCursor, len(deliveries))
@@ -748,7 +748,7 @@ func requireStandingDeclarationPublicationReadback(t *testing.T, baseURL string,
 	}
 	for _, event := range listed.Events {
 		delivery, ok := event.Payload["provider_event_id"].(string)
-		if !ok || !remaining[delivery] || event.RunID != binding.RunID || event.EntityID != "" || event.EventName != "inbound.telegram" {
+		if !ok || !remaining[delivery] || event.RunID != binding.RunID || event.EntityID != "" || event.EventName != "inbound.telegram.raw" {
 			t.Fatalf("declaration raw event changed exact delivery/run or borrowed a sender: %+v", event)
 		}
 		delete(remaining, delivery)
