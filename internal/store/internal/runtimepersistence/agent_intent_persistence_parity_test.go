@@ -57,7 +57,7 @@ func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {
 	})
 }
 
-func TestSelectedStoresRejectIntentMismatchBeforeProviderRecovery(t *testing.T) {
+func TestSelectedStoresRejectCriteriaMismatchBeforeProviderRecovery(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		ctx := testAuthorActivityContext()
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
