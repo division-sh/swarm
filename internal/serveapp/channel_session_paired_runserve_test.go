@@ -243,6 +243,15 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready {
 				t.Fatal("interrupted native activation did not recover to executable readiness", result)
 			}
+			reader, err := storetest.OpenChannelObservation(backend, storeDSN)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := reader.Close(); err != nil {
+					t.Error(err)
+				}
+			})
 			select {
 			case sent := <-peer.sent:
 				if sent.ID != strings.ReplaceAll(result.Operation.ConfirmationOperationID, "-", "") || sent.Body.GetConversation() != "Swarm channel connected." {
@@ -250,6 +259,12 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatal("ready native channel had no genuine decrypted confirmation send")
+			}
+			var cards []servedNativeMessage
+			if quotedRetirement {
+				// This is an ordinary restart, not a lost-send cut. The gate
+				// already exists before SERVED_RETIRE_TRIGGER is published.
+				cards = append(cards, waitServedNativeCardBeforeRestart(t, endpoint, peer, reader))
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatal("enabled RunServe shutdown failed", code, process.outputString())
@@ -271,15 +286,6 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				t.Fatal("completed confirmation was resent during ordinary restart", sent.ID)
 			default:
 			}
-			reader, err := storetest.OpenChannelObservation(backend, storeDSN)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := reader.Close(); err != nil {
-					t.Error(err)
-				}
-			})
 			if proof.noticeAcknowledgment {
 				notice := requireServedNativeNoticeAcknowledgment(t, endpoint, peer, reader, result.Operation)
 				if code := process.stop(); code != 0 {
@@ -335,7 +341,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				MessageReference: "SERVED_INBOX", ConversationReference: from.String(), InterfaceKey: result.Operation.Interface.Key()}
 			waitTextReplyIntent(t, reader, observation, "entry")
 			requireNativeIntentObservationScope(t, reader, observation)
-			cards := requireServedNativeInboxReply(t, endpoint, peer, reader, opts.SourceRoot)
+			cards = append(cards, requireServedNativeInboxReply(t, endpoint, peer, reader, opts.SourceRoot)...)
 			if proof.explicitLogout {
 				requireServedNativeExplicitLogout(t, endpoint, peer, result.Operation)
 				if code := process.stop(); code != 0 {
@@ -755,6 +761,39 @@ waiting:
 	return nil
 }
 
+func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation) servedNativeMessage {
+	t.Helper()
+	cardID := waitServedNativePendingCard(t, endpoint)
+	var sent servedNativeMessage
+	select {
+	case sent = <-peer.sent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("native card was not delivered before ordinary restart", cardID)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, plan := range plans {
+			if plan.SourceKind != "card" || plan.SourceID != cardID || plan.State != "sent" {
+				continue
+			}
+			receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plan.DeliveryID, plan.CurrentReceiptID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found && receipt.DeliveryReference == sent.ID && receipt.RenderID == plan.CurrentRenderID {
+				return sent
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("native card has no exact settled receipt before ordinary restart", cardID, sent.ID)
+	return servedNativeMessage{}
+}
+
 func requireServedNativeQuotedRetirement(t *testing.T, endpoint string, peer *serveNativeProtocolPeer,
 	reader storetest.ChannelObservation, observation render.IntentObservationQuery, cards []servedNativeMessage,
 ) {
@@ -785,36 +824,6 @@ func requireServedNativeQuotedRetirement(t *testing.T, endpoint string, peer *se
 	}
 	if !strings.Contains(selected.Body.GetConversation(), "\nReference: "+cardID+"\n") || !retirementChoice {
 		t.Fatal("served peer did not receive the actual retirement choice", selected.Body.GetConversation())
-	}
-	// Receiving ciphertext at the peer precedes the sender's durable ACK
-	// receipt. A quoted control requires that exact issued-message identity.
-	receiptDeadline := time.Now().Add(5 * time.Second)
-	for {
-		plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
-		if err != nil {
-			t.Fatal(err)
-		}
-		issued := false
-		for _, plan := range plans {
-			if plan.SourceKind != "card" || plan.SourceID != cardID || plan.State != "sent" {
-				continue
-			}
-			receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plan.DeliveryID, plan.CurrentReceiptID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if found && receipt.DeliveryReference == selected.ID && receipt.RenderID == plan.CurrentRenderID {
-				issued = true
-				break
-			}
-		}
-		if issued {
-			break
-		}
-		if time.Now().After(receiptDeadline) {
-			t.Fatal("actual retirement card has no exact settled native receipt", selected.ID, cardID)
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	var detail struct {
 		Card struct {
