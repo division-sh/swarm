@@ -36,7 +36,7 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	parent := owner
 	parentPorts := *owner.ports
 	parent.ports = &parentPorts
-	parent.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: func(runID string) {
+	parent.ports.busDurable.RunLifecycle = &selectedActivatedServingCut{OperationOwner: owner.ports.busDurable.RunLifecycle, checkpoint: func(runID string) {
 		activated <- runID
 		<-ctx.Done()
 	}}

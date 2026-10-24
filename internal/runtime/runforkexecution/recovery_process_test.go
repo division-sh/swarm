@@ -10,16 +10,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -121,6 +124,20 @@ type selectedCrashExecution struct {
 type selectedCrashActivated struct {
 	SelectedContractForkLifecycle
 	checkpoint func(string)
+}
+
+type selectedActivatedServingCut struct {
+	runlifecycle.OperationOwner
+	checkpoint func(string)
+	once       sync.Once
+}
+
+func (p *selectedActivatedServingCut) RequireActiveRunSource(ctx context.Context, runID string) (correlation.SourceArtifactFact, error) {
+	fact, err := p.OperationOwner.RequireActiveRunSource(ctx, runID)
+	if err == nil {
+		p.once.Do(func() { p.checkpoint(runID) })
+	}
+	return fact, err
 }
 
 func (p selectedCrashActivated) ActivateRunForkForSelectedContractExecution(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {

@@ -29,11 +29,12 @@ func TestIssue642UnpublishedArrivalIgnoresLateSourcePublicationBothStores(t *tes
 type unpublishedJoinLateSourceActivation struct {
 	SelectedContractForkLifecycle
 	before func()
+	once   sync.Once
 }
 
-func (s unpublishedJoinLateSourceActivation) ActivateRunForkForSelectedContractExecution(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	s.before()
-	return s.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, request)
+func (s *unpublishedJoinLateSourceActivation) RequireRunForkSelectedContractBinding(ctx context.Context, runID string) (runfork.RunForkSelectedContractBinding, error) {
+	s.once.Do(s.before)
+	return s.SelectedContractForkLifecycle.RequireRunForkSelectedContractBinding(ctx, runID)
 }
 
 func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication bool) {
@@ -69,7 +70,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			parentOwner := owner
 			parentPorts := *owner.ports
 			parentOwner.ports = &parentPorts
-			parentOwner.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: func(runID string) {
+			parentOwner.ports.busDurable.RunLifecycle = &selectedActivatedServingCut{OperationOwner: owner.ports.busDurable.RunLifecycle, checkpoint: func(runID string) {
 				activated <- runID
 				select {
 				case <-release:
@@ -136,7 +137,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			if latePublication {
 				childPorts := *owner.ports
 				childOwner.ports = &childPorts
-				childOwner.ports.fork = unpublishedJoinLateSourceActivation{SelectedContractForkLifecycle: owner.ports.fork, before: func() {
+				childOwner.ports.fork = &unpublishedJoinLateSourceActivation{SelectedContractForkLifecycle: owner.ports.fork, before: func() {
 					// The child already owns its immutable cut/materialization. Let B
 					// physically publish EB before C acquires execution authority.
 					releaseParent()
