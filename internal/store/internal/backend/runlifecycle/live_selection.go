@@ -61,6 +61,34 @@ func liveScopeForRun(ctx context.Context, q rowQueryer, runID string) (runtimeru
 	return scope, scope.Validate()
 }
 
+// LiveRunForTargetTx uses the same flow selector as SelectLiveRunTx, then locks
+// that predecessor before its accepted-work fence is inspected by activation.
+func LiveRunForTargetTx(ctx context.Context, tx *sql.Tx, runID string, postgres bool) (runtimerunlifecycle.LiveRun, bool, error) {
+	scope, err := liveScopeForRun(ctx, tx, runID)
+	if err != nil {
+		return runtimerunlifecycle.LiveRun{}, false, err
+	}
+	if err := scope.Validate(); err != nil {
+		return runtimerunlifecycle.LiveRun{}, false, err
+	}
+	live, found, err := loadLiveRun(ctx, tx, scope)
+	if err != nil || !found {
+		return live, found, err
+	}
+	query := `SELECT status FROM runs WHERE run_id=$1`
+	if postgres {
+		query += ` FOR UPDATE`
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, query, live.RunID).Scan(&status); err != nil {
+		return live, false, err
+	}
+	if status != string(runtimerunlifecycle.StateLive) {
+		return live, false, errors.New("live predecessor changed before its handoff fence")
+	}
+	return live, true, nil
+}
+
 func requireCreateScope(ctx context.Context, tx *sql.Tx, request runtimerunlifecycle.CreateRequest) error {
 	scope, err := liveScopeForRun(ctx, tx, request.RunID)
 	if err != nil {

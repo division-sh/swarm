@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -185,10 +186,10 @@ func q1BranchPointSourceConstructor(t *testing.T, ctx context.Context, owner Sel
 }
 
 func q1StateOnlyGateComponentSource(t *testing.T, owner SelectedContractExecutionOwner) (context.Context, SelectedContractExecutionRequest, func()) {
-	return q1GateComponentSource(t, owner, true, false)
+	return q1GateComponentSource(t, owner, true, false, false)
 }
 
-func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, decided, pending bool) (context.Context, SelectedContractExecutionRequest, func()) {
+func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, decided, pending, live bool) (context.Context, SelectedContractExecutionRequest, func()) {
 	t.Helper()
 	selected := owner.ports.fork
 	ctx := runForkTestContext(t)
@@ -210,10 +211,25 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
-	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
-		BundleHash: fact.BundleHash(), StartedAt: at,
-	})
+	if live {
+		artifacts := selected.(interface {
+			EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+		})
+		if _, err := artifacts.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := selected.(runlifecycle.OperationOwner).CreateRun(ctx, runlifecycle.CreateRequest{
+			RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), Source: fact, StartedAt: at,
+			LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+			RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+			BundleHash: fact.BundleHash(), StartedAt: at,
+		})
+	}
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: runID, SourceArtifactFact: fact, Selection: testContractSelection()})
 	if err != nil {

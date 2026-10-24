@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	managedcapabilitystore "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	"github.com/google/uuid"
 )
 
@@ -304,6 +305,20 @@ func inspectRunExecutionOwnershipModeTx(ctx context.Context, tx *sql.Tx, evidenc
 		return 0, err
 	}
 	if evidence.SelectedFork == nil {
+		if bindingID.Valid && hash == evidence.BundleHash {
+			applicable, err := sourceadmission.ObserveLiveHandoff(ctx, tx, runID, hash)
+			if err != nil || !applicable {
+				return manager.RunExecutionForeign, err
+			}
+			if lock {
+				if err := generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, evidence, hash, sqlite); err != nil {
+					return 0, err
+				}
+			} else if evidence.State != startupownership.GrantAdmitted {
+				return manager.RunExecutionForeign, nil
+			}
+			return manager.RunExecutionOwned, nil
+		}
 		return classifyOrdinaryRunSource(hash, bindingID, evidence.BundleHash), nil
 	}
 	if lock {
@@ -354,7 +369,7 @@ func classifyOrdinaryRunSource(hash string, bindingID sql.NullString, sourceHash
 
 // ObserveOrdinaryRunSource shares durable binding classification with grant
 // admission. It proves only source applicability, never process possession or
-// execution ownership; selected-fork bindings are always excluded.
+// execution ownership; selected bindings require an exact committed live handoff.
 func (s *AgentPostgresOwner) ObserveOrdinaryRunSource(ctx context.Context, source correlation.SourceArtifactFact, runID string) (bool, error) {
 	if s == nil || s.backend == nil {
 		return false, errors.New("ordinary run source observation requires the selected PostgreSQL reader")
@@ -377,6 +392,10 @@ func observeOrdinaryRunSource(ctx context.Context, source correlation.SourceArti
 	err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		hash, binding, err := loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, false)
 		if err != nil {
+			return err
+		}
+		if binding.Valid && hash == source.BundleHash() {
+			matches, err = sourceadmission.ObserveLiveHandoff(ctx, tx, runID, hash)
 			return err
 		}
 		matches = classifyOrdinaryRunSource(hash, binding, source.BundleHash()) == manager.RunExecutionOwned

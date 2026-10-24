@@ -21135,6 +21135,13 @@ platform_tables:
           service current-run fields are not selectors. A fork fences outgoing admissions and settles or parks accepted
           work before one transaction pauses the currently live sibling and selects the child. Rollback and lost-ACK
           recovery preserve the committed selection. A live run is not normally completed when its instances settle.
+          A selected child completes actor self-release while its selected grant remains admitted. The activation
+          transaction fences and closes that exact executor, switches live selection, records the immutable live
+          acknowledgment and transfers only its exactly fenced, parked delivery continuations. Unacknowledged
+          pipeline publications, open claims and active provider attempts refuse the switch without partial writes.
+          Post-commit execution requires the exact committed handoff plus a fresh admitted ordinary grant for the
+          current process and source set. A selected grant, closed history alone, or a missing binding grants no
+          ordinary execution rights. Delivery attempts, terminal results, routes and historical lineage are retained.
         running: Active isolated execution. Events being processed; this status is not deployment live-selection authority.
         paused: Execution suspended (budget threshold, admin action). Resumable.
         completed: All pipelines reached terminal states or idle. No in-flight events.
