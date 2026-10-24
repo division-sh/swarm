@@ -96,7 +96,7 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
 	}
 	var existing apiIdempotencyRecord
 	var found bool
-	err = postgresbackend.RunAuthorityTransaction(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
+	load := func(sqlCtx context.Context, tx *sql.Tx) error {
 		if err := admitPrincipalTx(sqlCtx, tx, req, true); err != nil {
 			return err
 		}
@@ -106,7 +106,23 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
 		var err error
 		existing, found, err = loadAPIIdempotency(sqlCtx, tx, req)
 		return err
-	})
+	}
+	needsPurge := true
+	if (req.Method == "event.publish" || req.Method == "run.start") && req.Actor.Kind != apiidempotencycontract.ActorOperatorPrincipal {
+		// The same retained key lease protects this snapshot and any fallback.
+		// Expired cache still takes the original cleanup path, including misses.
+		err = postgresbackend.RunAuthorityReadTransaction(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
+			if err := tx.QueryRowContext(sqlCtx, `SELECT EXISTS (SELECT 1 FROM api_idempotency WHERE expires_at <= $1)`, req.Now).Scan(&needsPurge); err != nil {
+				return fmt.Errorf("read api idempotency expiration: %w", err)
+			}
+			var err error
+			existing, found, err = loadAPIIdempotency(sqlCtx, tx, req)
+			return err
+		})
+	}
+	if err == nil && needsPurge {
+		err = postgresbackend.RunAuthorityTransaction(ctx, session, load)
+	}
 	if err != nil {
 		return nil, errors.Join(err, requestLease.Release(ctx))
 	}
