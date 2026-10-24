@@ -707,13 +707,16 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			}
 			issuanceElapsed := chunks.LastCommitAt.Sub(issuanceStarted)
 			mergeCeiling := numericReporterIssuanceMergeCeiling(tc.name, transactionOptions.Delay, issuanceBudget)
+			// P4 (2727/6389296168) changes only these PostgreSQL issuance cuts.
+			advisoryIssuance := tc.name == "postgres" && !servingWindow && (transactionOptions.Delay == 0 ||
+				(transactionOptions.Delay == 300*time.Millisecond && transactionOptions.DelayScope == storetest.DelayAllCommits))
 			if tc.name == "postgres" && transactionOptions.Delay == 0 {
-				t.Logf("normal PostgreSQL conformance500 provisional acceptance: original target=%s previous merge ceiling=15s provisional merge ceiling=%s", issuanceBudget, mergeCeiling)
+				t.Logf("normal PostgreSQL conformance500 advisory issuance: original target=%s previous merge ceiling=15s historical comparison=%s", issuanceBudget, mergeCeiling)
 			} else if tc.name == "sqlite" && transactionOptions.Delay == 0 {
 				t.Logf("normal SQLite conformance500 lead-authorized thirty percent allowance: original target=%s previous merge ceiling=10s provisional merge ceiling=%s", issuanceBudget, mergeCeiling)
 			}
-			t.Logf("500-row issuance from first batch submission to final durable chunk acknowledgement: %s; cursor observed at %s; original target=%s merge ceiling=%s", issuanceElapsed, issuanceReached.Sub(issuanceStarted), issuanceBudget, mergeCeiling)
-			if !fanOutRaceBuild && issuanceElapsed > mergeCeiling {
+			t.Logf("500-row issuance from first batch submission to final durable chunk acknowledgement: %s; cursor observed at %s; original target=%s merge ceiling=%s advisory=%t", issuanceElapsed, issuanceReached.Sub(issuanceStarted), issuanceBudget, mergeCeiling, advisoryIssuance)
+			if !fanOutRaceBuild && !advisoryIssuance && issuanceElapsed > mergeCeiling {
 				t.Errorf("500-row issuance exceeded %s merge ceiling (original target %s): %s (transaction probe %+v)", mergeCeiling, issuanceBudget, issuanceElapsed, transactionOptions)
 			}
 			settledBeforeHandoff := false

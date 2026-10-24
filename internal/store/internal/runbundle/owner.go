@@ -38,7 +38,7 @@ func (o *Postgres) Load(ctx context.Context, runID string) (runtimerunbundle.Ava
 		return runtimerunbundle.Availability{}, fmt.Errorf("run_id is required")
 	}
 	var availability runtimerunbundle.Availability
-	err := o.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		availability, err = loadPostgres(txctx, tx, runID)
 		return err
@@ -52,7 +52,6 @@ func loadPostgres(ctx context.Context, queryer rowQueryer, runID string) (runtim
 		SELECT run_id::text, status, bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-		FOR SHARE
 	`, runID).Scan(&row.RunID, &row.Status, &row.BundleHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimerunbundle.Availability{}, fmt.Errorf("run %s not found: %w", runID, runtimerunbundle.ErrRunNotFound)
