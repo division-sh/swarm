@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -125,9 +126,11 @@ func TestChannelNativeInboxDelayedApplyDuringReconnectStartE2E(t *testing.T) {
 
 func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "verdict")
-		})
+		for _, scenario := range []string{"paused_verdict", "unloaded_verdict"} {
+			t.Run(backend+"/"+scenario, func(t *testing.T) {
+				runChannelDeliveryInboundDispositionE2E(t, backend, scenario)
+			})
+		}
 	}
 }
 
@@ -300,6 +303,10 @@ func (r telegramLongNoticeLLMRuntime) ContinueManagedSession(ctx context.Context
 
 func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario string) {
 	t.Helper()
+	pausedVerdict, unloadedVerdict := scenario == "paused_verdict", scenario == "unloaded_verdict"
+	if pausedVerdict || unloadedVerdict {
+		scenario = "verdict"
+	}
 	retainedInteraction := scenario == "ordered_input_restart" || scenario == "draft_chooser_restart"
 	if retainedInteraction {
 		scenario = strings.TrimSuffix(scenario, "_restart")
@@ -338,7 +345,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatal(err)
 		}
 	}
-	if scenario == "draft_chooser" || scenario == "quoted_two" {
+	if scenario == "draft_chooser" || scenario == "quoted_two" || pausedVerdict || unloadedVerdict {
 		sourceRoot = writeMixedStandingTelegramServeFixture(t, telegram.URL)
 	}
 	if scenario == "required_input" || scenario == "invalid_input" || scenario == "ordered_input" || scenario == "edit_loss_resend" ||
@@ -440,10 +447,18 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "delivery_loss_resend" || scenario == "edit_loss_resend" || scenario == "notice_uncertainty_readback" {
 		observation.configure(&opts)
 	}
+	var captured <-chan *processLifecycleSupervisor
+	if pausedVerdict || unloadedVerdict {
+		captured = captureSelectedResetSupervisor(t)
+	}
 	process := startServeRuntimeTestProcess(t, opts)
 	t.Cleanup(func() { _ = process.stop() })
 	process.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
+	var supervisor *processLifecycleSupervisor
+	if captured != nil {
+		supervisor = <-captured
+	}
 	if scenario == "summary_open" || scenario == "summary_open_many" || scenario == "notice_uncertainty_readback" {
 		rpcEndpoint := endpoint + "/v1/rpc"
 		var identity apiv1.RuntimeIdentityResult
@@ -707,6 +722,16 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "verdict" || scenario == "verdict_ack_loss" || scenario == "required_input" || scenario == "invalid_input" || scenario == "edit_loss_resend" ||
 		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		cardMessageID := 2
+		if pausedVerdict || unloadedVerdict {
+			db, err := sql.Open(backend, observerDSN)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cardMessageID = waitChannelCardMessageID(t, db, backend, "telegram-stopped")
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if scenario == "quoted_two" || scenario == "draft_chooser" {
 			cardMessageID = cardMessages["telegram-ingress"]
 		}
@@ -753,6 +778,31 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if err != nil {
 		t.Fatal(err)
 	}
+	var observedCard decisioncard.Card
+	if pausedVerdict || unloadedVerdict {
+		db, err := sql.Open(backend, observerDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		_, runID, _ := loadServedStandingOwnerByFlow(t, db, backend, "telegram-stopped")
+		cardID := waitChannelAnchorCard(t, db, runID, decisioncard.AnchorKindStageGate, "telegram-stopped")
+		observedCard, err = supervisor.resetRequests[0].Stores.runtimeDeps().DecisionCards.GetDecisionCard(t.Context(), cardID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := requestServedJSONRPC(t, endpoint+"/v1/rpc", "run.pause", map[string]any{"run_id": runID, "idempotency_key": "R12-channel-pause"})
+		t.Logf("R12 actual channel pause: run=%s card=%s result=%s error=%+v", runID, cardID, response.Result, response.Error)
+		if response.Error != nil {
+			t.Fatal("actual channel card's run could not be paused")
+		}
+		if unloadedVerdict {
+			result := supervisor.runtimeContexts.DeactivateBundleHashWithOptions(observedCard.BundleHash, runtimepkg.RuntimeContextCauseUnloaded, runtimepkg.DefaultShutdownOptions())
+			if result.ShutdownErr != nil {
+				t.Fatal(result.ShutdownErr)
+			}
+		}
+	}
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, callbackURL, strings.NewReader(string(requestBody)))
 	if err != nil {
 		t.Fatal(err)
@@ -767,6 +817,15 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if unloadedVerdict {
+		card, err := supervisor.resetRequests[0].Stores.runtimeDeps().DecisionCards.GetDecisionCard(t.Context(), observedCard.CardID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("R12 actual unloaded channel callback: status=%d body=%s card_before=%s card_after=%s decision_event=%s", response.StatusCode, responseBody, observedCard.Status, card.Status, card.DecisionEventID)
+		requireServedRunStatus(t, endpoint+"/v1/rpc", observedCard.RunID, "paused")
+		return
 	}
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("business text admission status=%d body=%s", response.StatusCode, responseBody)
@@ -869,6 +928,17 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if (scenario == "verdict" || scenario == "verdict_ack_loss") && len(provider.Acknowledgments()) > 0 && len(provider.Edits()) > 0 {
+			if pausedVerdict {
+				card, err := supervisor.resetRequests[0].Stores.runtimeDeps().DecisionCards.GetDecisionCard(t.Context(), observedCard.CardID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("R12 actual paused channel callback: status=%d card_before=%s card_after=%s decision_event=%s acknowledgments=%v edits=%v", response.StatusCode, observedCard.Status, card.Status, card.DecisionEventID, provider.Acknowledgments(), provider.Edits())
+				requireServedRunStatus(t, endpoint+"/v1/rpc", observedCard.RunID, "paused")
+				var event map[string]any
+				requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "event.get", map[string]any{"event_id": card.DecisionEventID}, &event)
+				t.Logf("R12 paused channel decision delivery: %v", event)
+			}
 			if scenario == "verdict_ack_loss" {
 				time.Sleep(2300 * time.Millisecond)
 				if got := len(provider.Acknowledgments()); got != 1 {
