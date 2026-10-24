@@ -88,18 +88,11 @@ func TestToolDefinitionsForActor_ExcludeForeignReadTargets(t *testing.T) {
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"discovery": {
-			EntitiesYAML: `
-campaign:
-  status: text
-`,
-			AgentsYAML: entityToolAgentYAML(actor),
+			EntitiesYAML: "status: text\n",
+			AgentsYAML:   entityToolAgentYAML(actor),
 		},
 		"signal-search": {
-			EntitiesYAML: `
-signal:
-  signal_strength: integer
-  processed: boolean
-`,
+			EntitiesYAML: "signal_strength: integer\nprocessed: boolean\n",
 		},
 	})
 
@@ -132,18 +125,12 @@ func TestToolDefinitionsForActor_HideEntityScopedUniversalToolsWithoutActorContr
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
-			EntitiesYAML: `
-validation_case:
-  status: text
-`,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "validator", Role: "validator"}),
+			EntitiesYAML: "status: text\n",
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "validator", Role: "validator"}),
 		},
 		"scoring": {
-			EntitiesYAML: `
-vertical:
-  status: text
-`,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "scorer", Role: "scorer"}),
+			EntitiesYAML: "status: text\n",
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "scorer", Role: "scorer"}),
 		},
 	})
 

@@ -2044,20 +2044,15 @@ func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 func TestEntityContractsAdmission_PreservesZeroAndFalseInitialValue(t *testing.T) {
 	var schema EntityContractsDocument
 	if err := decodeNodeTestYAML([]byte(`
-scoring_phase:
-  revision_count:
-    type: integer
-    initial: 0
-  is_duplicate:
-    type: boolean
-    initial: false
+revision_count: 0
+is_duplicate: false
 `), &schema); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if len(schema) != 1 {
 		t.Fatalf("entity count = %d", len(schema))
 	}
-	fields := schema["scoring_phase"].Fields
+	fields := schema[stateEntityType].Fields
 	if got := fields["revision_count"].Initial; got != 0 {
 		t.Fatalf("revision_count initial = %#v", got)
 	}
@@ -2074,32 +2069,6 @@ func TestRetiredEntitySchemaAdmissionRejectsScalarInitialSuffix(t *testing.T) {
 				t.Fatalf("retired entity-schema grammar admitted: %v", err)
 			}
 		})
-	}
-}
-
-func TestEntityContractsAdmissionScalarTypeCannotInventInitial(t *testing.T) {
-	var schema EntityContractsDocument
-	err := decodeNodeTestYAML([]byte(`
-scoring_phase:
-  revision_count: integer initial 0
-`), &schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if field := schema["scoring_phase"].Fields["revision_count"]; field.Initial != nil {
-		t.Fatalf("scalar type text invented an initial value: %#v", field)
-	}
-}
-
-func TestEntityContractsAdmission_RejectsMappingWithoutType(t *testing.T) {
-	var schema EntityContractsDocument
-	err := decodeNodeTestYAML([]byte(`
-scoring_phase:
-  revision_count:
-    initial: 0
-`), &schema)
-	if err == nil || !strings.Contains(err.Error(), "type is required") {
-		t.Fatalf("yaml.Unmarshal error = %v, want missing-type rejection", err)
 	}
 }
 
@@ -2954,30 +2923,6 @@ indexed: true
 	}
 	if !field.Indexed {
 		t.Fatal("Indexed = false, want true")
-	}
-}
-
-func TestEntityFieldDeclDecode_PreservesUnusedReaderReason(t *testing.T) {
-	var field EntityFieldDecl
-	if err := decodeNodeTestYAML([]byte(`
-type: text
-_unused_reader_reason: External operator readout
-`), &field); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := field.UnusedReaderReason; got != "External operator readout" {
-		t.Fatalf("UnusedReaderReason = %q", got)
-	}
-}
-
-func TestEntityFieldDeclDecode_RejectsShortUnusedReaderReason(t *testing.T) {
-	var field EntityFieldDecl
-	err := decodeNodeTestYAML([]byte(`
-type: text
-_unused_reader_reason: short
-`), &field)
-	if err == nil || !strings.Contains(err.Error(), "_unused_reader_reason must be at least 10 characters") {
-		t.Fatalf("yaml.Unmarshal error = %v, want _unused_reader_reason length error", err)
 	}
 }
 

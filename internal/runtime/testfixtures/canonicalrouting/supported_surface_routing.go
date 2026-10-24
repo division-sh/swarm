@@ -158,6 +158,6 @@ connect:
 instance: producer_id
 outputs:
   - deploy.done
-`, "deploy.done:\n", "producer_state:\n  producer_id: string\n", "")
+`, "deploy.done:\n", "producer_id: text\n", "")
 	return root
 }

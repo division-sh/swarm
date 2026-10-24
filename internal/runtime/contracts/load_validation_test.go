@@ -107,7 +107,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefine
 			},
 		},
 		RootEntities: EntityContractsDocument{
-			"deploy": {
+			"state": {
 				Fields: map[string]EntityFieldDecl{
 					"created_at": {
 						Type:        "timestamp",

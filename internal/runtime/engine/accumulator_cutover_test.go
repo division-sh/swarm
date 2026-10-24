@@ -22,7 +22,7 @@ import (
 func a2AccumulatorExecutor(t *testing.T) (*Executor, *persistentStateRepo) {
 	t.Helper()
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"record": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"BusinessRecord": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}, "marker": {Type: "text"}}},
 		}},

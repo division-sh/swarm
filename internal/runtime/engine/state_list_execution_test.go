@@ -19,7 +19,7 @@ func stateListExecutor2293(t *testing.T) (*Executor, *persistentStateRepo, *[]st
 	fields := map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "boolean"}, "message": {Type: "text"}}
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{"Review": {Fields: fields}}},
-		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 			"reviews": {Type: "[Review]"}, "marker": {Type: "text"},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{

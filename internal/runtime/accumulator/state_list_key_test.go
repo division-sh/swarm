@@ -68,7 +68,7 @@ func accumulateQ1KeySource(t *testing.T, typeRef string, required bool) semantic
 				}},
 			},
 		},
-		RootEntities: runtimecontracts.EntityContractsDocument{"work": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 			"reviews": {Type: "[CollectedItem]", IsOptional: true},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"review.received": {Payload: payload}},

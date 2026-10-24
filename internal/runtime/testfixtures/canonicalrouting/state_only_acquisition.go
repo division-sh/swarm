@@ -26,7 +26,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		rootSchema = strings.Replace(rootSchema, "inputs: [test.node_emitted.selector, test.node_emitted.upserter]", "inputs: [test.node_emitted.selector, test.node_emitted.upserter, test.fixture_parent.construct]", 1)
 	}
 	if targetFlow != "." {
-		rootSchema += "  outputs: [test.node_emitted.selector, test.node_emitted.upserter]\nconnect:\n"
+		rootSchema += "outputs: [test.node_emitted.selector, test.node_emitted.upserter]\nconnect:\n"
 		for _, name := range []string{"test.node_emitted.selector", "test.node_emitted.upserter"} {
 			policy := ""
 			if modes[targetFlow] == "template" {
@@ -88,7 +88,7 @@ func writeStateOnlyAcquisitionFlow(t testing.TB, root, workflowName, rootSchema,
 	writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "schema.yaml")), schema)
 	entity := "account_id: \"different-business-key\"\ninstance_key: \"instance\"\nitems: [json]\n"
 	if mode == "template" {
-		entity = "review_item:\n  account_id: text\n  instance_key: text\n  items: {type: '[json]', initial: []}\n"
+		entity = "account_id: text\ninstance_key: text\nitems: [json]\n"
 	}
 	writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "state.yaml")), entity)
 	if path != "." && path != targetFlow {
@@ -98,7 +98,11 @@ func writeStateOnlyAcquisitionFlow(t testing.TB, root, workflowName, rootSchema,
 	}
 	nodes := `selector:
   test.node_emitted.selector:
-    accumulate: {into: items, from: payload}
+    data_accumulation:
+      writes:
+        - op: append
+          target: state.items
+          value: payload
 upserter:
   test.node_emitted.upserter: {}
 `

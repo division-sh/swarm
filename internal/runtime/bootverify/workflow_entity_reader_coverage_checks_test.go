@@ -99,7 +99,7 @@ func TestRun_GateContextLiteralDoesNotCountAsEntityReaderCoverage(t *testing.T) 
 func entityReaderCoverageBundle(field runtimecontracts.EntityFieldDecl) *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"ticket": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"resolution": field,
 				},

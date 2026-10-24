@@ -13,7 +13,7 @@ import (
 func TestEntityPresenceAtGateConsumer(t *testing.T) {
 	source := semanticview.Wrap(&rc.WorkflowContractBundle{
 		RootTypes:    rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}},
-		RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}},
+		RootEntities: rc.EntityContractsDocument{"state": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}},
 	})
 	for _, consumer := range []string{"gate"} {
 		for _, safe := range []bool{false, true} {

@@ -16,7 +16,7 @@ import (
 func TestWave1EntityResolverSplitsBusinessEntityAndPlatformEntity(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"record": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"current_state": {Type: "text"},
 					"name":          {Type: "text"},
@@ -45,7 +45,7 @@ func TestWave1EntityResolverSplitsBusinessEntityAndPlatformEntity(t *testing.T) 
 func TestWave1EntityResolverRejectsLegacyAndUnsupportedPlatformEntityFields(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"record": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"name": {Type: "text"},
 				},
@@ -74,7 +74,7 @@ func TestWave1EntityResolverRejectsLegacyAndUnsupportedPlatformEntityFields(t *t
 func TestWave1EntityResolverRejectsRetiredFanOutCountRead(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"record": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"fan_out_count": {Type: "integer"},
 				},

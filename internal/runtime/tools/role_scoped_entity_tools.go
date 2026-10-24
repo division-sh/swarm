@@ -196,13 +196,13 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {
 	switch spec.Kind {
 	case roleScopedEntityToolReadWhole:
-		return fmt.Sprintf("Read the current turn %s state. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.EntityType)
+		return "Read this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted."
 	case roleScopedEntityToolReadField:
-		return fmt.Sprintf("Read %s from the current turn %s state. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		return fmt.Sprintf("Read %s from this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field)
 	case roleScopedEntityToolSaveField:
-		return fmt.Sprintf("Save %s on the current turn %s state. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		return fmt.Sprintf("Save %s on this flow's state. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field)
 	case roleScopedEntityToolUpdatePath:
-		return fmt.Sprintf("Update %s.%s on the current turn %s state. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath, spec.EntityType)
+		return fmt.Sprintf("Update %s.%s on this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath)
 	default:
 		return "Role-scoped entity tool."
 	}

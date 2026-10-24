@@ -1,7 +1,4 @@
 processing-node:
-  state_table: processing_node_state
-  gate_state:
-    score_ready: gate set when score is ready
   item.review_requested:
     guard: policy.delivery_enabled
     compute:
@@ -22,12 +19,19 @@ processing-node:
       - advances_to: rejected
         emit:
           event: item.rejected
-    sets_gate: score_ready
-    clear_gates:
-      - intake_open
+    data_accumulation:
+      writes:
+        - target_field: score_ready
+          value: true
+        - target_field: intake_open
+          value: false
   item.rejected:
     advances_to: rejected
-    clear_gates:
-      - intake_ready
-      - score_ready
-      - delivery_ready
+    data_accumulation:
+      writes:
+        - target_field: intake_ready
+          value: false
+        - target_field: score_ready
+          value: false
+        - target_field: delivery_ready
+          value: false

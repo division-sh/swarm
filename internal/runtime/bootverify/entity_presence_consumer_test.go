@@ -37,14 +37,14 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				bundle, _ := semanticview.Bundle(source)
 				bundle.Platform.Platform.Name = "presence-proof"
 				bundle.Platform.Platform.Version = "1"
-				entity := bundle.RootEntities["items"]
+				entity := bundle.RootEntities["state"]
 				entity.Fields["profile"] = rc.EntityFieldDecl{Type: "WorkItem", Initial: map[string]any{"id": "proof", "status": "ready", "tags": []any{}}}
 				entity.Fields["captured"] = rc.EntityFieldDecl{Type: "text"}
 				for name, field := range entity.Fields {
 					field.UnusedReason = "externally populated proof fixture"
 					entity.Fields[name] = field
 				}
-				bundle.RootEntities["items"] = entity
+				bundle.RootEntities["state"] = entity
 				bundle.Events["work.result"] = rc.EventCatalogEntry{Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"note": {Type: "text"}}, Required: []string{"note"}}}
 				tools, _ := semanticview.Bundle(schemaBoundActivityInputSource(value, "text", rc.ToolSchemaString, true))
 				bundle.Tools = tools.Tools
@@ -95,7 +95,7 @@ func TestStageGateContextPreservesNestedEntityPresence(t *testing.T) {
 			}},
 		}
 		bundle.RootTypes = rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}
-		bundle.RootEntities = rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile", Initial: map[string]any{}}}}}
+		bundle.RootEntities = rc.EntityContractsDocument{"state": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile", Initial: map[string]any{}}}}}
 		compileBootverifySchemasPreservingPlans(bundle)
 		findings := checkStageGateValidation(&checkerContext{source: semanticview.Wrap(bundle)})
 		if safe && len(findings) != 0 {

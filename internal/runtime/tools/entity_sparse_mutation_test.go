@@ -501,7 +501,7 @@ writer:
 				}
 				return row
 			}
-			whole, err := exec.Execute(ctx, "read_work", map[string]any{})
+			whole, err := exec.Execute(ctx, "read_state", map[string]any{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -513,18 +513,18 @@ writer:
 				t.Fatalf("creation lost explicit initial: %#v", fields)
 			}
 			assertSparseToolContinuation(t, whole, fields)
-			if _, err := exec.Execute(ctx, "read_work_label", map[string]any{}); err == nil {
+			if _, err := exec.Execute(ctx, "read_state_label", map[string]any{}); err == nil {
 				t.Fatal("unassigned typed field read returned a fabricated value")
 			}
 			for _, tc := range []struct {
 				name  string
 				value any
 			}{
-				{"update_work_profile_name", "no parent"},
-				{"save_work_left", "unpaired"},
-				{"save_work_token", "changed"},
-				{"save_work_label", nil},
-				{"save_work_profile", map[string]any{"note": "required name absent"}},
+				{"update_state_profile_name", "no parent"},
+				{"save_state_left", "unpaired"},
+				{"save_state_token", "changed"},
+				{"save_state_label", nil},
+				{"save_state_profile", map[string]any{"note": "required name absent"}},
 			} {
 				before := read()
 				if _, err := exec.Execute(ctx, tc.name, map[string]any{"value": tc.value}); err == nil {
@@ -538,11 +538,11 @@ writer:
 				name  string
 				value any
 			}{
-				{"save_work_label", ""},
-				{"save_work_left", "paired"},
-				{"save_work_profile", map[string]any{"name": "first", "note": "previous"}},
-				{"save_work_profile", map[string]any{"name": "first"}},
-				{"update_work_profile_name", "second"},
+				{"save_state_label", ""},
+				{"save_state_left", "paired"},
+				{"save_state_profile", map[string]any{"name": "first", "note": "previous"}},
+				{"save_state_profile", map[string]any{"name": "first"}},
+				{"update_state_profile_name", "second"},
 			} {
 				if _, err := exec.Execute(ctx, tc.name, map[string]any{"value": tc.value}); err != nil {
 					for cause := errors.Unwrap(err); cause != nil; cause = errors.Unwrap(cause) {
@@ -563,7 +563,7 @@ writer:
 			if _, exists := profile["note"]; exists {
 				t.Fatalf("nested optional value fabricated: %#v", fields)
 			}
-			whole, err = exec.Execute(ctx, "read_work", map[string]any{})
+			whole, err = exec.Execute(ctx, "read_state", map[string]any{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -674,7 +674,7 @@ writer:
 
 func assertSparseToolContinuation(t *testing.T, result any, wantFields map[string]any) {
 	t.Helper()
-	raw, err := json.Marshal([]map[string]any{{"name": "read_work", "ok": true, "result": result}})
+	raw, err := json.Marshal([]map[string]any{{"name": "read_state", "ok": true, "result": result}})
 	if err != nil {
 		t.Fatal(err)
 	}

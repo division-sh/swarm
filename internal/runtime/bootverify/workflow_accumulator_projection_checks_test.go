@@ -16,7 +16,7 @@ func TestAccumulateTargetRejectsAdditionalWriters(t *testing.T) {
 				RootTypes: c.TypeCatalogDocument{Types: map[string]c.NamedTypeDecl{
 					"Review": {Fields: map[string]c.TypeFieldSpec{"reviewer_id": {Type: "text"}}},
 				}},
-				RootEntities: c.EntityContractsDocument{"work": {Fields: map[string]c.EntityFieldDecl{
+				RootEntities: c.EntityContractsDocument{"state": {Fields: map[string]c.EntityFieldDecl{
 					"reviews": {Type: "[Review]"},
 				}}},
 				Nodes: map[string]c.SystemNodeContract{"collector": {EventHandlers: map[string]c.SystemNodeEventHandler{

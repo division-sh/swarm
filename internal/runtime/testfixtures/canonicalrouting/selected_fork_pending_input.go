@@ -82,7 +82,7 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 	}
 	if variant == PendingInputConnectedSiblings {
 		writeClosedVariantFile(t, root, "on_demand/schema.yaml", "name: on_demand\ninstance: token\nstages:\n  ready: {}\n  done: {final: true}\ninputs:\n  - work.first\n")
-		writeClosedVariantFile(t, root, "on_demand/state.yaml", "token: {type: text, indexed: true}\n")
+		writeClosedVariantFile(t, root, "on_demand/state.yaml", "type: text\nindexed: true\n")
 		writeClosedVariantFile(t, root, "on_demand/nodes.yaml", "controller:\n  work.first:\n    advances_to: done\n")
 	}
 	return root

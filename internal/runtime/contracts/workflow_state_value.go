@@ -7,7 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-// Provisional R18 binding, local diagnostics only until the user rules.
+// R18 gives every flow's state the same internal and persisted identity.
 const stateEntityType = "state"
 
 func projectStateDeclarations(root yamlsource.Value, types TypeCatalogDocument) (EntityContractsDocument, error) {
@@ -135,31 +135,7 @@ func stateTypeDeclaration(raw string, types TypeCatalogDocument) (EntityFieldDec
 	if _, err := (CatalogTypeReference{Type: typeName, Catalog: types}).Resolve(); err != nil {
 		return EntityFieldDecl{}, fmt.Errorf("%q is not a declared type; for a text initial value write %q: %w", raw, `"`+raw+`"`, err)
 	}
-	if !stateTypeVocabulary(typeName, types) {
-		return EntityFieldDecl{}, catalogReferenceError(fmt.Sprintf("%q is not a state type; use text, integer, numeric, boolean, timestamp, or a visible named type; for a text initial write %q", raw, `"`+raw+`"`))
-	}
 	return EntityFieldDecl{Type: typeName, IsOptional: optional}, nil
-}
-
-func stateTypeVocabulary(name string, types TypeCatalogDocument) bool {
-	if isEventListType(name) {
-		return stateTypeVocabulary(eventListItemType(name), types)
-	}
-	if key, value, ok := parseWave1MapTypeRef(name); ok {
-		return stateTypeVocabulary(key, types) && stateTypeVocabulary(value, types)
-	}
-	if _, ok := types.Types[name]; ok {
-		return true
-	}
-	if _, ok := types.Enums[name]; ok {
-		return true
-	}
-	switch name {
-	case "text", "integer", "numeric", "boolean", "timestamp":
-		return true
-	default:
-		return false
-	}
 }
 
 func stateLiteral(value yamlsource.Value, types TypeCatalogDocument) (EntityFieldDecl, error) {

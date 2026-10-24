@@ -179,7 +179,7 @@ func TestRun_RejectsFanOutCountDependencyInPrecedingHandlerWrites(t *testing.T) 
 			}
 			bundle := fanOutValidationBundle(spec)
 			bundle.RootEntities = runtimecontracts.EntityContractsDocument{
-				"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"line_items": {Type: "[LineItem]"},
 				}},
 			}

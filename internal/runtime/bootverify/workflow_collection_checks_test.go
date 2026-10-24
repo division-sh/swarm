@@ -169,7 +169,7 @@ func collectionItemSemanticsSource(handler runtimecontracts.SystemNodeEventHandl
 			}},
 		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"items": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"work.received": {Payload: runtimecontracts.EventPayloadSpec{

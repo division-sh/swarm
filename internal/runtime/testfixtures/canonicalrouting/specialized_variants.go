@@ -24,11 +24,7 @@ stages:
   done: {final: true}
 inputs:
   - task.assigned
-`, "", `case:
-  priority:
-    type: integer
-    _unused_reason: output-mode child primary entity proof field
-`, `reader:
+`, "", "priority: integer\n", `reader:
   task.assigned:
     guard: has(state.priority) && state.priority >= 0
     advances_to: done
@@ -100,11 +96,7 @@ stages:
 line_item.requested:
   line_item_id: string
   line_item_index: integer
-`, `ticket:
-  expected_line_item_ids:
-    type: "[text]"
-    initial: []
-`, `support-node:
+`, "expected_line_item_ids: [text]\n", `support-node:
   ticket.opened:
     fan_out:
       items_from: payload.line_items

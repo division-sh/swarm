@@ -358,18 +358,18 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 	defs := exec.ToolDefinitionsForActor(actor)
 	names := roleScopedToolDefinitionMap(defs)
 	for _, name := range []string{
-		"read_validation_case",
-		"read_validation_case_status",
-		"read_validation_case_business_brief",
-		"save_validation_case_business_brief",
-		"update_validation_case_business_brief_summary",
-		"update_validation_case_business_brief_confidence",
+		"read_state",
+		"read_state_status",
+		"read_state_business_brief",
+		"save_state_business_brief",
+		"update_state_business_brief_summary",
+		"update_state_business_brief_confidence",
 	} {
 		if _, ok := names[name]; !ok {
 			t.Fatalf("expected generated role-scoped tool %q in %#v", name, sortedRoleScopedToolNames(names))
 		}
 	}
-	for _, name := range []string{"save_validation_case_status", "update_validation_case_status_value"} {
+	for _, name := range []string{"save_state_status", "update_state_status_value"} {
 		if _, ok := names[name]; ok {
 			t.Fatalf("create-only field produced mutation tool %q in %#v", name, sortedRoleScopedToolNames(names))
 		}
@@ -389,7 +389,7 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		}
 	}
 
-	saveSchema := names["save_validation_case_business_brief"].Schema.(map[string]any)
+	saveSchema := names["save_state_business_brief"].Schema.(map[string]any)
 	props, _ := saveSchema["properties"].(map[string]any)
 	if _, ok := props["entity_id"]; ok {
 		t.Fatalf("generated save schema exposes entity_id: %#v", saveSchema)
@@ -398,10 +398,10 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		t.Fatalf("generated save schema missing value: %#v", saveSchema)
 	}
 
-	capabilityNames := append([]string{"read_validation_case"}, legacyNames...)
+	capabilityNames := append([]string{"read_state"}, legacyNames...)
 	caps := exec.ToolCapabilitiesForActor(actor, capabilityNames, nil)
-	if cap, ok := caps.Capability("read_validation_case"); !ok || !cap.Visible || !cap.Callable {
-		t.Fatalf("read_validation_case capability = %#v, ok=%v; want visible/callable", cap, ok)
+	if cap, ok := caps.Capability("read_state"); !ok || !cap.Visible || !cap.Callable {
+		t.Fatalf("read_state capability = %#v, ok=%v; want visible/callable", cap, ok)
 	}
 	for _, name := range legacyNames {
 		if cap, ok := caps.Capability(name); !ok || cap.Visible || cap.Callable || cap.DenialReason != "tool_not_allowed" {
@@ -418,10 +418,10 @@ func TestRoleScopedEntityToolsRejectUnknownDeclarationWithMatchingRole(t *testin
 	source := semanticview.Wrap(bundle)
 	_, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, exact, bundle, false)
 	contract, ok := entityruntime.ResolveForActor(source, exact)
-	if !ok || contract.EntityType != "validation_case" {
+	if !ok || contract.EntityType != "state" {
 		t.Fatalf("exact declaration contract = %#v, %v", contract, ok)
 	}
-	if _, ok := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(exact))["save_validation_case_business_brief"]; !ok {
+	if _, ok := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(exact))["save_state_business_brief"]; !ok {
 		t.Fatal("exact actor lost authored writable field")
 	}
 	for _, id := range []string{"unknown", ""} {
@@ -429,11 +429,11 @@ func TestRoleScopedEntityToolsRejectUnknownDeclarationWithMatchingRole(t *testin
 		if got, ok := entityruntime.ResolveForActor(source, actor); ok {
 			t.Errorf("unknown actor %q borrowed entity contract: %#v", id, got)
 		}
-		if _, ok := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))["save_validation_case_business_brief"]; ok {
+		if _, ok := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))["save_state_business_brief"]; ok {
 			t.Errorf("unknown actor %q borrowed generated write tool", id)
 		}
-		caps := exec.ToolCapabilitiesForActor(actor, []string{"save_validation_case_business_brief"}, nil)
-		if cap, ok := caps.Capability("save_validation_case_business_brief"); !ok || cap.Callable || cap.Visible {
+		caps := exec.ToolCapabilitiesForActor(actor, []string{"save_state_business_brief"}, nil)
+		if cap, ok := caps.Capability("save_state_business_brief"); !ok || cap.Callable || cap.Visible {
 			t.Errorf("unknown actor %q received write capability: %#v", id, cap)
 		}
 	}
@@ -484,19 +484,19 @@ validation-orchestrator:
 
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
 	for _, name := range []string{
-		"save_validation_case_manifest",
-		"update_validation_case_manifest_description",
-		"save_validation_case_notes",
+		"save_state_manifest",
+		"update_state_manifest_description",
+		"save_state_notes",
 	} {
 		if _, ok := names[name]; !ok {
 			t.Fatalf("expected generated role-scoped tool %q in %#v", name, sortedRoleScopedToolNames(names))
 		}
 	}
 	for _, name := range []string{
-		"save_validation_case_component",
-		"save_validation_case_owner",
-		"update_validation_case_manifest_component",
-		"update_validation_case_manifest_owner",
+		"save_state_component",
+		"save_state_owner",
+		"update_state_manifest_component",
+		"update_state_manifest_owner",
 	} {
 		if _, ok := names[name]; !ok {
 			t.Fatalf("equality participant lacks declared mutation tool %q in %#v", name, sortedRoleScopedToolNames(names))
@@ -514,7 +514,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	foreignID := uuid.NewString()
-	seedEntityStateRow(t, ctx, currentID, "validation/inst-1", "validation_case", map[string]any{
+	seedEntityStateRow(t, ctx, currentID, "validation/inst-1", "state", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "valid", "confidence": 1},
 	}, time.Now().UTC())
@@ -548,28 +548,28 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 	))
 
 	validNames := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(validCtx, actor))
-	for _, name := range []string{"read_validation_case", "read_validation_case_status", "save_validation_case_business_brief", "update_validation_case_business_brief_summary"} {
+	for _, name := range []string{"read_state", "read_state_status", "save_state_business_brief", "update_state_business_brief_summary"} {
 		if _, ok := validNames[name]; !ok {
 			t.Fatalf("valid current entity filtered %s from %#v", name, sortedRoleScopedToolNames(validNames))
 		}
 	}
 
 	invalidNames := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(invalidCtx, actor))
-	for _, name := range []string{"read_validation_case", "read_validation_case_status", "save_validation_case_business_brief", "update_validation_case_business_brief_summary"} {
+	for _, name := range []string{"read_state", "read_state_status", "save_state_business_brief", "update_state_business_brief_summary"} {
 		if _, ok := invalidNames[name]; ok {
 			t.Fatalf("invalid current entity left %s visible in %#v", name, sortedRoleScopedToolNames(invalidNames))
 		}
 	}
 
-	caps := exec.ToolCapabilitiesForActorInContext(invalidCtx, actor, []string{"read_validation_case", "save_validation_case_business_brief"}, nil)
-	for _, name := range []string{"read_validation_case", "save_validation_case_business_brief"} {
+	caps := exec.ToolCapabilitiesForActorInContext(invalidCtx, actor, []string{"read_state", "save_state_business_brief"}, nil)
+	for _, name := range []string{"read_state", "save_state_business_brief"} {
 		cap, ok := caps.Capability(name)
 		if !ok || cap.Visible || cap.Callable || cap.DenialReason != "current_entity_contract_unavailable" {
 			t.Fatalf("%s invalid-current capability = %#v ok=%v", name, cap, ok)
 		}
 	}
 	deniedCtx := toolcapabilities.WithContext(invalidCtx, caps)
-	_, err := exec.Execute(deniedCtx, "read_validation_case", map[string]any{})
+	_, err := exec.Execute(deniedCtx, "read_state", map[string]any{})
 	requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 }
 
@@ -591,7 +591,7 @@ func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *
 	imported, err := fixture.owner.SetupScenarioEntities(ctx, runtimepipeline.ScenarioSetupRequest{
 		RunID: entityToolTestRunID, CreatedAt: time.Now().UTC(),
 		Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
-			Alias: currentID, EntityID: currentID, FlowInstance: "validation/inst-1", EntityType: "validation_case",
+			Alias: currentID, EntityID: currentID, FlowInstance: "validation/inst-1", EntityType: "state",
 			Fields: map[string]any{"status": "open", "business_brief": map[string]any{"summary": "trigger-owned", "confidence": 1}},
 		}},
 	})
@@ -620,12 +620,12 @@ func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *
 		t.Run(fmt.Sprintf("entityless=%t", event.EntityID() == ""), func(t *testing.T) {
 			turn := runtimebus.WithInboundEvent(ctx, event)
 			definitions := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(turn, currentActor))
-			for _, name := range []string{"read_validation_case", "read_validation_case_status"} {
+			for _, name := range []string{"read_state", "read_state_status"} {
 				if _, visible := definitions[name]; !visible {
 					t.Fatalf("receiver projection dropped an eligible triggering entity: tool=%s actor_entity=%q event_entity=%q source=%+v", name, currentActor.EffectiveEntityID(), event.EntityID(), event.SourceRoute())
 				}
 			}
-			value, err := exec.Execute(turn, "read_validation_case_status", map[string]any{})
+			value, err := exec.Execute(turn, "read_state_status", map[string]any{})
 			if err != nil || value != "open" {
 				t.Fatalf("callable read lost its exact triggering entity: value=%v err=%v", value, err)
 			}
@@ -664,11 +664,11 @@ func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *
 			configured := currentActor
 			configured.EntityID = currentID
 			definitions := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(turn, configured))
-			if _, visible := definitions["read_validation_case"]; visible {
+			if _, visible := definitions["read_state"]; visible {
 				t.Fatalf("ineligible message borrowed actor/construction entity: %s", denied.name)
 			}
-			caps := exec.ToolCapabilitiesForActorInContext(turn, configured, []string{"read_validation_case"}, nil)
-			capability, present := caps.Capability("read_validation_case")
+			caps := exec.ToolCapabilitiesForActorInContext(turn, configured, []string{"read_state"}, nil)
+			capability, present := caps.Capability("read_state")
 			if !present || capability.Visible || capability.Callable || capability.DenialReason != "current_entity_contract_unavailable" {
 				t.Fatalf("invalid context was callable: %+v", capability)
 			}
@@ -685,7 +685,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	}
 	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
-	saveSchema := names["save_validation_case_business_brief"].Schema.(map[string]any)
+	saveSchema := names["save_state_business_brief"].Schema.(map[string]any)
 	if err := runtimetools.ValidatePayloadAgainstSchema(saveSchema, map[string]any{
 		"value": map[string]any{
 			"summary":    "provider-side",
@@ -720,7 +720,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/inst-1"),
 		time.Time{},
 	))
-	_, err = exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
+	_, err = exec.Execute(currentCtx, "save_state_business_brief", map[string]any{
 		"value": map[string]any{
 			"summary":    "after",
 			"confidence": 9,
@@ -729,7 +729,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	})
 	failure := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
 	if failure.Component != "tool-executor" || failure.Operation != "execute.validate_runtime_tool_input" ||
-		failure.Detail.Attributes["tool"] != "save_validation_case_business_brief" {
+		failure.Detail.Attributes["tool"] != "save_state_business_brief" {
 		t.Fatalf("malformed payload failed at an unintended gate: %+v", failure)
 	}
 	var violation *eventschema.Violation
@@ -744,7 +744,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	if err != nil || !found || !reflect.DeepEqual(after, before) {
 		t.Fatalf("runtime validation failure changed constructed state: found=%t instance=%+v err=%v", found, after, err)
 	}
-	output, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
+	output, err := exec.Execute(currentCtx, "save_state_business_brief", map[string]any{
 		"value": map[string]any{"summary": "after", "confidence": 9},
 	})
 	if err != nil {
@@ -773,8 +773,17 @@ func TestRoleScopedEntityTools_NonOptedActorReceivesGeneratedSurfaceByDefault(t 
 			t.Fatalf("legacy entity tool %q remained visible without opt-in in %#v", name, sortedRoleScopedToolNames(names))
 		}
 	}
-	if _, ok := names["read_validation_case"]; !ok {
+	if _, ok := names["read_state"]; !ok {
 		t.Fatalf("generated role-scoped tool was not visible by default in %#v", sortedRoleScopedToolNames(names))
+	}
+	stateless := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"validation": {AgentsYAML: roleScopedEntityToolAgentYAML(actor)},
+	})
+	withoutState := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
+		WorkflowSource: semanticview.Wrap(stateless),
+	})
+	if names := withoutState.RoleScopedEntityToolNamesForActor(actor); len(names) != 0 {
+		t.Fatalf("flow without state.yaml exposed state tools: %v", names)
 	}
 }
 
@@ -795,7 +804,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, ctx, siblingID, "validation/inst-sibling", "validation_case", map[string]any{
+	seedEntityStateRow(t, ctx, siblingID, "validation/inst-sibling", "state", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "sibling", "confidence": 2},
 	}, time.Now().UTC())
@@ -822,21 +831,21 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		time.Time{},
 	))
 
-	if _, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
+	if _, err := exec.Execute(currentCtx, "save_state_business_brief", map[string]any{
 		"value": map[string]any{"summary": "after", "confidence": 9},
 	}); err != nil {
-		t.Fatalf("save_validation_case_business_brief: %v", err)
+		t.Fatalf("save_state_business_brief: %v", err)
 	}
-	whole, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{})
+	whole, err := exec.Execute(currentCtx, "read_state", map[string]any{})
 	if err != nil {
-		t.Fatalf("read_validation_case with hostile bookkeeping: %v", err)
+		t.Fatalf("read_state with hostile bookkeeping: %v", err)
 	}
 	if _, exists := whole.(map[string]any)["bookkeeping"]; exists {
 		t.Fatalf("role-scoped read exposed platform bookkeeping: %#v", whole)
 	}
-	got, err := exec.Execute(currentCtx, "read_validation_case_business_brief", map[string]any{})
+	got, err := exec.Execute(currentCtx, "read_state_business_brief", map[string]any{})
 	if err != nil {
-		t.Fatalf("read_validation_case_business_brief: %v", err)
+		t.Fatalf("read_state_business_brief: %v", err)
 	}
 	brief, ok := got.(map[string]any)
 	if !ok || strings.TrimSpace(asString(brief["summary"])) != "after" {
@@ -846,11 +855,11 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		t.Fatalf("generated save touched sibling entity: %s", got)
 	}
 
-	if _, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{"entity_id": siblingID}); err == nil {
-		t.Fatalf("read_validation_case accepted caller-supplied entity_id")
+	if _, err := exec.Execute(currentCtx, "read_state", map[string]any{"entity_id": siblingID}); err == nil {
+		t.Fatalf("read_state accepted caller-supplied entity_id")
 	}
-	if _, err := exec.Execute(ctx, "read_validation_case", map[string]any{}); err == nil {
-		t.Fatalf("read_validation_case succeeded without current inbound entity")
+	if _, err := exec.Execute(ctx, "read_state", map[string]any{}); err == nil {
+		t.Fatalf("read_state succeeded without current inbound entity")
 	}
 	foreignCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-foreign",
@@ -864,8 +873,8 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, foreignID), "other/inst-1"),
 		time.Time{},
 	))
-	if _, err := exec.Execute(foreignCtx, "read_validation_case", map[string]any{}); err == nil {
-		t.Fatalf("read_validation_case accepted foreign current entity")
+	if _, err := exec.Execute(foreignCtx, "read_state", map[string]any{}); err == nil {
+		t.Fatalf("read_state accepted foreign current entity")
 	}
 	for _, legacy := range []string{"get_entity", "create_entity"} {
 		if _, err := exec.Execute(currentCtx, legacy, map[string]any{"entity_id": currentID}); err == nil {
@@ -882,7 +891,7 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 	brief := strings.Repeat("business brief ", 1800)
 	specProblem := strings.Repeat("problem statement ", 900)
 	specApproach := strings.Repeat("technical approach ", 900)
-	seedEntityStateRow(t, ctx, entityID, "validation/inst-1", "validation_case", map[string]any{
+	seedEntityStateRow(t, ctx, entityID, "validation/inst-1", "state", map[string]any{
 		"status": "open",
 		"business_brief": map[string]any{
 			"summary":    brief,
@@ -906,9 +915,9 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 		time.Time{},
 	))
 
-	whole, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{})
+	whole, err := exec.Execute(currentCtx, "read_state", map[string]any{})
 	if err != nil {
-		t.Fatalf("read_validation_case: %v", err)
+		t.Fatalf("read_state: %v", err)
 	}
 	rawWhole, err := json.Marshal(whole)
 	if err != nil {
@@ -930,9 +939,9 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 		t.Fatalf("whole read mvp_spec.problem_statement length = %d, want %d", len(asString(mvp["problem_statement"])), len(specProblem))
 	}
 
-	field, err := exec.Execute(currentCtx, "read_validation_case_mvp_spec", map[string]any{})
+	field, err := exec.Execute(currentCtx, "read_state_mvp_spec", map[string]any{})
 	if err != nil {
-		t.Fatalf("read_validation_case_mvp_spec: %v", err)
+		t.Fatalf("read_state_mvp_spec: %v", err)
 	}
 	fieldMap, ok := field.(map[string]any)
 	if !ok {
@@ -2001,7 +2010,7 @@ func TestEntityTools_BracketListTypeRefsAcrossConsumers(t *testing.T) {
 		Role:          "validator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	}
-	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "validation_case", `Feature:
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "state", `Feature:
   name: text
 BrandCandidate:
   name: text
@@ -2309,19 +2318,11 @@ foreign:
 func TestEntityTools_SaveEntityFieldCrossFlowDenialPreservesSelectedForkRuntimeLineage(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
-			EntitiesYAML: `
-analysis:
-  status: text
-`,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"save_entity_field", "get_entity"}}),
+			EntitiesYAML: "status: text\n",
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"save_entity_field", "get_entity"}}),
 		},
 		"other-flow": {
-			EntitiesYAML: `
-foreign:
-  status: text
-  name: text
-  composite_score: numeric
-`,
+			EntitiesYAML: "status: text\nname: text\ncomposite_score: numeric\n",
 		},
 	})
 	actor := models.AgentConfig{
@@ -2368,11 +2369,8 @@ foreign:
 func TestEntityTools_SaveEntityFieldAllowsSameFlowWrite(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
-			EntitiesYAML: `
-analysis:
-  status: text
-`,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
+			EntitiesYAML: "status: text\n",
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
@@ -2400,11 +2398,8 @@ analysis:
 func TestEntityTools_SaveEntityFieldAllowsSameFlowWriteWithoutSubjectLink(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
-			EntitiesYAML: `
-analysis:
-  status: text
-`,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
+			EntitiesYAML: "status: text\n",
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
@@ -2475,18 +2470,11 @@ func TestEntityTools_ExistingEntityFlowInstanceAcceptsDeclaredRootAndExactPath(t
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
-			EntitiesYAML: `
-validation_case:
-  status: text
-  score: integer
-`,
-			AgentsYAML: entityToolAgentYAML(actor),
+			EntitiesYAML: "status: text\nscore: integer\n",
+			AgentsYAML:   entityToolAgentYAML(actor),
 		},
 		"operating": {
-			EntitiesYAML: `
-operating_case:
-  status: text
-`,
+			EntitiesYAML: "status: text\n",
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
@@ -2506,7 +2494,7 @@ operating_case:
 		},
 	})
 	deepID := uuid.NewString()
-	seedEntityStateRow(t, ctx, deepID, "validation/nested/case-3", "validation_case", map[string]any{
+	seedEntityStateRow(t, ctx, deepID, "validation/nested/case-3", "state", map[string]any{
 		"status": "open",
 		"score":  30,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2711,19 +2699,11 @@ operating_case:
 func TestEntityTools_FlowOwnedActorCannotReadForeignEntityAndCanWriteOwnEntity(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
-			EntitiesYAML: `
-analysis:
-  status: text
-`,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "get_entity", "save_entity_field"}}),
+			EntitiesYAML: "status: text\n",
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "get_entity", "save_entity_field"}}),
 		},
 		"other-flow": {
-			EntitiesYAML: `
-foreign:
-  status: text
-  name: text
-  composite_score: numeric
-`,
+			EntitiesYAML: "status: text\nname: text\ncomposite_score: numeric\n",
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
@@ -3042,7 +3022,7 @@ func TestEntityToolFixtureInitialStageBranches(t *testing.T) {
 		{"marginal_review", []string{"marginal_review", "queued", "closed"}},
 	} {
 		t.Run(tc.entry, func(t *testing.T) {
-			bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "validation_case", "", "validation_case:\n  status: text\n", tc.entry)
+			bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "state", "", "validation_case:\n  status: text\n", tc.entry)
 			graph, ok := bundle.WorkflowStageTopology("validation")
 			if !ok {
 				t.Fatal("missing compiled validation stage catalog")
@@ -3079,20 +3059,11 @@ mvp_spec:
   problem_statement: text
   technical_approach: text
 `,
-			EntitiesYAML: `
-validation_case:
-  fixture_key: text
-  status: text
-  business_brief: business_brief
-  mvp_spec: mvp_spec
-`,
-			AgentsYAML: roleScopedEntityToolAgentYAML(actor),
+			EntitiesYAML: "fixture_key: text\nstatus: text\nbusiness_brief: business_brief\nmvp_spec: mvp_spec\n",
+			AgentsYAML:   roleScopedEntityToolAgentYAML(actor),
 		},
 		"other": {
-			EntitiesYAML: `
-other_case:
-  status: text
-`,
+			EntitiesYAML: "status: text\n",
 		},
 	})
 }
@@ -3211,16 +3182,10 @@ stages:
 }
 
 func entityToolKeyedFixtureYAML(entities string) string {
-	if strings.Contains(entities, "  fixture_key:") {
+	if strings.HasPrefix(entities, "fixture_key:") || strings.Contains(entities, "\nfixture_key:") {
 		return entities
 	}
-	lines := strings.Split(entities, "\n")
-	for index, line := range lines {
-		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") && strings.HasSuffix(strings.TrimSpace(line), ":") {
-			return strings.Join(lines[:index+1], "\n") + "\n  fixture_key: text\n" + strings.Join(lines[index+1:], "\n")
-		}
-	}
-	return entities
+	return "fixture_key: text\n" + entities
 }
 
 // Read-only counterparts use the admitted import owner and retain history;

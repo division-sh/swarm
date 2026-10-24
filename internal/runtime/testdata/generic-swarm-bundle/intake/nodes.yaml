@@ -1,7 +1,4 @@
 intake-router:
-  state_table: intake_router_state
-  gate_state:
-    intake_ready: gate set when intake is ready
   item.created:
     guard: payload.item_id != ''
     fan_out:
@@ -21,6 +18,9 @@ intake-router:
       event: item.review_requested
       fields:
         score: payload.score
-    sets_gate: intake_ready
-    clear_gates:
-      - needs_revision
+    data_accumulation:
+      writes:
+        - target_field: intake_ready
+          value: true
+        - target_field: needs_revision
+          value: false

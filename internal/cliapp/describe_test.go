@@ -430,8 +430,8 @@ func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 	if view.Root.PrimaryEntity == nil {
 		t.Fatalf("root primary entity missing: %#v", view.Root)
 	}
-	if view.Root.PrimaryEntity.Type != "workspace" {
-		t.Fatalf("root primary entity type = %q, want workspace", view.Root.PrimaryEntity.Type)
+	if view.Root.PrimaryEntity.Type != "state" {
+		t.Fatalf("root primary entity type = %q, want state", view.Root.PrimaryEntity.Type)
 	}
 	if view.Root.PrimaryEntity.Fields["org_id"] != "text" {
 		t.Fatalf("root primary entity fields = %#v, want org_id text", view.Root.PrimaryEntity.Fields)

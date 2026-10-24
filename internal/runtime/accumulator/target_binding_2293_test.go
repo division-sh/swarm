@@ -23,7 +23,7 @@ func targetBinding2293Bundle() *c.WorkflowContractBundle {
 				"Nested": {Fields: map[string]c.TypeFieldSpec{"id": {Type: "uuid"}}},
 			},
 		},
-		RootEntities: c.EntityContractsDocument{"work": {Fields: map[string]c.EntityFieldDecl{
+		RootEntities: c.EntityContractsDocument{"state": {Fields: map[string]c.EntityFieldDecl{
 			"reviews": {Type: "[Review]", IsOptional: true},
 		}}},
 		Nodes: map[string]c.SystemNodeContract{"collector": {
@@ -55,10 +55,10 @@ func Test2293Q1AccumulateTargetRequiresExactPayloadElement(t *testing.T) {
 		{"missing_target", func(_ *c.WorkflowContractBundle, spec *c.AccumulateSpec) { spec.Target = "" }, "target"},
 		{"unknown_target", func(_ *c.WorkflowContractBundle, spec *c.AccumulateSpec) { spec.Target = "missing" }, "missing"},
 		{"non_list", func(b *c.WorkflowContractBundle, _ *c.AccumulateSpec) {
-			b.RootEntities["work"].Fields["reviews"] = c.EntityFieldDecl{Type: "Review"}
+			b.RootEntities["state"].Fields["reviews"] = c.EntityFieldDecl{Type: "Review"}
 		}, "list"},
 		{"map_not_list", func(b *c.WorkflowContractBundle, _ *c.AccumulateSpec) {
-			b.RootEntities["work"].Fields["reviews"] = c.EntityFieldDecl{Type: "map[text]Review"}
+			b.RootEntities["state"].Fields["reviews"] = c.EntityFieldDecl{Type: "map[text]Review"}
 		}, "list"},
 		{"extra_payload_field", func(b *c.WorkflowContractBundle, _ *c.AccumulateSpec) {
 			b.Events["review.received"].Payload.Properties["extra"] = c.EventFieldSpec{Type: "text"}

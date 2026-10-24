@@ -6003,13 +6003,6 @@
             "default": "current_state",
             "type": "string"
           }
-        },
-        {
-          "name": "type",
-          "required": false,
-          "schema": {
-            "type": "string"
-          }
         }
       ],
       "result": {
@@ -6101,13 +6094,6 @@
         },
         {
           "name": "flow",
-          "required": false,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "type",
           "required": false,
           "schema": {
             "type": "string"

@@ -375,7 +375,7 @@ instance: chat_id
 inputs:
   - inbound.telegram.text_message
 `,
-		"consumer/state.yaml": "chat_id: {type: text, indexed: true}\n",
+		"consumer/state.yaml": "type: text\nindexed: true\n",
 		"consumer/nodes.yaml": nodes,
 	}
 	if nodes == "" {

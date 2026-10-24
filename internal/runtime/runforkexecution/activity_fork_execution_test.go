@@ -580,7 +580,7 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 		Events: map[string]runtimecontracts.EventCatalogEntry{"review.requested": {}}, Path: "flow_a",
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "activity-fork-proof", Version: "v1",
 			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{

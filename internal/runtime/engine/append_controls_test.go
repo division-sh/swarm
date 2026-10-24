@@ -27,7 +27,7 @@ func TestExecutor_GenericAppendReferenceControls(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := sourceWithFixtureStages(semanticview.Wrap(&contracts.WorkflowContractBundle{
-				RootEntities: contracts.EntityContractsDocument{"work": {Fields: map[string]contracts.EntityFieldDecl{
+				RootEntities: contracts.EntityContractsDocument{"state": {Fields: map[string]contracts.EntityFieldDecl{
 					"entries": {Type: "[json]"},
 				}}},
 			}), ".", "active", "active")

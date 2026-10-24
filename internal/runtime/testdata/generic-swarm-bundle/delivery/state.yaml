@@ -1,3 +1,6 @@
 item_id: string
 status: string
 timed_out: boolean
+delivery_ready: false
+intake_ready: false
+score_ready: false

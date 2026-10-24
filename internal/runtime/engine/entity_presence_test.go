@@ -18,7 +18,7 @@ type sparseSnapshotRepo struct {
 
 func sparseMutationFrame() (*Executor, *executionFrame) {
 	source := semanticview.Wrap(&rc.WorkflowContractBundle{RootEntities: rc.EntityContractsDocument{
-		"work": {Fields: map[string]rc.EntityFieldDecl{"left": {Type: "integer"}, "right": {Type: "integer"}}},
+		"state": {Fields: map[string]rc.EntityFieldDecl{"left": {Type: "integer"}, "right": {Type: "integer"}}},
 	}})
 	frame := &executionFrame{}
 	frame.state.State = testStateSnapshot("ready", map[string]any{"left": int64(1), "right": int64(1)}, nil, nil)
@@ -57,7 +57,7 @@ func TestEntityMutationHandlerMissingSourceRollsBackList(t *testing.T) {
 
 func TestEntityMutationHandlerEqualityAtListBoundary(t *testing.T) {
 	source := semanticview.Wrap(&rc.WorkflowContractBundle{RootEntities: rc.EntityContractsDocument{
-		"work": {Fields: map[string]rc.EntityFieldDecl{
+		"state": {Fields: map[string]rc.EntityFieldDecl{
 			"left":  {Type: "text", IsOptional: true, Refinements: rc.SchemaRefinements{EqualTo: "right"}},
 			"right": {Type: "text", IsOptional: true},
 		}},
@@ -139,7 +139,7 @@ func TestEntityReloadRefusesMissingConstruction(t *testing.T) {
 
 func TestEntityReloadDoesNotReapplyConstructorInitials(t *testing.T) {
 	source := semanticview.Wrap(&rc.WorkflowContractBundle{RootEntities: rc.EntityContractsDocument{
-		"work": {Fields: map[string]rc.EntityFieldDecl{
+		"state": {Fields: map[string]rc.EntityFieldDecl{
 			"note":     {Type: "text", IsOptional: true, Initial: "seeded"},
 			"provided": {Type: "text", Initial: "initial"},
 		}},

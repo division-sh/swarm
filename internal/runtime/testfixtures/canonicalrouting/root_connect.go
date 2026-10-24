@@ -229,7 +229,7 @@ inputs:
   - work.ping
 outputs:
   - work.pong
-`, "work.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
+`, "work.pong:\n  turn: integer\n", "turn: integer\n", `boomerang-worker:
   work.ping:
     guard: instance.id != ""
 `)

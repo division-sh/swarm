@@ -1,3 +1,7 @@
 item_id: string
 status: string
 score: number
+score_ready: false
+intake_open: false
+intake_ready: false
+delivery_ready: false

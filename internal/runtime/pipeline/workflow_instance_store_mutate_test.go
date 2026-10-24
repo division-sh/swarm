@@ -27,7 +27,7 @@ func VerifyWorkflowEngineCompleteCarrierPreservesBookkeepingForTest(t *testing.T
 
 	source := testRootEntityContractSource("bookkeeping", "test_entity")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["test_entity"].Fields["status"] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	bundle.RootEntities["state"].Fields["status"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	entityID := uuid.NewString()
 	route := testRunScopedWorkflowInstance("bookkeeping/root")
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{

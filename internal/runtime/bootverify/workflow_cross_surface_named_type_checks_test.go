@@ -186,7 +186,7 @@ func crossSurfaceNamedTypeUseBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"proposal": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"summary":           {Type: "text", Initial: ""},
 					"supporting_routes": {Type: "[text]", Initial: []any{}},

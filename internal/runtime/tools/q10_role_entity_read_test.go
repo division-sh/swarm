@@ -24,12 +24,12 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 			bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 				"review": {
 					SchemaYAML:   "name: review\ninstance: fixture_key\nstages:\n  unknown: {}\n  done: {final: true}\n",
-					EntitiesYAML: "accounts:\n  current_state: text\n",
+					EntitiesYAML: "current_state: text\n",
 					AgentsYAML:   entityToolAgentYAML(actor),
 				},
 				"nostage": {
 					SchemaYAML:   "name: nostage\ninstance: fixture_key\nstages: []\n",
-					EntitiesYAML: "accounts:\n  current_state: text\n",
+					EntitiesYAML: "current_state: text\n",
 					AgentsYAML:   entityToolAgentYAML(noStageActor),
 				},
 			})

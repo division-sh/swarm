@@ -225,7 +225,7 @@ func TestNativeDeclarativeEmissionSourcePreservesBusinessCatalogAndHostileField(
 			if len(batch.Payload.Properties) != 1 || batch.Payload.Properties["items"].Type != "[json]" || len(batch.Payload.Required) != 0 {
 				t.Fatal("original optional batch catalog changed")
 			}
-			if bundle.SourceArtifact == nil || !reflect.DeepEqual(bundle.Events, bundle.FlowTree.Root.Events) || bundle.RootEntities["test_entity"].Fields["legacy_entity"].Type != "text" {
+			if bundle.SourceArtifact == nil || !reflect.DeepEqual(bundle.Events, bundle.FlowTree.Root.Events) || bundle.RootEntities["state"].Fields["legacy_entity"].Type != "text" {
 				t.Fatal("source does not own complete catalog and hostile persisted field")
 			}
 		})
