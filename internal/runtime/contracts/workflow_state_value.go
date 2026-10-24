@@ -29,10 +29,6 @@ func projectStateContract(root yamlsource.Value, types TypeCatalogDocument) (Ent
 		if field.Name == "" || field.Name != strings.TrimSpace(field.Name) {
 			return EntityContract{}, fmt.Errorf("state field %q must be nonempty without surrounding whitespace", field.Name)
 		}
-		switch field.Name {
-		case "_description", "_owner":
-			return EntityContract{}, NewUndefinedFieldDiagnostic("state metadata", field.Name, map[string]struct{}{}, field)
-		}
 		declaration, err := projectStateField(field.Value, types)
 		if err != nil {
 			return EntityContract{}, fmt.Errorf("state.%s at %s: %w", field.Name, field.IntroductionLocation(), nodeValueError(field.Value, err))

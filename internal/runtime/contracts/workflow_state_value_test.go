@@ -73,6 +73,21 @@ func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 			}
 		})
 	}
+	t.Run("ordinary_field_names", func(t *testing.T) {
+		source, err := yamlsource.Load([]byte("_description: text\n_owner: text\nstate: text\nid: text\nstage: text\ncurrent_state: text\nflow_instance: text\ngates: text\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := projectStateContract(source.Document("state.yaml").Root(), catalog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"_description", "_owner", "state", "id", "stage", "current_state", "flow_instance", "gates"} {
+			if field, ok := state.Fields[name]; !ok || field.Type != "text" {
+				t.Fatalf("ordinary state field %q = %#v, present=%v", name, field, ok)
+			}
+		}
+	})
 	t.Run("retained_flow_binding", func(t *testing.T) {
 		root := t.TempDir()
 		for file, body := range map[string]string{
