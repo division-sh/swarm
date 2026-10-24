@@ -109,7 +109,7 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 		}
 		request := runforkexecution.SelectedContractExecutionRequest{
 			SourceRunID: binding.SourceRunID, At: point.Input, AtStart: point.Kind == runfork.RunForkPointRunStart,
-			AllowSourceFreeze: original.AllowSourceFreeze, Owner: owner, SourceLoader: loader, ContractSelection: binding.ContractSelection,
+			Owner: owner, SourceLoader: loader, ContractSelection: binding.ContractSelection,
 			AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
 				ProcessCapability: capability, ExecutionPosture: executionposture.Live,
 				Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},

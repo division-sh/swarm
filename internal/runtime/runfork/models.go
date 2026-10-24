@@ -1403,14 +1403,12 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
-	LiveHandoff           bool
 	InheritedSchedules    InheritedScheduleSelection `json:"-"`
 	ForkOperation         *ForkOperationRequest
 	ExecutedEventCount    int
 	DataPins              []durabledata.Pin
 	ExecutionSource       semanticview.Source
 	ForkRunID             string
-	AllowSourceFreeze     bool
 	AllowedSourceEventIDs []string
 	FrontierAdmission     RunForkContractFrontierAdmission
 	RouteTopology         RunForkSelectedContractRouteTopology

@@ -121,6 +121,22 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 					for table := range before {
 						if !reflect.DeepEqual(before[table], after[table]) {
 							t.Errorf("refusal changed complete table %s", table)
+							oldRows := make(map[string]int)
+							for _, row := range before[table] {
+								oldRows[row]++
+							}
+							for _, row := range after[table] {
+								if oldRows[row] == 0 {
+									t.Logf("added %s row: %s", table, row)
+								} else {
+									oldRows[row]--
+								}
+							}
+							for row, remaining := range oldRows {
+								if remaining != 0 {
+									t.Logf("removed %s row x%d: %s", table, remaining, row)
+								}
+							}
 						}
 					}
 					t.Fatal("historical refusal changed application rows (including API journal)")
@@ -164,6 +180,11 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 					requireUnchanged()
 				}
 			}
+			// The public refusals above retain a live predecessor. Subsequent
+			// retained-row controls must not compare across its lawful retirement.
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.pause", map[string]any{"run_id": sibling.RunID}, &paused)
+			waitForkReceiverSourceCompletion(t, rt, sibling.RunID)
+			before = snapshotForkReceiverApplication(t, rt)
 			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			requireHistoricalRefusal(err)
 			writeFact(original)
@@ -186,7 +207,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			activation, err := direct.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-				ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true,
+				ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID,
 				AllowedSourceEventIDs: eventIDs, FrontierAdmission: request.FrontierAdmission,
 				RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
 			})

@@ -162,7 +162,7 @@ func activateSelectedForkFanOutForTest(t *testing.T, ctx context.Context, fixtur
 	activation, err := fixture.store.(interface {
 		ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 	}).ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		ForkRunID: child.ForkRunID, AllowSourceFreeze: true, ExecutionSource: source,
+		ForkRunID: child.ForkRunID, ExecutionSource: source,
 		DataPins: child.DataPins, InheritedSchedules: request.Readiness, AllowedSourceEventIDs: sourceEvents,
 		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
 	})

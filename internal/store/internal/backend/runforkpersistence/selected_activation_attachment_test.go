@@ -99,7 +99,7 @@ func newSelectedAttachmentFixture(t *testing.T, kind runfork.RunForkPointKind) s
 					Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 					FlowInstance: source,
 				}}}},
-			request: runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: child, AllowSourceFreeze: true},
+			request: runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: child, ForkOperation: &runfork.ForkOperationRequest{}},
 		},
 		record: selectedRecoveryRecord{
 			SelectedForkRecoveryResult: runfork.SelectedForkRecoveryResult{RunID: child, ExecutionID: execution.ExecutionID},

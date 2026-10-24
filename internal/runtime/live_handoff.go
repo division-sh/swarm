@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -22,6 +23,8 @@ func (rt *Runtime) WithParkedLiveRun(ctx context.Context, live runlifecycle.Live
 	}
 	ctx = startupownership.WithGenerationGrantEvidence(ctx, grant)
 	ctx = correlation.WithSourceArtifactFact(ctx, live.Source)
+	ctx = correlation.WithRuntimeInstanceID(ctx, rt.Options.RuntimeInstanceID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(rt.Options.RuntimeInstanceID, live.Source.BundleHash()))
 	transition, err := rt.Bus.BeginRunStop(ctx, live.RunID)
 	if err != nil {
 		return err

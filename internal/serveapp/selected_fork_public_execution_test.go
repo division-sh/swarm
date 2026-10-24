@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -52,12 +53,26 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			supervisors := make(chan *processLifecycleSupervisor, 1)
-			if reset {
+			{
 				prior := buildSelectedAPICapabilities
 				var once sync.Once
 				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
-					once.Do(func() { supervisors <- req.RuntimeSupervisor })
-					return prior(owner, req)
+					if reset {
+						once.Do(func() { supervisors <- req.RuntimeSupervisor })
+					}
+					caps, err := prior(owner, req)
+					if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); err == nil && ok {
+						execute := executor.ExecuteSelectedContractRunFork
+						executor.ExecuteSelectedContractRunFork = func(ctx context.Context, request runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+							result, err := execute(ctx, request)
+							if err != nil {
+								t.Logf("selected changed-target owner error: %v", err)
+							}
+							return result, err
+						}
+						caps.RunFork = executor
+					}
+					return caps, err
 				}
 				t.Cleanup(func() { buildSelectedAPICapabilities = prior })
 			}
