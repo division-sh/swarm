@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
@@ -50,6 +51,7 @@ func (h *selectedHandlerFanOutClaimHold) resume() { h.once.Do(func() { close(h.r
 
 func requireSelectedHandlerFanOutLiveClaimFenced(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, checkpoint selectedForkCrashCheckpoint, held selectedHandlerFanOutHeldClaim) {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 	old := *checkpoint.FanOut.Claim
 	if held.claim.Validate() != nil || held.claim.Key != old.Key || held.claim.Owner == old.Owner || held.claim.Generation != old.Generation+1 {
 		t.Fatalf("hold missed the actual native successor claim: claim=%+v predecessor=%+v", held.claim, old)

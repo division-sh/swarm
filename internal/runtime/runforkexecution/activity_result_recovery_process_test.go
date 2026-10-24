@@ -167,7 +167,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 	fixture := activityForkFixture{owner: owner}
 	sourceEvent := fixture.seedSource(t, ctx, loaded, sourceRun, entityID, requestID, at, route, source, request)
 	seedSelectedContractActivityLoop(t, ctx, fixture, loaded, sourceEvent, entityID, activation, at)
-	storetest.CaptureSelectedRunForkRevision(t, context.Background(), selected, sourceRun)
+	storetest.CaptureSelectedRunForkRevision(t, ctx, selected, sourceRun)
 	seedSelectedContractActivityAttempt(t, selected, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
 	t.Logf("ACTIVITY_CRASH_SOURCE_READY source=%s request=%s", sourceRun, requestID)
 	after := func(ctx context.Context, event events.Event, consumed attemptgeneration.Generation) {
