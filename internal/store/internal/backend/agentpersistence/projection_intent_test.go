@@ -13,7 +13,6 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
@@ -32,8 +31,12 @@ func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
 	if !hydrated.Prompt.Empty() {
 		t.Fatal("hydration restored a persisted derived prompt instead of requiring canonical reconstruction")
 	}
-	if !reflect.DeepEqual(hydrated.Criteria, cfg.Criteria) {
-		t.Fatalf("hydrated criteria = %#v, want %#v", hydrated.Criteria, cfg.Criteria)
+	var descriptor map[string]any
+	if err := json.Unmarshal(projection.RuntimeDescriptor, &descriptor); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := descriptor["criteria"]; present {
+		t.Fatal("runtime descriptor retained the removed criteria feature")
 	}
 }
 
@@ -159,6 +162,14 @@ func TestPersistedAgentProjectionRejectsRetiredDerivedPromptAndImpossibleIntentF
 	if _, exists := descriptor["derived_system_prompt"]; exists {
 		t.Fatal("runtime descriptor persisted the retired derived prompt")
 	}
+	for _, value := range []any{nil, "", []any{}, []any{"quality"}, map[string]any{}} {
+		candidate := cloneIntentDescriptor(t, descriptor)
+		candidate["criteria"] = value
+		projection.RuntimeDescriptor = marshalIntentDescriptor(t, candidate)
+		if _, err := HydratePersistedAgentConfig(projection); err == nil || !strings.Contains(err.Error(), "unsupported keys: criteria") {
+			t.Fatalf("retired criteria presence did not refuse: %v", err)
+		}
+	}
 
 	t.Run("hostile_suffix", func(t *testing.T) {
 		candidate := cloneIntentDescriptor(t, descriptor)
@@ -225,12 +236,7 @@ func persistedIntentTestAgent(t testing.TB) runtimeactors.AgentConfig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := runtimeagentintent.ContractCriteriaPrompt(intent, []string{"quality"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
-		"quality": {
-			Classes: map[string]runtimeflowmodel.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
-			Rules:   []runtimeflowmodel.PolicyCriteriaRule{{ID: "QUALITY-01", Class: "hard", Text: "Require exact quality."}},
-		},
-	})
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +252,6 @@ func persistedIntentTestAgent(t testing.TB) runtimeactors.AgentConfig {
 		Memory:             agentmemory.Plan{Enabled: false},
 		Intent:             intent,
 		Prompt:             prompt,
-		Criteria:           []string{"quality"},
 		Config:             json.RawMessage(`{}`),
 	}
 }

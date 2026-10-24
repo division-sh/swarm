@@ -34,7 +34,6 @@ type PersistedAgentRuntimeDescriptor struct {
 	ExecutionMode        runtimeeffects.ExecutionMode   `json:"execution_mode"`
 	Mock                 mockperformance.Performance    `json:"mock,omitempty"`
 	Intent               runtimeagentintent.Resolved    `json:"intent"`
-	Criteria             []string                       `json:"criteria,omitempty"`
 	FlowDataAccess       []string                       `json:"flow_data_access,omitempty"`
 	BudgetEnvelope       float64                        `json:"budget_envelope,omitempty"`
 }
@@ -103,7 +102,6 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"execution_mode":         {},
 	"mock":                   {},
 	"intent":                 {},
-	"criteria":               {},
 	"flow_data_access":       {},
 	"budget_envelope":        {},
 }
@@ -246,7 +244,6 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		EmitEvents:           emitEvents,
 		Tools:                tools,
 		Permissions:          permissions,
-		Criteria:             append([]string(nil), desc.Criteria...),
 		FlowDataAccess:       append([]string(nil), desc.FlowDataAccess...),
 		BudgetEnvelope:       desc.BudgetEnvelope,
 		NativeTools:          desc.NativeTools,
@@ -286,7 +283,6 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
 		ExecutionMode:        cfg.ExecutionMode,
 		Mock:                 cfg.Mock,
 		Intent:               cfg.Intent,
-		Criteria:             append([]string(nil), cfg.Criteria...),
 		FlowDataAccess:       append([]string(nil), cfg.FlowDataAccess...),
 		BudgetEnvelope:       cfg.BudgetEnvelope,
 	}

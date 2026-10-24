@@ -283,7 +283,7 @@ func managerDrainedCompletionFrame(ctx context.Context, event events.Event, surf
 	if err != nil {
 		return agentframe.Frame{}, err
 	}
-	prompt, err := runtimeagentintent.AssembleProviderPrompt(intent, nil, derived, runtimeagentintent.RuntimeEnvironmentContext())
+	prompt, err := runtimeagentintent.AssembleProviderPrompt(intent, derived, runtimeagentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		return agentframe.Frame{}, err
 	}

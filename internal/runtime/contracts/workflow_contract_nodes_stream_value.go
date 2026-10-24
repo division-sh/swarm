@@ -10,25 +10,38 @@ import (
 
 func projectNodeAccumulateValue(value yamlsource.Value) (*AccumulateSpec, error) {
 	fields, err := nodeValueFields(value, "accumulate", map[string]struct{}{
-		"into": {}, "from": {}, "description": {}, "key": {},
+		"target": {}, "key": {},
 	})
 	if err != nil {
 		return nil, err
 	}
 	var out AccumulateSpec
-	if key, present := fields["key"]; present {
-		scalar, err := key.Scalar()
+	for _, name := range []string{"target", "key"} {
+		field, present := fields[name]
+		if !present {
+			if name == "key" {
+				_, err := out.ItemKeyPath()
+				return nil, nodeValueError(value, err)
+			}
+			return nil, nodeValueError(value, fmt.Errorf("accumulate requires target: <state field>"))
+		}
+		scalar, err := field.Scalar()
 		if err != nil || scalar.Tag != "!!str" || strings.TrimSpace(scalar.Value) == "" {
-			return nil, fmt.Errorf("accumulate.key at %s must be non-empty text", key.Location())
+			return nil, fmt.Errorf("accumulate.%s at %s must be non-empty text", name, field.Location())
 		}
 	}
 	if err := nodeValueTexts(fields, map[string]*string{
-		"into": &out.Into, "from": &out.From, "description": &out.Description,
-		"key": &out.Key,
-	}, true, "key"); err != nil {
+		"target": &out.Target, "key": &out.Key,
+	}, false, "target", "key"); err != nil {
 		return nil, err
 	}
-	out.KeyPath = paths.Parse(out.Key)
+	if _, err := out.TargetField(); err != nil {
+		return nil, nodeValueError(fields["target"], err)
+	}
+	out.KeyPath, err = out.ItemKeyPath()
+	if err != nil {
+		return nil, nodeValueError(fields["key"], err)
+	}
 	return &out, nil
 }
 

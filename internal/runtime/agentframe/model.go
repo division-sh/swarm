@@ -22,10 +22,9 @@ import (
 )
 
 const (
-	Version            = "agent-execution-frame.v1"
-	frameIDPrefix      = "agent-frame:v1:"
-	contentHashPrefix  = "agent-frame-content:v1:sha256:"
-	criteriaHashPrefix = "agent-criteria:v1:sha256:"
+	Version           = "agent-execution-frame.v1"
+	frameIDPrefix     = "agent-frame:v1:"
+	contentHashPrefix = "agent-frame-content:v1:sha256:"
 )
 
 type TurnKind string
@@ -51,7 +50,6 @@ type SessionSeed struct {
 	Role           string
 	FlowID         string
 	Intent         agentintent.Resolved
-	Criteria       []string
 	ProviderPrompt agentintent.ProviderPrompt
 	RuntimeMode    string
 	Provider       string
@@ -67,10 +65,7 @@ func (s SessionSeed) Validate() error {
 	if err := s.Intent.Validate(); err != nil {
 		return fmt.Errorf("resolved intent: %w", err)
 	}
-	if !slices.Equal(s.Criteria, canonicalStrings(s.Criteria)) {
-		return fmt.Errorf("criteria references are not canonical")
-	}
-	if err := s.ProviderPrompt.Validate(s.Intent, s.Criteria); err != nil {
+	if err := s.ProviderPrompt.Validate(s.Intent); err != nil {
 		return fmt.Errorf("provider prompt: %w", err)
 	}
 	if strings.TrimSpace(s.RuntimeMode) == "" || strings.TrimSpace(s.Provider) == "" || strings.TrimSpace(s.Transport) == "" {
@@ -95,11 +90,6 @@ type Intent struct {
 	Identity    string `json:"identity"`
 }
 
-type Criteria struct {
-	References []string `json:"references"`
-	Identity   string   `json:"identity"`
-}
-
 type Provider struct {
 	RuntimeMode string `json:"runtime_mode"`
 	Provider    string `json:"provider"`
@@ -114,7 +104,6 @@ type SessionContract struct {
 	Role           string                 `json:"role,omitempty"`
 	FlowID         string                 `json:"flow_id,omitempty"`
 	Intent         Intent                 `json:"intent"`
-	Criteria       Criteria               `json:"criteria"`
 	Provider       Provider               `json:"provider"`
 	ProviderPrompt string                 `json:"provider_prompt"`
 }
@@ -372,10 +361,6 @@ func completeSession(seed SessionSeed, bundleHash string) (SessionContract, erro
 	if err != nil {
 		return SessionContract{}, err
 	}
-	criteriaIdentity, err := CriteriaIdentity(bundleHash, seed.Criteria)
-	if err != nil {
-		return SessionContract{}, err
-	}
 	return SessionContract{
 		SourceArtifact: SourceArtifact{Hash: strings.TrimSpace(bundleHash)},
 		AgentIdentity:  seed.AgentIdentity.Normalize(),
@@ -385,7 +370,6 @@ func completeSession(seed SessionSeed, bundleHash string) (SessionContract, erro
 			Kind: string(seed.Intent.Kind), Coordinate: seed.Intent.Coordinate, Provenance: seed.Intent.Provenance,
 			Content: seed.Intent.Content, ContentHash: seed.Intent.ContentHash, Identity: seed.Intent.Identity,
 		},
-		Criteria: Criteria{References: append([]string(nil), seed.Criteria...), Identity: criteriaIdentity},
 		Provider: Provider{
 			RuntimeMode: strings.TrimSpace(seed.RuntimeMode), Provider: strings.TrimSpace(seed.Provider),
 			Transport: strings.TrimSpace(seed.Transport), ModelAlias: seed.ModelAlias, Model: seed.Model,
@@ -606,26 +590,6 @@ func projectCapabilityPlan(surface managedcapabilities.Surface) (CapabilityPlan,
 		})
 	}
 	return CapabilityPlan{SurfaceID: surface.ID, PlanFingerprint: fingerprint, Candidates: candidates}, nil
-}
-
-func CriteriaIdentity(bundleHash string, references []string) (string, error) {
-	if err := bundleidentity.ValidateCanonicalHash(strings.TrimSpace(bundleHash)); err != nil {
-		return "", err
-	}
-	if !slices.Equal(references, canonicalStrings(references)) {
-		return "", fmt.Errorf("criteria references are not canonical")
-	}
-	raw, err := json.Marshal(struct {
-		Domain     string   `json:"domain"`
-		Version    int      `json:"version"`
-		BundleHash string   `json:"bundle_hash"`
-		References []string `json:"references"`
-	}{"division-sh.swarm.agent-criteria", 1, strings.TrimSpace(bundleHash), references})
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(raw)
-	return criteriaHashPrefix + hex.EncodeToString(sum[:]), nil
 }
 
 func canonicalStrings(values []string) []string {

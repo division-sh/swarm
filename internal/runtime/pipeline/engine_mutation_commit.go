@@ -197,7 +197,7 @@ type WorkflowEngineMutationCommand struct {
 	Publications            []runtimeengine.DurablePublicationPlan
 	DeliverySuccess         *WorkflowEngineDeliverySuccess
 	PostCommit              WorkflowEnginePostCommitPlan
-	FanOutIntent            *fanoutobligation.IntentRequest
+	FanOutIntents           []fanoutobligation.IntentRequest
 	FanOutBarrier           *fanoutbarrier.Registration
 	FanOutBarrierCompletion *fanoutbarrier.Completion
 }
@@ -274,7 +274,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		}
 		if c.AcceptedEvent != nil || c.GateRouteAdmissionRunID != "" || len(c.ProposedEffects) != 0 || len(c.Publications) != 0 ||
 			c.DeliverySuccess != nil || c.PostCommit.FlowDeactivation != nil ||
-			c.FanOutIntent != nil || c.FanOutBarrier != nil || c.FanOutBarrierCompletion != nil ||
+			len(c.FanOutIntents) != 0 || c.FanOutBarrier != nil || c.FanOutBarrierCompletion != nil ||
 			c.Lifecycle.StageEntry != nil || len(c.Lifecycle.Timers) != 0 || len(c.Lifecycle.Schedules) != 0 || len(c.Lifecycle.GateCards) != 0 {
 			return fmt.Errorf("entity tool attribution permits only the exact field mutation")
 		}
@@ -301,7 +301,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		if c.State.ExpectedState != c.State.CurrentState || c.Lifecycle.StageEntry != nil ||
 			len(c.Lifecycle.Timers) == 0 || len(c.Lifecycle.Schedules) != 0 || len(c.Lifecycle.GateCards) != 0 ||
 			len(c.ProposedEffects) != 0 || len(c.Publications) != 0 ||
-			c.PostCommit.FlowDeactivation != nil || c.FanOutIntent != nil || c.FanOutBarrier != nil || c.FanOutBarrierCompletion != nil {
+			c.PostCommit.FlowDeactivation != nil || len(c.FanOutIntents) != 0 || c.FanOutBarrier != nil || c.FanOutBarrierCompletion != nil {
 			return fmt.Errorf("preserved constructed state permits only accepted-event timer reactions and exact settlement")
 		}
 	} else if c.AcceptedEvent != nil || c.AcceptedEventSource != (correlation.SourceArtifactFact{}) {
@@ -320,27 +320,8 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 			return err
 		}
 	}
-	if c.FanOutIntent != nil {
-		if err := c.FanOutIntent.Validate(); err != nil {
-			return fmt.Errorf("workflow engine fan-out intent: %w", err)
-		}
-		if c.DeliverySuccess == nil {
-			return fmt.Errorf("workflow engine fan-out intent requires exact delivery settlement")
-		}
-		if c.FanOutIntent.Key.RunID != runID || c.FanOutIntent.Key.TriggeringDeliveryID != c.DeliverySuccess.Claim.DeliveryID() {
-			return fmt.Errorf("workflow engine fan-out intent disagrees with the settled delivery")
-		}
-	}
-	if c.FanOutBarrier != nil && c.FanOutIntent == nil {
-		return fmt.Errorf("workflow engine fan-out delivery barrier must be committed with its exact intent")
-	}
-	if c.FanOutBarrier != nil {
-		if err := c.FanOutBarrier.Validate(); err != nil {
-			return fmt.Errorf("workflow engine fan-out barrier: %w", err)
-		}
-		if c.FanOutBarrier.IntentKey != c.FanOutIntent.Key || c.FanOutBarrier.PlanRef != c.FanOutIntent.PlanRef {
-			return fmt.Errorf("workflow engine fan-out barrier disagrees with its exact intent")
-		}
+	if err := c.validateFanOutIntents(runID); err != nil {
+		return err
 	}
 	if c.FanOutBarrierCompletion != nil {
 		if err := c.FanOutBarrierCompletion.Validate(); err != nil {

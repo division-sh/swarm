@@ -69,22 +69,22 @@ const (
 
 var OrderedSteps = []Step{
 	StepLoop,
-	StepQuery,
 	StepClearGates,
 	StepGuard,
 	StepJoin,
 	StepAccumulate,
+	StepQuery,
 	StepFilter,
 	StepGroupBy,
 	StepReduce,
 	StepCount,
 	StepCompute,
+	StepDataWrites,
 	StepFanOut,
 	StepOnComplete,
 	StepRules,
 	StepAdvancesTo,
 	StepSetsGate,
-	StepDataWrites,
 	StepProjection,
 	StepTransform,
 	StepEmits,
@@ -116,6 +116,7 @@ type executionFrame struct {
 	topLevelDataAccumulation  runtimecontracts.WorkflowDataAccumulation
 	topLevelDataWritesApplied bool
 	ruleDataWritesApplied     bool
+	ruleEffectsApplied        bool
 	projectionApplied         bool
 	transitionApplied         bool
 	lastEmitCreatedAt         time.Time
@@ -125,7 +126,7 @@ type executionFrame struct {
 	collectionPlan            runtimecontracts.WorkflowHandlerCollectionPlan
 	joinLoopGeneration        attemptgeneration.Generation
 	entityMutations           *entityruntime.MutationPlan
-	discardedJoin             bool
+	discardedMutation         bool
 }
 
 type handlerRuleSource string
@@ -527,10 +528,10 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 					SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
 					return err
 				}
-				if frame.discardedJoin {
-					// An obsolete join occurrence has no accepted state effect. Its exact
-					// claim still settles through the coordinator's no-op outcome path;
-					// committing an unchanged snapshot would mutate the new entry's revision.
+				if frame.discardedMutation {
+					// Obsolete joins and identical collected items settle their exact
+					// delivery through the coordinator's no-op path. Earlier staged
+					// loop/join work must not manufacture a business-state revision.
 					result = frame.result
 					return nil
 				}
@@ -707,7 +708,7 @@ func (e *Executor) runSteps(frame *executionFrame) error {
 		}
 		frame.result.ExecutedSteps = append(frame.result.ExecutedSteps, step)
 		if stop {
-			frame.discardedJoin = step == StepJoin && frame.result.Status == OutcomeDiscarded
+			frame.discardedMutation = (step == StepJoin || step == StepAccumulate) && frame.result.Status == OutcomeDiscarded
 			frame.resolveNonRuleObservation()
 			return nil
 		}
@@ -1153,26 +1154,15 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	bucketRef, matched, err := e.resolveAccumulatorBucketRef(frame, spec)
+	acc, err := collectedList(frame, spec)
 	if err != nil {
 		return false, err
-	}
-	if !matched {
-		return false, nil
-	}
-	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
-	if !ok {
-		acc = &Accumulator{}
-	}
-	deliveryID := ""
-	if claim, ok := runtimedelivery.ClaimFromContext(frame.ctx); ok {
-		deliveryID = claim.DeliveryID()
 	}
 	var duplicate bool
 	if frame.req.Preview {
 		duplicate, err = acc.Preview(spec, frame.payload)
 	} else {
-		duplicate, err = acc.Admit(spec, frame.payload, deliveryID)
+		duplicate, err = acc.Admit(spec, frame.payload)
 	}
 	if err != nil {
 		return false, err
@@ -1181,10 +1171,29 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 		frame.result.Status = OutcomeDiscarded
 		return true, nil
 	}
-	storeAccumulatorForBucket(&frame.state.State, bucketRef, acc)
-	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
-	frame.state.Accumulated = accumulatorExpressionValue(acc)
+	items := make([]any, len(acc.Items))
+	for index, item := range acc.Items {
+		items[index] = item
+	}
+	if err := e.appendEntityMutation(frame, entityruntime.Mutation{Target: "entity." + spec.Target, Value: items}); err != nil {
+		return false, err
+	}
 	return false, nil
+}
+
+func collectedList(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (*Accumulator, error) {
+	if spec == nil {
+		return &Accumulator{}, nil
+	}
+	if spec.Target == "" {
+		return nil, fmt.Errorf("accumulate requires target: <state field>")
+	}
+	raw, present := frame.state.State.StateCarrier.Fields[spec.Target]
+	if !present {
+		return &Accumulator{}, nil
+	}
+	list := runtimeaccumulator.Load(raw)
+	return list, list.Err()
 }
 
 func (e *Executor) stepFilter(frame *executionFrame) error {
@@ -1295,7 +1304,7 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 }
 
 func (e *Executor) stepCompute(frame *executionFrame) error {
-	for _, site := range handlerComputations(frame.req.Handler, frame.rule) {
+	for _, site := range handlerComputations(frame.req.Handler, nil) {
 		if err := e.executeComputeSpec(frame, site.spec); err != nil {
 			return err
 		}
@@ -1337,16 +1346,9 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 	if effectiveErr != nil {
 		return effectiveErr
 	}
-	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, accumulateSpec)
-	if bucketErr != nil {
-		return bucketErr
-	}
-	if !matched {
-		return nil
-	}
-	acc, _ := loadAccumulatorForBucket(frame.state.State, bucketRef)
-	if err := acc.Err(); err != nil {
-		return err
+	acc, loadErr := collectedList(frame, accumulateSpec)
+	if loadErr != nil {
+		return loadErr
 	}
 	var (
 		value any
@@ -1843,9 +1845,13 @@ func specialHandlerClearTarget(target string) bool {
 }
 
 func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
-	active := selectedFanOutPlan(frame)
+	active := fanOutPlanForPhase(frame, false)
+	return false, e.executeFanOutPlan(frame, active)
+}
+
+func (e *Executor) executeFanOutPlan(frame *executionFrame, active activeFanOutPlan) error {
 	if !active.Found {
-		return false, nil
+		return nil
 	}
 	plan := active.Plan
 	resolveItems := func() ([]any, error) {
@@ -1855,34 +1861,16 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		}
 		return plan.SemanticEvidence().ProjectSource(itemsValue)
 	}
-	var items []any
-	var err error
-	if !plan.SourceAfterWrites {
-		items, err = resolveItems()
-		if err != nil {
-			return false, err
-		}
-		frame.state.FanOut = map[string]any{}
-		frame.state.SetFanOut("count", len(items))
+	items, err := resolveItems()
+	if err != nil {
+		return err
 	}
-	if err := e.stepDataWrites(frame); err != nil {
-		return false, err
-	}
-	if err := e.stepProjection(frame); err != nil {
-		return false, err
-	}
-	if plan.SourceAfterWrites {
-		items, err = resolveItems()
-		if err != nil {
-			return false, err
-		}
-		frame.state.FanOut = map[string]any{}
-		frame.state.SetFanOut("count", len(items))
-	}
+	frame.state.FanOut = map[string]any{}
+	frame.state.SetFanOut("count", len(items))
 	frame.result.FanOutCount = len(items)
 	limit := plan.MaxItems
 	if frame.result.FanOutCount > limit {
-		return false, failures.Wrap(
+		return failures.Wrap(
 			failures.ClassFanOutBoundExceeded,
 			"fan_out_bound",
 			"runtime.engine",
@@ -1901,25 +1889,19 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	if !frame.req.Preview {
 		intent, err := e.buildFanOutIntent(frame, plan, frame.result.FanOutCount)
 		if err != nil {
-			return false, err
+			return err
 		}
-		frame.result.FanOutIntent = &intent
+		frame.result.FanOutIntents = append(frame.result.FanOutIntents, intent)
 		if frame.req.JoinDeclaration.Mode() == timeridentity.JoinRefModeFanOutDelivery {
 			registration, err := e.buildFanOutBarrierRegistration(frame, intent)
 			if err != nil {
-				return false, err
+				return err
 			}
 			frame.result.FanOutBarrier = &registration
 		}
 	}
-	// Fan-out completes before the ordinary rule/advance steps. Preserve an
-	// actual selected rule, or resolve this completed non-rule path explicitly.
-	frame.resolveNonRuleObservation()
-	if err := e.stepAdvancesTo(frame); err != nil {
-		return false, err
-	}
 	frame.result.Status = OutcomeFannedOut
-	return true, nil
+	return nil
 }
 
 func (e *Executor) buildFanOutBarrierRegistration(frame *executionFrame, intent fanoutobligation.IntentRequest) (fanoutbarrier.Registration, error) {
@@ -2030,6 +2012,13 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 	if err := request.Validate(); err != nil {
 		return fanoutobligation.IntentRequest{}, err
 	}
+	if source.Kind == fanoutobligation.SourceEntityField {
+		value, present := resolveContractPath(ctx, frame.state, plan.ItemsPath, plan.ItemsFrom)
+		if !present {
+			return fanoutobligation.IntentRequest{}, fmt.Errorf("fan_out source %s is absent", plan.ItemsFrom)
+		}
+		return request.CaptureEntitySource(value)
+	}
 	return request, nil
 }
 
@@ -2082,19 +2071,14 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 		if err := e.applyRule(frame, rule); err != nil {
 			return err
 		}
-		if _, err := e.stepFanOut(frame); err != nil {
-			return err
-		}
-		if rule.Compute != nil {
-			return e.stepCompute(frame)
-		}
+		return e.stepSelectedRuleEffects(frame)
 	}
 	return nil
 }
 
 func (e *Executor) stepRules(frame *executionFrame) error {
 	if frame.rule != nil {
-		return nil
+		return e.stepSelectedRuleEffects(frame)
 	}
 	rule, ruleIndex, err := e.selectRule(frame, frame.req.Handler.Rules, handlerRuleSourceRules)
 	if err != nil {
@@ -2107,13 +2091,30 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 		if err := e.applyRule(frame, rule); err != nil {
 			return err
 		}
-		if _, err := e.stepFanOut(frame); err != nil {
+		return e.stepSelectedRuleEffects(frame)
+	}
+	return nil
+}
+
+func (e *Executor) stepSelectedRuleEffects(frame *executionFrame) error {
+	if frame.rule == nil || frame.ruleEffectsApplied {
+		return nil
+	}
+	for _, site := range handlerComputations(frame.req.Handler, frame.rule) {
+		if err := e.executeComputeSpec(frame, site.spec); err != nil {
 			return err
 		}
-		if rule.Compute != nil {
-			return e.stepCompute(frame)
-		}
 	}
+	if err := e.executeFanOutPlan(frame, fanOutPlanForPhase(frame, true)); err != nil {
+		return err
+	}
+	if frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "" {
+		if err := e.applyDataAccumulation(frame, frame.rule.DataAccumulation); err != nil {
+			return err
+		}
+		frame.ruleDataWritesApplied = true
+	}
+	frame.ruleEffectsApplied = true
 	return nil
 }
 
@@ -2175,13 +2176,6 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 }
 
 func (e *Executor) stepDataWrites(frame *executionFrame) error {
-	ruleHasWrites := frame.rule != nil && (frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "")
-	if ruleHasWrites && !frame.ruleDataWritesApplied {
-		if err := e.applyDataAccumulation(frame, frame.rule.DataAccumulation); err != nil {
-			return err
-		}
-		frame.ruleDataWritesApplied = true
-	}
 	if (frame.topLevelDataAccumulation.HasWrites() || strings.TrimSpace(frame.topLevelDataAccumulation.SourceEvent) != "") && !frame.topLevelDataWritesApplied {
 		if err := e.applyDataAccumulation(frame, frame.topLevelDataAccumulation); err != nil {
 			return err
@@ -2880,7 +2874,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 		ActivityIntents:          append([]ActivityIntent(nil), frame.result.ActivityIntents...),
 		EmitIntents:              append([]EmitIntent(nil), frame.result.EmitIntents...),
 		EmitPrerequisites:        prerequisites,
-		FanOutIntent:             frame.result.FanOutIntent,
+		FanOutIntents:            append([]fanoutobligation.IntentRequest(nil), frame.result.FanOutIntents...),
 		FanOutBarrier:            frame.result.FanOutBarrier,
 		FanOutBarrierCompletion:  frame.result.FanOutBarrierCompletion,
 	})
@@ -3231,13 +3225,25 @@ func (a activeFanOutPlan) EmitSource() string {
 }
 
 func selectedFanOutPlan(frame *executionFrame) activeFanOutPlan {
+	return fanOutPlanForPhase(frame, frame != nil && frame.rule != nil)
+}
+
+func fanOutPlanForPhase(frame *executionFrame, selected bool) activeFanOutPlan {
 	if frame == nil {
+		return activeFanOutPlan{}
+	}
+	// A join outcome owns its continuation. In particular, a delivery-barrier
+	// completion must not issue the paired trigger's fan-out a second time.
+	if !selected && (frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout) {
 		return activeFanOutPlan{}
 	}
 	kind := runtimecontracts.FanOutSiteHandler
 	index := -1
 	source := "handler.fan_out"
-	if frame.rule != nil {
+	if selected {
+		if frame.rule == nil {
+			return activeFanOutPlan{}
+		}
 		switch frame.ruleSource {
 		case handlerRuleSourceRules:
 			kind, index, source = runtimecontracts.FanOutSiteRule, frame.ruleIndex, "handler.rules.fan_out"

@@ -88,7 +88,7 @@ func validatePolicyValidationSet(context string, set PolicyValidationSet, policy
 		}
 		sort.Strings(paramNames)
 		for _, name := range paramNames {
-			if err := validateCriteriaParam(ruleContext+".params."+name, rule.Params[name].Value, policy); err != nil {
+			if err := validateValidationParam(ruleContext+".params."+name, rule.Params[name].Value, policy); err != nil {
 				errs = append(errs, err)
 			}
 		}

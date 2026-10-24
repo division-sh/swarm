@@ -84,7 +84,7 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 	state.UpdatedAt = at.Add(time.Second)
 	state.CurrentState, state.EntityType, state.Mode = "review", "root", "static"
 	if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
-		State: state, FanOutIntent: &intent, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
+		State: state, FanOutIntents: []fanoutobligation.IntentRequest{intent}, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 	}); err != nil {
 		t.Fatal(err)
 	}

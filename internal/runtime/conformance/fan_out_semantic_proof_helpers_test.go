@@ -54,8 +54,8 @@ func TestFanOutSemanticProofFixtureAdmitsExactProducerSites(t *testing.T) {
 		if len(plans) != 1 || plans[0].ItemsFrom != test.source || plans[0].Site.Kind != test.site {
 			t.Fatalf("compiled producer %s: %+v", test.event, plans)
 		}
-		if test.site == contracts.FanOutSiteOnComplete && !plans[0].SourceAfterWrites {
-			t.Fatal("entity proof must bind its same-handler writes")
+		if test.site == contracts.FanOutSiteOnComplete && len(plans[0].Writes) == 0 {
+			t.Fatal("entity proof must retain its preceding handler writes")
 		}
 	}
 }
@@ -129,14 +129,14 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 			{semanticProofEntityEvent, "on_complete", "entity.account_ids"},
 		} {
 			raw += fmt.Sprintf(`    %s:
+      data_accumulation:
+        writes:
+          - source_field: account_ids
+            target_field: account_ids
+          - source_field: threshold
+            target_field: threshold
       %s:
-        - data_accumulation:
-            writes:
-              - source_field: account_ids
-                target_field: account_ids
-              - source_field: threshold
-                target_field: threshold
-          fan_out:
+        - fan_out:
             items_from: %s
             as: account
             identity: account.account_id

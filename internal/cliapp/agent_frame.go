@@ -139,7 +139,6 @@ func writeAgentFrameResult(out io.Writer, result agentframe.Inspection) {
 			{Label: "Source", Value: humanSourceIdentity(result.Session.BundleHash, result.SourceLabel)},
 			{Label: "Flow", Value: result.Session.AuthoredFlow},
 			{Label: "Intent", Value: result.Session.Intent.Identity},
-			{Label: "Criteria", Value: result.Session.Criteria.Identity},
 			{Label: "Provider", Value: provider},
 			{Label: "Turn", Value: result.Turn.Kind.Status},
 		},

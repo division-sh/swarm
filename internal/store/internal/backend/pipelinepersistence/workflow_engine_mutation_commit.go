@@ -550,15 +550,15 @@ func commitWorkflowEngineMutation(
 				}
 				result.Lifecycle.ChannelCardsChanged = result.Lifecycle.ChannelCardsChanged || changed
 			}
-			if command.FanOutIntent != nil {
+			for _, intent := range command.FanOutIntents {
 				runID := command.State.Identity.RunID
 				fields := command.State.Fields
-				triggerEventID := command.FanOutIntent.Capsule.Lineage.ParentEventID
+				triggerEventID := intent.Capsule.Lineage.ParentEventID
 				createdAt := command.State.UpdatedAt
-				if err := commitFanOutIntentTx(txctx, attempt, postgres, store.resourceSourceOwner(), *command.FanOutIntent, runID, fields, triggerEventID, createdAt); err != nil {
+				if err := commitFanOutIntentTx(txctx, attempt, postgres, store.resourceSourceOwner(), intent, runID, fields, triggerEventID, createdAt); err != nil {
 					return err
 				}
-				if command.FanOutBarrier != nil {
+				if command.FanOutBarrier != nil && command.FanOutBarrier.IntentKey == intent.Key {
 					if err := commitFanOutBarrierRegistrationTx(txctx, attempt, postgres, *command.FanOutBarrier); err != nil {
 						return err
 					}
@@ -603,8 +603,10 @@ func commitWorkflowEngineMutation(
 				if err != nil {
 					return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
 				}
-				if command.FanOutIntent != nil && command.FanOutIntent.Capsule.Context.ReplyContextID() != settled.Route.Context.ReplyContextID() {
-					return fmt.Errorf("fan-out continuation differs from its exact native delivery settlement")
+				for _, intent := range command.FanOutIntents {
+					if intent.Capsule.Context.ReplyContextID() != settled.Route.Context.ReplyContextID() {
+						return fmt.Errorf("fan-out continuation differs from its exact native delivery settlement")
+					}
 				}
 				if !command.Lifecycle.RequestCompletionCandidate {
 					if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {

@@ -247,7 +247,7 @@ func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.Accum
 	if !ok {
 		return nil, false
 	}
-	return runtimeaccumulator.Load(raw.Raw()), true
+	return runtimeaccumulator.Load(raw.Raw()["items"]), true
 }
 
 func storeAccumulator(state *StateSnapshot, node identity.ExecutableNode, eventType events.EventType, acc *Accumulator) {
@@ -261,27 +261,12 @@ func storeAccumulatorForBucket(state *StateSnapshot, bucketRef timeridentity.Acc
 	}
 	bucket := state.EnsureStateBucket(bucketRef.Node.Key())
 	accumulators := bucket.EnsureMap(handlerAccumulatorBucketKey)
-	received := map[string]any{}
-	keys := make([]string, 0, len(acc.Received))
-	for key := range acc.Received {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		received[key] = acc.Received[key]
-	}
-	deliveries := map[string]any{}
-	for key, hash := range acc.Deliveries {
-		deliveries[key] = hash
-	}
 	items := make([]map[string]any, 0, len(acc.Items))
 	for _, item := range acc.Items {
 		items = append(items, cloneStringAnyMap(item))
 	}
 	accumulators.Set(bucketRef.Key(), map[string]any{
-		"received":   received,
-		"deliveries": deliveries,
-		"items":      items,
+		"items": items,
 	})
 }
 

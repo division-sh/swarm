@@ -41,7 +41,7 @@ func catalogTypeNameCollision(bundle *WorkflowContractBundle, source FlowSource,
 	diagnostic := NewDeclarationNameCollisionDiagnostic("type catalog", name, firstLocation, secondLocation)
 	diagnostic.Problem = fmt.Sprintf("TYPE-NAME-COLLISION: %s and %s use one name. A name identifies one declaration per catalog. Rename one of them.",
 		catalogTypeDeclarationDescription(first, name, firstLocation), catalogTypeDeclarationDescription(second, name, secondLocation))
-	diagnostic.Location.YAMLPath = second + "." + name
+	diagnostic.Location.YAMLPath = name
 	return diagnostic
 }
 
@@ -54,22 +54,28 @@ func catalogTypeDeclarationLocation(bundle *WorkflowContractBundle, source FlowS
 		if !ok {
 			continue
 		}
-		container, err := document.Root().Lookup(category)
+		declaration, err := document.Root().Lookup(name)
 		if err != nil {
 			return yamlsource.Location{}, err
 		}
-		if container.Presence == yamlsource.PresenceMissing {
+		if declaration.Presence == yamlsource.PresenceMissing {
 			continue
 		}
-		declaration, err := container.Value.Lookup(name)
-		if err != nil {
-			return yamlsource.Location{}, err
+		switch category {
+		case "enums":
+			if declaration.Presence != yamlsource.PresenceSequence && declaration.Presence != yamlsource.PresenceEmptySequence {
+				continue
+			}
+		case "types":
+			if declaration.Presence != yamlsource.PresenceMapping && declaration.Presence != yamlsource.PresenceEmptyMapping {
+				continue
+			}
 		}
 		if len(declaration.Occurrences) > 0 {
 			return declaration.Occurrences[0].KeyLocation, nil
 		}
 	}
-	return yamlsource.Location{}, fmt.Errorf("type catalog declaration %s.%s has no admitted source location", category, name)
+	return yamlsource.Location{}, fmt.Errorf("type catalog declaration %s has no admitted source location", name)
 }
 
 func catalogTypeDeclarationDescription(category, name string, location yamlsource.Location) string {

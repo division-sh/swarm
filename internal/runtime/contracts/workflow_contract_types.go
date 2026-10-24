@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -447,12 +446,55 @@ type GuardSpec struct {
 	Check string `yaml:"-"`
 }
 type AccumulateSpec struct {
+	Target      string     `yaml:"target"`
 	Into        string     `yaml:"into"`
 	From        string     `yaml:"from"`
 	Description string     `yaml:"description"`
 	Key         string     `yaml:"key"`
 	KeyPath     paths.Path `yaml:"-"`
 }
+
+func (s AccumulateSpec) TargetField() (string, error) {
+	if s.Target == "" {
+		return "", fmt.Errorf("accumulate requires target: <state field>")
+	}
+	if !bareAccumulateField(s.Target) {
+		return "", fmt.Errorf("accumulate.target %q names one bare state field; write target: %s", s.Target, strings.TrimPrefix(s.Target, "state."))
+	}
+	return s.Target, nil
+}
+
+// ItemKeyPath binds the bare authored item field to the payload value owner.
+func (s AccumulateSpec) ItemKeyPath() (paths.Path, error) {
+	if s.Key == "" {
+		return paths.Path{}, fmt.Errorf("accumulate requires key: <item field>; to collect every arrival without identity, write op: append with target: state.<field> and value: payload\n  writes:\n    - op: append\n      target: state.<field>\n      value: payload")
+	}
+	if strings.HasPrefix(s.Key, "payload.") {
+		return paths.Path{}, fmt.Errorf("key: %s: key names an item field; write key: %s", s.Key, strings.TrimPrefix(s.Key, "payload."))
+	}
+	if !bareAccumulateField(s.Key) {
+		return paths.Path{}, fmt.Errorf("accumulate.key %q must name one bare item field", s.Key)
+	}
+	return paths.Parse("payload." + s.Key), nil
+}
+
+// Accumulate names one field, without interpreting its spelling as a root.
+func bareAccumulateField(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index, char := range name {
+		if char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' || char == '_' {
+			continue
+		}
+		if index > 0 && (char >= '0' && char <= '9' || char == '-') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 type ComputeSpec struct {
 	Operation   ComputeOperation       `yaml:"operation"`
 	Tiers       []ComputeTier          `yaml:"tiers"`
@@ -914,22 +956,18 @@ type EnumTypeDecl struct {
 	Default string   `yaml:"default"`
 }
 
-// Validate enforces the explicit-default enum invariant: every enum declares
-// its members and an explicit default member (#1532). It is the shared
-// invariant owner called from the catalog decode loop and the runtime default
-// guard, so the loader verdict and the runtime verdict can never diverge.
-// Each defect has a distinct message naming the offending value or the
-// declared members as appropriate.
+// Validate enforces value membership independently of the source syntax check.
 func (e EnumTypeDecl) Validate(name string) error {
 	name = strings.TrimSpace(name)
 	if len(e.Values) == 0 {
-		return fmt.Errorf("enum %s is declared without values; declare the mapping form {values: [...], default: <member>}", name)
+		return fmt.Errorf("enum %s requires at least one quoted text literal", name)
 	}
-	if strings.TrimSpace(e.Default) == "" {
-		return fmt.Errorf("enum %s has no declared default; add default: %s to preserve current behavior", name, e.Values[0])
-	}
-	if !slices.Contains(e.Values, strings.TrimSpace(e.Default)) {
-		return fmt.Errorf("enum %s default %q is not a declared member; declared members: %s", name, e.Default, strings.Join(e.Values, ", "))
+	seen := make(map[string]struct{}, len(e.Values))
+	for _, member := range e.Values {
+		if _, duplicate := seen[member]; duplicate {
+			return fmt.Errorf("enum %s has duplicate member %q", name, member)
+		}
+		seen[member] = struct{}{}
 	}
 	return nil
 }
@@ -1435,7 +1473,6 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"native_tools":       {},
 	"flow_data_access":   {},
 	"data_access":        {},
-	"criteria":           {},
 	"emit_events":        {},
 	"implementation":     {},
 }

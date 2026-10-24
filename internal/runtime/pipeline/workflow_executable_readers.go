@@ -60,12 +60,9 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	"Rules": func(out *[]WorkflowExecutableReader, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendRulesExecutableReaders(out, ctx, "rules", handler.Rules)
 	},
-	"Accumulate": func(out *[]WorkflowExecutableReader, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		if handler.Accumulate != nil {
-			appendExecutableReader(out, "accumulate.from", handler.Accumulate.From, WorkflowEntityFieldLifecycleAccumulate)
-			appendExecutableReader(out, "accumulate.key", handler.Accumulate.Key, WorkflowEntityFieldLifecycleAccumulate)
-		}
-	},
+	// Target and key are bare field declarations admitted by the accumulator
+	// owner, not expressions. The retired from key refuses at source admission.
+	"Accumulate": noHandlerExecutableReaders,
 	"Join": func(out *[]WorkflowExecutableReader, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendJoinExecutableReaders(out, ctx, handler.Join)
 	},
@@ -425,16 +422,11 @@ func appendCompiledFanOutExecutableReaders(out *[]WorkflowExecutableReader, ctx 
 	if !ok {
 		return
 	}
-	beforeSource := len(*out)
 	appendExecutableReader(out, kind+".items_from", plan.ItemsFrom, phase)
-	for i := beforeSource; i < len(*out); i++ {
-		(*out)[i].FanOutAfterWrites = plan.SourceAfterWrites
-	}
 	before := len(*out)
 	appendExecutableReader(out, kind+".identity", plan.Identity, phase)
 	if len(*out) > before {
 		ref := &(*out)[len(*out)-1]
-		ref.FanOutAfterWrites = true
 		ref.ItemAlias = plan.ItemAlias
 		ref.ItemType = plan.ItemType.Clone()
 		ref.HasItemType = true
@@ -512,7 +504,6 @@ type WorkflowExecutableReader struct {
 	HasWriteIndex             bool
 	EmitSite                  *runtimecontracts.HandlerDeclarativeEmitSite
 	EmitField                 string
-	FanOutAfterWrites         bool
 	Kind                      string
 	SourceSlot                string
 	Expression                string

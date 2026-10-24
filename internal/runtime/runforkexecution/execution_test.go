@@ -3578,7 +3578,7 @@ func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Autho
 	if err != nil {
 		t.Fatalf("derive selected-fork race prompt: %v", err)
 	}
-	prompt, err := runtimeagentintent.AssembleProviderPrompt(intent, nil, derived, runtimeagentintent.RuntimeEnvironmentContext())
+	prompt, err := runtimeagentintent.AssembleProviderPrompt(intent, derived, runtimeagentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatalf("assemble selected-fork race prompt: %v", err)
 	}

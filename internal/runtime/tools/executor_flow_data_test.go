@@ -315,16 +315,12 @@ func TestFlowBackedAgentConsumersUseOwningFlowInsteadOfStorageScopeKind(t *testi
 	source, _ := loadFlowDataToolSource(t)
 	actor := flowDataActor()
 	declaration, ok := semanticview.ResolveAgentDeclaration(source, actor)
-	if !ok || declaration.ScopeKind != "flow" || declaration.OwnerFlowID != "support" || declaration.Source.FlowPath != "support" {
+	if !ok || declaration.ScopeKind != "flow" || declaration.OwnerFlowID != "support" || declaration.Source.FlowPath != "support" || declaration.Entry.Role != "factory_cto" {
 		t.Fatalf("flow-backed declaration = %#v ok %v", declaration, ok)
 	}
 	staticData := flowdata.AllowedStaticData(source, actor)
 	if len(staticData) != 1 || staticData[0].RelativePath != "exclusions.yaml" {
 		t.Fatalf("flow-data static projection = %#v", staticData)
-	}
-	entry, flowID, ok := criteriaAgentContractDeclaration(source, actor)
-	if !ok || flowID != "support" || entry.Role != "factory_cto" {
-		t.Fatalf("criteria declaration = entry %#v flow %q ok %v", entry, flowID, ok)
 	}
 	entity, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok || entity.FlowID != "support" || entity.EntityType != "support_state" {
