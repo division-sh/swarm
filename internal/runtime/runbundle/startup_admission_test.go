@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type admissionAvailabilityReader func(context.Context) ([]Availability, error)
@@ -82,6 +85,61 @@ func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
 				t.Fatalf("source integrity was reinterpreted as a pin mismatch: %v", err)
 			}
 		}
+	}
+	t.Run("upgrade preserves held instance state", testUpgradeRetainedInstances)
+}
+
+func testUpgradeRetainedInstances(t *testing.T) {
+	source := func(stage, fieldType string) semanticview.Source {
+		bundle := &contracts.WorkflowContractBundle{
+			RootSchema: &contracts.FlowSchemaDocument{Name: "upgrade", StageDeclarations: contracts.FlowStageDeclarations{
+				Declared: true, Entries: []contracts.FlowStageDeclaration{{ID: stage}},
+			}},
+			FlowSources: map[string]contracts.FlowSource{".": {Schema: "schema.yaml", Entities: "entities.yaml"}},
+			RootEntities: contracts.EntityContractsDocument{"record": {Fields: map[string]contracts.EntityFieldDecl{
+				"count": {Type: fieldType},
+			}}},
+		}
+		if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
+			t.Fatal(err)
+		}
+		return semanticview.Wrap(bundle)
+	}
+	current := source("ready", "integer")
+	identity := flowidentity.Derive(current, ".", "one")
+	state := UpgradeState{RunID: "run-1", Instances: []UpgradeInstance{{
+		Route:    flowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath),
+		EntityID: identity.EntityID, FlowID: ".", Status: "active", Stage: "ready", Fields: map[string]any{"count": int64(5)},
+	}}}
+	for _, test := range []struct {
+		name, stage, fieldType, kind string
+	}{
+		{"unchanged declarations", "ready", "integer", ""},
+		{"numeric widening", "ready", "double", ""},
+		{"removed occupied stage", "later", "integer", "stage_removed"},
+		{"incompatible held value", "ready", "string", "field_value_incompatible"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			blockers, err := CheckUpgrade(context.Background(), current, source(test.stage, test.fieldType), state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.kind == "" {
+				if len(blockers) != 0 {
+					t.Fatalf("compatible upgrade blocked: %+v", blockers)
+				}
+			} else if len(blockers) != 1 || blockers[0].Kind != test.kind || blockers[0].FlowInstance != identity.InstancePath || blockers[0].EntityID != identity.EntityID || blockers[0].Location == "" {
+				t.Fatalf("upgrade did not name its exact retained blocker: %+v", blockers)
+			}
+			if state.Instances[0].Fields["count"] != int64(5) || state.Instances[0].Stage != "ready" {
+				t.Fatalf("admission changed retained state: %+v", state.Instances[0])
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := CheckUpgrade(ctx, current, source("ready", "integer"), state); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled upgrade = %v", err)
 	}
 }
 
