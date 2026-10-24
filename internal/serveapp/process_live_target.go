@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
@@ -28,7 +27,7 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 	manager, resetting := s.runtimeContexts, s.resetting
 	requests := append([]serveRuntimeBundleContextRequest(nil), s.resetRequests...)
 	s.mu.RUnlock()
-	if manager == nil || resetting || len(requests) == 0 || s.processCapability == nil {
+	if manager == nil || resetting || len(requests) == 0 || s.processCapability == nil || s.resetBuildExecution == nil {
 		return nil, errors.New("live target requires converged runtime composition")
 	}
 	current, exists, err := s.processCapability.CurrentSourceSet(ctx)
@@ -65,11 +64,7 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 			retErr = errors.Join(retErr, loaded.cleanup())
 		}
 	}()
-	bundles := make([]serveRuntimeBundle, 0, len(requests)+1)
-	for _, existing := range requests {
-		bundles = append(bundles, existing.Loaded)
-	}
-	if err := validateServeMultiContextToolGatewayAdmission(request.Config, append(bundles, loaded)); err != nil {
+	if err := validateServeMultiContextToolGatewayAdmission(request.Config, []serveRuntimeBundle{loaded}); err != nil {
 		return nil, err
 	}
 	packs, err := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: request.Config}, loaded.bundle, request.ProviderCredentials, request.ManagedCredentials)
@@ -77,9 +72,6 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 		return nil, err
 	}
 	request.Loaded, request.StateStoreSummary = loaded, ""
-	// Match serve's existing secondary-context composition: only the primary
-	// context owns the process MCP listener and its turn registry.
-	request.EnableToolGateway, request.ToolGatewayBinding = false, toolgateway.Binding{}
 	request.ProviderTriggerCatalog = packs.ProviderTriggers.Catalog
 	request.ChannelPlans, request.ChannelBindings = packs.Channels.Plans, packs.Channels.Bindings
 	request.BootStartedAt, request.BootProgress = time.Now().UTC(), nil
@@ -88,38 +80,55 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 		return nil, fmt.Errorf("construct live target %s: %w", bundleHash, err)
 	}
 	retained := false
+	registered := false
 	defer func() {
 		if !retained {
-			retErr = errors.Join(retErr, candidate.runtime.ShutdownWithOptions(s.shutdownOptions))
+			if registered {
+				retErr = errors.Join(retErr, manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnavailable, s.shutdownOptions).ShutdownErr)
+			} else {
+				retErr = errors.Join(retErr, candidate.runtime.ShutdownWithOptions(s.shutdownOptions))
+			}
 			if candidate.workspaces != nil {
 				retErr = errors.Join(retErr, candidate.workspaces.ReleaseSourceProjection(context.WithoutCancel(ctx)))
 			}
 		}
 	}()
-	plan := current
-	if !member {
-		addition, err := compileServeSourceSetPlan([]serveRuntimeBundleContext{candidate})
-		if err != nil {
-			return nil, err
+	plan, err := compileServeSourceSetPlan([]serveRuntimeBundleContext{candidate})
+	if err != nil {
+		return nil, err
+	}
+	execution, err := s.resetBuildExecution(candidate)
+	if err != nil {
+		return nil, err
+	}
+	// This boundary is reached only for a missing bundle occurrence, never an
+	// ordinary pause. Joining the old occurrence also joins its agent processes.
+	for _, source := range current.Sources {
+		if result := manager.DeactivateBundleHashWithOptions(source.BundleHash, runtime.RuntimeContextCauseUnloaded, s.shutdownOptions); result.ShutdownErr != nil {
+			return nil, result.ShutdownErr
 		}
-		plan, err = agenttopology.NewSourceSetPlan(append(current.Sources, addition.Sources...), append(current.Agents, addition.Agents...))
-		if err != nil {
-			return nil, err
-		}
-		transition, err := manager.PrepareSourceSetTransition(ctx, plan)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := s.processCapability.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{
-			OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan,
-		}); err != nil {
-			// An uncertain commit cannot restore visibility of stale grants.
-			transition.RetainForRetry()
-			return nil, err
-		}
-		if err := transition.Commit(ctx, s.processCapability); err != nil {
-			return nil, err
-		}
+	}
+	if s.stopRunStalled != nil {
+		s.stopRunStalled()
+		s.stopRunStalled = nil
+	}
+	if err := s.releaseResetProjections(context.WithoutCancel(ctx)); err != nil {
+		return nil, err
+	}
+	transition, err := manager.PrepareSourceSetTransition(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.processCapability.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan, RequirePausedRemoval: true,
+	}); err != nil {
+		// An uncertain commit cannot restore visibility of stale grants. A retry
+		// reads the committed head and rebuilds its exact ordinary occurrence.
+		transition.RetainForRetry()
+		return nil, err
+	}
+	if err := transition.Commit(ctx, s.processCapability); err != nil {
+		return nil, err
 	}
 	s.resetGeneration++
 	grant, err := s.processCapability.IssueGenerationGrant(ctx, startupownership.GrantRequest{
@@ -132,6 +141,12 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 	if err := candidate.runtime.InstallStartupGrant(grant); err != nil {
 		return nil, err
 	}
+	// Startup MCP uses only the candidate's exact private startup token. Normal
+	// traffic still acquires the manager and cannot select this occurrence yet.
+	s.mu.Lock()
+	s.resetContexts = []serveRuntimeBundleContext{candidate}
+	s.resetRequests = []serveRuntimeBundleContextRequest{request}
+	s.mu.Unlock()
 	if err := candidate.runtime.Start(request.Ctx); err != nil {
 		return nil, err
 	}
@@ -142,14 +157,25 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 		InstalledTriggerSubjects:  candidate.installedTriggerSubjects, PackInventoryDigest: candidate.packInventoryDigest,
 		ChannelPlans: candidate.runtime.Options.ChannelPlans, DeclaredChannelPublication: candidate.runtime.Options.DeclaredChannelPublication,
 	}
-	if err := manager.Register(definition); err != nil {
+	if err := manager.RegisterLiveReplacement(definition); err != nil {
 		return nil, err
 	}
+	registered = true
 	s.mu.Lock()
-	s.resetContexts = append(s.resetContexts, candidate)
-	s.resetRequests = append(s.resetRequests, request)
+	s.currentRT, s.execution = candidate.runtime, execution
+	s.currentSourceArtifactFact = candidate.sourceArtifactFact
 	s.mu.Unlock()
 	retained, projectionOwned = true, false
+	if s.resetRefresh != nil {
+		if err := s.resetRefresh(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if s.resetChannelPublication != nil {
+		if err := s.resetChannelPublication(); err != nil {
+			return nil, err
+		}
+	}
 	use, lookup, err := manager.AcquireBundleHash(ctx, bundleHash)
 	if err == nil && !lookup.Loaded() {
 		err = fmt.Errorf("admitted live target is not loaded: %s", lookup.Cause)

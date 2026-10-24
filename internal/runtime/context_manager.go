@@ -494,7 +494,7 @@ func (m *RuntimeContextManager) quiesceConstructionFailure() error {
 func ValidateRuntimeContextSet(contexts ...BundleContext) error {
 	manager := newRuntimeContextManagerState(nil)
 	for _, contextDef := range contexts {
-		if err := manager.register(contextDef, false); err != nil {
+		if err := manager.register(contextDef, false, false); err != nil {
 			return err
 		}
 	}
@@ -507,10 +507,21 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	}
 	m.sourceSetMu.Lock()
 	defer m.sourceSetMu.Unlock()
-	return m.register(contextDef, true)
+	return m.register(contextDef, true, false)
 }
 
-func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccurrences bool) error {
+// RegisterLiveReplacement publishes the sole bundle after withdrawal. Returning
+// to a prior bundle also requires its exact previous occurrence to have joined.
+func (m *RuntimeContextManager) RegisterLiveReplacement(contextDef BundleContext) error {
+	if m == nil {
+		return errors.New("runtime context manager is required")
+	}
+	m.sourceSetMu.Lock()
+	defer m.sourceSetMu.Unlock()
+	return m.register(contextDef, true, true)
+}
+
+func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccurrences, replaceJoined bool) error {
 	if m == nil {
 		return fmt.Errorf("runtime context manager is required")
 	}
@@ -524,8 +535,28 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if m.contexts == nil {
 		m.contexts = map[string]*runtimeContextEntry{}
 	}
-	if _, exists := m.contexts[contextDef.BundleHash()]; exists {
-		return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash())
+	if replaceJoined {
+		for _, entry := range m.contexts {
+			if runtimeContextEntryLoaded(entry) || !entry.shutdownMu.TryLock() {
+				return errors.New("bundle replacement requires every predecessor to be withdrawn and joined")
+			}
+			joined := entry.shutdownComplete
+			entry.shutdownMu.Unlock()
+			if !joined {
+				return errors.New("bundle replacement requires every predecessor to be joined")
+			}
+		}
+	}
+	previous := m.contexts[contextDef.BundleHash()]
+	if previous != nil {
+		if !replaceJoined || previous.state != RuntimeContextStateUnloaded || previous.runtime == contextDef.Runtime || !previous.shutdownMu.TryLock() {
+			return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash())
+		}
+		joined := previous.shutdownComplete
+		previous.shutdownMu.Unlock()
+		if !joined {
+			return fmt.Errorf("runtime context %s has not joined", contextDef.BundleHash())
+		}
 	}
 	collision, duplicateAgent, err := m.duplicateLoadedAgentSlugLocked(contextDef)
 	if err != nil {
@@ -564,16 +595,22 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 		state:     RuntimeContextStateUnloaded,
 		cause:     RuntimeContextCauseNotLoaded,
 	}
-	m.order = append(m.order, contextDef.BundleHash())
-	sort.Strings(m.order)
+	if previous == nil {
+		m.order = append(m.order, contextDef.BundleHash())
+		sort.Strings(m.order)
+	}
 	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
 		entry: m.contexts[contextDef.BundleHash()], state: RuntimeContextStateLoaded,
 	}); err != nil {
-		delete(m.contexts, contextDef.BundleHash())
-		for i, bundleHash := range m.order {
-			if bundleHash == contextDef.BundleHash() {
-				m.order = append(m.order[:i], m.order[i+1:]...)
-				break
+		if previous != nil {
+			m.contexts[contextDef.BundleHash()] = previous
+		} else {
+			delete(m.contexts, contextDef.BundleHash())
+			for i, bundleHash := range m.order {
+				if bundleHash == contextDef.BundleHash() {
+					m.order = append(m.order[:i], m.order[i+1:]...)
+					break
+				}
 			}
 		}
 		var retireErr error
@@ -589,7 +626,7 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if activateOccurrences && runtimeOwner != nil && runtimeOwner.Bus != nil {
 		runtimeOwner.Bus.SetStandingRunWorkOwner(m)
 	}
-	if m.primaryBundleHash == "" {
+	if m.primaryBundleHash == "" || replaceJoined {
 		m.primaryBundleHash = contextDef.BundleHash()
 	}
 	return nil

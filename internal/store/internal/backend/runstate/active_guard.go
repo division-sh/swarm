@@ -15,7 +15,8 @@ import (
 
 const ActiveStateSQLValues = "'" +
 	string(runtimerunlifecycle.StateRunning) + "', '" +
-	string(runtimerunlifecycle.StatePaused) + "'"
+	string(runtimerunlifecycle.StatePaused) + "', '" +
+	string(runtimerunlifecycle.StateLive) + "'"
 
 func RequirePostgresActiveTx(ctx context.Context, tx *sql.Tx, runID string) error {
 	if tx == nil {

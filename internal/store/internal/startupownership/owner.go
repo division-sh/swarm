@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -937,6 +938,11 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 	} else if !hasPrevious || req.ExpectedRevision != previous.Revision {
 		return runtimeagenttopology.SourceSetCommitResult{}, errors.New("agent topology source-set predecessor changed")
 	}
+	if req.RequirePausedRemoval {
+		if err := requirePausedSourceRemoval(ctx, tx, previous, req.Plan, sqlite); err != nil {
+			return runtimeagenttopology.SourceSetCommitResult{}, err
+		}
+	}
 	changes, err := runtimeagenttopology.Diff(previous, req.Plan)
 	if err != nil {
 		return runtimeagenttopology.SourceSetCommitResult{}, err
@@ -960,6 +966,27 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 		}
 	}
 	return result, err
+}
+
+func requirePausedSourceRemoval(ctx context.Context, tx *sql.Tx, previous, next runtimeagenttopology.SourceSetPlan, sqlite bool) error {
+	for _, source := range previous.Sources {
+		if sourceSetContains(next, source) {
+			continue
+		}
+		query := `SELECT run_id,status FROM runs WHERE bundle_hash=$1 AND status IN ('live','running') ORDER BY run_id LIMIT 1`
+		if !sqlite {
+			query += ` FOR UPDATE`
+		}
+		var state runcontrol.State
+		err := tx.QueryRowContext(ctx, query, source.BundleHash).Scan(&state.RunID, &state.Status)
+		if err == nil {
+			return &runcontrol.StateError{Err: runcontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status, Detail: "pause every run before replacing its bundle"}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
 }
 
 func inspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence runtimestartupownership.GrantEvidence, runID string, sqlite bool) (runtimemanager.RunExecutionOwnership, error) {

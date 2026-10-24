@@ -1,9 +1,11 @@
 package serveapp
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -11,13 +13,16 @@ import (
 
 func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		for _, family := range []string{"timer", "decision"} {
+		for _, family := range []string{"timer", "decision", "decision_unloaded", "stop_unloaded"} {
 			t.Run(string(backend)+"/"+family, func(t *testing.T) {
+				captured := captureSelectedResetSupervisor(t)
 				root := canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleGateLocal)
 				if family == "timer" {
 					root = canonicalrouting.CopyLifecycleEmitterCompetingExit(t, true)
 				}
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+				supervisor := <-captured
+				rt.Contexts = supervisor.runtimeContexts
 				created := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "paused-accepted-" + family,
@@ -33,8 +38,26 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, created.RunID, "", "review")
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": created.RunID, "idempotency_key": "pause-" + family})
 				requireServedRunStatus(t, rt.Endpoint, created.RunID, "paused")
+				lookup := rt.Contexts.LookupBundleHashStatus(rt.BundleHash)
+				t.Logf("R12 pause observation: runtime_state=%s declared_process_agents=%d", lookup.State, len(rt.Runtime.Manager.ListAgentConfigs()))
+				if family == "decision_unloaded" || family == "stop_unloaded" {
+					result := rt.Contexts.DeactivateBundleHashWithOptions(rt.BundleHash, runtimepkg.RuntimeContextCauseUnloaded, runtimepkg.DefaultShutdownOptions())
+					if result.ShutdownErr != nil {
+						t.Fatal(result.ShutdownErr)
+					}
+					if family == "stop_unloaded" {
+						response := requestServedJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": created.RunID, "idempotency_key": "stop-unloaded"})
+						t.Logf("R12 paused/unloaded stop: result=%s error=%+v", response.Result, response.Error)
+						var status string
+						if err := rt.DB.QueryRowContext(context.Background(), `SELECT status FROM runs WHERE run_id=$1`, created.RunID).Scan(&status); err != nil {
+							t.Fatal(err)
+						}
+						t.Logf("R12 paused/unloaded stop durable status=%s", status)
+						return
+					}
+				}
 				var eventID string
-				if family == "decision" {
+				if family == "decision" || family == "decision_unloaded" {
 					var listed struct {
 						Items []struct {
 							Kind string `json:"kind"`
@@ -55,6 +78,12 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 					}
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": listed.Items[0].Card.ID}, &detail)
 					params := map[string]any{"card_id": listed.Items[0].Card.ID, "verdict": "approve", "observed_content_hash": detail.Card.Hash, "idempotency_key": "paused-verdict"}
+					if family == "decision_unloaded" {
+						response := requestServedJSONRPC(t, rt.Endpoint, "mailbox.decide", params)
+						t.Logf("R12 paused/unloaded card answer: result=%s error=%+v", response.Result, response.Error)
+						requireServedRunStatus(t, rt.Endpoint, created.RunID, "paused")
+						return
+					}
 					var outcome struct {
 						Status  string `json:"status"`
 						EventID string `json:"decision_event_id"`
@@ -106,7 +135,7 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 					state = "cancelled"
 				}
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, created.RunID, entityID, state)
-				requireServedRunStatus(t, rt.Endpoint, created.RunID, "completed")
+				requireServedRunStatus(t, rt.Endpoint, created.RunID, "live")
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, created.RunID, eventID).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("continue duplicated accepted occurrence = %d, %v", count, err)
 				}
