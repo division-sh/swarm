@@ -431,7 +431,6 @@ seam_families:
     classification: canonical_owner
     paths:
       - platform-spec.yaml
-      - internal/apispec/platform_spec_flow_instance_authoring_test.go
       - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
@@ -701,8 +700,6 @@ seam_families:
     paths:
       - platform-spec.yaml
       - internal/apispec/platform_spec_composition_routing_test.go
-      - internal/runtime/accprojection/resolver.go
-      - internal/runtime/accprojection/resolver_test.go
       - internal/apiv1/operator_event_publish_test.go
       - internal/apiv1/operator_event_replay_test.go
       - internal/runtime/semanticview/agent_subscription_admission.go
