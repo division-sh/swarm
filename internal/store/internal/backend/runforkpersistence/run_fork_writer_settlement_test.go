@@ -509,10 +509,10 @@ func TestSelectedForkActivationProjectsAcknowledgedOutcome(t *testing.T) {
 				return committed, primary
 			}
 			result, err := activateRunForkForSelectedContractExecution(context.Background(), runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: uuid.NewString()}, port)
-			if !errors.Is(err, primary) || result.Activated != committed || result.SourceFrozen != committed {
+			if !errors.Is(err, primary) || result.Activated != committed || result.SourceFrozen {
 				t.Fatalf("activated=%t sourceFrozen=%t committed=%t error=%v", result.Activated, result.SourceFrozen, committed, err)
 			}
-			if committed && (result.ForkRunStatus != runfork.RunForkActivatedStatus || result.SourceRunStatus != runfork.RunForkSourceFrozenStatus) {
+			if committed && result.ForkRunStatus != runfork.RunForkLiveStatus {
 				t.Fatalf("committed statuses: %+v", result)
 			}
 		})

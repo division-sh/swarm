@@ -1489,10 +1489,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 				presenter.fail(5, "selected_fork_process", err)
 				return 1
 			}
-			if _, err := apiStoreCaps.SelectedForkProcess.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture), supervisor.selectedRecoveryEnvironment); err != nil {
-				presenter.fail(5, "selected_fork_recovery", err)
-				return 1
-			}
 		}
 	}
 	storeDeps := stores.RuntimeDeps()
@@ -1763,6 +1759,14 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	if err := releaseRuntimeContexts(); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
+	}
+	// A selected handoff needs a genuinely admitted ordinary target, not the
+	// prepared grant held before normal runtime startup.
+	if apiStoreCaps.SelectedForkProcess != nil && rt != nil {
+		if _, err := apiStoreCaps.SelectedForkProcess.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture), supervisor.selectedRecoveryEnvironment); err != nil {
+			presenter.fail(22, "selected_fork_recovery", err)
+			return 1
+		}
 	}
 	if rt != nil {
 		if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {

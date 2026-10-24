@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -34,6 +35,9 @@ type SelectedContractExecutionRequest struct {
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	AllowSourceFreeze       bool
 	LiveRuntime             *runtimepkg.Runtime
+	AcquireLiveRuntime      func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)
+	LiveContexts            *runtimepkg.RuntimeContextManager
+	LiveRuns                runlifecycle.LiveRunReader
 	DataPinOverrides        []durabledata.ExplicitPin
 
 	Owner             SelectedContractExecutionOwner
@@ -85,7 +89,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 }
 
 func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest, reserved *selectedContractOperation) (out SelectedContractExecutionResult, finalErr error) {
-	callerContext := ctx
 	if req.Recovery == nil && req.ForkOperation != nil {
 		result, found, err := req.Owner.replaySelectedForkOperation(ctx, req, nil)
 		if found || err != nil {
@@ -96,6 +99,23 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
 	}
+	if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
+		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(err, req.Owner.completePreparation(prepared))
+	}
+	if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
+		result, err := executePreparedLiveFork(ctx, req, prepared)
+		if replay := isolatedSelectedForkOperationReplay(err); replay != nil {
+			req.ForkOperation = prepared.forkOperation
+			return req.Owner.continueElectedSelectedForkOperation(ctx, req, replay)
+		}
+		return result, err
+	}
+	return executePreparedSelectedContractRunFork(ctx, req, prepared)
+}
+
+func executePreparedSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (out SelectedContractExecutionResult, finalErr error) {
+	callerContext := ctx
+	var err error
 	disposed := false
 	defer func() {
 		if !disposed {
@@ -105,9 +125,6 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	ports, operation, loadedSource := req.Owner.ports, prepared.operation, prepared.loadedSource
 	forkOperation := prepared.forkOperation
 	plan, frontier, routeAdmission := prepared.plan, prepared.frontier, prepared.routeAdmission
-	if err := admitSelectedDeploymentRevisionFrontier(plan, frontier); err != nil {
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
-	}
 	routeTopology, model := prepared.routeTopology, prepared.model
 	agentRuntime := prepared.agentRuntime
 	deferredWorkAdmission := prepared.deferredWorkAdmission
@@ -128,6 +145,9 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 				disposed = true
 				if cleanupErr := req.Owner.disposePreparation(prepared); cleanupErr != nil {
 					return SelectedContractExecutionResult{}, errors.Join(materializationDiagnostic, cleanupErr)
+				}
+				if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
+					return SelectedContractExecutionResult{}, materializationDiagnostic
 				}
 				request := req
 				request.ForkOperation = forkOperation

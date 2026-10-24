@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -101,7 +100,7 @@ func newSelectedAttachmentFixture(t *testing.T, kind runfork.RunForkPointKind) s
 					Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 					FlowInstance: source,
 				}}}},
-			request: runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: child, AllowSourceFreeze: true},
+			request: runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: child, ForkOperation: &runfork.ForkOperationRequest{}},
 		},
 		record: selectedRecoveryRecord{
 			SelectedForkRecoveryResult: runfork.SelectedForkRecoveryResult{RunID: child, ExecutionID: execution.ExecutionID},
@@ -495,19 +494,10 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 					steps = append(steps, "attachment")
 					return attachmentErr
 				},
-				transition: func(context.Context, *mutationprotocol.Attempt, runlifecycle.ActiveTransitionRequest) error {
-					t.Fatal("unexpected advanced-source transition")
-					return nil
-				},
-				diverge: func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error {
-					t.Fatal("unexpected divergence")
-					return nil
-				},
-				freeze: func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error {
+				liveHandoff: func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkSelectedContractActivationEvidence) (string, error) {
 					steps = append(steps, "activate")
-					return nil
+					return string(runlifecycle.StateRunning), nil
 				},
-				now: func() time.Time { return time.Unix(200, 0).UTC() },
 			}
 			ctx := correlation.WithRunID(context.Background(), f.evidence.lineage.ForkRunID)
 			result, err := activateRunForkForSelectedContractExecution(ctx, f.evidence.request, port)
@@ -519,7 +509,7 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 				}
 			} else if attachmentErr == nil {
 				wantSteps = append(wantSteps, "activate")
-				if !result.Activated || !result.SourceFrozen || !errors.Is(err, cleanup) {
+				if !result.Activated || result.SourceFrozen || result.SourceRunStatus != string(runlifecycle.StateRunning) || result.ForkRunStatus != runfork.RunForkLiveStatus || !errors.Is(err, cleanup) {
 					t.Fatalf("durable acknowledgment lost: result=%+v err=%v", result, err)
 				}
 			} else if result.Activated || !errors.Is(err, attachmentErr) {

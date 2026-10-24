@@ -113,7 +113,7 @@ func (f *q1BranchPointAttachment) activate() (runfork.RunForkActivation, error) 
 	p := f.prepared
 	return p.owner.ports.fork.ActivateRunForkForSelectedContractExecution(effects.WithAuthority(p.operation.Context(), f.container.authority), runfork.RunForkSelectedContractExecutionActivateRequest{
 		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation, DataPins: f.materialized.DataPins,
-		ExecutionSource: p.loadedSource.Source, ForkRunID: f.materialized.ForkRunID, AllowSourceFreeze: true,
+		ExecutionSource: p.loadedSource.Source, ForkRunID: f.materialized.ForkRunID,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
 		FrontierAdmission:     p.frontier, RouteTopology: p.routeTopology, RecipientPlanning: *p.model.RecipientPlanning,
 	})

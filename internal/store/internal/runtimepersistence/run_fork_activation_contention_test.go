@@ -625,7 +625,7 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
-	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkOperation: request.ForkOperation, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, DataPins: staged.DataPins, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
+	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkOperation: request.ForkOperation, ForkRunID: staged.ForkRunID, DataPins: staged.DataPins, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
 		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning}
 }
 

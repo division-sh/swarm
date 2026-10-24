@@ -419,7 +419,6 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			InheritedSchedules:    readiness,
 			ExecutionSource:       loadedSource.Source,
 			ForkRunID:             forkRunID,
-			AllowSourceFreeze:     req.AllowSourceFreeze,
 			AllowedSourceEventIDs: sourceEventIDs,
 			FrontierAdmission:     frontier,
 			RouteTopology:         routeTopology,
