@@ -471,7 +471,11 @@ func (p *PreparedSelectedFork) Close() (finalErr error) {
 	}
 	p.loadedSource.Cleanup = nil
 	if p.pendingDiscard != nil {
-		if err := p.settleConstructionFailure(context.WithoutCancel(p.operation.Context()), p.pendingDiscard.store, p.pendingDiscard.runID, runfork.ForkOperationFailure{}, true); err != nil {
+		cleanupCtx, err := p.cleanupContext()
+		if err == nil {
+			err = p.settleConstructionFailure(cleanupCtx, p.pendingDiscard.store, p.pendingDiscard.runID, runfork.ForkOperationFailure{}, true)
+		}
+		if err != nil {
 			p.closeErr = fmt.Errorf("cleanup selected-contract fork %s: %w", p.pendingDiscard.runID, err)
 			return p.closeErr
 		}
@@ -690,6 +694,17 @@ func selectedPreparationProcessOwner(ports *selectedContractExecutionPorts, supp
 		return nil, errors.New("selected preparation has contradictory retained process custody")
 	}
 	return owner, nil
+}
+
+func (p *PreparedSelectedFork) cleanupContext() (context.Context, error) {
+	if p == nil || p.operation == nil || p.operation.preparation == nil || p.processOwner == nil {
+		return nil, errors.New("selected cleanup requires its retained preparation original")
+	}
+	ctx := context.WithoutCancel(p.operation.preparation.Context())
+	if !startupownership.HasMutationAuthority(ctx) {
+		return startupownership.WithProcessMutationAuthority(ctx, p.processOwner)
+	}
+	return ctx, nil
 }
 
 func (p *PreparedSelectedFork) settleConstructionFailure(ctx context.Context, store SelectedContractForkLifecycle, runID string, failure runfork.ForkOperationFailure, discard bool) error {
