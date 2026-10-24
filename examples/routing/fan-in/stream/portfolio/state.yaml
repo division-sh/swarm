@@ -1,4 +1,4 @@
 operating_reports: [OperatingReport]
 period_id: text
-reports: {}
+reports: map[text]OperatingReport
 last_revenue: integer

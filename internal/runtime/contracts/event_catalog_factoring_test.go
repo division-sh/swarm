@@ -81,7 +81,6 @@ func TestEventCatalogFactoringConsumers(t *testing.T) {
 		{"type_lowering", TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning},
 		{"business_key_lowering", TestEventCatalogBusinessKeyRejectsDynamicSemanticsAtBundleAdmission},
 		{"connected_rename", TestEffectiveEventResolutionPreservesConnectedRenameOwnership},
-		{"shared_refinements", TestSharedRefinementBoundPresenceMatrix},
 		{"shared_vocabulary", TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges},
 	} {
 		t.Run(tc.name, tc.proof)

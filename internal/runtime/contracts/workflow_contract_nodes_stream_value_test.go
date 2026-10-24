@@ -35,32 +35,29 @@ func TestProjectNodeFanOutValuePreservesMetadataAndRejectsRetiredAddress(t *test
 }
 
 func TestProjectNodeAccumulateValueDoesNotAssignPinDefaults(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("accumulate: {into: arrivals}\n"))
+	snapshot, err := yamlsource.Load([]byte("accumulate: {target: arrivals}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	field, _ := snapshot.Document("nodes.yaml").Root().Lookup("accumulate")
 	out, err := projectNodeAccumulateValue(field.Value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Into != "arrivals" || out.Key != "" {
-		t.Fatalf("node projection invented a business key: %#v", out)
+	if err == nil || !strings.Contains(err.Error(), "requires key") || out != nil {
+		t.Fatalf("missing authored key acquired a default: %#v, %v", out, err)
 	}
 }
 
 func TestProjectNodeAccumulateValueAdmitsOnlyAuthoredKey(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("accumulate: {into: arrivals, key: payload.record.id}\n"))
+	snapshot, err := yamlsource.Load([]byte("accumulate: {target: arrivals, key: id}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	field, _ := snapshot.Document("nodes.yaml").Root().Lookup("accumulate")
 	out, err := projectNodeAccumulateValue(field.Value)
-	if err != nil || out.Key != "payload.record.id" || len(out.KeyPath.Segments) != 2 {
+	if err != nil || out.Key != "id" || len(out.KeyPath.Segments) != 1 {
 		t.Fatalf("authored key = %#v, %v", out, err)
 	}
 	for _, retired := range []string{"window: payload.period", "window: null", "dedup_by: payload.id", "dedup_by: []", "key: null", "key: ''", "key: 12"} {
-		snapshot, err := yamlsource.Load([]byte("accumulate: {into: arrivals, " + retired + "}\n"))
+		snapshot, err := yamlsource.Load([]byte("accumulate: {target: arrivals, " + retired + "}\n"))
 		if err != nil {
 			t.Fatal(err)
 		}

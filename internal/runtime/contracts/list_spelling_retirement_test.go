@@ -32,7 +32,11 @@ func listRetirementDecode(t testing.TB, surface string, value yamlsource.Value) 
 		field, err := projectTypeFieldSpec(value)
 		return field.Type, field.IsOptional, nil, err
 	case "entities":
-		field, err := projectEntityFieldDecl(value)
+		field, err := projectStateField(value, TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+			"ProbeItem": {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
+			"List":      {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
+			"LIST":      {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
+		}})
 		return field.Type, field.IsOptional, field.Initial, err
 	case "events":
 		field, optional, err := admitEventPayloadField(value)
@@ -44,7 +48,7 @@ func listRetirementDecode(t testing.TB, surface string, value yamlsource.Value) 
 }
 
 func TestListSpellingRetirementTypedFields(t *testing.T) {
-	for _, surface := range []string{"types", "entities", "events"} {
+	for _, surface := range []string{"types", "events"} {
 		for _, source := range []string{
 			"list<ProbeItem>", "'list<ProbeItem>'", "list<ProbeItem>?", "{type: list<ProbeItem>}",
 			"map[text]list<ProbeItem>", "'[list<ProbeItem>]'", "{type: '[list<ProbeItem>]'}",
@@ -88,7 +92,7 @@ func TestListSpellingRetirementPresenceMatrix(t *testing.T) {
 }
 
 func TestListSpellingRetirementMetadataAndData(t *testing.T) {
-	for _, surface := range []string{"types", "entities", "events"} {
+	for _, surface := range []string{"types", "events"} {
 		t.Run(surface, func(t *testing.T) {
 			typeRef, optional, _, err := listRetirementDecode(t, surface, listRetirementField(t, "{type: '[text]?'} # list<T> is business text\n"))
 			if err != nil || typeRef != "[text]" || !optional {
@@ -101,7 +105,7 @@ func TestListSpellingRetirementMetadataAndData(t *testing.T) {
 		})
 	}
 	for _, test := range []struct{ surface, source string }{
-		{"entities", "{type: '[text]', initial: ['list<T>', '[text]', 'text']}"},
+		{"entities", "['list<T>', '[text]', 'text']"},
 	} {
 		t.Run(test.surface+"/data", func(t *testing.T) {
 			_, _, initial, err := listRetirementDecode(t, test.surface, listRetirementField(t, test.source))
@@ -142,7 +146,13 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 				case "types":
 					files["types.yaml"] += "Container:\n  items: " + form.source + "\n"
 				case "entities":
-					files["state.yaml"] = "probe:\n  items: " + form.source + "\n"
+					if strings.HasPrefix(form.source, "{") {
+						form.source = strings.TrimSuffix(form.source, "}") + ", indexed: true}"
+					}
+					if strings.HasPrefix(form.name, "bare_quoted") || form.name == "literal_block" || form.name == "folded_block" {
+						form.reject = false
+					}
+					files["state.yaml"] = "items: " + form.source + "\n"
 				case "events":
 					files["events.yaml"] = "proof.received:\n  items: " + form.source + "\n"
 				}
@@ -152,7 +162,11 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 				repo := repoRootForContractsTest(t)
 				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 				if form.reject {
-					if err == nil || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), surface+".yaml") {
+					file := surface + ".yaml"
+					if surface == "entities" {
+						file = "state.yaml"
+					}
+					if err == nil || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), file) {
 						t.Fatalf("full bundle failed to teach the offending source: %v", err)
 					}
 					artifact, err := sourceartifact.AdmitDirectory(root)
@@ -172,7 +186,7 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, source := range []*sourceartifact.AdmittedSourceArtifact{artifact, catalog, retained} {
-						if _, err := LoadWorkflowContractBundleFromArtifact(repo, source, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), surface+".yaml") {
+						if _, err := LoadWorkflowContractBundleFromArtifact(repo, source, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), file) {
 							t.Fatalf("retained source bypassed shape/style admission: %v", err)
 						}
 					}
@@ -208,7 +222,7 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 }
 
 func TestListSpellingRetirementAliasMergeDiagnostics(t *testing.T) {
-	for _, surface := range []string{"types", "entities", "events"} {
+	for _, surface := range []string{"types", "events"} {
 		for _, source := range []string{
 			"definition: &value 'list<ProbeItem>'\nitems: *value\n",
 			"definition: &value ['ProbeItem']\nitems: *value\n",
@@ -268,16 +282,25 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 					case "types":
 						prefix = "Unused:\n  items: "
 					case "entities":
-						prefix = "probe:\n  items: "
+						file = scope + "state.yaml"
+						prefix = "items: "
 					case "events":
 						prefix = "proof.received:\n  items: "
 					}
 					repo := repoRootForContractsTest(t)
 					for _, source := range []string{test.retired, test.canonical} {
-						writeFixtureFile(t, root+"/"+file, prefix+"{type: '"+source+"'}\n")
+						indexed := ""
+						if surface == "entities" {
+							indexed = ", indexed: true"
+						}
+						writeFixtureFile(t, root+"/"+file, prefix+"{type: '"+source+"'"+indexed+"}\n")
 						bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 						if source == test.retired {
-							if bundle != nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "use [") || !strings.Contains(err.Error(), file) {
+							located := err != nil && strings.Contains(err.Error(), file)
+							if diagnostic, ok := AsLoaderDiagnostic(err); ok {
+								located = located || diagnostic.Location.File == file
+							}
+							if bundle != nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "use [") || !located {
 								t.Fatalf("nested alternate escaped full source admission: %s: %v", source, err)
 							}
 							continue
@@ -297,6 +320,9 @@ func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, surface := range []string{"types", "entities", "events"} {
 				for _, source := range []string{name, "{type: '" + name + "'}", "[" + name + "]"} {
+					if surface == "entities" && strings.HasPrefix(source, "{") {
+						source = strings.TrimSuffix(source, "}") + ", indexed: true}"
+					}
 					typeRef, optional, initial, err := listRetirementDecode(t, surface, listRetirementField(t, source))
 					want := name
 					if strings.HasPrefix(source, "[") {
@@ -311,7 +337,7 @@ func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 			for file, source := range map[string]string{
 				"schema.yaml": "name: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
 				"types.yaml":  name + ":\n  value: text\nHolder:\n  item: " + name + "\n",
-				"state.yaml":  "probe:\n  item: " + name + "\n",
+				"state.yaml":  "item: " + name + "\n",
 				"events.yaml": "proof.received:\n  item: " + name + "\n",
 			} {
 				writeFixtureFile(t, root+"/"+file, source)

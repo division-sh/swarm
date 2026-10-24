@@ -85,7 +85,7 @@ func TestCatalogStructuralTypeFactoringPostDPrecedence(t *testing.T) {
 			catalogFactoringRefusal(t, err, tc.problem)
 		})
 	}
-	for _, surface := range []string{"types", "entities", "events"} {
+	for _, surface := range []string{"types", "events"} {
 		t.Run("source_decoder/"+surface, func(t *testing.T) {
 			decode := func(source string) (string, error) {
 				snapshot, err := yamlsource.Load([]byte("items: " + source + "\n"))

@@ -11,7 +11,3 @@ task-handler:
       source_event: work.setup
   work.assign:
     advances_to: complete
-  state_schema:
-    fields:
-      worker_id: string
-      task_label: string

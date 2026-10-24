@@ -21,7 +21,6 @@ connect: [{event: work.requested, from: source, to: worker, rename: work.receive
 inputs:
   - work.requested
 outputs: [work.completed]
-required_agents: [{role: worker, subscribes_to: [], emits: [work.completed], description: ''}]
 auto_emit_on_create: {event: work.started}
 stages:
   waiting:

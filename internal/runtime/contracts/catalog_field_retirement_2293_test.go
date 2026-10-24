@@ -70,6 +70,12 @@ func Test2293Q2CatalogFieldCommentsAndStateIndexingSurvive(t *testing.T) {
 		}},
 	} {
 		t.Run(entrance.name+"_description", func(t *testing.T) {
+			if entrance.name == "state" {
+				if err := entrance.admit(fieldRetirementValue2293(t, "{_description: text, value: text}")); err != nil {
+					t.Fatalf("state has no reserved field names: %v", err)
+				}
+				return
+			}
 			err := entrance.admit(fieldRetirementValue2293(t, "{_description: null, value: text}"))
 			diagnostic, ok := AsLoaderDiagnostic(err)
 			if !ok || diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(diagnostic.Remediation, "YAML comment") {
@@ -111,7 +117,6 @@ func Test2293Q2CatalogFieldBundleRefusals(t *testing.T) {
 		{"type_refinement", "types.yaml", "Row: {value: {type: text, length: {min: 1}}}\n"},
 		{"type_prose", "types.yaml", "Row: {_description: prose, value: text}\n"},
 		{"state_immutable", "state.yaml", "value: {type: text, immutable: false}\n"},
-		{"state_prose", "state.yaml", "_description: prose\nvalue: text\n"},
 		{"event_prose", "events.yaml", "row.received: {_description: prose, value: text}\n"},
 		{"event_citation", "events.yaml", "row.received: {value: {type: text, citation: null}}\n"},
 		{"state_projection", "state.yaml", "value: {type: '[text]', materialize_from: collector.values}\n"},

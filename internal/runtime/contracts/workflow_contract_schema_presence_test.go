@@ -17,9 +17,8 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	input := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes:\n        approve:\n          advances_to: done\n          input:\n            note:\n              type: text\n              %s\n"
 	timer := "stages:\n  waiting:\n    timers:\n      - after: 1s\n        emit: work.expired\n        advances_to: done\n        %s\n"
 	loop := "loops:\n  revision:\n    revision_field: revision\n    max_attempts: 3\n    escape: {advances_to: done}\n    %s\n"
-	required := "required_agents:\n  - role: worker\n    %s\n"
 	connect := "connect:\n  - event: work.requested\n    from: source\n    to: worker\n    %s\n"
-	outputPin := "pins:\n  outputs:\n    - event: work.completed\n      %s\n"
+	outputPin := "outputs:\n  - event: work.completed\n    %s\n"
 	ingress := "ingress:\n  alias: hooks\n  providers: [{provider: partner}]\n  %s\n"
 	provider := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      %s\n"
 	admission := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      admission:\n        kind: pack\n        pack: {id: partner}\n        %s\n"
@@ -57,11 +56,7 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"loop.revision_field", loop, "revision_field", "revision", "", "", "S"},
 		{"loop.max_attempts", loop, "max_attempts", "10", "", "", "S"},
 		{"loop.escape", loop, "escape", "x", "{advances_to: done}", "", "P"},
-		{"required_agents", root, "required_agents", "x", "", "[{role: worker}]", "MZQ"},
-		{"required.role", required, "role", "worker", "", "", "S"},
-		{"required.description", required, "description", "Worker", "", "", "MES"},
-		{"required.subscribes_to", required, "subscribes_to", "x", "", "[work.requested]", "MZQ"},
-		{"required.emits", required, "emits", "x", "", "[work.completed]", "MZQ"},
+		{"retired.required_agents", root, "required_agents", "x", "", "[{role: worker}]", "M"},
 		{"retired.instance_variables", root, "instance_variables", "x", "{variables: {note: text}}", "[text]", "M"},
 		{"auto_emit", root, "auto_emit_on_create", "x", "{event: work.started}", "", "MP"},
 		{"auto_emit.event", "auto_emit_on_create:\n  description: Start\n  %s\n", "event", "work.started", "", "", "S"},
@@ -103,9 +98,9 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"delivery.source", delivery, "source", "header", "", "", "S"},
 		{"delivery.header", delivery, "header", "X-Id", "", "", "S"},
 		{"delivery.json_path", strings.ReplaceAll(delivery, "source: header\n          header: X-Id", "source: json_path"), "json_path", "$.id", "", "", "S"},
-		{"pins", root, "pins", "x", "{inputs: [work.requested]}", "", "MP"},
-		{"pins.inputs", "pins:\n  outputs: [work.completed]\n  %s\n", "inputs", "x", "{events: [work.requested]}", "[work.requested]", "MQ"},
-		{"pins.outputs", "pins:\n  inputs: [work.requested]\n  %s\n", "outputs", "x", "{events: [work.completed]}", "[work.completed]", "MQ"},
+		{"retired.pins", root, "pins", "x", "{inputs: [work.requested]}", "", "M"},
+		{"inputs", "outputs: [work.completed]\n%s\n", "inputs", "x", "{events: [work.requested]}", "[work.requested]", "MQ"},
+		{"outputs", "inputs: [work.requested]\n%s\n", "outputs", "x", "{events: [work.completed]}", "[work.completed]", "MQ"},
 		{"retired.pins.inputs.events", "pins:\n  inputs:\n    %s\n", "events", "x", "", "[work.requested]", ""},
 		{"retired.pins.outputs.events", "pins:\n  outputs:\n    %s\n", "events", "x", "", "[work.completed]", ""},
 		{"retired.pins.inputs.reads", "pins:\n  inputs:\n    events: [work.requested]\n    %s\n", "reads", "x", "", "[note]", ""},
@@ -225,7 +220,7 @@ func TestSchemaAdmissionResolutionPresenceDoesNotBypassMode(t *testing.T) {
 		for _, key := range []string{"from", "aggregation", "window", "dedup_by", "singleton", "replies_to", "correlation_key"} {
 			t.Run(mode+"/"+key, func(t *testing.T) {
 				for _, raw := range []string{"null", "''", "{}", "[]"} {
-					source := "pins: {inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + raw + "}}]}\n"
+					source := "inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + raw + "}}]\n"
 					if _, err := admitSchemaFragment(source); err == nil {
 						t.Fatalf("mode %s admitted explicit invalid %s=%s", mode, key, raw)
 					}
@@ -243,7 +238,7 @@ func TestSchemaAdmissionResolutionPresenceDoesNotBypassMode(t *testing.T) {
 				if key == "replies_to" {
 					value = "work.requested"
 				}
-				_, err := admitSchemaFragment("pins: {inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + value + "}}]}\n")
+				_, err := admitSchemaFragment("inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + value + "}}]\n")
 				if err == nil || !strings.Contains(err.Error(), `must be a scalar text, got mapping`) || !strings.Contains(err.Error(), `["inputs"][0]`) {
 					t.Fatalf("retired pin mode %s %s was not rejected: %v", mode, key, err)
 				}

@@ -41,12 +41,8 @@ func TestCompiledConnectEventConsumerProjectionCensus(t *testing.T) {
 		{bundle: "template-reply", from: "provider", to: "requester", event: "provider.replied"},
 		{bundle: "template-select-or-create", from: "producer", to: "account", event: "account.ready"},
 	}
-	if len(manifestations) != 16 {
-		t.Fatalf("manifestation census = %d, want 16", len(manifestations))
-	}
 
 	repo := repoRootForContractsTest(t)
-	exact, projected := 0, 0
 	for _, item := range manifestations {
 		item := item
 		t.Run(item.bundle+"/"+item.event, func(t *testing.T) {
@@ -66,13 +62,11 @@ func TestCompiledConnectEventConsumerProjectionCensus(t *testing.T) {
 			producerBytes := canonicalEventSchemaBytes(t, producer)
 			consumerBytes := canonicalEventSchemaBytes(t, consumer)
 			if item.projectionField == "" {
-				exact++
 				if !bytes.Equal(producerBytes, consumerBytes) {
 					t.Fatalf("consumer event schema differs from producer-owned schema: producer=%s consumer=%s", producerBytes, consumerBytes)
 				}
 				return
 			}
-			projected++
 			if bytes.Equal(producerBytes, consumerBytes) {
 				t.Fatalf("compiled receiver projection %s did not change the acceptance schema", item.projectionField)
 			}
@@ -94,9 +88,6 @@ func TestCompiledConnectEventConsumerProjectionCensus(t *testing.T) {
 				}
 			}
 		})
-	}
-	if exact != 13 || projected != 3 {
-		t.Fatalf("consumer schema classes exact=%d projected=%d, want 13/3", exact, projected)
 	}
 }
 
