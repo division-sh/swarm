@@ -298,6 +298,9 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				assertIssue2394ReporterEventGet(t, rt, finalEvents[id])
 			}
 			assertIssue2394ReporterClients(t, rt, runID, final.FanOut)
+			if backend == "postgres" && transactionOptions.Delay == 0 {
+				t.Logf("normal PostgreSQL served reporter drain: issuance=%s drain_mixed_readback=%s first_submission_to_final_readback=%s", elapsed, time.Since(drainStarted), time.Since(issuanceStarted))
+			}
 			if transactionOptions.Delay > 0 {
 				observed := transactions
 				wantChunks := uint64(21)
