@@ -42,7 +42,7 @@ func proveQ1BranchPointCleanup(t *testing.T, backend string, kind runfork.RunFor
 	fixture := newActivityForkFixture(t, backend)
 	owner, selected := fixture.owner, fixture.owner.ports.fork
 	// Source constructors and the sole process exist before either pending fork.
-	ctx, eventRequest, advanceEvent := q1GateComponentSource(t, owner, false, kind == runfork.RunForkPointEvent && operation == "reset")
+	ctx, eventRequest, advanceEvent := q1GateComponentSource(t, owner, false, kind == runfork.RunForkPointEvent && operation == "reset", false)
 	deploymentCtx, deploymentRequest, advanceDeployment := q1DeploymentComponentSource(t, owner)
 	if operation == "discard" {
 		eventRequest.ForkOperation = nil
@@ -128,7 +128,7 @@ func proveQ1DetachedAcknowledgmentWithoutSource(t *testing.T, backend string, ki
 	build := q1DeploymentComponentSource
 	if kind == runfork.RunForkPointEvent {
 		build = func(t *testing.T, owner SelectedContractExecutionOwner) (context.Context, SelectedContractExecutionRequest, func()) {
-			return q1GateComponentSource(t, owner, false, false)
+			return q1GateComponentSource(t, owner, false, false, false)
 		}
 	}
 	ctx, request, advance := build(t, owner)

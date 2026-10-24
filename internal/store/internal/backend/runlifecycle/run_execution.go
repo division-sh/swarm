@@ -9,6 +9,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
@@ -78,6 +80,13 @@ func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, 
 	if selectedRunID == "" {
 		return !selectedExecutionContext(ctx), nil
 	}
+	if !selectedExecutionContext(ctx) {
+		state, err := executionRunState(ctx, q, postgres, runID)
+		if err != nil || state != runtimerunlifecycle.StateLive {
+			return false, err
+		}
+		return sourceadmission.ObserveLiveHandoff(ctx, q, runID, fact.BundleHash())
+	}
 	return observeSelectedRunExecution(ctx, q, postgres, runID, fact, owner)
 }
 
@@ -136,6 +145,19 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 	state, err := executionRunState(ctx, tx, postgres, runID)
 	if err != nil {
 		return err
+	}
+	if state == runtimerunlifecycle.StateLive && !selectedExecutionContext(ctx) {
+		handedOff, err := sourceadmission.ObserveLiveHandoff(ctx, tx, runID, fact.BundleHash())
+		if err != nil {
+			return err
+		}
+		if handedOff {
+			evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx)
+			if !present {
+				return fmt.Errorf("%w: live handoff requires its ordinary generation grant", runtimerunlifecycle.ErrRunExecutionAuthority)
+			}
+			return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, evidence, fact.BundleHash(), !postgres)
+		}
 	}
 	if state != runtimerunlifecycle.StateRunning {
 		return fmt.Errorf("%w: selected run %s is %s", runtimerunlifecycle.ErrRunExecutionAuthority, runID, state)

@@ -1403,6 +1403,7 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
+	LiveHandoff           bool
 	InheritedSchedules    InheritedScheduleSelection `json:"-"`
 	ForkOperation         *ForkOperationRequest
 	ExecutedEventCount    int
