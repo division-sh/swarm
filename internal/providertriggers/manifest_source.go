@@ -25,9 +25,6 @@ func parseManifestAt(body []byte, file string) (Manifest, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return Manifest{}, err
 	}
-	if err := root.ValidateUniqueMappings(); err != nil {
-		return Manifest{}, err
-	}
 	definition, err := admitTriggerDefinition(root)
 	if err != nil {
 		return Manifest{}, err
@@ -45,6 +42,9 @@ func AdmitBody(body packartifact.ProviderBody) (Manifest, error) {
 	definition, err := admitTriggerDefinition(root)
 	if err != nil {
 		return Manifest{}, err
+	}
+	if capabilities, present := body.Metadata().Capabilities(); present && definition.Transport == packs.ChannelTransportSession && capabilities.Can.VerifySecret != "" {
+		return Manifest{}, triggerSourceError(root, "verify_secret is forbidden by transport: session in trigger.yaml")
 	}
 	definition.Provider = body.ProviderKey()
 	if err := qualifyTriggerBodyNames(root, &definition); err != nil {
@@ -67,6 +67,9 @@ func freezeTriggerManifest(definition manifestDefinition, root yamlsource.Value,
 }
 
 func admitTriggerDefinition(root yamlsource.Value) (manifestDefinition, error) {
+	if err := root.ValidateUniqueMappings(); err != nil {
+		return manifestDefinition{}, err
+	}
 	f, err := triggerFields(root, "provider", "transport", "payload_object_required", "payload_object_error", "payload_source", "secret", "signature", "challenge", "delivery_condition", "delivery_id", "event_type", "event_name", "normalized_events", "ack", "redact_keys", "metadata")
 	if err != nil {
 		return manifestDefinition{}, err

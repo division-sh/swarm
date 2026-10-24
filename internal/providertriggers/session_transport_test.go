@@ -159,7 +159,19 @@ func mustInstalledTriggerSubjects(t *testing.T, catalog *CatalogSnapshot) []pack
 }
 
 func TestSessionTriggerTransportRejectsHTTPPolicyWithExactSource(t *testing.T) {
+	provider, err := s1LoadProviderMembers("acme", map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {verify_secret: webhook_signing_secret}, cannot: [execute code]}\n"),
+		"trigger.yaml":  []byte(sessionTriggerFixture),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := provider.Body(packmodel.BodyTrigger)
+	if _, err := AdmitBody(body); err == nil || !strings.Contains(err.Error(), "verify_secret") || !strings.Contains(err.Error(), "transport: session") {
+		t.Fatalf("session BODY admitted manifest signing capability: %v", err)
+	}
 	for _, cell := range []struct{ name, old, replacement string }{
+		{"duplicate transport", "transport: session", "transport: session\ntransport: webhook"},
 		{"secret", "payload_object_required: true", "secret: {required: false}"},
 		{"signature", "payload_object_required: true", "signature: {}"},
 		{"challenge", "payload_object_required: true", "challenge: {when: {json_path: '$.kind', equals: challenge}, response: {json_path: '$.challenge'}}"},

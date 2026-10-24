@@ -171,6 +171,8 @@ func retiredManifestField(name string, value yamlsource.Value) error {
 		return manifestError(value, "requires is not a manifest key; credentials are declared on the action, trigger or channel that uses them")
 	case "requires.secrets", "requires.managed_credentials":
 		return manifestError(value, name+" is not a manifest key; credentials are declared on the action, trigger or channel that uses them")
+	case "receive_https_route", "receive_session_events":
+		return manifestError(value, name+" is not a manifest capability; select transport: in the provider's trigger.yaml BODY; routes and session targets are derived")
 	case "id", "implements", "manifest_hash", "provenance", "tests":
 		return manifestError(value, name+" is not a manifest key; use version, platform_version and provider capabilities")
 	default:
@@ -217,7 +219,7 @@ func admitManifestCapabilities(value yamlsource.Value) (Capabilities, error) {
 	if err := manifestRequired(value, fields, "can", "cannot"); err != nil {
 		return Capabilities{}, err
 	}
-	can, err := manifestMapping(fields["can"], "receive_https_route", "receive_session_events", "verify_secret", "emit_events", "persist_dedupe_markers", "call_provider_actions", "lower_through_activity", "journal_activity_attempts")
+	can, err := manifestMapping(fields["can"], "verify_secret", "emit_events", "persist_dedupe_markers", "call_provider_actions", "lower_through_activity", "journal_activity_attempts")
 	if err != nil {
 		return Capabilities{}, err
 	}
