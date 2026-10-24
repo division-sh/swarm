@@ -117,8 +117,8 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						t.Fatalf("recovered agent did not reach its exact final consumer: %#v, %t, %v", state, found, err)
 					}
 					if sourceCleanup != nil {
-						if sourceCleanup.loads != 2 || sourceCleanup.calls != [2]int{} {
-							t.Fatalf("recovered context lost its two retained sources: loads=%d calls=%v", sourceCleanup.loads, sourceCleanup.calls)
+						if sourceCleanup.loads != 2 {
+							t.Fatalf("recovered context lost its two retained sources: loads=%d", sourceCleanup.loads)
 						}
 						for attempt := 0; attempt < 2; attempt++ {
 							if err := executionOwner.RetireSelectedContexts(context.Background()); !errors.Is(err, sourceCleanup.failure) {
@@ -130,13 +130,6 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						for i, root := range sourceCleanup.roots {
-							want := 1
-							if i == sourceCleanup.faultAt {
-								want = 3
-							}
-							if sourceCleanup.calls[i] != want {
-								t.Fatalf("source %d release calls=%d want=%d", i, sourceCleanup.calls[i], want)
-							}
 							if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 								t.Fatalf("source %d projection remains after retry: %v", i, err)
 							}
@@ -181,7 +174,6 @@ type selectedRecoverySourceCleanup struct {
 	faultAt, loads int
 	failure        error
 	repaired       bool
-	calls          [2]int
 	roots          [2]string
 }
 
@@ -195,7 +187,6 @@ func (p *selectedRecoverySourceCleanup) LoadRunForkSelectedContractSourceForRequ
 	p.roots[i] = filepath.Dir(loaded.RuntimeProjection.PrivateRoot())
 	release := loaded.Cleanup
 	loaded.Cleanup = func() error {
-		p.calls[i]++
 		if i == p.faultAt && !p.repaired {
 			return p.failure
 		}

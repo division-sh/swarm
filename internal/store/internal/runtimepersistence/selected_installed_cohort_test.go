@@ -126,6 +126,10 @@ func (r *selectedInstalledHistoryRows) Next(values []driver.Value) error {
 
 func completeSelectedHistoryJournal(t *testing.T, ctx context.Context, original runtimeownership.GenerationGrant, grant runtimeownership.GrantEvidence, runID, sourceID, status string) pipeline.ActivityAttemptRecord {
 	t.Helper()
+	ctx, err := runtimeownership.WithRuntimeMutationAuthority(ctx, original)
+	if err != nil {
+		t.Fatal(err)
+	}
 	journal, err := runtimeownership.CaptureActivityJournal(ctx, original, grant)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +175,7 @@ func completeSelectedHistoryJournal(t *testing.T, ctx context.Context, original 
 // failure under each of two retired generations, not just successful results.
 func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionSettlementFixture, selected selectedCompletionFixture, firstGrant runtimeownership.GrantEvidence, firstJournals []pipeline.ActivityAttemptRecord, control *activityGrantHistoryConnector) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.store)
 	issued, err := selected.store.IssueRunForkSelectedContractRuntimeExecution(ctx, selected.request)
 	if err != nil {
 		t.Fatal(err)

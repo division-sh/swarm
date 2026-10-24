@@ -6,10 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
+
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -45,31 +43,6 @@ func TestFixedRevisionArrivalHistoryHasCompletePendingInventory(t *testing.T) {
 			})
 		}
 	}
-}
-
-func mixedTimerHistoryFixture(t *testing.T) (runfork.RunForkPlan, time.Time, []runForkWorkflowTimerProjection, []genericschedule.Activation) {
-	t.Helper()
-	plan, bornAt, _, arrivals := arrivalJoinInventoryFixture(t, true, true)
-	ordinary := workflowTimerProjectionSource(t, true)
-	ordinary.RunID, ordinary.EntityID = plan.SourceRunID, plan.Entities[0].EntityID
-	ordinary.Route = flowidentity.StoredRoute(".", plan.SourceRunID, plan.SourceRunID)
-	var err error
-	ordinary.RoutingSource, err = events.NewRootRoutingSource(ordinary.EntityID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan.WorkflowTimers = []pipeline.WorkflowTimerActivationPersistenceRecord{ordinary.PersistenceRecord()}
-	inventory, err := runForkTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers, plan.JoinSchedules)
-	if err != nil {
-		t.Fatal(err)
-	}
-	inventory.Complete, inventory.Point = true, plan.ForkPoint
-	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(runForkAdmissionEvidence{RelevantTimer: true, TimerHistory: inventory})
-	projected, err := prepareRunForkWorkflowTimers(plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, bornAt)
-	if err != nil || len(projected) != 1 {
-		t.Fatalf("mixed ordinary projection: %+v err=%v", projected, err)
-	}
-	return plan, bornAt, projected, arrivals
 }
 
 func TestRunForkArrivalSourceInventoryRequiresExactPhysicalRows(t *testing.T) {

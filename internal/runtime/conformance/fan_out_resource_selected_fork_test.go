@@ -772,6 +772,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if err := f.topology.capability.Release(context.Background()); err != nil {
 						t.Fatal(err)
 					}
+					f.ctx = originalConformanceFixtureContext(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, f.source)), f.selected)
 					f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 					f.boot(t)
 					f.runtime.fanOutServing.Wake()

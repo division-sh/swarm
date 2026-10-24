@@ -2,9 +2,9 @@ package runforkpersistence
 
 import (
 	"context"
-	"database/sql"
+
 	"database/sql/driver"
-	"errors"
+
 	"testing"
 	"time"
 
@@ -14,8 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+
 	"github.com/google/uuid"
 )
 
@@ -104,53 +103,6 @@ func continuedBindingComponentKey(deployment bool) fanoutobligation.IntentKey {
 		key.ElementRef = contracts.FanOutElementRef{FlowPath: ".", Family: "fan_out", SemanticPath: "scatter/handler/items.ready/fan_out"}
 	}
 	return key
-}
-
-func expectContinuedBindingComponentWrite(mock sqlmock.Sqlmock, key fanoutobligation.IntentKey, replay runfork.RunForkFanOutPendingReplay,
-	childEvent string, at time.Time, changed int64, row []driver.Value) {
-	args := []driver.Value{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, replay.Ordinal}
-	if key.DeploymentFeedID != "" {
-		args = []driver.Value{key.RunID, key.DeploymentFeedID, replay.Ordinal}
-	}
-	var retained driver.Value
-	if replay.InheritedDisposition != "" {
-		retained = string(replay.InheritedDisposition)
-	}
-	writeArgs := append(append([]driver.Value(nil), args...), childEvent, replay.SourceEventID, retained, at.UTC())
-	mock.ExpectExec(`INSERT INTO fan_out_outcomes`).WithArgs(writeArgs...).WillReturnResult(sqlmock.NewResult(0, changed))
-	mock.ExpectQuery(`SELECT outcome_kind,CAST\(event_id AS TEXT\),CAST\(source_event_id AS TEXT\),inherited_disposition,failure,created_at`).
-		WithArgs(args...).WillReturnRows(sqlmock.NewRows([]string{"kind", "event", "source", "retained", "failure", "created"}).AddRow(row...))
-}
-
-func runContinuedBindingComponentAttempt(t *testing.T, expectations func(sqlmock.Sqlmock), operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error, wantError bool) {
-	t.Helper()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	backend, err := postgresbackend.New(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectBegin()
-	expectations(mock)
-	mock.ExpectRollback()
-	stop := errors.New("component stops before revision finalization")
-	result := mutationprotocol.RunPostgres(context.Background(), backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil,
-		func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error { return operation(ctx, tx, attempt) })
-			if err == nil {
-				err = stop
-			}
-			return struct{}{}, err
-		})
-	if result.Acknowledged() || result.Err() == nil || errors.Is(result.Err(), stop) == wantError {
-		t.Fatalf("continued binding component ack=%t err=%v wantError=%t", result.Acknowledged(), result.Err(), wantError)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestRunForkDeploymentContinuedPendingReadbackRejectsUnownedAssociation(t *testing.T) {

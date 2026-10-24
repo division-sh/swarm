@@ -1009,7 +1009,7 @@ func (c *selectedGatewayCustody) hooks(hooks runtimemcp.GatewayHooks) runtimemcp
 	resolve := hooks.ResolveTurnContext
 	hooks.ResolveTurnContext = func(token string) (runtimemcp.TurnContext, bool) {
 		turn, ok := resolve(token)
-		if !ok || !c.matchesTurn(turn) {
+		if !ok || !c.matchesTurn(turn, hooks) {
 			return runtimemcp.TurnContext{}, false
 		}
 		return turn, true
@@ -1050,7 +1050,7 @@ func refusedSelectedGatewayContext(ctx context.Context, err error) context.Conte
 	return failed
 }
 
-func (c *selectedGatewayCustody) matchesTurn(turn runtimemcp.TurnContext) bool {
+func (c *selectedGatewayCustody) matchesTurn(turn runtimemcp.TurnContext, hooks runtimemcp.GatewayHooks) bool {
 	evidence, err := c.grant.Evidence()
 	if err != nil || evidence.SelectedFork == nil || turn.CapabilitySurface == nil ||
 		!turn.HasSourceArtifactFact || turn.SourceArtifactFact.BundleHash() != evidence.BundleHash ||
@@ -1067,7 +1067,7 @@ func (c *selectedGatewayCustody) matchesTurn(turn runtimemcp.TurnContext) bool {
 	if !selectedGatewayEffectMatches(turn.EffectAuthority, *evidence.SelectedFork) {
 		return false
 	}
-	return c.matchesTurnActor(turn, evidence)
+	return c.matchesTurnActor(turn, evidence, hooks)
 }
 
 func selectedGatewayEffectMatches(authority runtimeeffects.Authority, binding runtimestartupownership.SelectedForkGrantBinding) bool {
@@ -1079,7 +1079,7 @@ func selectedGatewayEffectMatches(authority runtimeeffects.Authority, binding ru
 		selected.ActorCensusFingerprint == binding.ActorCensusFingerprint && selected.EffectiveConfigFingerprint == binding.EffectiveConfigFingerprint
 }
 
-func (c *selectedGatewayCustody) matchesTurnActor(turn runtimemcp.TurnContext, evidence runtimestartupownership.GrantEvidence) bool {
+func (c *selectedGatewayCustody) matchesTurnActor(turn runtimemcp.TurnContext, evidence runtimestartupownership.GrantEvidence, hooks runtimemcp.GatewayHooks) bool {
 	surface := turn.CapabilitySurface
 	if surface.Validate() != nil {
 		return false
@@ -1087,8 +1087,7 @@ func (c *selectedGatewayCustody) matchesTurnActor(turn runtimemcp.TurnContext, e
 	identity := turn.Actor.Identity
 	if surface.Authority.Kind == managedcapabilities.AuthorityStartupProbe {
 		if !turn.HasLifecycleToken || !turn.LifecycleToken.Valid() || surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedForkPreparation ||
-			surface.Authority.ExecutionAuthorityID != c.preparation.PreparationID || surface.Authority.Preparation == nil ||
-			surface.Authority.Preparation.SelectedForkPreparationCoordinates != c.preparation.Coordinates {
+			surface.Authority.Preparation == nil {
 			return false
 		}
 		identity = turn.LifecycleToken.Identity
@@ -1105,12 +1104,35 @@ func (c *selectedGatewayCustody) matchesTurnActor(turn runtimemcp.TurnContext, e
 	if err != nil {
 		return false
 	}
+	if surface.ActorPlan != plan && surface.ActorIdentity != identity {
+		return false
+	}
 	for _, actor := range c.preparation.Actors {
 		if actor.Plan == plan {
-			return (surface.ActorPlan == plan || surface.ActorIdentity == identity) && actor.Mode == turn.Actor.ExecutionMode
+			if surface.Authority.Kind == managedcapabilities.AuthorityStartupProbe &&
+				(surface.Authority.ExecutionAuthorityID != c.preparation.PreparationID || surface.Authority.Preparation.SelectedForkPreparationCoordinates != c.preparation.Coordinates) {
+				return false
+			}
+			return actor.Mode == turn.Actor.ExecutionMode
 		}
 	}
-	return false
+	return c.matchesProspectiveTurnActor(turn, identity, hooks)
+}
+
+func (c *selectedGatewayCustody) matchesProspectiveTurnActor(turn runtimemcp.TurnContext, identity agentidentity.Identity, hooks runtimemcp.GatewayHooks) bool {
+	if turn.CapabilitySurface.Authority.Kind == managedcapabilities.AuthorityStartupProbe {
+		// The registered surface belongs to the prospective catalog already
+		// checked by observeSelectedActivationActor, not the initial actor census.
+		coordinates := turn.CapabilitySurface.Authority.Preparation.SelectedForkPreparationCoordinates
+		coordinates.AdmittedPlanFingerprint = c.preparation.Coordinates.AdmittedPlanFingerprint
+		coordinates.CatalogFingerprint = c.preparation.Coordinates.CatalogFingerprint
+		return coordinates == c.preparation.Coordinates && hooks.ValidateActivationProbe != nil && hooks.ValidateActivationProbe(turn.LifecycleToken) == nil
+	}
+	if hooks.ResolveActorConfig == nil {
+		return false
+	}
+	actor, ok := hooks.ResolveActorConfig(identity)
+	return ok && actor.Identity == identity && actor.ExecutionMode == turn.Actor.ExecutionMode
 }
 
 type selectedContractGatewayServer struct {

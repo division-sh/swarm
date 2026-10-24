@@ -57,6 +57,13 @@ type c4ForkCreationOwner interface {
 
 func c4ReopenCreationStore(t *testing.T, backend string, selected any, db *sql.DB, connector *stopCommitConnector, instrumentation ...driver.Connector) (selectedFanOutLifecycleOwner, *sql.DB) {
 	t.Helper()
+	process, err := agentfixture.ProcessCapability(t, context.Background(), selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	location := connector.dsn
 	if backend == "sqlite" {
 		parsed, err := url.Parse(location)
@@ -988,13 +995,6 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 				} else {
 					c4RequireExclusiveStart(t, ctx, selected, runID, command.RunCreation.BundleHash, "")
 					c4RequireRevisionCount(t, ctx, selected, runID, 1)
-				}
-				capability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := capability.Release(context.Background()); err != nil {
-					t.Fatal(err)
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
 				ctx = testAuthorActivityContextForBundle(command.RunCreation.BundleHash)
