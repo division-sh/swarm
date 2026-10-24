@@ -21,7 +21,11 @@ func (e *readinessShutdownCancellation) Unwrap() error { return e.cause }
 
 func (am *AgentManager) cleanReadinessShutdownCancellation(ctx context.Context, result runtimepipeline.FlowAttachmentAdvanceResult, err error) bool {
 	_, clean := result.CleanCancellation(err)
-	if !clean || ctx.Err() != context.Canceled {
+	return clean && am.ownsReadinessShutdownCancellation(ctx)
+}
+
+func (am *AgentManager) ownsReadinessShutdownCancellation(ctx context.Context) bool {
+	if ctx.Err() != context.Canceled {
 		return false
 	}
 	am.lifecycle.mu.Lock()
@@ -29,6 +33,11 @@ func (am *AgentManager) cleanReadinessShutdownCancellation(ctx context.Context, 
 	am.lifecycle.workMu.Lock()
 	defer am.lifecycle.workMu.Unlock()
 	return am.lifecycle.phase == runtimeLifecycleShuttingDown && am.lifecycle.runOwner.CancelledByShutdown(ctx)
+}
+
+func (am *AgentManager) cleanReadinessShutdownReadCancellation(ctx context.Context, err error) bool {
+	return runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == context.Canceled }) &&
+		am.ownsReadinessShutdownCancellation(ctx)
 }
 
 func isReadinessShutdownCompletion(err error, key dynamicFlowRuntimeReadinessKey, attempt *dynamicFlowRuntimeReadinessAttempt) bool {
