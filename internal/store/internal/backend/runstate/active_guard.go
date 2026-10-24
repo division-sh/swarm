@@ -85,7 +85,7 @@ func DispatchParked(ctx context.Context, q RowQueryer, postgres bool, runID stri
 		return false, fmt.Errorf("run %s has invalid standing authority: %s", runID, standing.RunControlGuidance())
 	}
 	switch status {
-	case string(runtimerunlifecycle.StateRunning):
+	case string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StateLive):
 		if control != "" && control != string(runtimerunlifecycle.StateRunning) {
 			return false, fmt.Errorf("run %s has contradictory running/control state %q", runID, control)
 		}

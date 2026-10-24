@@ -64,9 +64,10 @@ func (a *Adapter) TransferSelectedLiveAuthority(ctx context.Context, attempt *mu
 		}
 		var blocked int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1
-			AND execution_authority_kind='selected_contract_fork' AND status IN ('pending','failed','in_progress')
+			AND execution_authority_kind='selected_contract_fork'
+			AND (continuation_handoff_at IS NULL OR (status IN ('pending','failed','in_progress')
 			AND (selected_execution_id<>$2 OR selected_execution_generation<>$3 OR authority_bundle_hash<>$4
-			OR continuation_handoff_at IS NULL OR current_attempt_open IS NOT NULL OR status='in_progress')`,
+			OR current_attempt_open IS NOT NULL OR status='in_progress')))`,
 			runID, predecessor.ID, predecessor.SelectedFork.Generation, grant.BundleHash).Scan(&blocked); err != nil {
 			return err
 		}

@@ -27,6 +27,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 		SelectLiveRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time) (string, error)
 		InsertRunForkRunTx(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact) error
 		RunDispatchBlocked(context.Context, string) (bool, error)
+		RunDispatchParked(context.Context, string) (bool, error)
 	})
 	reader := fixture.store.(runtimerunlifecycle.LiveRunReader)
 	scope := runtimerunlifecycle.LiveRunScope{FlowPath: "."}
@@ -83,6 +84,9 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 		if blocked, err := owner.RunDispatchBlocked(ctx, runID); err != nil || blocked != want {
 			t.Fatalf("rolled-back switch changed dispatch gate %s: blocked=%v, want %v; err=%v", runID, blocked, want, err)
 		}
+		if parked, err := owner.RunDispatchParked(ctx, runID); err != nil || parked != want {
+			t.Fatalf("rolled-back switch changed claim gate %s: parked=%v, want %v; err=%v", runID, parked, want, err)
+		}
 	}
 	err = runSelectedFixtureMutation(ctx, fixture.store, "live switch", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 		_, err := owner.SelectLiveRunTx(ctx, attempt, second, time.Now().UTC())
@@ -97,6 +101,9 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	for runID, want := range map[string]bool{first: true, second: false} {
 		if blocked, err := owner.RunDispatchBlocked(ctx, runID); err != nil || blocked != want {
 			t.Fatalf("committed switch dispatch gate %s: blocked=%v, want %v; err=%v", runID, blocked, want, err)
+		}
+		if parked, err := owner.RunDispatchParked(ctx, runID); err != nil || parked != want {
+			t.Fatalf("committed switch claim gate %s: parked=%v, want %v; err=%v", runID, parked, want, err)
 		}
 	}
 	if _, err := owner.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: second}); !errors.Is(err, runtimeruncontrol.ErrNotPaused) {
