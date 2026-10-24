@@ -79,7 +79,7 @@ func TestSelectedLifecycleDiagnosticUsesExactForkPointBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					got, err := validateLifecycleDiagnosticOriginTx(ctx, tx, result, true)
+					got, err := validateLifecycleDiagnosticOriginTx(ctx, tx, result, true, backend == "sqlite")
 					if wantOK && (err != nil || got != bindingID) {
 						t.Fatalf("exact point rejected: binding=%q err=%v", got, err)
 					}
