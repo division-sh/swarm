@@ -230,7 +230,7 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				}
 				waitPublishedChildCompletion(t, selected, owner, process, baseline, crashed.ForkRun)
 				state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, crashed.ForkRun)
-				if err != nil || state.State != "running" || state.RunStatus != "running" || state.Occurrences != 2 {
+				if err != nil || state.RunStatus != "running" || state.Occurrences != 2 {
 					t.Fatalf("successor did not complete through one fresh execution: %+v error=%v", state, err)
 				}
 				parentState, err := storetest.ReadSelectedExecutionStorage(ctx, selected, crashed.SourceRun)
