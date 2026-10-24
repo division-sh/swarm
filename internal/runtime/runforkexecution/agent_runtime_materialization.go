@@ -1257,7 +1257,7 @@ func (r *selectedContractAgentRuntime) stopExecutionWork() error {
 	}
 	if len(r.pendingActivations) != 0 {
 		var err error
-		r.pendingActivations, err = retireSelectedFlowActivations(context.Background(), r.pipeline, r.pendingActivations)
+		r.pendingActivations, err = retireSelectedFlowActivations(context.WithoutCancel(r.operationContext), r.pipeline, r.pendingActivations)
 		if err != nil {
 			return err
 		}
