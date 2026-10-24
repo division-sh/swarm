@@ -31,7 +31,7 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 	}
 	primary, err := b.ResolveFlowPrimaryEntity(flowID)
 	if err != nil {
-		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s primary entity required for instance: %w", flowID, err)
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s declared state required for instance: %w", flowID, err)
 	}
 	field, err := validateTemplateInstanceField(flowID, schema.Instance, primary)
 	if err != nil {
@@ -62,7 +62,7 @@ func (b *WorkflowContractBundle) ResolveFlowSingleton(flowID string) (SingletonC
 	}
 	primary, err := b.ResolveFlowPrimaryEntity(flowID)
 	if err != nil {
-		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s requires exactly one primary entity: %w", flowID, err)
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s requires declared state: %w", flowID, err)
 	}
 	if _, err := singletonCoordinatorContainedFields(primary); err != nil {
 		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s invalid typed entity state: %w", flowID, err)
