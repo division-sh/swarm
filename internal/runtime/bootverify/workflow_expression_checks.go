@@ -213,13 +213,6 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 			for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, c.source.FanOutPlansForHandler(nodeRef, eventType)) {
 				c.emitFieldExprFindings = append(c.emitFieldExprFindings, c.literalEmitFieldFindings(nodeRef, eventType, site.Source, site.SiteKey, site.Spec)...)
 			}
-			if handler.Guard != nil {
-				if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
-					if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
-						c.emitFieldExprFindings = append(c.emitFieldExprFindings, c.literalEmitFieldFindings(nodeRef, eventType, "guard escalation", "guard.on_fail.escalate", failureSpec.EscalationEmitSpec())...)
-					}
-				}
-			}
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
 			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
 			for _, expr := range c.entityAssignmentReaders(nodeRef, eventType, handler) {

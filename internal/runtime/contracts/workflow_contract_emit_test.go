@@ -15,9 +15,11 @@ func TestHandlerEmitEventsPreservesCompletionSites(t *testing.T) {
 			Deadline:   &JoinDeadlineSpec{After: "1h", From: JoinDeadlineFromStageEntry},
 			OnDeadline: HandlerRuleEntry{Emit: EmitSpec{Event: "join.timed_out"}},
 		},
+		Guard: &GuardSpec{Check: "payload.allowed", OnFail: "escalate:handler.escalated"},
 	}
 
-	want := []string{"handler.completed", "join.completed", "join.timed_out"}
+	// Reach: producer derivation must include escalation without a second guard walk.
+	want := []string{"handler.completed", "join.completed", "join.timed_out", "handler.escalated"}
 	if got := HandlerEmitEvents(handler, nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("HandlerEmitEvents() = %#v, want %#v", got, want)
 	}
