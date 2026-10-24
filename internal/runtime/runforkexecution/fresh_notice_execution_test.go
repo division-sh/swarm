@@ -108,11 +108,18 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 			wait, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()
 			child := result.Materialization.ForkRunID
+			diagnostic := func() {
+				read, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer done()
+				failure, err := storetest.ReadNotifyFirstRunFailure(read, selected, child)
+				t.Logf("selected notice failure readback: %s error=%v", failure, err)
+			}
 			var items []mailbox.V1Item
 			for {
 				items, _, err = selected.ListV1MailboxItems(wait, mailbox.V1ListOptions{RunID: child, Limit: 10})
 				delivery, readErr := storetest.ReadManagedDeliveryStorage(wait, selected, child, "test-agent")
 				if err != nil || readErr != nil || len(delivery.Failures) != 0 {
+					diagnostic()
 					t.Fatalf("fresh notice execution: items=%+v delivery=%+v errors=%v/%v", items, delivery, err, readErr)
 				}
 				if len(items) == 1 && delivery.Delivered == 1 {
@@ -120,6 +127,7 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 				}
 				select {
 				case <-wait.Done():
+					diagnostic()
 					t.Fatalf("fresh notice did not settle: %+v error=%v", items, wait.Err())
 				case <-time.After(10 * time.Millisecond):
 				}

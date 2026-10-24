@@ -1785,12 +1785,12 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 			}
 			if releaseErr := am.lifecycle.releaseLoop(token, done); releaseErr != nil && am.bus != nil {
 				failure := runtimefailures.FromError(releaseErr, "agent-manager", "release_agent_loop")
-				_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+				_ = am.bus.LogRuntime(context.WithoutCancel(parent), runtimepipeline.RuntimeLogEntry{
 					Level: "error", Component: "agent-manager", Action: "agent_loop_release_failed",
 					AgentID: agent.ID(), Failure: &failure.Failure,
 				})
 			}
-			_ = am.projectLifecycleDiagnostics(context.Background())
+			_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
 			if settleErr := workLease.Done(); settleErr != nil {
 				diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "agent execution loop work settlement failed",
 					"agent_id", agent.ID(),
