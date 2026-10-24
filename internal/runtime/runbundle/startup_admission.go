@@ -1,20 +1,24 @@
 package runbundle
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -119,6 +123,9 @@ func CheckUpgrade(ctx context.Context, current, candidate semanticview.Source, s
 	}
 	before, _ := semanticview.Bundle(current)
 	after, _ := semanticview.Bundle(candidate)
+	if before == nil || after == nil {
+		return nil, errors.New("bundle upgrade requires both admitted declarations")
+	}
 	if before == after || (before.SourceArtifact != nil && after.SourceArtifact != nil && before.SourceArtifact.BundleHash() == after.SourceArtifact.BundleHash()) {
 		return nil, nil
 	}
@@ -293,12 +300,31 @@ func upgradeEventSchemaChanged(current, candidate semanticview.Source, event eve
 	if flow == "" {
 		flow = "."
 	}
-	before, found, err := current.ResolveEffectiveCompiledFlowEventSchema(flow, string(event.Type()))
+	before, found, err := upgradeEventSchema(current, flow, string(event.Type()))
 	if err != nil || !found {
 		return false, errors.Join(errors.New("queued event has no admitted source schema"), err)
 	}
-	after, found, err := candidate.ResolveEffectiveCompiledFlowEventSchema(flow, string(event.Type()))
-	return !found || before.AcceptanceSchemaDigest() != after.AcceptanceSchemaDigest(), err
+	after, found, err := upgradeEventSchema(candidate, flow, string(event.Type()))
+	return !found || !bytes.Equal(before, after), err
+}
+
+func upgradeEventSchema(source semanticview.Source, flow, event string) ([]byte, bool, error) {
+	resolved := semanticview.ResolveEventSchema(source, flow, event)
+	if resolved.HasSchema {
+		if err := resolved.UnresolvedTypeError(); err != nil {
+			return nil, true, err
+		}
+		value, err := canonicaljson.Bytes(eventschema.CanonicalAcceptanceSchema(resolved.Schema.Schema))
+		return value, true, err
+	}
+	// Reference-only platform entries retain their subtype owner; do not invent
+	// an empty payload schema for them during bundle compatibility checks.
+	proof := semanticview.ResolveFlowEventProof(source, flow, event)
+	if !proof.HasSchema || !contracts.PlatformEventCatalogContains(source.PlatformSpec(), proof.CatalogKey) {
+		return nil, false, nil
+	}
+	value, err := canonicaljson.Bytes(proof.Entry)
+	return value, true, err
 }
 
 func upgradeLocation(source semanticview.Source, flow, family, member string) string {
@@ -311,6 +337,12 @@ func upgradeLocation(source semanticview.Source, flow, family, member string) st
 	}
 	declaration := bundle.FlowSources[flow]
 	file := map[string]string{"schema": declaration.Schema, "entities": declaration.Entities, "events": declaration.Events, "nodes": declaration.Nodes}[family]
+	if family == "events" && member != "" {
+		proof := semanticview.ResolveFlowEventProof(source, flow, member)
+		if proof.CatalogKey != "" {
+			member = "[" + strconv.Quote(proof.CatalogKey) + "]"
+		}
+	}
 	if location, found := bundle.IntroductionLocation(file, member, false); found {
 		return fmt.Sprintf("%s:%d:%d", file, location.Line, location.Column)
 	}

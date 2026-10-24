@@ -116,15 +116,22 @@ func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context, runID
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres workflow instance reader is required")
 	}
-	runID = strings.TrimSpace(runID)
-	rows, err := s.backend.QueryContext(ctx, postgresWorkflowInstanceSelect+`
-		WHERE fi.run_id = $1::uuid
-		ORDER BY fi.created_at ASC
-	`, runID)
+	return listWorkflowInstances(ctx, s.backend, false, runID)
+}
+
+func listWorkflowInstances(ctx context.Context, q pipelineQueryer, sqlite bool, runID string) ([]runtimepipeline.WorkflowInstance, error) {
+	query := postgresWorkflowInstanceSelect + ` WHERE fi.run_id = $1::uuid ORDER BY fi.created_at ASC`
+	if sqlite {
+		query = sqliteWorkflowInstanceSelect + ` WHERE fi.run_id = ? ORDER BY fi.created_at ASC`
+	}
+	rows, err := q.QueryContext(ctx, query, strings.TrimSpace(runID))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	if sqlite {
+		return scanSQLiteWorkflowInstances(rows)
+	}
 	return scanPostgresWorkflowInstances(rows)
 }
 
@@ -464,13 +471,7 @@ func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context, runID s
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite workflow instance reader is required")
 	}
-	runID = strings.TrimSpace(runID)
-	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowInstanceSelect+` WHERE fi.run_id = ? ORDER BY fi.created_at ASC`, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanSQLiteWorkflowInstances(rows)
+	return listWorkflowInstances(ctx, s.backend, true, runID)
 }
 
 const sqliteWorkflowInstanceSelect = `

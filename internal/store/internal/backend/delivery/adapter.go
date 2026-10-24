@@ -2807,10 +2807,24 @@ func (a *Adapter) ActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID stri
 	if tx == nil {
 		return nil, fmt.Errorf("delivery active-run snapshot transaction is required")
 	}
+	return a.activeRunSnapshots(ctx, tx, runID, true)
+}
+
+func (a *Adapter) ReadActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID string) ([]Snapshot, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("delivery active-run read transaction is required")
+	}
+	return a.activeRunSnapshots(ctx, tx, runID, false)
+}
+
+func (a *Adapter) activeRunSnapshots(ctx context.Context, tx *sql.Tx, runID string, forUpdate bool) ([]Snapshot, error) {
 	if _, err := uuid.Parse(strings.TrimSpace(runID)); err != nil {
 		return nil, fmt.Errorf("delivery active-run snapshot run id: %w", err)
 	}
-	query := `SELECT delivery_id::text FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed') ORDER BY delivery_id FOR UPDATE`
+	query := `SELECT delivery_id::text FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed') ORDER BY delivery_id`
+	if forUpdate {
+		query += " FOR UPDATE"
+	}
 	if a.dialect == DialectSQLite {
 		query = `SELECT delivery_id FROM event_deliveries WHERE run_id = ? AND status IN ('pending', 'in_progress', 'failed') ORDER BY delivery_id`
 	}
@@ -2827,12 +2841,16 @@ func (a *Adapter) ActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID stri
 		}
 		ids = append(ids, id)
 	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
 	out := make([]Snapshot, 0, len(ids))
 	for _, id := range ids {
-		record, err := a.loadByID(ctx, tx, id, true)
+		record, err := a.loadByID(ctx, tx, id, forUpdate)
 		if err != nil {
 			return nil, err
 		}
