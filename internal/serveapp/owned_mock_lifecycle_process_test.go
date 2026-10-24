@@ -29,12 +29,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/store/devscratch"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
 // This entry exists only in a go test -c binary. The parent owns retained roots
 // and credentials across children; production swarm cannot parse this input.
 func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
+	if raw := os.Getenv("SWARM_TEST_INTERNAL_GOLDEN_CRASH_OBSERVATION"); raw != "" {
+		if err := observeGoldenCrashCut(t.Context(), raw, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	raw := os.Getenv("SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST")
 	if raw == "" {
 		t.Skip("internal retained lifecycle child; launched by its parent proof")
@@ -80,6 +88,29 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	if err != nil || code != 0 {
 		t.Fatalf("internal lifecycle exit=%d: %v", code, err)
 	}
+}
+
+// The existing compiled child keeps native inspection outside releasee2e.
+// Only fixed scalar evidence crosses back; the child never admits a runtime.
+func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retErr error) {
+	var request struct{ Backend, Location, RunID string }
+	if err := json.Unmarshal([]byte(raw), &request); err != nil {
+		return err
+	}
+	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(request.Backend, request.Location)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, inspection.Close()) }()
+	var observed storetest.ManagedTurnEffectStorage
+	err = inspection.InspectSnapshot(ctx, func(scoped context.Context) (err error) {
+		observed, err = storetest.ReadManagedTurnEffectStorage(scoped, inspection, request.RunID, "")
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(struct{ Active, Launched int }{observed.ActiveProviderAttempts, observed.LaunchedCandidateWorkAttempts})
 }
 
 // The test caller owns source selection and explicit execution posture. Retained
