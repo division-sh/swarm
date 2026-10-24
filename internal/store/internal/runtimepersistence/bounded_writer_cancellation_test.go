@@ -35,6 +35,7 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 				pg := newTestPostgresStore(t, db)
 				db.SetMaxOpenConns(1)
 				base := testAuthorActivityContext()
+				base = storeTestOriginalProcessContext(t, base, pg)
 				now := time.Now().UTC()
 				var table, event, observe string
 				var invoke func(context.Context) error

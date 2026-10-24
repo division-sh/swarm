@@ -121,7 +121,7 @@ func selectedContractTestProcessCapability(
 			if err := capability.ProveCurrent(ctx); err != nil {
 				t.Fatal(err)
 			}
-			runForkOriginalContextForTest(t, runForkTestContext(t), capability)
+			runForkOriginalContextForTest(t, ctx, capability)
 			return capability
 		}
 	}
@@ -148,7 +148,7 @@ func selectedContractTestProcessCapability(
 		fixture.capabilities = make(map[runtimestartupownership.Store]runtimestartupownership.ProcessCapability)
 	}
 	fixture.capabilities[selected] = capability
-	runForkOriginalContextForTest(t, runForkTestContext(t), capability)
+	runForkOriginalContextForTest(t, ctx, capability)
 	t.Cleanup(func() {
 		if err := capability.Release(context.Background()); err != nil {
 			t.Errorf("release selected-contract process capability: %v", err)

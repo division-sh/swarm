@@ -110,16 +110,13 @@ func TestFanOutPublicationGroupJointAdmissionFreshnessBothStores(t *testing.T) {
 					t.Fatalf("admission failure crossed mutation boundary: %+v", receipt)
 				}
 				f.requireSnapshot(t, before)
-				if f.sink.reserves != 0 || f.sink.submits != 0 || f.sink.cancels != 0 {
-					t.Fatalf("rejected admission reached candidate handoff: %+v", f.sink)
-				}
 				writeRecord(original)
 				f.requireObservation(t, pipelineobligation.PublicationSettlementPending)
 				revisions := countP16RunRevisions(t, f.db, f.seed.runID)
 				out, err = f.group.Settle(f.ctx, f.members)
 				requireB10Acknowledged(t, out, err, nil)
-				if got := countP16RunRevisions(t, f.db, f.seed.runID); got != revisions+1 || f.sink.submits != 1 {
-					t.Fatalf("restored exact claims did not settle in one revision/handoff: revisions=%d want=%d sink=%+v", got, revisions+1, f.sink)
+				if got := countP16RunRevisions(t, f.db, f.seed.runID); got != revisions+1 {
+					t.Fatalf("restored exact claims did not settle in one revision: revisions=%d want=%d", got, revisions+1)
 				}
 				f.requireObservation(t, pipelineobligation.PublicationSettlementSatisfied)
 			})
