@@ -140,22 +140,8 @@ func executePreparedSelectedContractRunFork(ctx context.Context, req SelectedCon
 		materialization, acknowledged, materializationDiagnostic = req.Owner.materializePrepared(ctx, prepared)
 	}
 	if !acknowledged {
-		if req.Recovery == nil && forkOperation != nil {
-			if replay := isolatedSelectedForkOperationReplay(materializationDiagnostic); replay != nil {
-				disposed = true
-				if cleanupErr := req.Owner.disposePreparation(prepared); cleanupErr != nil {
-					return SelectedContractExecutionResult{}, errors.Join(materializationDiagnostic, cleanupErr)
-				}
-				if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
-					return SelectedContractExecutionResult{}, materializationDiagnostic
-				}
-				request := req
-				request.ForkOperation = forkOperation
-				return req.Owner.continueElectedSelectedForkOperation(callerContext, request, replay)
-			}
-		}
 		disposed = true
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(materializationDiagnostic, req.Owner.disposePreparation(prepared))
+		return continueUnacknowledgedSelectedMaterialization(callerContext, req, prepared, materializationDiagnostic)
 	}
 	defer func() {
 		if !out.Activation.Activated {
@@ -256,6 +242,22 @@ func executePreparedSelectedContractRunFork(ctx context.Context, req SelectedCon
 		}
 	}
 	return container.activatePrepared(prepared, req, result, materializationDiagnostic)
+}
+
+func continueUnacknowledgedSelectedMaterialization(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork, diagnostic error) (SelectedContractExecutionResult, error) {
+	if req.Recovery == nil && prepared.forkOperation != nil {
+		if replay := isolatedSelectedForkOperationReplay(diagnostic); replay != nil {
+			if cleanupErr := req.Owner.disposePreparation(prepared); cleanupErr != nil {
+				return SelectedContractExecutionResult{}, errors.Join(diagnostic, cleanupErr)
+			}
+			if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
+				return SelectedContractExecutionResult{}, diagnostic
+			}
+			req.ForkOperation = prepared.forkOperation
+			return req.Owner.continueElectedSelectedForkOperation(ctx, req, replay)
+		}
+	}
+	return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(diagnostic, req.Owner.disposePreparation(prepared))
 }
 
 func validateSelectedContractExecutionFrontierForMutation(frontier runfork.RunForkContractFrontierAdmission) error {

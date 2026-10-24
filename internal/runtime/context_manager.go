@@ -535,28 +535,9 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if m.contexts == nil {
 		m.contexts = map[string]*runtimeContextEntry{}
 	}
-	if replaceJoined {
-		for _, entry := range m.contexts {
-			if runtimeContextEntryLoaded(entry) || !entry.shutdownMu.TryLock() {
-				return errors.New("bundle replacement requires every predecessor to be withdrawn and joined")
-			}
-			joined := entry.shutdownComplete
-			entry.shutdownMu.Unlock()
-			if !joined {
-				return errors.New("bundle replacement requires every predecessor to be joined")
-			}
-		}
-	}
-	previous := m.contexts[contextDef.BundleHash()]
-	if previous != nil {
-		if !replaceJoined || previous.state != RuntimeContextStateUnloaded || previous.runtime == contextDef.Runtime || !previous.shutdownMu.TryLock() {
-			return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash())
-		}
-		joined := previous.shutdownComplete
-		previous.shutdownMu.Unlock()
-		if !joined {
-			return fmt.Errorf("runtime context %s has not joined", contextDef.BundleHash())
-		}
+	previous, err := m.registrationPredecessorLocked(contextDef, replaceJoined)
+	if err != nil {
+		return err
 	}
 	collision, duplicateAgent, err := m.duplicateLoadedAgentSlugLocked(contextDef)
 	if err != nil {
@@ -602,26 +583,7 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
 		entry: m.contexts[contextDef.BundleHash()], state: RuntimeContextStateLoaded,
 	}); err != nil {
-		if previous != nil {
-			m.contexts[contextDef.BundleHash()] = previous
-		} else {
-			delete(m.contexts, contextDef.BundleHash())
-			for i, bundleHash := range m.order {
-				if bundleHash == contextDef.BundleHash() {
-					m.order = append(m.order[:i], m.order[i+1:]...)
-					break
-				}
-			}
-		}
-		var retireErr error
-		for serviceID, occurrence := range standing {
-			if occurrence != nil {
-				if occurrenceErr := occurrence.RetireAndWait(context.Background()); occurrenceErr != nil {
-					retireErr = errors.Join(retireErr, fmt.Errorf("retire standing occurrence %s after registration failure: %w", serviceID, occurrenceErr))
-				}
-			}
-		}
-		return errors.Join(err, retireErr)
+		return errors.Join(err, m.rollbackRegistrationLocked(contextDef.BundleHash(), previous, standing))
 	}
 	if activateOccurrences && runtimeOwner != nil && runtimeOwner.Bus != nil {
 		runtimeOwner.Bus.SetStandingRunWorkOwner(m)
@@ -630,6 +592,56 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 		m.primaryBundleHash = contextDef.BundleHash()
 	}
 	return nil
+}
+
+func (m *RuntimeContextManager) rollbackRegistrationLocked(hash string, previous *runtimeContextEntry, standing map[string]*worklifetime.StandingOccurrence) error {
+	if previous != nil {
+		m.contexts[hash] = previous
+	} else {
+		delete(m.contexts, hash)
+		for i, bundleHash := range m.order {
+			if bundleHash == hash {
+				m.order = append(m.order[:i], m.order[i+1:]...)
+				break
+			}
+		}
+	}
+	var retireErr error
+	for serviceID, occurrence := range standing {
+		if occurrence != nil {
+			if err := occurrence.RetireAndWait(context.Background()); err != nil {
+				retireErr = errors.Join(retireErr, fmt.Errorf("retire standing occurrence %s after registration failure: %w", serviceID, err))
+			}
+		}
+	}
+	return retireErr
+}
+
+func (m *RuntimeContextManager) registrationPredecessorLocked(contextDef BundleContext, replaceJoined bool) (*runtimeContextEntry, error) {
+	if replaceJoined {
+		for _, entry := range m.contexts {
+			if runtimeContextEntryLoaded(entry) || !entry.shutdownMu.TryLock() {
+				return nil, errors.New("bundle replacement requires every predecessor to be withdrawn and joined")
+			}
+			joined := entry.shutdownComplete
+			entry.shutdownMu.Unlock()
+			if !joined {
+				return nil, errors.New("bundle replacement requires every predecessor to be joined")
+			}
+		}
+	}
+	previous := m.contexts[contextDef.BundleHash()]
+	if previous != nil {
+		if !replaceJoined || previous.state != RuntimeContextStateUnloaded || previous.runtime == contextDef.Runtime || !previous.shutdownMu.TryLock() {
+			return nil, fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash())
+		}
+		joined := previous.shutdownComplete
+		previous.shutdownMu.Unlock()
+		if !joined {
+			return nil, fmt.Errorf("runtime context %s has not joined", contextDef.BundleHash())
+		}
+	}
+	return previous, nil
 }
 
 func (m *RuntimeContextManager) BeginStandingRunRecovery(
