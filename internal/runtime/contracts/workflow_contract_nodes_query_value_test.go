@@ -45,8 +45,8 @@ func TestNodeQueryAdmissionConsumesCollectionDataflowOwner(t *testing.T) {
 	node := identitytest.RootNode(t, "worker")
 	for _, tc := range []struct{ name, source, wantError string }{
 		{"path", "query: {source: payload.items, select: [id, note]}\nfilter: {items_from: computed.query, condition: true}\n", ""},
-		{"table", "query: {entities: items}\n", ""},
-		{"dual source", "query: {source: payload.items, entities: items}\n", "exactly one collection source"},
+		{"table", "query: {entities: state}\n", ""},
+		{"dual source", "query: {source: payload.items, entities: state}\n", "exactly one collection source"},
 		{"missing source", "query: {count: false}\n", "exactly one collection source"},
 		{"future source", "query: {source: computed.filter}\nfilter: {items_from: payload.items, condition: true}\n", "same or a later execution phase"},
 		{"duplicate output", "query: {source: payload.items, store_as: computed.rows}\ncount: {items_from: payload.items, store_as: computed.rows}\n", "overlapping ownership"},

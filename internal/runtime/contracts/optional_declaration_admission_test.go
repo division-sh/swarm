@@ -410,7 +410,8 @@ func assertMergedBundleIdentity(t *testing.T, role string, bundle *WorkflowContr
 	case "agents":
 		assertRegistryIdentity(t, bundle.Agents, "worker")
 	case "entities":
-		assertRegistryIdentity(t, bundle.RootEntities, "item")
+		assertRegistryIdentity(t, bundle.RootEntities, stateEntityType)
+		assertRegistryIdentity(t, bundle.RootEntities[stateEntityType].Fields, "item")
 	case "events":
 		assertRegistryIdentity(t, bundle.Events, "item.created")
 	case "nodes":

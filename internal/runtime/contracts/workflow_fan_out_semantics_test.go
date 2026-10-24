@@ -112,12 +112,12 @@ func TestResolveHandlerCollectionItemTypeOwnsImplicitOutputsAndEntityTables(t *t
 		t.Fatalf("filter output = %#v", filtered)
 	}
 
-	entityHandler := SystemNodeEventHandler{Query: &QuerySpec{Entities: "items"}}
+	entityHandler := SystemNodeEventHandler{Query: &QuerySpec{Entities: stateEntityType}}
 	entityPlan, err := bundle.ResolveHandlerQueryCollectionPlan(node, "work.received", entityHandler)
 	if err != nil {
 		t.Fatalf("resolve entity-table query: %v", err)
 	}
-	if entityPlan.Source.Kind != WorkflowCollectionSourceEntityTable || entityPlan.Source.EntityType != "items" {
+	if entityPlan.Source.Kind != WorkflowCollectionSourceEntityTable || entityPlan.Source.EntityType != stateEntityType {
 		t.Fatalf("entity source = %#v", entityPlan.Source)
 	}
 	if _, ok := entityPlan.Source.ItemType.Field("status"); !ok {

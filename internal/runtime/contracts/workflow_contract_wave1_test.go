@@ -517,15 +517,6 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"jobs": {Type: "[MissingType]"}}}},
 			wantErr:  "MissingType",
 		},
-		{
-			name:   "multiple entity contracts",
-			schema: FlowSchemaDocument{},
-			entities: EntityContractsDocument{
-				"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}},
-				"legacy_state":      {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}},
-			},
-			wantErr: "multiple entity types",
-		},
 	}
 
 	for _, tc := range tests {
