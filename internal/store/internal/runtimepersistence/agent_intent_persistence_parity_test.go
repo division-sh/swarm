@@ -192,7 +192,7 @@ func selectedIntentRecoverySource(t *testing.T) semanticview.Source {
 		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "stages: []\n")
 	}
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "review", "agents.yaml"), "worker:\n  role: worker\n  model: regular\n  intent: {inline: Perform only the declared review work.}\n  criteria: [quality]\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "review", "rules.yaml"), "quality:\n  criteria:\n    classes:\n      hard: {disposition: reject}\n    rules:\n      - {id: QUALITY-01, class: hard, text: Require declared quality.}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "review", "rules.yaml"), "quality:\n  classes:\n    hard: {disposition: reject}\n  rules:\n    - {id: QUALITY-01, class: hard, text: Require declared quality.}\n")
 	repo := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

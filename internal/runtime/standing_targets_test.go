@@ -122,6 +122,7 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 		RunID: "run", Generation: 1, SigningSecret: binding.SigningSecret,
 		SourcePath: declaration.SourcePath, AdmissionPlan: binding.AdmissionPlan,
 	}}
+	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -192,6 +193,7 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 		SourcePath: declaration.SourcePath, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
 	}
 	contextDef.StandingTargets = []StandingTarget{target}
+	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -292,6 +294,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 		t.Fatalf("SuppressStandingServiceTargets: %v", err)
 	}
 	contextDef.StandingTargets = []StandingTarget{target}
+	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
 	if err := manager.Register(contextDef); err != nil {
 		t.Fatalf("Register: %v", err)
 	}

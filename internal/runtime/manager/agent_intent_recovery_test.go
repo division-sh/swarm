@@ -117,7 +117,7 @@ func managerRecoverySource(t *testing.T, intent runtimeagentintent.Resolved, cri
 	agent := fmt.Sprintf("worker:\n  role: worker\n  model: regular\n  intent: {inline: %q}\n", intent.Content)
 	if len(criteria) != 0 {
 		agent += "  criteria: [quality]\n"
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "rules.yaml"), "quality:\n  criteria:\n    classes:\n      hard: {disposition: reject}\n    rules:\n      - {id: QUALITY-01, class: hard, text: Require declared quality.}\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "rules.yaml"), "quality:\n  classes:\n    hard: {disposition: reject}\n  rules:\n    - {id: QUALITY-01, class: hard, text: Require declared quality.}\n")
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "agents.yaml"), agent)
 	repo := filepath.Clean("../../..")
