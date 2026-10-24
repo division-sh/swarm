@@ -2,8 +2,7 @@ name: child
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - child.start
-  outputs:
-    - child.done
+inputs:
+  - child.start
+outputs:
+  - child.done

@@ -21,7 +21,7 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 		for _, connected := range [][]string{nil, {"first"}, {"first", "second"}, {"second"}} {
 			for _, local := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/edges=%s/local=%t", mode, strings.Join(connected, "+"), local), func(t *testing.T) {
-					schema := "name: root\npins:\n  inputs:\n    - thing.created\n  outputs:\n    - thing.created\n"
+					schema := "name: root\ninputs:\n  - thing.created\noutputs:\n  - thing.created\n"
 					if len(connected) > 0 {
 						schema += "connect:\n"
 						for _, child := range connected {
@@ -34,7 +34,7 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 						files[child+"/schema.yaml"] = "name: " + child + "\n"
 						for _, wired := range connected {
 							if wired == child {
-								files[child+"/schema.yaml"] += "pins:\n  inputs:\n    - thing.created\n"
+								files[child+"/schema.yaml"] += "inputs:\n  - thing.created\n"
 								files[child+"/nodes.yaml"] = node
 							}
 						}

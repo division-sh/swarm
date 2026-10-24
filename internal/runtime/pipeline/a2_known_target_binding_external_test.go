@@ -451,7 +451,7 @@ func a2KnownTargetEarlyRefusal(t *testing.T, selected gateRecoveryStoreCase, ctx
 func a2KnownTargetBindingFiles() map[string]string {
 	return map[string]string{
 		"schema.yaml": "name: a2-known-target-binding\nstages:\n  active: {}\n",
-		"types.yaml":  "types:\n  JoinResult:\n    value: text\n",
+		"types.yaml":  "JoinResult:\n  value: text\n",
 		"orders/schema.yaml": `name: orders
 instance: order_id
 stages:

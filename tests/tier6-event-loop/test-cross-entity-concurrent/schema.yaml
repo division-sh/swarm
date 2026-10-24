@@ -1,8 +1,7 @@
 name: test-cross-entity-concurrent
-pins:
-  inputs:
-    - task.submitted
-  outputs:
-    - task.submitted
+inputs:
+  - task.submitted
+outputs:
+  - task.submitted
 connect:
   - {event: task.submitted, from: ., to: worker, resolution: select}

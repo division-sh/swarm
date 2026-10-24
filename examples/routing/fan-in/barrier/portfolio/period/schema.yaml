@@ -5,7 +5,6 @@ stages:
   awaiting: {}
   complete: {final: true}
   failed: {final: true}
-pins:
-  inputs:
-    - period.setup
-    - period.reported
+inputs:
+  - period.setup
+  - period.reported

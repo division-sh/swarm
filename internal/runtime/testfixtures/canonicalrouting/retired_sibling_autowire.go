@@ -8,14 +8,13 @@ func CopyRetiredSiblingAutowire(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", `name: retired-sibling-autowire
-pins:
-  outputs: [scan.requested]
+outputs: [scan.requested]
 connect:
   - {event: scan.requested, from: producer, to: '.'}
 `)
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\npins:\n  outputs: [scan.requested]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\noutputs: [scan.requested]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "scan.requested:\n")
-	writeClosedVariantFile(t, root, "discovery/schema.yaml", "name: discovery\npins:\n  inputs: [scan.requested]\n")
+	writeClosedVariantFile(t, root, "discovery/schema.yaml", "name: discovery\ninputs: [scan.requested]\n")
 	writeClosedVariantFile(t, root, "discovery/events.yaml", "scan.requested:\n")
 	writeClosedVariantFile(t, root, "discovery/nodes.yaml", "scan-orchestrator:\n  scan.requested: {}\n")
 	return root

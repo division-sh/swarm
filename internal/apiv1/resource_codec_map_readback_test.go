@@ -29,7 +29,7 @@ func TestResourceCodecCompiledMapImportReceiptAndPinnedPublicAgentReadbackBothSt
 		for name, text := range map[string]string{
 			"schema.yaml":         "name: codec-map-readback\n",
 			"support/schema.yaml": "name: support\n",
-			"support/types.yaml":  "types:\n  CodecProfile:\n    note: integer?\n",
+			"support/types.yaml":  "CodecProfile:\n  note: integer?\n",
 			"support/events.yaml": "records.loaded:\n  records: map[text]CodecProfile\n",
 			"support/agents.yaml": "reader:\n  id: codec-map-reader\n  role: reader\n  intent: {inline: Read exact run data.}\n  data_access:\n    - data: support/records.loaded\n",
 		} {

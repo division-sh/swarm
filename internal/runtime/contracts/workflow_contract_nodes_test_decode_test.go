@@ -121,9 +121,12 @@ func decodeNodeTestYAML(body []byte, target any) error {
 		}
 		return err
 	}
-	if envelope != "" {
-		indent := strings.Repeat("  ", strings.Count(envelope, "\n")+1)
-		text := envelope + "\n" + indent + strings.ReplaceAll(strings.TrimSpace(string(body)), "\n", "\n"+indent) + "\n"
+	if project != nil {
+		text := string(body)
+		if envelope != "" {
+			indent := strings.Repeat("  ", strings.Count(envelope, "\n")+1)
+			text = envelope + "\n" + indent + strings.ReplaceAll(strings.TrimSpace(text), "\n", "\n"+indent) + "\n"
+		}
 		schema, err := admitSchemaFragment(text)
 		if err == nil {
 			project(schema)

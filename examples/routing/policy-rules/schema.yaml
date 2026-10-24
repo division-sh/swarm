@@ -1,8 +1,7 @@
 name: policy-rules
 stages: []
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.accepted
-    - work.rejected
+inputs:
+  - work.requested
+outputs:
+  - work.accepted
+  - work.rejected

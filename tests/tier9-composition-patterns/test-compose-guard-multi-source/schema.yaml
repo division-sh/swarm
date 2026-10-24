@@ -1,8 +1,7 @@
 stages:
   pending: {}
   accepted: {final: true}
-pins:
-  inputs:
-    - candidate.submitted
-  outputs:
-    - candidate.accepted
+inputs:
+  - candidate.submitted
+outputs:
+  - candidate.accepted

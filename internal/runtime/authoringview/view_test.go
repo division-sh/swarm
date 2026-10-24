@@ -1317,14 +1317,11 @@ func writeDuplicateNodeIDFlow(t testing.TB, root, flowID string) {
 	dir := filepath.Join(root, flowID)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "schema.yaml"), `
 name: `+flowID+`
-pins:
-  inputs:
-    - observed
+inputs:
+  - observed
 `)
-	writeAuthoringViewTestFile(t, filepath.Join(dir, "types.yaml"), `
-types:
-  Item:
-    name: text
+	writeAuthoringViewTestFile(t, filepath.Join(dir, "types.yaml"), `Item:
+  name: text
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "entities.yaml"), `
 state:

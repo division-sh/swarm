@@ -115,7 +115,7 @@ func TestW5AgentFieldPresenceMatrix(t *testing.T) {
 			})
 		}
 	}
-	for _, field := range []string{"subscriptions", "tools", "permissions", "flow_data_access", "criteria", "emit_events"} {
+	for _, field := range []string{"subscriptions", "tools", "permissions", "flow_data_access", "emit_events"} {
 		for _, state := range states {
 			t.Run(field+"/"+state, func(t *testing.T) {
 				value := map[string]string{"null": "null", "empty": "''", "scalar": "worker", "empty_sequence": "[]", "sequence": "[worker]", "empty_mapping": "{}", "mapping": "{worker: true}"}[state]
@@ -130,7 +130,7 @@ func TestW5AgentFieldPresenceMatrix(t *testing.T) {
 				}
 				if err == nil {
 					entry := entries["worker"]
-					got := map[string][]string{"subscriptions": entry.Subscriptions, "tools": entry.Tools, "permissions": entry.Permissions, "flow_data_access": entry.FlowDataAccess, "criteria": entry.Criteria, "emit_events": entry.EmitEvents}[field]
+					got := map[string][]string{"subscriptions": entry.Subscriptions, "tools": entry.Tools, "permissions": entry.Permissions, "flow_data_access": entry.FlowDataAccess, "emit_events": entry.EmitEvents}[field]
 					var want []string
 					if state == "sequence" {
 						want = []string{"worker"}

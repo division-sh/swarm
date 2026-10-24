@@ -2,13 +2,12 @@ name: test-compose-create-instance-config
 stages:
   idle: {}
   spawned: {final: true}
-pins:
-  inputs:
-    - spawn.requested
-    - task.assign
-  outputs:
-    - spawn.done
-    - task.assign
+inputs:
+  - spawn.requested
+  - task.assign
+outputs:
+  - spawn.done
+  - task.assign
 connect:
   - event: spawn.done
     from: .

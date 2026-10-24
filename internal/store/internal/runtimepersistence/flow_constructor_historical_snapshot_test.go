@@ -227,7 +227,7 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 		files["entities.yaml"] = "record:\n  marker: {type: text, initial: original}\n"
 	}
 	if keyed {
-		files["schema.yaml"] += "instance: item_id\npins:\n  inputs:\n    - item.created\n"
+		files["schema.yaml"] += "instance: item_id\ninputs:\n  - item.created\n"
 		files["entities.yaml"] += "  item_id: text\n"
 		files["events.yaml"] += "item.created:\n  item_id: text\n"
 	}

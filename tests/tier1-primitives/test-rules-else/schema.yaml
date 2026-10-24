@@ -1,6 +1,5 @@
 stages: []
-pins:
-  inputs:
-    - item.received
-  outputs:
-    - routed.unknown
+inputs:
+  - item.received
+outputs:
+  - routed.unknown

@@ -40,16 +40,13 @@ func TestEventMetadataRetirementRejectsPresenceBeforeValueInterpretation(t *test
 }
 
 func TestEventMetadataRetirementPreservesBusinessPayloadNames(t *testing.T) {
-	entry, err := admitEventCatalogEntryForTest(t, "source: text\nstatus: text\nnote: text\nvalue:\n  type: text\n  description: author_summary_field\n")
+	entry, err := admitEventCatalogEntryForTest(t, "source: text\nstatus: text\nnote: text\ndescription: text\nvalue: text\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"source", "status", "note"} {
+	for _, name := range []string{"source", "status", "note", "description", "value"} {
 		if entry.Payload.Properties[name].Type != "text" {
 			t.Fatalf("business field %s was consumed as metadata: %#v", name, entry.Payload)
 		}
-	}
-	if entry.Payload.Properties["value"].Description != "author_summary_field" {
-		t.Fatal("retired spelling inside payload description must remain prose")
 	}
 }

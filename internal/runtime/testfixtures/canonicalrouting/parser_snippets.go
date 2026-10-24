@@ -118,13 +118,13 @@ func InputPinSourceParserSnippet(t testing.TB, id InputPinSourceSnippet) ParserS
 	var source string
 	switch id {
 	case InputPinSourceDefault:
-		source = "name: source-enum\npins:\n  inputs:\n    - work.requested\n"
+		source = "name: source-enum\ninputs:\n  - work.requested\n"
 	case InputPinSourceExternal:
-		source = "name: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: external\n"
+		source = "name: source-enum\ninputs:\n  - event: work.requested\n    source: external\n"
 	case InputPinSourceHarness:
-		source = "name: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: harness\n"
+		source = "name: source-enum\ninputs:\n  - event: work.requested\n    source: harness\n"
 	case InputPinSourceInvalid:
-		source = "name: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: fallback\n"
+		source = "name: source-enum\ninputs:\n  - event: work.requested\n    source: fallback\n"
 	default:
 		t.Fatalf("unsupported input pin source parser snippet %q", id)
 	}
@@ -135,25 +135,24 @@ func W2OptionPinsParserSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
 	return NewParserSnippet(t, `stages:
   pending: {}
-pins:
-  inputs:
-    events:
-      - event: check.requested
-        source: harness
-    reads:
-      - entity.score
-  outputs:
-    events:
-      - event: check.passed
-        sink: harness
-    writes:
-      - entity.status
+inputs:
+  events:
+    - event: check.requested
+      source: harness
+  reads:
+    - entity.score
+outputs:
+  events:
+    - event: check.passed
+      sink: harness
+  writes:
+    - entity.status
 `)
 }
 
 func W2EmptyResolutionParserSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
-	return NewParserSnippet(t, "pins:\n  inputs:\n    - event: work.requested\n      resolution: {}\n")
+	return NewParserSnippet(t, "inputs:\n  - event: work.requested\n    resolution: {}\n")
 }
 
 func ReceiverInitializeParserSnippet(t testing.TB) ParserSnippet {
@@ -166,21 +165,21 @@ func W2MappingKeyParserSnippet(t testing.TB, id W2MappingKeySnippet) ParserSnipp
 	var source string
 	switch id {
 	case W2FlowPinsSurroundingKey:
-		source = "pins:\n  \" inputs \": [work.requested]\n"
+		source = "\" inputs \": [work.requested]\n"
 	case W2FlowPinsBlankKey:
-		source = "pins:\n  \" \": {}\n"
+		source = "\" \": {}\n"
 	case W2InputDirectionSurroundingKey:
-		source = "pins:\n  inputs:\n    \" events \": [work.requested]\n"
+		source = "inputs:\n  \" events \": [work.requested]\n"
 	case W2InputDirectionBlankKey:
-		source = "pins:\n  inputs:\n    \" \": [work.requested]\n"
+		source = "inputs:\n  \" \": [work.requested]\n"
 	case W2InputEventSurroundingKey:
-		source = "pins:\n  inputs:\n    - \" event \": work.requested\n      initialize: {count: payload.count}\n"
+		source = "inputs:\n  - \" event \": work.requested\n    initialize: {count: payload.count}\n"
 	case W2InputEventBlankKey:
-		source = "pins:\n  inputs:\n    - \" \": ignored\n      event: work.requested\n      initialize: {count: payload.count}\n"
+		source = "inputs:\n  - \" \": ignored\n    event: work.requested\n    initialize: {count: payload.count}\n"
 	case W2OutputEventSurroundingKey:
-		source = "pins:\n  outputs:\n    - \" event \": work.completed\n"
+		source = "outputs:\n  - \" event \": work.completed\n"
 	case W2OutputEventBlankKey:
-		source = "pins:\n  outputs:\n    - \" \": work.completed\n"
+		source = "outputs:\n  - \" \": work.completed\n"
 	case W2ResolutionSurroundingKey:
 		source = "connect:\n  - event: work.requested\n    from: .\n    to: worker\n    \" resolution \": create\n"
 	case W2ResolutionBlankKey:
@@ -204,11 +203,10 @@ connect:
   - {event: account.selected, from: ., to: worker, resolution: select}
   - {event: account.requested, from: ., to: worker, resolution: select-or-create, key_from: payload.external_account_id}
   - {event: provider.replied, from: provider, to: requester, replies_to: provider.requested, correlation_key: provider_request_id}
-pins:
-  inputs:
-    - validation.requested
-    - account.selected
-    - account.requested
+inputs:
+  - validation.requested
+  - account.selected
+  - account.requested
 `)
 }
 
@@ -219,48 +217,44 @@ func UnsupportedInputPinResolutionSnippet(t testing.TB, id UnsupportedResolution
 	case UnsupportedResolutionField:
 		source = `
 name: invalid-resolution
-pins:
-  inputs:
-    - event: work.requested
-      resolution:
-        mode: create
-        unsupported: true
+inputs:
+  - event: work.requested
+    resolution:
+      mode: create
+      unsupported: true
 `
 	case UnsupportedInstanceKeyField:
 		source = `
 name: invalid-resolution-instance-key
-pins:
-  inputs:
-    - event: work.requested
-      resolution:
-        mode: create
-        instance_key:
-          mint: uuid
-          as: work_id
-          unsupported: true
+inputs:
+  - event: work.requested
+    resolution:
+      mode: create
+      instance_key:
+        mint: uuid
+        as: work_id
+        unsupported: true
 `
 	case UnsupportedResolutionCarry:
 		source = `
 name: invalid-resolution-carries
-pins:
-  inputs:
-    - event: work.requested
-      carries:
-        work_id:
-          from: payload.work_id
-          unsupported: true
+inputs:
+  - event: work.requested
+    carries:
+      work_id:
+        from: payload.work_id
+        unsupported: true
 `
 	case RetiredInstanceKeyCarry:
 		source = `
 name: retired-instance-key-source
 instance: work_id
-pins:
-  inputs:
-    - event: work.requested
-      carries:
-        work_id:
-          from: instance.key.work_id
-          type: uuid
+inputs:
+  - event: work.requested
+    carries:
+      work_id:
+        from: instance.key.work_id
+        type: uuid
 `
 	default:
 		t.Fatalf("unsupported resolution parser snippet %q", id)
@@ -273,15 +267,15 @@ func RetiredReceiverRoutingParserSnippet(t testing.TB, id RetiredReceiverRouting
 	var source string
 	switch id {
 	case RetiredInputAddressEmpty:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: {}}]}\n"
+		source = "name: retired-address\ninputs: [{event: work.requested, address: {}}]\n"
 	case RetiredInputAddressMalformed:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: unsupported}]}\n"
+		source = "name: retired-address\ninputs: [{event: work.requested, address: unsupported}]\n"
 	case RetiredInputAddressPopulated:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, source: payload.work_id, target: entity.work_id}}]}\n"
+		source = "name: retired-address\ninputs: [{event: work.requested, address: {by: work_id, source: payload.work_id, target: entity.work_id}}]\n"
 	case RetiredInputAddressMixed:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, resolution: {mode: select}}}]}\n"
+		source = "name: retired-address\ninputs: [{event: work.requested, address: {by: work_id, resolution: {mode: select}}}]\n"
 	case RetiredInputAddressUnsupportedNested:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, unsupported: nope}}]}\n"
+		source = "name: retired-address\ninputs: [{event: work.requested, address: {by: work_id, unsupported: nope}}]\n"
 	case RetiredConnectMapEmpty:
 		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {}}]\n"
 	case RetiredConnectMapMalformed:

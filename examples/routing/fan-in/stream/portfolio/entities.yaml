@@ -1,4 +1,5 @@
 portfolio_state:
+  operating_reports: [OperatingReport]
   period_id:
     type: text
   reports:

@@ -1,11 +1,10 @@
 name: template-select-existing
-pins:
-  inputs:
-    - account.setup.requested
-    - account.work.requested
-  outputs:
-    - account.setup.requested
-    - account.work.requested
+inputs:
+  - account.setup.requested
+  - account.work.requested
+outputs:
+  - account.setup.requested
+  - account.work.requested
 connect:
   - event: account.setup.requested
     from: .

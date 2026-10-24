@@ -1500,7 +1500,7 @@ func nodeOnlyDeliveryPlan(t testing.TB, evt events.Event, nodeID string) RoutePl
 func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: node-only-proof\npins:\n  inputs: [custom.node_only]\n",
+		"schema.yaml": "name: node-only-proof\ninputs: [custom.node_only]\n",
 		"events.yaml": "custom.node_only:\n",
 		"nodes.yaml":  "workflow-node:\n  custom.node_only: {}\n",
 	}))
@@ -1622,7 +1622,7 @@ func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *tes
 func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: mixed-delivery\npins:\n  inputs: [custom.mixed_node_agent]\n",
+		"schema.yaml": "name: mixed-delivery\ninputs: [custom.mixed_node_agent]\n",
 		"events.yaml": "custom.mixed_node_agent:\n",
 		"nodes.yaml":  "workflow-node:\n  custom.mixed_node_agent: {}\n",
 	}))
@@ -3580,7 +3580,7 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "name: top-level-project-node\nversion: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "name: top-level-project-node\npins:\n  inputs:\n    - thing.created\n",
+		"schema.yaml":   "name: top-level-project-node\ninputs:\n  - thing.created\n",
 		"events.yaml":   "thing.created:\n  entity_id: string\n",
 		"nodes.yaml": `reviewer:
   thing.created:

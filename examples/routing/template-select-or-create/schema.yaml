@@ -1,9 +1,8 @@
 name: template-select-or-create
-pins:
-  inputs:
-    - account.requested
-  outputs:
-    - account.requested
+inputs:
+  - account.requested
+outputs:
+  - account.requested
 connect:
   - event: account.requested
     from: .

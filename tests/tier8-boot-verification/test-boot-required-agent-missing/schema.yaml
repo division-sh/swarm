@@ -4,6 +4,5 @@ stages:
 required_agents:
   - role: missing-agent
     emits: [task.completed]
-pins:
-  inputs:
-    - task.requested
+inputs:
+  - task.requested

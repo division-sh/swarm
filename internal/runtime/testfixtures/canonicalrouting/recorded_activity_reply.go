@@ -15,9 +15,8 @@ stages:
   waiting: {}
   working: {}
   done: {final: true}
-pins:
-  inputs: [provider.requested]
-  outputs: [provider.replied]
+inputs: [provider.requested]
+outputs: [provider.replied]
 `)
 	writeClosedVariantFile(t, root, "provider/entities.yaml", "work: {}\n")
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:

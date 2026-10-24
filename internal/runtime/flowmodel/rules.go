@@ -6,22 +6,18 @@ import (
 	"strings"
 )
 
-// RulesDocument is one namespace; resolution precedes variant selection.
+// RulesDocument contains machine-checked rule sets in one namespace.
 type RulesDocument map[string]RuleSet
 
 type RuleSet struct {
-	Criteria   *PolicyCriteriaSet
 	Validation *PolicyValidationSet
 }
 
 func (r RuleSet) MarshalYAML() (any, error) {
-	if r.Criteria != nil && r.Validation == nil {
-		return r.Criteria, nil
-	}
-	if r.Validation != nil && r.Criteria == nil {
+	if r.Validation != nil {
 		return r.Validation, nil
 	}
-	return nil, fmt.Errorf("rule set must have exactly one variant")
+	return nil, fmt.Errorf("rule set requires machine-checked rules")
 }
 
 func (r RuleSet) MarshalJSON() ([]byte, error) {
@@ -32,28 +28,12 @@ func (r RuleSet) MarshalJSON() ([]byte, error) {
 	return json.Marshal(value)
 }
 
-func (d RulesDocument) Criteria(name string) (PolicyCriteriaSet, bool) {
-	set, ok := d[name]
-	if !ok || set.Criteria == nil || set.Validation != nil {
-		return PolicyCriteriaSet{}, false
-	}
-	return clonePolicyCriteriaSet(*set.Criteria), true
-}
 func (d RulesDocument) Validation(name string) (PolicyValidationSet, bool) {
 	set, ok := d[name]
-	if !ok || set.Validation == nil || set.Criteria != nil {
+	if !ok || set.Validation == nil {
 		return PolicyValidationSet{}, false
 	}
 	return clonePolicyValidationSet(*set.Validation), true
-}
-func (d RulesDocument) CriteriaSets() map[string]PolicyCriteriaSet {
-	out := map[string]PolicyCriteriaSet{}
-	for name := range d {
-		if set, ok := d.Criteria(name); ok {
-			out[name] = set
-		}
-	}
-	return out
 }
 func (d RulesDocument) ValidationSets() map[string]PolicyValidationSet {
 	out := map[string]PolicyValidationSet{}
@@ -68,10 +48,6 @@ func CloneRulesDocument(in RulesDocument) RulesDocument {
 	out := make(RulesDocument, len(in))
 	for name, set := range in {
 		cloned := RuleSet{}
-		if set.Criteria != nil {
-			v := clonePolicyCriteriaSet(*set.Criteria)
-			cloned.Criteria = &v
-		}
 		if set.Validation != nil {
 			v := clonePolicyValidationSet(*set.Validation)
 			cloned.Validation = &v

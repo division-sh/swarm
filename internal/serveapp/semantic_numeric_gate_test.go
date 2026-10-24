@@ -37,9 +37,8 @@ stages:
               value: decision.score
   approved: {}
   done: {final: true}
-pins:
-  inputs:
-    - numeric.requested
+inputs:
+  - numeric.requested
 `
 			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(schema), 0600); err != nil {
 				t.Fatal(err)

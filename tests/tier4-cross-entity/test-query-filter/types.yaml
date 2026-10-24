@@ -1,3 +1,2 @@
-types:
-  FilterResult:
-    entity_id: text
+FilterResult:
+  entity_id: text

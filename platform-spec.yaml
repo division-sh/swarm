@@ -2817,7 +2817,7 @@ contract_formats:
       platform_version: ">=0.7.0 <0.8.0"
 
       flows: []'
-    schema_yaml: "stages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs: [hello.requested]\n  outputs: [hello.completed]"
+    schema_yaml: "stages:\n  waiting: {}\n  done: {final: true}\ninputs: [hello.requested]\noutputs: [hello.completed]"
     nodes_yaml: "hello-node:\n  hello.requested:\n    advances_to: done\n    emit:\n      event: hello.completed\n      fields:\n        result: payload.message"
     events_yaml: "hello.requested:\n  message: text\nhello.completed:\n  result: text"
     agents_yaml: '{}'
@@ -4309,6 +4309,13 @@ handler_specification:
       purpose: Write fields to entity state from event payloads, literal values, or computed expressions.
       sub_fields:
         writes: list of write items (see write_item_forms below)
+        from: 'Optional payload only. Copy required, same-named payload fields into declared state fields;
+          optional payload fields are never copied. Explicit writes to a target or its subpaths win before
+          automatic type checking. Every remaining automatic copy requires equal structural types.
+          Admission lowers this spelling to ordinary explicit writes; runtime has no copy-all path.
+          The payload schema is the exact handler trigger schema, never another source_event. Join
+          outcomes have no payload and cannot use this spelling. A default row with no effect after
+          lowering remains an empty-row error.'
         source_event: 'string — which event the payload comes from (default: current trigger event).
           CANONICAL field name — use source_event, not "source".'
       write_item_forms:
@@ -10477,7 +10484,7 @@ engine:
     - id: input_pin_wiring
       severity: hard_invalidity
       scope: per-flow
-      trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs) has no satisfiable authored producer
+      trigger: 'A flow''s required input event pin (from schema.yaml inputs) has no satisfiable authored producer
         source on the static verify surface. The hard invalidity consumes internal/runtime/core/pinrouting.ResolveFlowInputProducer
         evidence: boundary external ingress, flow-local admitted provider ingress, parent connect,
         platform source, and internal topology producer. It does not use unique same-name sibling output-pin inference as
@@ -14816,8 +14823,7 @@ flow_model:
       authoring_shape:
         example:
           name: telegram-chat
-          pins:
-            inputs: [inbound.telegram]
+          inputs: [inbound.telegram]
           ingress:
             alias: chat
             providers:
@@ -15259,8 +15265,8 @@ flow_model:
       description: |
         Events accepted by the flow receiver interface. Only selected-root inputs are public. Private required pins
         need explicit compiled connections, declaration-owned provider ingress, platform facts, or internal producer
-        proof. Schema imports are not subscriptions. Inputs are scalar event identities; the only transient mapping
-        is {event, initialize} until the separately allocated constructor cut. No source/resolution option is admitted.
+        proof. Schema imports are not subscriptions. Inputs are scalar event identities at the schema.yaml root;
+        the pins wrapper and all mapping passengers are refused. No source/resolution option is admitted.
       required: true
     output_event_pins:
       description: |
@@ -15616,17 +15622,16 @@ flow_model:
         fail-closed under #642; retained history and a join declaration never grant unsupported execution.
     authored_shapes:
       output_event_pin:
-        location: schema.yaml pins.outputs
+        location: schema.yaml outputs
         canonical_form: |
           Each output is one scalar exact local event identity in a names-only sequence. Mappings and an events wrapper are not admitted. Event-level schema and business-key declarations own producer payload guarantees.
         scalar_form: |
           Scalar output event identity is the only authoring form. Receiver identity is never inferred from output pins.
         example: |
-          pins:
-            outputs:
-              - deploy.completed
+          outputs:
+            - deploy.completed
       resolved_input_pin:
-        location: schema.yaml pins.inputs
+        location: schema.yaml inputs
         canonical_form: |
           Inputs form one names-only sequence of scalar exact event identities. Mappings, an events wrapper and all pin passengers are invalid. Reply facts belong on the response connect row; ordinary instance selection belongs on each connect. Pins own no business-value mapping, default or alternate identity.
         scalar_form: |
@@ -15672,9 +15677,8 @@ flow_model:
           mode: connect.resolution is an exhaustive typed ordinary value. No policy default or string fallback exists. Paired replies_to/correlation_key are response-connection facts; stream/join semantics remain handler-owned.
         example: |
           instance: vertical_id
-          pins:
-            inputs:
-              - deploy.completed
+          inputs:
+            - deploy.completed
       parent_connect:
         location: schema.yaml connect at the exact least common ancestor FlowNode
         canonical_form: |
@@ -15955,8 +15959,7 @@ flow_model:
           connect behavior; they are not instance-resolution runtime modes. Authored harness markers are absent.
         authoring_shape: |
           instance: validation_case_id
-          pins:
-            inputs: [validation.requested]
+          inputs: [validation.requested]
           # In the parent's schema.yaml:
           connect:
             - {event: validation.requested, from: producer, to: validator, resolution: create, key_from: generated.uuid}
@@ -23712,11 +23715,11 @@ platform_events:
     - Event names in agent emit_events declarations
     - Event names in node handler emit sites
     - Event names in node produces lists
-    - Event names in flow schema.yaml pins.outputs (platform.* events are produced by the engine, not by flows)
+    - Event names in flow schema.yaml outputs (platform.* events are produced by the engine, not by flows)
     not_violations:
     - Agent subscriptions to platform.* events (subscribing is allowed — products SHOULD subscribe to platform events)
     - Wildcard subscriptions that match platform.* events (e.g., platform.* subscription pattern)
-    - Flow schema.yaml pins.inputs listing platform.* events (flows MAY declare them as inputs to receive routing)
+    - Flow schema.yaml inputs listing platform.* events (flows MAY declare them as inputs to receive routing)
     - Product subscriptions, handlers, or input pins that reference non-platform.* catalog-owned events such as mailbox.card_decided
   schema_authority_ref_syntax:
     description: >-
@@ -25491,10 +25494,10 @@ static_analyzer:
       - engine.event_identity
       - contract_formats.event_schema
     scope:
-      description: For every flow input pin event declared in schema.yaml pins.inputs, verify that at least one accepted
+      description: For every flow input pin event declared in schema.yaml inputs, verify that at least one accepted
         producer source exists in the authored bundle through the canonical input-source resolver on the static verify surface.
       applies_to:
-      - schema.yaml pins.inputs
+      - schema.yaml inputs
       excludes:
       - runtime routing correctness
       - payload compatibility

@@ -108,10 +108,9 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - fork.source_message
-    - item.processed
+inputs:
+  - fork.source_message
+  - item.processed
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - external.observed\n", "    - external.observed\n    - fork.source_message\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [external.observed]\n", "outputs: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
@@ -155,10 +154,9 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - item.agent_hold
-    - item.processed
+inputs:
+  - item.agent_hold
+  - item.processed
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - item.agent_hold\n  outputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
 	writeClosedVariantFile(t, root, "hold/entities.yaml", "session: {}\n")
@@ -209,11 +207,10 @@ stages:
   initializing: {}
   waiting: {}
   ready: {final: true}
-pins:
-  inputs:
-    - opco.create_requested
-    - opco.product_initialization_requested
-    - opco.product_review_requested
+inputs:
+  - opco.create_requested
+  - opco.product_initialization_requested
+  - opco.product_review_requested
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
@@ -279,9 +276,8 @@ stages:
   initializing: {}
   spawning: {}
   ready: {final: true}
-pins:
-  inputs:
-    - opco.create_requested
+inputs:
+  - opco.create_requested
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
@@ -326,21 +322,19 @@ stages:
   pending: {}
   processed: {}
   done: {final: true}
-pins:
-  inputs:
-    - item.received
+inputs:
+  - item.received
 `, `name: routing-root-ingress
 stages:
   new: {}
   waiting: {}
   done: {final: true}
-pins:
-  inputs:
-    - item.received
-    - opco.bootstrap_requested
-    - opco.spinup_requested
-  outputs:
-    - opco.create_requested
+inputs:
+  - item.received
+  - opco.bootstrap_requested
+  - opco.spinup_requested
+outputs:
+  - opco.create_requested
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
 `)

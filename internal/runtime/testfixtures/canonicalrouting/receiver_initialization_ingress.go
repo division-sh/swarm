@@ -15,9 +15,8 @@ imports:
 instance: conversation_reference
 auto_emit_on_create:
   event: chat.initialized
-pins:
-  inputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.text_message
 `)
 	writeClosedVariantFile(t, root, "telegram-chat/entities.yaml", `chat:
   conversation_reference: {type: text, _unused_reason: canonical receiver key}

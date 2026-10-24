@@ -25,9 +25,8 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `,
 		"schema.yaml": `name: review
-pins:
-  inputs:
-    - bootstrap.requested
+inputs:
+  - bootstrap.requested
 `,
 		"events.yaml": `bootstrap.requested:
   topic: text?
@@ -37,9 +36,8 @@ pins:
 `,
 		"operating/schema.yaml": `name: operating
 instance: operating_id
-pins:
-  inputs:
-    - opco.product_initialization_requested
+inputs:
+  - opco.product_initialization_requested
 `,
 		"operating/entities.yaml": `operating:
   operating_id:
@@ -75,22 +73,21 @@ platform_version: ">=0.7.0 <0.8.0"
 	rootInput := ""
 	rootNodes := ""
 	if emit != RootConnectNoEmitter {
-		rootInput = "  inputs: [root.start]\n"
-		emitBody := "      emit:\n        event: root.ready\n        fields:\n          entity_id: payload.entity_id\n"
+		rootInput = "inputs: [root.start]\n"
+		emitBody := "    emit:\n      event: root.ready\n      fields:\n        entity_id: payload.entity_id\n"
 		if emit != RootConnectCanonicalEmit {
 			t.Fatalf("unsupported root connect emitter %d", emit)
 		}
 		rootNodes = "root-node:\n  root.start:\n" + emitBody
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\n"+rootInput+"outputs: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
 	writeClosedVariantFile(t, root, "events.yaml", "root.start:\n  entity_id: text\nroot.ready:\n  entity_id: text\n")
 	if rootNodes != "" {
 		writeClosedVariantFile(t, root, "nodes.yaml", rootNodes)
 	}
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
-pins:
-  inputs:
-    - root.ready
+inputs:
+  - root.ready
 `, "", "", `consumer-node:
   root.ready:
     guard: _entity.id != ""
@@ -108,7 +105,7 @@ func CopyRootOutputConnectMissingReceiver(t testing.TB) string {
 func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  outputs: [root.ready]\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\noutputs: [root.ready]\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "root.ready:\n  entity_id: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `child-node:
   root.ready:
@@ -127,18 +124,16 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-output-singleton-connect
-pins:
-  outputs:
-    - root.ready
+outputs:
+  - root.ready
 connect:
   - event: root.ready
     from: .
     to: consumer
 `)
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
-pins:
-  inputs:
-    - root.ready
+inputs:
+  - root.ready
 `, "", "", `consumer-node:
   root.ready: {}
 `)
@@ -197,9 +192,8 @@ connect:
     guard: _entity.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, scoutPath, `name: scout
-pins:
-  outputs:
-    - scout.completed
+outputs:
+  - scout.completed
 `, "scout.completed:\n  proof: string\n", "", "")
 	return root
 }
@@ -216,11 +210,10 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-singleton-boomerang
-pins:
-  inputs:
-    - work.pong
-  outputs:
-    - work.ping
+inputs:
+  - work.pong
+outputs:
+  - work.ping
 connect:
   - event: work.ping
     from: .
@@ -235,11 +228,10 @@ connect:
     guard: _entity.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, "boomerang", `name: boomerang
-pins:
-  inputs:
-    - work.ping
-  outputs:
-    - work.pong
+inputs:
+  - work.ping
+outputs:
+  - work.pong
 `, "work.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
   work.ping:
     guard: _entity.id != ""

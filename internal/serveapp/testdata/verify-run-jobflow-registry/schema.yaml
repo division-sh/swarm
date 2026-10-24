@@ -1,9 +1,8 @@
 name: verify-run-jobflow-registry
 stages:
   done: {final: true}
-pins:
-  inputs:
-    - company.registered
+inputs:
+  - company.registered
 connect:
   - event: company.registered
     from: .

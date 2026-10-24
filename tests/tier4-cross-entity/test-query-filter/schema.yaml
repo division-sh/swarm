@@ -1,8 +1,7 @@
 stages:
   idle: {}
   filtered: {final: true}
-pins:
-  inputs:
-    - filter.requested
-  outputs:
-    - filter.completed
+inputs:
+  - filter.requested
+outputs:
+  - filter.completed

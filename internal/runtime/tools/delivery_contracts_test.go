@@ -20,15 +20,10 @@ func TestToolDefinitionsForActor_DeriveRoleScopedEntitySchemasFromActorContract(
 		Role:  "analyzer",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "review_subject", `
-types:
-  metadata:
-    region: text
-    score_band: score_band
-enums:
-  score_band:
-    values: [low, medium, high]
-    default: low
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "review_subject", `metadata:
+  region: text
+  score_band: score_band
+score_band: ["low", "medium", "high"]
 `, `
 review_subject:
   status: text

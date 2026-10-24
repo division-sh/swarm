@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func namespaceTestDeclaration(category, name, body string) string {
-	return category + ":\n  " + name + ": " + body + "\n"
+func namespaceTestDeclaration(_, name, body string) string {
+	return name + ": " + body + "\n"
 }
 
 func loadNamespaceTestBundle(t *testing.T, rootTypes, flowTypes string) (*WorkflowContractBundle, error) {
@@ -42,50 +42,6 @@ func requireNamespaceCollision(t *testing.T, bundle *WorkflowContractBundle, err
 	}
 }
 
-func TestCatalogTypeNamespaceRefusesCrossCategoryShadowing(t *testing.T) {
-	for _, pair := range []struct{ left, body, description string }{
-		{"scalars", "text", `scalar alias "Shared"`},
-		{"enums", "{values: [open, closed], default: open}", `enum "Shared"`},
-	} {
-		for _, body := range []string{"{value: Missing}", "{next: Shared}", "{value: integer}"} {
-			for _, placement := range []string{"local", "root_scalar_flow_type", "root_type_flow_scalar"} {
-				t.Run(pair.left+"/"+body+"/"+placement, func(t *testing.T) {
-					left := namespaceTestDeclaration(pair.left, "Shared", pair.body)
-					right := namespaceTestDeclaration("types", "Shared", body)
-					root, flow := left+right, ""
-					if placement == "root_scalar_flow_type" {
-						root, flow = left, right
-					}
-					if placement == "root_type_flow_scalar" {
-						// The root is independently admitted before flow composition.
-						root, flow = namespaceTestDeclaration("types", "Shared", "{value: integer}"), left
-					}
-					bundle, err := loadNamespaceTestBundle(t, root, flow)
-					requireNamespaceCollision(t, bundle, err, pair.description, `named type "Shared"`, "types.yaml:2:3")
-					if placement != "local" && !strings.Contains(err.Error(), "child/types.yaml:2:3") {
-						t.Fatalf("composition omitted flow declaration: %v", err)
-					}
-				})
-			}
-		}
-	}
-	for _, placement := range []string{"local", "root_scalar", "root_enum"} {
-		t.Run("scalar_enum/"+placement, func(t *testing.T) {
-			left := namespaceTestDeclaration("scalars", "Shared", "text")
-			right := namespaceTestDeclaration("enums", "Shared", "{values: [open], default: open}")
-			root, flow := left+right, ""
-			if placement == "root_scalar" {
-				root, flow = left, right
-			}
-			if placement == "root_enum" {
-				root, flow = right, left
-			}
-			bundle, err := loadNamespaceTestBundle(t, root, flow)
-			requireNamespaceCollision(t, bundle, err, `scalar alias "Shared"`, `enum "Shared"`)
-		})
-	}
-}
-
 func TestCatalogTypeNamespaceRefusesBuiltinShadowing(t *testing.T) {
 	for _, name := range []string{"text", "integer", "numeric", "boolean", "timestamp", "uuid"} {
 		base := "text"
@@ -93,8 +49,7 @@ func TestCatalogTypeNamespaceRefusesBuiltinShadowing(t *testing.T) {
 			base = "integer"
 		}
 		for _, category := range []struct{ name, body, description string }{
-			{"scalars", base, "scalar alias"},
-			{"enums", "{values: [open], default: open}", "enum"},
+			{"enums", "[\"open\"]", "enum"},
 			{"types", "{value: " + base + "}", "named type"},
 		} {
 			for _, flow := range []bool{false, true} {
@@ -104,7 +59,7 @@ func TestCatalogTypeNamespaceRefusesBuiltinShadowing(t *testing.T) {
 						root, child = "", root
 					}
 					bundle, err := loadNamespaceTestBundle(t, root, child)
-					requireNamespaceCollision(t, bundle, err, "built-in scalar "+fmt.Sprintf("%q", name), category.description+" "+fmt.Sprintf("%q", name), "types.yaml:2:3")
+					requireNamespaceCollision(t, bundle, err, "built-in scalar "+fmt.Sprintf("%q", name), category.description+" "+fmt.Sprintf("%q", name), "types.yaml:1:1")
 				})
 			}
 		}
@@ -113,8 +68,7 @@ func TestCatalogTypeNamespaceRefusesBuiltinShadowing(t *testing.T) {
 
 func TestCatalogTypeNamespacePreservesSameCategoryOverridesAndBodyValidation(t *testing.T) {
 	for _, category := range []struct{ name, root, child string }{
-		{"scalars", "text", "integer"},
-		{"enums", "{values: [root], default: root}", "{values: [child], default: child}"},
+		{"enums", "[\"root\"]", "[\"child\"]"},
 		{"types", "{root_value: text}", "{child_value: integer}"},
 	} {
 		t.Run(category.name, func(t *testing.T) {
@@ -124,12 +78,8 @@ func TestCatalogTypeNamespacePreservesSameCategoryOverridesAndBodyValidation(t *
 			}
 			root, child := bundle.RootTypeCatalog(), bundle.ResolvedTypeCatalogForFlow("child")
 			switch category.name {
-			case "scalars":
-				if root.Scalars["Shared"].Base != "text" || child.Scalars["Shared"].Base != "integer" {
-					t.Fatal("scalar override changed")
-				}
 			case "enums":
-				if root.Enums["Shared"].Default != "root" || child.Enums["Shared"].Default != "child" {
+				if strings.Join(root.Enums["Shared"].Values, ",") != "root" || strings.Join(child.Enums["Shared"].Values, ",") != "child" {
 					t.Fatal("enum override changed")
 				}
 			case "types":
@@ -165,7 +115,7 @@ func TestCatalogTypeNamespacePreservesSameCategoryOverridesAndBodyValidation(t *
 func TestCatalogTypeNamespaceChecksBodiesBeforeReferenceSyntax(t *testing.T) {
 	for _, name := range []string{"[text]", "map[text]text", "Unused"} {
 		t.Run(name, func(t *testing.T) {
-			source := fmt.Sprintf("types:\n  %q: {value: Missing}\n", name)
+			source := fmt.Sprintf("%q: {value: Missing}\n", name)
 			bundle, err := loadNamespaceTestBundle(t, source, "")
 			diagnostic, ok := AsLoaderDiagnostic(err)
 			if bundle != nil || !ok || diagnostic.Code != "contract_loader.invalid_type_reference" || !strings.Contains(err.Error(), `unknown catalog type "Missing"`) {

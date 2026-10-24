@@ -1,8 +1,7 @@
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - job.created
-  outputs:
-    - job.done
+inputs:
+  - job.created
+outputs:
+  - job.done

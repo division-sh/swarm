@@ -173,7 +173,6 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event)
 			Role:           a.config.Role,
 			FlowID:         a.config.FlowID,
 			Intent:         a.config.Intent,
-			Criteria:       append([]string{}, a.config.Criteria...),
 			ProviderPrompt: providerPrompt,
 			RuntimeMode:    providerContract.RuntimeMode,
 			Provider:       providerContract.Provider,

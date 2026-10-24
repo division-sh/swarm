@@ -82,7 +82,7 @@ func TestRewriteNamesOnlyPreservesOtherSourceAndIsIdempotent(t *testing.T) {
 }
 
 func TestRewriteRejectsRetiredInitializePassenger(t *testing.T) {
-	before := []byte("name: worker\npins:\n  inputs:\n    events:\n      - {event: worker.ready, initialize: {label: payload.label}}\n")
+	before := []byte("name: worker\ninputs:\n  events:\n    - {event: worker.ready, initialize: {label: payload.label}}\n")
 	inputs := map[string][]byte{"worker/schema.yaml": before}
 	if _, err := planRewrite(inputs); err == nil {
 		t.Fatal("retired initializer preserved by rewrite")
@@ -136,25 +136,25 @@ func TestRewriteMovesExactReplyAndCorrelationToResponseConnection(t *testing.T) 
 func TestRewriteRejectsUnratifiedOrAmbiguousForms(t *testing.T) {
 	for name, text := range map[string]string{
 		"extra_document":    "pins: {inputs: {events: [work.start]}}\n---\nname: hidden\n",
-		"duplicate":         "pins: {inputs: {events: [work.start], events: [other.start]}}\n",
-		"null":              "pins: {inputs: null}\n",
-		"alias":             "pins: {inputs: {events: &names [work.start]}, outputs: {events: *names}}\n",
-		"unknown_grant":     "pins: {inputs: {events: [work.start], reads: [secret]}}\n",
-		"unknown_option":    "pins: {inputs: {events: [{event: work.start, surprise: true}]}}\n",
-		"wrong_sink":        "pins: {outputs: {events: [{event: work.done, sink: other}]}}\n",
-		"output_init":       "pins: {outputs: {events: [{event: work.done, initialize: {x: payload.x}}]}}\n",
+		"duplicate":         "inputs: {events: [work.start], events: [other.start]}\n",
+		"null":              "inputs: null\n",
+		"alias":             "inputs: {events: &names [work.start]}\noutputs: {events: *names}\n",
+		"unknown_grant":     "inputs: {events: [work.start], reads: [secret]}\n",
+		"unknown_option":    "inputs: {events: [{event: work.start, surprise: true}]}\n",
+		"wrong_sink":        "outputs: {events: [{event: work.done, sink: other}]}\n",
+		"output_init":       "outputs: {events: [{event: work.done, initialize: {x: payload.x}}]}\n",
 		"fan_out":           canonicalrouting.PinRewriteSyntaxSource(t, "RewriteRejectsUnratifiedOrAmbiguousForms-5"),
 		"fan_in":            canonicalrouting.PinRewriteSyntaxSource(t, "RewriteRejectsUnratifiedOrAmbiguousForms-6"),
-		"invalid_event":     "pins: {inputs: {events: [/work.start]}}\n",
-		"qualified_event":   "pins: {inputs: {events: [worker/work.start]}}\n",
-		"padded_event":      "pins: {inputs: {events: [' work.start ']}}\n",
-		"duplicate_event":   "pins: {inputs: {events: [work.start, work.start]}}\n",
-		"mixed_duplicate":   "pins: {outputs: {events: [work.done, {event: work.done, sink: harness}]}}\n",
-		"empty_initialize":  "pins: {inputs: {events: [{event: work.start, initialize: {}}]}}\n",
-		"redundant_mapping": "pins: {inputs: {events: [{event: work.start}]}}\n",
+		"invalid_event":     "inputs: {events: [/work.start]}\n",
+		"qualified_event":   "inputs: {events: [worker/work.start]}\n",
+		"padded_event":      "inputs: {events: [' work.start ']}\n",
+		"duplicate_event":   "inputs: {events: [work.start, work.start]}\n",
+		"mixed_duplicate":   "outputs: {events: [work.done, {event: work.done, sink: harness}]}\n",
+		"empty_initialize":  "inputs: {events: [{event: work.start, initialize: {}}]}\n",
+		"redundant_mapping": "inputs: {events: [{event: work.start}]}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			inputs := map[string][]byte{"valid/schema.yaml": []byte("name: valid\npins:\n  outputs:\n    events: [work.done]\n"), "invalid/schema.yaml": []byte(text)}
+			inputs := map[string][]byte{"valid/schema.yaml": []byte("name: valid\noutputs:\n  events: [work.done]\n"), "invalid/schema.yaml": []byte(text)}
 			if plan, err := planRewrite(inputs); err == nil || len(plan) != 0 {
 				t.Fatalf("bad form generated a partial plan: %v %v", plan, err)
 			}
@@ -216,7 +216,7 @@ func TestRewriteDeletesOnlyExplicitRetiredFixtures(t *testing.T) {
 }
 
 func TestRewriteRetainsCommentsOnUntouchedSections(t *testing.T) {
-	before := []byte("name: worker\n# boundary heading\npins:\n  inputs:\n    events: [work.start]\n\n# lifecycle heading\n# another lifecycle line\nstages: {idle: {}}\n")
+	before := []byte("name: worker\n# boundary heading\ninputs:\n  events: [work.start]\n\nlifecycle heading\nanother lifecycle line\nstages: {idle: {}}\n")
 	after, _ := rewritten(t, map[string][]byte{"schema.yaml": before})
 	for _, expected := range []string{"name: worker\n# boundary heading\n", "\n# lifecycle heading\n# another lifecycle line\nstages: {idle: {}}\n"} {
 		if !bytes.Contains(after["schema.yaml"], []byte(expected)) {
@@ -226,7 +226,7 @@ func TestRewriteRetainsCommentsOnUntouchedSections(t *testing.T) {
 }
 
 func TestRewritePreflightFailureMakesNoWrites(t *testing.T) {
-	inputs := map[string][]byte{"schema.yaml": []byte("name: valid\npins:\n  outputs:\n    events: [work.done]\n"), "child/schema.yaml": []byte("pins: {inputs: {events: [invalid]}}\n---\nname: trailing\n")}
+	inputs := map[string][]byte{"schema.yaml": []byte("name: valid\noutputs:\n  events: [work.done]\n"), "child/schema.yaml": []byte("pins: {inputs: {events: [invalid]}}\n---\nname: trailing\n")}
 	root := trackedTestSources(t, inputs)
 	if err := run(root, true); err == nil {
 		t.Fatal("trailing document admitted")
@@ -322,7 +322,7 @@ func TestRewriteApplicationPreservesModesAndIsIdempotent(t *testing.T) {
 
 func TestRewriteRetirementRejectsUntrackedFilesBeforeWrites(t *testing.T) {
 	inputs := map[string][]byte{
-		"schema.yaml":                           []byte("pins: {inputs: {events: [work.start]}}\n"),
+		"schema.yaml":                           []byte("inputs: {events: [work.start]}\n"),
 		retiredGrantFixtures[0] + "schema.yaml": []byte("retired fixture\n"),
 	}
 	root := trackedTestSources(t, inputs)
@@ -345,7 +345,7 @@ func TestRewriteRetirementRejectsUntrackedFilesBeforeWrites(t *testing.T) {
 }
 
 func TestRewriteRejectsTrackedSymlinkBeforeWriting(t *testing.T) {
-	before := []byte("name: valid\npins:\n  outputs:\n    events: [work.done]\n")
+	before := []byte("name: valid\noutputs:\n  events: [work.done]\n")
 	root := trackedTestSources(t, map[string][]byte{"schema.yaml": before})
 	if err := os.Mkdir(filepath.Join(root, "child"), 0755); err != nil {
 		t.Fatal(err)
@@ -469,7 +469,7 @@ func TestRewriteRejectsUnaccountedGrantLocations(t *testing.T) {
 			}
 		}
 	}
-	if _, err := planRewrite(map[string][]byte{"other/schema.yaml": []byte("pins: {outputs: {writes: [field]}}\n")}); err == nil {
+	if _, err := planRewrite(map[string][]byte{"other/schema.yaml": []byte("outputs: {writes: [field]}\n")}); err == nil {
 		t.Fatal("grant at a new source location silently discarded")
 	}
 }

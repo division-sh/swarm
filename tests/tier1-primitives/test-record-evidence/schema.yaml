@@ -1,6 +1,5 @@
 stages: []
-pins:
-  inputs:
-    - evidence.submitted
-  outputs:
-    - evidence.recorded
+inputs:
+  - evidence.submitted
+outputs:
+  - evidence.recorded

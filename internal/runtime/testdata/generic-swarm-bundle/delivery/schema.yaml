@@ -7,10 +7,9 @@ stages:
 auto_emit_on_create:
   event: item.completed
   description: Seed delivery completion checks when a template instance is created.
-pins:
-  inputs:
-    - item.completed
-    - timer.item.timeout
+inputs:
+  - item.completed
+  - timer.item.timeout
 required_agents:
   - role: control-plane
     subscribes_to:

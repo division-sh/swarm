@@ -1,9 +1,8 @@
 name: fan-in-stream
-pins:
-  inputs:
-    - operating.report.triggered
-  outputs:
-    - operating.report.triggered
+inputs:
+  - operating.report.triggered
+outputs:
+  - operating.report.triggered
 connect:
   - event: operating.report.triggered
     from: .

@@ -86,7 +86,7 @@ func TestD1HistoricalReforkExactRequireSurvivesReopenBothStores(t *testing.T) {
 			selected, db, connector := newP16RaceStore(t, backend)
 			files := map[string]string{
 				"schema.yaml":          "name: historical-reopen\n",
-				"review/schema.yaml":   "name: review\ninstance: request_id\nstages: {pending: {}}\npins:\n  inputs: [task.create]\n",
+				"review/schema.yaml":   "name: review\ninstance: request_id\nstages: {pending: {}}\ninputs: [task.create]\n",
 				"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
 				"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n",
 			}

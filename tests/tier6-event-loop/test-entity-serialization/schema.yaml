@@ -2,10 +2,9 @@ stages:
   pending: {}
   processing: {}
   complete: {final: true}
-pins:
-  inputs:
-    - step.first
-    - step.second
-  outputs:
-    - step.first_done
-    - step.second_done
+inputs:
+  - step.first
+  - step.second
+outputs:
+  - step.first_done
+  - step.second_done

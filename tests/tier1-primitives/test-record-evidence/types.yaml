@@ -1,4 +1,3 @@
-types:
-  Finding:
-    finding: text
-    severity: text
+Finding:
+  finding: text
+  severity: text

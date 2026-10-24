@@ -96,9 +96,8 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	}
 	if opts.ObjectMembership {
 		applyClosedReplacement(t, ownerEntities, "  account_ids: {type: \"[text]\", initial: []}\n", "  account_ids: {type: \"[AccountRef]\", initial: []}\n")
-		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `types:
-  AccountRef:
-    account_id: text
+		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `AccountRef:
+  account_id: text
 `)
 		applyClosedReplacement(t, ownerNodes, "          account_id: account_id\n", "          account_id: account_id.account_id\n")
 	}
@@ -166,12 +165,11 @@ portfolio.notify.completed:
 	if opts.NumericRegistrationRows {
 		// Keep row fields addressable under the compiled structural-type contract.
 		// gem_score is deliberately JSON so hostile values reach emitted-schema admission.
-		writeClosedVariantFile(t, root, "types.yaml", `types:
-  NumericAccount:
-    account_id: text
-    eng_roles: integer
-    gem_score: json
-    external_id: text?
+		writeClosedVariantFile(t, root, "types.yaml", `NumericAccount:
+  account_id: text
+  eng_roles: integer
+  gem_score: json
+  external_id: text?
 `)
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `portfolio.opened:
   portfolio_id: text
@@ -402,13 +400,13 @@ retired:
 		// The root only forwards work. The portfolio stays active across rows
 		// until an explicit close, rather than completing on its first input.
 		applyClosedReplacement(t, connectFile, "name: notify-all-children\n", "name: notify-all-children\nstages: {done: {final: true}}\n")
-		applyClosedReplacement(t, connectFile, "  inputs:\n", "  inputs:\n    - fixture.close.requested\n")
-		applyClosedReplacement(t, connectFile, "  outputs:\n", "  outputs:\n    - fixture.close.requested\n")
+		applyClosedReplacement(t, connectFile, "inputs:\n", "inputs:\n  - fixture.close.requested\n")
+		applyClosedReplacement(t, connectFile, "outputs:\n", "outputs:\n  - fixture.close.requested\n")
 		applyClosedReplacement(t, connectFile, "connect:\n", "connect:\n  - {event: fixture.close.requested, from: ., to: portfolio}\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "portfolio.opened:\n", "fixture.close.requested:\nportfolio.opened:\n")
 		applyClosedReplacement(t, ownerSchema, "name: portfolio\n", "name: portfolio\nstages: {active: {}, done: {final: true}}\n")
-		applyClosedReplacement(t, ownerSchema, "  inputs:\n", "  inputs:\n    - fixture.close.requested\n")
-		applyClosedReplacement(t, ownerNodes, "", "    - fixture.close.requested\n  fixture.close.requested: {advances_to: done}\n")
+		applyClosedReplacement(t, ownerSchema, "inputs:\n", "inputs:\n  - fixture.close.requested\n")
+		applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", "portfolio-coordinator:\n  fixture.close.requested: {advances_to: done}\n")
 	}
 	return root
 }

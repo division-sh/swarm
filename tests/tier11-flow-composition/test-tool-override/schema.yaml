@@ -2,12 +2,11 @@ name: test-tool-override
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.requested
-    - child.done
-  outputs:
-    - task.done
+inputs:
+  - task.requested
+  - child.done
+outputs:
+  - task.done
 connect:
   - event: child.done
     from: child

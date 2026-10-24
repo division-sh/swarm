@@ -11,9 +11,8 @@ import (
 )
 
 type EventSchema struct {
-	Description    string
-	Schema         map[string]any
-	CitationFields map[string]CriteriaCitation
+	Description string
+	Schema      map[string]any
 }
 
 func EventSchemaRegistryFromCatalog(entries map[string]EventCatalogEntry) map[string]EventSchema {
@@ -30,7 +29,6 @@ func EventSchemaRegistryFromCatalog(entries map[string]EventCatalogEntry) map[st
 
 func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, types TypeCatalogDocument) EventSchema {
 	properties := make(map[string]any, len(entry.Payload.Properties))
-	citations := map[string]CriteriaCitation{}
 	fieldNames := make([]string, 0, len(entry.Payload.Properties))
 	for fieldName := range entry.Payload.Properties {
 		fieldNames = append(fieldNames, strings.TrimSpace(fieldName))
@@ -65,12 +63,6 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 		if field.ExactSchema == nil {
 			applySchemaRefinements(prop, field.Refinements)
 		}
-		if strings.TrimSpace(field.Citation.Criteria) != "" || len(field.Citation.AllowedClasses) > 0 {
-			citations[fieldName] = CriteriaCitation{
-				Criteria:       strings.TrimSpace(field.Citation.Criteria),
-				AllowedClasses: normalizeStrings(field.Citation.AllowedClasses),
-			}
-		}
 		properties[fieldName] = prop
 	}
 	schema := map[string]any{
@@ -82,9 +74,8 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 		schema["required"] = required
 	}
 	return EventSchema{
-		Description:    fmt.Sprintf("Emit %s event", eventType),
-		Schema:         schema,
-		CitationFields: citations,
+		Description: fmt.Sprintf("Emit %s event", eventType),
+		Schema:      schema,
 	}
 }
 

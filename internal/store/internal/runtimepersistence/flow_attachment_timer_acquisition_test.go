@@ -138,7 +138,7 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 	workflow.enabled.Store(true)
 	f := newReceiverConfigActivationFixtureWithOwnership(t, backend, false, map[string]string{
 		"schema.yaml":          "name: timer-acquisition\n",
-		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {after: 2h, emit: timer.timeout}\n      - {after: 3h, emit: timer.timeout}\npins:\n  inputs:\n    - task.started\n",
+		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {after: 2h, emit: timer.timeout}\n      - {after: 3h, emit: timer.timeout}\ninputs:\n  - task.started\n",
 		"review/entities.yaml": "review_item:\n  request_id: text\n",
 		"review/events.yaml":   "task.started:\ntimer.timeout:\n",
 	}, nil, ownStoreTestAgentManager, func(options *pipeline.PipelineCoordinatorOptions) {

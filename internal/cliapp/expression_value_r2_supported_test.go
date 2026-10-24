@@ -63,7 +63,7 @@ func TestVerifyCommandR2RecursiveRecordUsesNamedDestination(t *testing.T) {
 			if err := os.CopyFS(root, os.DirFS(filepath.Join(RepoRoot(), "examples", "routing", "root-ingress"))); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("types:\n  Report:\n    name: text\n    count: integer\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("Report:\n  name: text\n  count: integer\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			eventsPath := filepath.Join(root, "events.yaml")
@@ -122,7 +122,7 @@ func TestVerifyCommandR2ConstructorAndCommentCrossProduct(t *testing.T) {
 			if err := os.CopyFS(root, os.DirFS(filepath.Join(RepoRoot(), "examples", "routing", "root-ingress"))); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("types:\n  Child:\n    n: integer\n  Pair:\n    left: integer\n    right: integer\n  Envelope:\n    child: Child\n    label: text\n  OptionalReport:\n    label: text\n    n: integer?\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("Child:\n  n: integer\nPair:\n  left: integer\n  right: integer\nEnvelope:\n  child: Child\n  label: text\nOptionalReport:\n  label: text\n  n: integer?\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			eventsPath := filepath.Join(root, "events.yaml")

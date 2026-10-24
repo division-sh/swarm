@@ -3,6 +3,5 @@ stages:
   pending: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
+inputs:
+  - task.assigned

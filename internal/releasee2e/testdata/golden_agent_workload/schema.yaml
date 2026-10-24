@@ -7,14 +7,13 @@ stages:
     final: true
   failed:
     final: true
-pins:
-  inputs:
-    - search.requested
-    - scout.completed
-    - candidate.completed
-  outputs:
-    - scout.requested
-    - candidate.requested
+inputs:
+  - search.requested
+  - scout.completed
+  - candidate.completed
+outputs:
+  - scout.requested
+  - candidate.requested
 connect:
   - event: scout.requested
     from: .

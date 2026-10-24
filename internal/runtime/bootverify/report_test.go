@@ -3637,9 +3637,9 @@ func TestRun_RejectsUnconnectedRootNodeEmitAsChildInputProducerPath(t *testing.T
 
 func TestRun_RootInputDoesNotImplicitlySubscribeSameNamedChild(t *testing.T) {
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root\npins:\n  inputs:\n    - work.started\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root\ninputs:\n  - work.started\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.started: {value: text}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\npins:\n  inputs:\n    - work.started\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\ninputs:\n  - work.started\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "work.started: {value: text}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), "observer:\n  work.started: {}\n")
 	repo := repoRootForBootverifyTest(t)
@@ -4077,10 +4077,8 @@ case:
   metadata:
     type: Metadata
 `, "Use `save_entity_field` for `metadata.region`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
-types:
-  Metadata:
-    region: text
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `Metadata:
+  region: text
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -4111,10 +4109,8 @@ case:
     type: text
     _unused_reason: prompt save auth proof
 `, "Use `save_entity_field` for `metadata.region`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
-types:
-  Metadata:
-    region: text
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `Metadata:
+  region: text
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -4145,10 +4141,8 @@ case:
     type: text
     _unused_reason: prompt save auth proof
 `, "Use save_entity_field.\n- `metadata.region`\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
-types:
-  Metadata:
-    region: text
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `Metadata:
+  region: text
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -4175,10 +4169,8 @@ case:
   metadata:
     type: Metadata
 `, "Use `save_entity_field` for `metadata.missing`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
-types:
-  Metadata:
-    region: text
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `Metadata:
+  region: text
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -4204,10 +4196,8 @@ case:
   metadata:
     type: Metadata
 `, "Use `save_entity_field` for `metadata.missing`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
-types:
-  Metadata:
-    region: text
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `Metadata:
+  region: text
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -4233,10 +4223,8 @@ case:
   validation_kit:
     type: ValidationKit
 `, "Use `save_entity_field` for `validation_kit.checklist.size`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
-types:
-  ValidationKit:
-    checklist: [text]
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `ValidationKit:
+  checklist: [text]
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -5980,9 +5968,8 @@ opco.spend_requested:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `name: treasury
 stages:
   active: {}
-pins:
-  inputs:
-    - opco.spend_requested
+inputs:
+  - opco.spend_requested
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "events.yaml"), `
 opco.spend_requested:
@@ -6195,9 +6182,8 @@ name: `+flowID+`
 stages:
   idle: {}
   done: {final: true}
-pins:
-  outputs:
-    - ticket.ready
+outputs:
+  - ticket.ready
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), `
 ticket.ready:
@@ -6213,11 +6199,10 @@ ticket.ready:
 stages:
   waiting: {}
   done: {final: true}
-pins:
-  inputs:
-    - ticket.ready
-  outputs:
-    - consumer.started
+inputs:
+  - ticket.ready
+outputs:
+  - consumer.started
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "events.yaml"), `
 ticket.ready:
@@ -6347,9 +6332,8 @@ case:
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
+inputs:
+  - task.assigned
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "case:\n  local: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `

@@ -320,14 +320,13 @@ stages:
   awaiting: {}
   ready: {final: true}
   attention: {final: true}
-pins:
-  inputs:
-    - dispatch.completed
-  outputs:
-    - item.completed
+inputs:
+  - dispatch.completed
+outputs:
+  - item.completed
 `,
 		"entities.yaml": "join_state:\n  expected: [text]\n",
-		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
+		"types.yaml":    "JoinResult:\n  value: text\n",
 		"events.yaml":   "dispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\n",
 		"nodes.yaml": `dispatcher:
   dispatch.completed:

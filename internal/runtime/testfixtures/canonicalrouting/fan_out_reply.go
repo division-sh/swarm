@@ -20,9 +20,8 @@ func CopyPublishedFanOutReply(t testing.TB) string {
 		"        account_id: payload.account_id\n        request_id: payload.request_id\n",
 		"        account_id: payload.account_id\n        request_id: payload.request_id\n        items: payload.items\n")
 	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
-pins:
-  inputs: [provider.requested]
-  outputs: [provider.replied]
+inputs: [provider.requested]
+outputs: [provider.replied]
 `)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `provider.replied:
   account_id: text
@@ -59,7 +58,7 @@ func CopyUnissuedFanOutReply(t testing.TB) string {
 	t.Helper()
 	root := CopyPublishedFanOutReply(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  inputs: [request.started, request.stop]\n", "  inputs: [request.started, request.stop, request.checkpoint]\n")
+		"inputs: [request.started, request.stop]\n", "inputs: [request.started, request.stop, request.checkpoint]\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.stop:\n", "request.stop:\nrequest.checkpoint:\n  note: text\nrequest.checkpointed:\n  note: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `checkpoint-node:
@@ -94,9 +93,8 @@ func CopyNestedFanOutReply(t testing.TB) string {
     correlation_key: request_id
 `)
 	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
-pins:
-  inputs: [provider.requested, t.replied]
-  outputs: [t.requested, provider.replied]
+inputs: [provider.requested, t.replied]
+outputs: [t.requested, provider.replied]
 `)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `t.requested:
   account_id: text

@@ -3,8 +3,7 @@ ingress:
   providers:
     - provider: telegram
       signing_secret: webhook_signing.telegram
-pins:
-  inputs:
-    - inbound.telegram
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram
+outputs:
+  - inbound.telegram.text_message

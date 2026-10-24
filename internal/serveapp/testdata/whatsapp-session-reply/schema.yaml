@@ -15,11 +15,10 @@ stages:
           advances_to: done
   done:
     final: true
-pins:
-  inputs:
-    - inbound.whatsapp
-  outputs:
-    - inbound.whatsapp.message
+inputs:
+  - inbound.whatsapp
+outputs:
+  - inbound.whatsapp.message
 ingress:
   alias: reception
   providers:

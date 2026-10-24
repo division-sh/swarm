@@ -786,9 +786,6 @@ type RulesDocument = flowmodel.RulesDocument
 type RuleSet = flowmodel.RuleSet
 type PolicyDocument = flowmodel.PolicyDocument
 type PolicyValue = flowmodel.PolicyValue
-type PolicyCriteriaSet = flowmodel.PolicyCriteriaSet
-type PolicyCriteriaClass = flowmodel.PolicyCriteriaClass
-type PolicyCriteriaRule = flowmodel.PolicyCriteriaRule
 type PolicyCriteriaParam = flowmodel.PolicyCriteriaParam
 type PolicyValidationSet = flowmodel.PolicyValidationSet
 type PolicyValidationClass = flowmodel.PolicyValidationClass
@@ -872,12 +869,7 @@ type EventFieldSpec struct {
 	Type        string            `yaml:"type"`
 	Description string            `yaml:"description"`
 	Refinements SchemaRefinements `yaml:"-"`
-	Citation    CriteriaCitation  `yaml:"citation"`
 	ExactSchema *ToolInputSchema  `yaml:"-" json:"-"`
-}
-type CriteriaCitation struct {
-	Criteria       string   `yaml:"criteria"`
-	AllowedClasses []string `yaml:"allowed_classes"`
 }
 type SchemaLengthRefinement struct {
 	Min *int `yaml:"min"`
@@ -1078,7 +1070,7 @@ type FlowSchemaDocument struct {
 	StageDeclarations      FlowStageDeclarations    `yaml:"stages"`
 	LoopDeclarations       FlowLoopDeclarations     `yaml:"loops"`
 	Schedules              map[string]FlowSchedule  `yaml:"schedules"`
-	Pins                   FlowPins                 `yaml:"pins"`
+	Pins                   FlowPins                 `yaml:"-"`
 	RequiredAgents         []FlowRequiredAgent      `yaml:"required_agents"`
 	RequiredAgentsDeclared bool                     `yaml:"-"`
 	AutoEmitOnCreate       AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
@@ -1224,9 +1216,9 @@ type WorkflowStageContract struct {
 type WorkflowDataAccumulation struct {
 	Writes      []WorkflowDataWrite `yaml:"writes"`
 	SourceEvent string              `yaml:"source_event"`
+	From        string              `yaml:"from,omitempty"`
 }
 type WorkflowDataWrite struct {
-	Field         string                `yaml:"-" json:"field,omitempty"`
 	SourceField   string                `yaml:"source_field,omitempty" json:"source_field,omitempty"`
 	SourcePath    paths.Path            `yaml:"-" json:"-"`
 	Operation     WorkflowDataOperation `yaml:"op,omitempty" json:"op,omitempty"`
@@ -1240,14 +1232,7 @@ type WorkflowDataWrite struct {
 }
 
 func (w WorkflowDataWrite) Source() string {
-	switch {
-	case strings.TrimSpace(w.SourceField) != "":
-		return strings.TrimSpace(w.SourceField)
-	case strings.TrimSpace(w.Field) != "":
-		return strings.TrimSpace(w.Field)
-	default:
-		return strings.TrimSpace(w.TargetField)
-	}
+	return strings.TrimSpace(w.SourceField)
 }
 func (w WorkflowDataWrite) Target() string {
 	switch {
@@ -1257,10 +1242,8 @@ func (w WorkflowDataWrite) Target() string {
 		return strings.TrimSpace(w.TargetPathRef)
 	case strings.TrimSpace(w.TargetField) != "":
 		return strings.TrimSpace(w.TargetField)
-	case strings.TrimSpace(w.Field) != "":
-		return strings.TrimSpace(w.Field)
 	default:
-		return strings.TrimSpace(w.SourceField)
+		return ""
 	}
 }
 func (w WorkflowDataWrite) HasLiteralValue() bool {
@@ -1298,7 +1281,7 @@ func (a WorkflowDataAccumulation) TargetFields() []string {
 	return out
 }
 func (a WorkflowDataAccumulation) HasWrites() bool {
-	return len(a.Writes) > 0
+	return len(a.Writes) > 0 || a.From != ""
 }
 
 type WorkflowTimerContract struct {
@@ -1445,7 +1428,6 @@ type AgentRegistryEntry struct {
 	NativeTools            map[string]any                  `yaml:"native_tools"`
 	FlowDataAccess         []string                        `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
 	DataAccess             []DurableDataAccessRef          `yaml:"data_access" json:"data_access,omitempty"`
-	Criteria               []string                        `yaml:"criteria" json:"criteria,omitempty"`
 	EmitEvents             []string                        `yaml:"emit_events"`
 	Implementation         string                          `yaml:"implementation"`
 	AuthoredFields         map[string]bool                 `yaml:"-" json:"-"`

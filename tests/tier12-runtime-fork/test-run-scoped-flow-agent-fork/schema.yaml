@@ -1,8 +1,7 @@
 name: flow-agent-fork-root
-pins:
-  inputs:
-    - worker.ready
-  outputs:
-    - worker.ready
+inputs:
+  - worker.ready
+outputs:
+  - worker.ready
 connect:
   - {event: worker.ready, from: ., to: worker-flow, resolution: select}

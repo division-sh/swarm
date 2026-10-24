@@ -18,11 +18,11 @@ func CopyConnectionPolicies(t testing.TB, reverse bool) string {
 		edges = reuse + create
 	}
 	for path, source := range map[string]string{
-		"schema.yaml":          "name: edge-policy\npins:\n  inputs: [work.requested]\n  outputs: [work.ready]\nconnect:\n" + edges,
+		"schema.yaml":          "name: edge-policy\ninputs: [work.requested]\noutputs: [work.ready]\nconnect:\n" + edges,
 		"events.yaml":          "work.requested:\n  creation_id: text\n  reuse_id: text\nwork.ready:\n  creation_id: text\n  reuse_id: text\n",
 		"entities.yaml":        "run: {}\n",
 		"nodes.yaml":           "relay:\n  work.requested:\n    emit:\n      event: work.ready\n      fields:\n        creation_id: payload.creation_id\n        reuse_id: payload.reuse_id\n",
-		"worker/schema.yaml":   "name: worker\ninstance: worker_id\npins:\n  inputs:\n    - work.ready\n",
+		"worker/schema.yaml":   "name: worker\ninstance: worker_id\ninputs:\n  - work.ready\n",
 		"worker/entities.yaml": "work:\n  worker_id: {type: text, _unused_reason: receiver identity}\n",
 		"worker/nodes.yaml":    "worker:\n  work.ready:\n    guard: payload.creation_id != ''\n",
 	} {
@@ -76,9 +76,9 @@ func CopyNonCreatingInitialization(t testing.TB, connected bool) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := "name: worker\npins:\n  inputs:\n" + "    " + strings.ReplaceAll(strings.TrimSuffix(string(invalid), "\n"), "\n", "\n    ") + "\n"
+	worker := "name: worker\ninputs:\n" + "    " + strings.ReplaceAll(strings.TrimSuffix(string(invalid), "\n"), "\n", "\n    ") + "\n"
 	files := map[string]string{
-		"schema.yaml":        "name: init-test\npins:\n  inputs:\n    - work.ready\n  outputs:\n    - work.ready\nconnect:\n  - {event: work.ready, from: ., to: worker}\n",
+		"schema.yaml":        "name: init-test\ninputs:\n  - work.ready\noutputs:\n  - work.ready\nconnect:\n  - {event: work.ready, from: ., to: worker}\n",
 		"events.yaml":        "work.ready:\n  label: text\n",
 		"worker/schema.yaml": worker,
 		"worker/nodes.yaml":  "worker:\n  work.ready:\n    guard: payload.label != ''\n",

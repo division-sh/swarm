@@ -1,4 +1,3 @@
-types:
-  Item:
-    item_id: text
-    value: text
+Item:
+  item_id: text
+  value: text

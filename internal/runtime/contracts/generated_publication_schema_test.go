@@ -180,7 +180,6 @@ func TestGeneratedPublicationSchemaExactCoordinatesAndReadback(t *testing.T) {
 			beforeSchema := producer.EventSchema()
 			mutated := receiver.EventSchema()
 			mutated.Schema["properties"].(map[string]any)["activity_id"].(map[string]any)["type"] = "integer"
-			mutated.CitationFields["injected"] = CriteriaCitation{}
 			if !reflect.DeepEqual(beforeSchema, producer.EventSchema()) || !reflect.DeepEqual(beforeSchema, receiver.EventSchema()) {
 				t.Fatal("readback mutation crossed schema owner")
 			}

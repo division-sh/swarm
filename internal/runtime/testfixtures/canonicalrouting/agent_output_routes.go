@@ -15,10 +15,10 @@ func CopyStaticAgentOutputConnect(t testing.TB) string {
 	root := t.TempDir()
 	for path, body := range map[string]string{
 		"schema.yaml":          "name: static-agent-output\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, rename: deploy.completed}\n",
-		"producer/schema.yaml": "name: producer\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml": "name: producer\noutputs: [deploy.done]\n",
 		"producer/events.yaml": "deploy.done:\n",
 		"producer/agents.yaml": "producer-agent:\n  model: regular\n  intent: {inline: Report deployment completion.}\n  emit_events: [deploy.done]\n",
-		"consumer/schema.yaml": "name: consumer\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml": "name: consumer\ninputs: [deploy.completed]\n",
 		"consumer/nodes.yaml":  "consumer-node:\n  deploy.completed:\n    guard: true\n",
 	} {
 		writeClosedVariantFile(t, root, path, body)

@@ -182,9 +182,8 @@ func loadNestedPhysicalAgentRouteSource(t *testing.T) semanticview.Source {
 	write(filepath.Join(flowRoot, "schema.yaml"), `name: support
 stages:
   active: {}
-pins:
-  inputs:
-    - work.requested
+inputs:
+  - work.requested
 `)
 	write(filepath.Join(flowRoot, "events.yaml"), "work.requested:\n")
 	write(filepath.Join(flowRoot, "agents.yaml"), `
@@ -271,9 +270,8 @@ func loadPackageCollisionRouteSource(t *testing.T, mode string, reverse bool) se
 
 	write(filepath.Join(root, "schema.yaml"), `
 name: exact-package-routes
-pins:
-  inputs:
-    - root.start
+inputs:
+  - root.start
 `)
 	write(filepath.Join(root, "events.yaml"), "root.start:\n")
 
@@ -285,8 +283,7 @@ pins:
 	write(filepath.Join(root, "orders", "schema.yaml"), "name: orders\n"+instance+`stages:
   active: {}
   done: {final: true}
-pins:
-  inputs: [root.start]
+inputs: [root.start]
 `)
 	write(filepath.Join(root, "orders", "events.yaml"), "root.start:\naddon_a.start:\naddon_b.start:\n")
 	write(filepath.Join(root, "orders", "nodes.yaml"), `

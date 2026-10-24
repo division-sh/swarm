@@ -147,38 +147,30 @@ func projectSchemaImportsValue(value yamlsource.Value) (FlowSchemaImports, error
 	return out, nil
 }
 
-func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
-	fields, err := schemaValueFields(value, "pins", map[string]struct{}{"inputs": {}, "outputs": {}}, true)
+func projectSchemaPinsValue(value yamlsource.Value, direction string) (FlowPins, error) {
 	var out FlowPins
+	items, err := schemaValueSequence(value, true)
 	if err != nil {
 		return out, err
 	}
-	for _, direction := range sortedContractKeys(fields) {
-		items, err := schemaValueSequence(fields[direction], true)
+	seen := map[string]bool{}
+	for _, item := range items {
+		input, output, err := projectSchemaPinValue(item, direction)
 		if err != nil {
 			return out, err
 		}
-		{
-			seen := map[string]bool{}
-			for _, item := range items {
-				input, output, err := projectSchemaPinValue(item, direction)
-				if err != nil {
-					return out, err
-				}
-				event := input.Event
-				if direction == "outputs" {
-					event = output.Event
-				}
-				if seen[event] {
-					return out, nodeValueError(item, fmt.Errorf("pin event %q is declared more than once", event))
-				}
-				seen[event] = true
-				if direction == "inputs" {
-					out.Inputs.EventPins = append(out.Inputs.EventPins, input)
-				} else {
-					out.Outputs.EventPins = append(out.Outputs.EventPins, output)
-				}
-			}
+		event := input.Event
+		if direction == "outputs" {
+			event = output.Event
+		}
+		if seen[event] {
+			return out, nodeValueError(item, fmt.Errorf("pin event %q is declared more than once", event))
+		}
+		seen[event] = true
+		if direction == "inputs" {
+			out.Inputs.EventPins = append(out.Inputs.EventPins, input)
+		} else {
+			out.Outputs.EventPins = append(out.Outputs.EventPins, output)
 		}
 	}
 	return out, nil

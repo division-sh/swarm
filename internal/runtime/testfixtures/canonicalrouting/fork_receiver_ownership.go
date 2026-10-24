@@ -120,13 +120,12 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - work.closed
-    - child.ready
-    - work.requested
-  outputs:
-    - work.requested
+inputs:
+  - work.closed
+  - child.ready
+  - work.requested
+outputs:
+  - work.requested
 connect:
   - {event: work.requested, from: ., to: child}
   - {event: child.ready, from: child, to: .}
@@ -149,7 +148,7 @@ connect:
   emit_events: []
 `)
 	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the receiving root entity.\n")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.ready\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\ninputs:\n  - work.requested\noutputs:\n  - child.ready\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "child.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `producer:
   work.requested:
@@ -197,18 +196,17 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - outer.seeded
-    - outer.requested
-    - outer.closed
-    - receiver.closed
-    - start.closed
-  outputs:
-    - start.seeded
-    - start.requested
-    - receiver.closed
-    - start.closed
+inputs:
+  - outer.seeded
+  - outer.requested
+  - outer.closed
+  - receiver.closed
+  - start.closed
+outputs:
+  - start.seeded
+  - start.requested
+  - receiver.closed
+  - start.closed
 connect:
   - {event: start.seeded, from: ., to: branch}
   - {event: start.requested, from: ., to: branch}
@@ -330,11 +328,10 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - start.seeded
-    - start.requested
-    - start.closed
+inputs:
+  - start.seeded
+  - start.requested
+  - start.closed
 `+receiptPins+closeInput+`  outputs: [`+outputs+`]
 connect:
 `+rootEdges+seedEdges+closeEdges)
@@ -361,7 +358,7 @@ connect:
 		producerBody = "    advances_to: active\n    data_accumulation:\n      writes:\n        - target_field: marker\n          value: \"producer-owned\"\n"
 		writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  marker: text\n")
 	}
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\n"+producerStages+"pins:\n  inputs: [work.requested]\n  outputs: [work.ready]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\n"+producerStages+"inputs: [work.requested]\noutputs: [work.ready]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "producer/nodes.yaml", `producer:
   work.requested:

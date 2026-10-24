@@ -1,6 +1,5 @@
 stages: []
-pins:
-  inputs:
-    - gate.requested
-  outputs:
-    - gate.set
+inputs:
+  - gate.requested
+outputs:
+  - gate.set

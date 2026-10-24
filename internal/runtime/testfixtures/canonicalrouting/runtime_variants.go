@@ -10,12 +10,12 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	if nested {
 		removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 
-		writeClosedVariantFile(t, root, "schema.yaml", "name: nested-generated-activity-topology\nstages: []\npins:\n  inputs:\n    - request\n  outputs:\n    - request\nconnect:\n  - {event: request, from: ., to: child}\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "name: nested-generated-activity-topology\nstages: []\ninputs:\n  - request\noutputs:\n  - request\nconnect:\n  - {event: request, from: ., to: child}\n")
 		flowRoot = "child/"
-		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "name: child\nstages: []\npins:\n  inputs:\n    - request\n")
+		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "name: child\nstages: []\ninputs:\n  - request\n")
 	} else {
 
-		writeClosedVariantFile(t, root, "schema.yaml", "name: generated-activity-topology\nstages: []\npins:\n  inputs:\n    - request\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "name: generated-activity-topology\nstages: []\ninputs:\n  - request\n")
 	}
 	writeClosedVariantFile(t, root, "events.yaml", "request:\n  message: text\n")
 	writeClosedVariantFile(t, root, flowRoot+"tools.yaml", `send:
@@ -53,7 +53,7 @@ func CopyPayloadNamedField(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: payload-normalizer\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - inbound.telegram\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: payload-normalizer\nstages:\n  active: {}\n  done: {final: true}\ninputs:\n  - inbound.telegram\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "chat:\n  chat_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "inbound.telegram:\n  entity_id: text\n  payload: json\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "normalizer:\n  inbound.telegram:\n    data_accumulation:\n      writes:\n        - target_field: chat_id\n          value: payload.payload.message.chat.id\n    advances_to: done\n")
@@ -67,7 +67,7 @@ func CopyConstructedStaticHandler(t testing.TB, withTimer bool) string {
 		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
 		"validator/events.yaml", "validator/entities.yaml", "validator/nodes.yaml", "validator/schema.yaml", "validator")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\npins:\n  inputs:\n    - thing.created\n  outputs:\n    - thing.created\nconnect:\n  - {event: thing.created, from: ., to: validation}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\ninputs:\n  - thing.created\noutputs:\n  - thing.created\nconnect:\n  - {event: thing.created, from: ., to: validation}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "thing.created:\n  amount: integer\n  who: text\n")
 	writeClosedVariantFile(t, root, "validation/agents.yaml", "result-observer:\n  intent: {inline: 'Observe the exact created-entity result.'}\n  subscriptions: [thing.emitted]\n")
 	inputs := "thing.created"

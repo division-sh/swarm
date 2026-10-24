@@ -20,9 +20,9 @@ func Test2293Q1AccumulateStateListBundleAdmission(t *testing.T) {
 			writeFixtureFile(t, filepath.Join(root, "types.yaml"), "Review: {reviewer_id: text, message: text}\n")
 			writeFixtureFile(t, filepath.Join(root, "entities.yaml"), "State:\n  reviews: [Review]\n")
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), "review.received: {reviewer_id: text, message: text}\nreview.recorded:\n")
-			node := "collector:\n  execution_type: system_node\n  subscribes_to: [review.received]\n  event_handlers:\n    review.received:\n      emit: review.recorded\n"
+			node := "collector:\n  review.received:\n    emit: review.recorded\n"
 			if collect {
-				node += "      accumulate: {target: reviews, key: reviewer_id}\n"
+				node += "    accumulate: {target: reviews, key: reviewer_id}\n"
 			}
 			writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), node)
 			repo := repoRootForContractsTest(t)

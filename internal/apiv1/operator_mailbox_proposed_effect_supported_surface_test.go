@@ -336,9 +336,8 @@ func proposedEffectSupportedSurfaceBundle(t *testing.T, providerURL string) *run
 stages:
   new: {}
   done: {final: true}
-pins:
-  inputs:
-    - thing.created
+inputs:
+  - thing.created
 `)
 	writeRunCompletionFixtureFile(t, root+"/events.yaml", `thing.created:
   text: text

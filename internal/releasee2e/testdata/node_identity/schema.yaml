@@ -3,17 +3,16 @@ stages:
   pending: {}
   working: {}
   done: {final: true}
-pins:
-  inputs:
-    - entry.root
-    - entry.left
-    - entry.right
-    - entry.nested
-  outputs:
-    - work.routed
-    - entry.left
-    - entry.right
-    - entry.nested
+inputs:
+  - entry.root
+  - entry.left
+  - entry.right
+  - entry.nested
+outputs:
+  - work.routed
+  - entry.left
+  - entry.right
+  - entry.nested
 connect:
   - {event: entry.left, from: ., to: left}
   - {event: entry.right, from: ., to: right}

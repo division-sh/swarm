@@ -418,7 +418,7 @@ func TestEntitySparseGeneratedToolMutation(t *testing.T) {
 			bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 				"work": {
 					SchemaYAML: "name: work\ninstance: fixture_key\nstages:\n  queued: {}\n  done: {final: true}\n",
-					TypesYAML:  "types:\n  Profile:\n    name: text\n    note: text?\n",
+					TypesYAML:  "Profile:\n  name: text\n  note: text?\n",
 					EntitiesYAML: `
 work:
   label: text?

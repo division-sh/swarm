@@ -2,6 +2,5 @@ name: flow-beta
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - trigger.beta
+inputs:
+  - trigger.beta

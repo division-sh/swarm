@@ -2,8 +2,7 @@ stages:
   pending: {}
   passed: {final: true}
   failed: {final: true}
-pins:
-  inputs:
-    - item.evaluated
-  outputs:
-    - item.failed
+inputs:
+  - item.evaluated
+outputs:
+  - item.failed

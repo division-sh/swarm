@@ -562,7 +562,7 @@ func TestEnginePublicationPlanAdmitsExactSourceArtifactBeforePersistenceOrClaim(
 func sourceMutationPublicationSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: source-mutation-proof\npins:\n  outputs: [test.source_mutation]\n",
+		"schema.yaml": "name: source-mutation-proof\noutputs: [test.source_mutation]\n",
 		"events.yaml": "test.source_mutation:\n",
 	}))
 }

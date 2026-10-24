@@ -1,12 +1,11 @@
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - pipeline.start
-    - task.done
-  outputs:
-    - pipeline.complete
+inputs:
+  - pipeline.start
+  - task.done
+outputs:
+  - pipeline.complete
 connect:
   - event: task.done
     from: child

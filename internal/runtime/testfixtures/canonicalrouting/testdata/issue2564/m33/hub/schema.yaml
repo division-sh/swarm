@@ -7,5 +7,4 @@ stages:
       - {after: 5s, advances_to: review}
   review: {}
   closed: {final: true}
-pins:
-  inputs: [hub.start, hub.begin, hub.close]
+inputs: [hub.start, hub.begin, hub.close]

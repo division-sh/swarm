@@ -7,28 +7,14 @@ import (
 
 func TestEventCatalogPayloadFieldSupportsEveryWave1Shape(t *testing.T) {
 	tests := []struct {
-		name        string
-		yaml        string
-		wantType    string
-		wantPattern string
-		wantCite    string
+		name     string
+		yaml     string
+		wantType string
 	}{
 		{name: "scalar", yaml: "payload: json\n", wantType: "json"},
 		{name: "singleton list", yaml: "payload: [json]\n", wantType: "[json]"},
-		{name: "mapping", yaml: "payload: {type: json, description: raw provider envelope}\n", wantType: "json"},
+		{name: "mapping", yaml: "payload: {type: json}\n", wantType: "json"},
 		{name: "mapping list", yaml: "payload: {type: '[json]'}\n", wantType: "[json]"},
-		{
-			name: "mapping refinements and citation",
-			yaml: `payload:
-  type: text
-  description: provider payload
-  pattern: "^[a-z]+$"
-  citation:
-    criteria: provider_contract
-    allowed_classes: [raw]
-`,
-			wantType: "text", wantPattern: "^[a-z]+$", wantCite: "provider_contract",
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,7 +26,7 @@ func TestEventCatalogPayloadFieldSupportsEveryWave1Shape(t *testing.T) {
 			if !ok {
 				t.Fatal("canonical payload property was discarded")
 			}
-			if field.Type != tc.wantType || field.Refinements.Pattern != tc.wantPattern || field.Citation.Criteria != tc.wantCite {
+			if field.Type != tc.wantType {
 				t.Fatalf("payload field = %#v", field)
 			}
 		})
@@ -55,9 +41,8 @@ func TestEventCatalogPayloadFieldDistinguishesRetiredBlocksFromMalformedFields(t
 	}{
 		{name: "properties block", yaml: "payload:\n  properties:\n    message: json\n", wantErr: "not a nested payload block"},
 		{name: "child field block", yaml: "payload:\n  message: json\n", wantErr: "not a nested payload block"},
-		{name: "missing type", yaml: "payload:\n  description: raw provider envelope\n", wantErr: "event payload field type is required"},
+		{name: "missing type", yaml: "payload: {}\n", wantErr: "event payload field type is required"},
 		{name: "unknown metadata with type", yaml: "payload:\n  type: json\n  mystery: true\n", wantErr: "event payload field field \"mystery\" is not supported"},
-		{name: "invalid refinement", yaml: "payload:\n  type: text\n  pattern: \"[\"\n", wantErr: "must compile as a regular expression"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -150,18 +150,13 @@ func (s CompiledEventSchema) AcceptanceSchema() map[string]any {
 }
 
 // EventSchema is the immutable owner's tooling/readback projection, including
-// diagnostic descriptions and citations that do not belong in the digest.
+// diagnostic descriptions that do not belong in the digest.
 func (s CompiledEventSchema) EventSchema() EventSchema {
 	if s.value == nil {
 		return EventSchema{}
 	}
 	out := s.value.readback
 	out.Schema = cloneEventSchemaMap(out.Schema)
-	out.CitationFields = make(map[string]CriteriaCitation, len(s.value.readback.CitationFields))
-	for name, citation := range s.value.readback.CitationFields {
-		citation.AllowedClasses = append([]string(nil), citation.AllowedClasses...)
-		out.CitationFields[name] = citation
-	}
 	return out
 }
 

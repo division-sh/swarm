@@ -19,13 +19,13 @@ func TestReceiverConfigurationRetiredForms(t *testing.T) {
 	}
 	for _, value := range []string{"null", "{}", "{brief: payload.brief}", "{brief: payload.settings.brief}"} {
 		t.Run("initialize/"+value, func(t *testing.T) {
-			_, err := admitSchemaFragment("pins:\n  inputs:\n    - event: work.ready\n      initialize: " + value + "\n")
+			_, err := admitSchemaFragment("inputs:\n  - event: work.ready\n    initialize: " + value + "\n")
 			if err == nil {
 				t.Fatal("retired input mapping admitted")
 			}
 		})
 	}
-	if _, err := admitSchemaFragment("pins: {inputs: [work.ready], outputs: [work.done]}\n"); err != nil {
+	if _, err := admitSchemaFragment("inputs: [work.ready]\noutputs: [work.done]\n"); err != nil {
 		t.Fatal(err)
 	}
 }

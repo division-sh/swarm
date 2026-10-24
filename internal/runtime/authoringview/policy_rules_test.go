@@ -32,8 +32,8 @@ func TestR3DescribeEffectiveLiteralPolicyAndRules(t *testing.T) {
 		}
 	}
 	view.Root.Policy["business"].(map[string]any)["value"] = 99
-	view.Root.Rules["review"].Criteria.Rules[0].ID = "changed"
-	if bundle.Policy.Values["business"].Value.(map[string]any)["value"] != 3 || bundle.Rules["review"].Criteria.Rules[0].ID != "R1" {
+	view.Root.Rules["review"].Validation.Rules[0].ID = "changed"
+	if bundle.Policy.Values["business"].Value.(map[string]any)["value"] != 3 || bundle.Rules["review"].Validation.Rules[0].ID != "R1" {
 		t.Fatal("describe aliases admitted source")
 	}
 }

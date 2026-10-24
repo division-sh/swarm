@@ -21,9 +21,9 @@ func CopyPipelineConnectedDeliveryCollision(t testing.TB) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", "name: connected-collision\nconnect:\n  - {event: deploy.done, from: producer, to: receiver, rename: deploy.accepted}\n  - {event: deploy.done, from: producer, to: receiver, rename: deploy.audited}\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "test_entity: {}\n")
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\npins:\n  outputs: [deploy.done]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\noutputs: [deploy.done]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n")
-	writeClosedVariantFile(t, root, "receiver/schema.yaml", "name: receiver\npins:\n  inputs: [deploy.accepted, deploy.audited]\n")
+	writeClosedVariantFile(t, root, "receiver/schema.yaml", "name: receiver\ninputs: [deploy.accepted, deploy.audited]\n")
 	writeClosedVariantFile(t, root, "receiver/nodes.yaml", "receiver-node:\n  deploy.accepted: {}\n  deploy.audited: {}\n")
 	return root
 }

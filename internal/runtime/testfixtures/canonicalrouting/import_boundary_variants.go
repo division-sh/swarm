@@ -59,11 +59,10 @@ connect:
 `
 		rootSchema = `
 name: import-boundary-alias
-pins:
-  inputs:
-    - parent.lead_enriched
-  outputs:
-    - parent.lead_captured
+inputs:
+  - parent.lead_enriched
+outputs:
+  - parent.lead_captured
 `
 		rootEvents = "\nparent.lead_captured:\n"
 	}
@@ -78,11 +77,10 @@ parent-listener:
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
 name: worker
-`+instance+`pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.completed
+`+instance+`inputs:
+  - work.requested
+outputs:
+  - work.completed
 `)
 	workerEvents := "work.completed:\n"
 	if !connected {

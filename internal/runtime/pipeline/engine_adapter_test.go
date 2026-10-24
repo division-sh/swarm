@@ -1041,10 +1041,10 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnDeclarativeSurface(t
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
+		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - parent.trigger\noutputs:\n  - parent.result\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 
-		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
+		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\ninputs:\n  - child.start\noutputs:\n  - child.internal\n",
 		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -1096,10 +1096,10 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSu
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n",
+		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - parent.trigger\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\n",
 
-		"child/schema.yaml":   "name: child\ninstance: entity_id\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.done\n",
+		"child/schema.yaml":   "name: child\ninstance: entity_id\nstages:\n  waiting: {}\n  processed: {final: true}\ninputs:\n  - child.start\noutputs:\n  - child.done\n",
 		"child/entities.yaml": "work:\n  entity_id: text\n",
 		"child/events.yaml":   "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
 	})
@@ -1153,10 +1153,10 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
+		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - parent.trigger\noutputs:\n  - parent.result\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 
-		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
+		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\ninputs:\n  - child.start\noutputs:\n  - child.internal\n",
 		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -1206,11 +1206,11 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarati
 func TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
+		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - parent.trigger\noutputs:\n  - parent.result\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
-		"types.yaml":  "enums:\n  Mode:\n    values: [fast, deep]\n    default: fast\n",
+		"types.yaml":  "Mode: [\"fast\", \"deep\"]\n",
 
-		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
+		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\ninputs:\n  - child.start\noutputs:\n  - child.internal\n",
 		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n",
 	})
 
@@ -1313,11 +1313,11 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 func TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  outputs:\n    - handoff.completed\n",
-		"types.yaml":  "types:\n  Evidence:\n    root_field: text\n",
+		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\noutputs:\n  - handoff.completed\n",
+		"types.yaml":  "Evidence:\n  root_field: text\n",
 		"events.yaml": "handoff.completed:\n  evidence: Evidence\n",
 
-		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  outputs:\n    - handoff.completed\n",
+		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\noutputs:\n  - handoff.completed\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {

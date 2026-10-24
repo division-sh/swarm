@@ -2,9 +2,8 @@ name: test-wildcard-cross-flow
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - trigger.alpha
+inputs:
+  - trigger.alpha
 connect:
   - event: trigger.alpha
     from: .

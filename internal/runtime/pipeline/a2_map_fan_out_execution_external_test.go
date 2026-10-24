@@ -88,13 +88,12 @@ stages:
   awaiting: {}
   ready: {final: true}
   attention: {final: true}
-pins:
-  inputs:
-    - seed
-    - batch.ready
-    - batch.replace
-  outputs:
-    - item.ready
+inputs:
+  - seed
+  - batch.ready
+  - batch.replace
+outputs:
+  - item.ready
 `,
 		"entities.yaml": "work:\n  items:\n    type: map[text][integer]\n    initial: {before: [999]}\n",
 		"events.yaml": `seed:

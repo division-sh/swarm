@@ -2,9 +2,8 @@ name: test-dual-delivery
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.completed
-  outputs:
-    - task.finalized
-    - task.audited
+inputs:
+  - task.completed
+outputs:
+  - task.finalized
+  - task.audited

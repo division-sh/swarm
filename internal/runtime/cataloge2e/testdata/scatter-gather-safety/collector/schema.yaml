@@ -5,7 +5,6 @@ stages:
   awaiting: {}
   complete: {final: true}
   failed: {final: true}
-pins:
-  inputs:
-    - batch.opened
-    - item.reported
+inputs:
+  - batch.opened
+  - item.reported

@@ -2,15 +2,14 @@ name: portfolio
 stages:
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - portfolio.opened
-    - portfolio.account.register.requested
-    - portfolio.accounts.register.requested
-    - portfolio.membership.seeded
-    - portfolio.notify.requested
-    - portfolio.close.requested
-  outputs:
-    - account.registered
-    - account.notify.requested
-    - portfolio.closed
+inputs:
+  - portfolio.opened
+  - portfolio.account.register.requested
+  - portfolio.accounts.register.requested
+  - portfolio.membership.seeded
+  - portfolio.notify.requested
+  - portfolio.close.requested
+outputs:
+  - account.registered
+  - account.notify.requested
+  - portfolio.closed

@@ -2,6 +2,5 @@ name: flow-b
 stages:
   waiting: {}
   finished: {final: true}
-pins:
-  inputs:
-    - beta.start
+inputs:
+  - beta.start

@@ -5,4 +5,4 @@ stages:
   timed:
     timers: [{after: 1s, advances_to: done}]
   done: {final: true}
-pins: {inputs: [overlap.start, overlap.arm, overlap.finish]}
+inputs: [overlap.start, overlap.arm, overlap.finish]

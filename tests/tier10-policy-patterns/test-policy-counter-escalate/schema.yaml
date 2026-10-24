@@ -1,6 +1,5 @@
 stages: []
-pins:
-  inputs:
-    - attempt.requested
-  outputs:
-    - attempt.limit_hit
+inputs:
+  - attempt.requested
+outputs:
+  - attempt.limit_hit

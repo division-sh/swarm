@@ -279,9 +279,6 @@ func dataAccumulationPayloadSourceRefs(write runtimecontracts.WorkflowDataWrite)
 	}
 	if source := strings.TrimSpace(write.Source()); source != "" {
 		description := fmt.Sprintf("source field %q", source)
-		if strings.TrimSpace(write.Field) != "" && strings.TrimSpace(write.SourceField) == "" {
-			description = fmt.Sprintf("writes '%s'", source)
-		}
 		return []dataAccumulationPayloadSourceRef{{
 			Field:       source,
 			Description: description,

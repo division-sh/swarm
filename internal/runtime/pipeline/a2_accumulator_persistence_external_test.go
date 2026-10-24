@@ -54,20 +54,18 @@ func newA2AccumulatorPersistenceProof(t *testing.T, selected gateRecoveryStoreCa
 		"schema.yaml": `name: accumulator-persistence-proof
 stages:
   active: {}
-pins:
-  inputs:
-    - seed
-    - item.keyed
-    - item.nested
-    - item.unkeyed
-  outputs:
-    - item.recorded
+inputs:
+  - seed
+  - item.keyed
+  - item.nested
+  - item.unkeyed
+outputs:
+  - item.recorded
 `,
 		"entities.yaml": "work:\n  marker: text?\n",
-		"types.yaml": `types:
-  AuthoredNested:
-    id: text
-    marker: text
+		"types.yaml": `AuthoredNested:
+  id: text
+  marker: text
 `,
 		"events.yaml": `seed:
 item.keyed: &item

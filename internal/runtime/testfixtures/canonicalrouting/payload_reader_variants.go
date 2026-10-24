@@ -29,9 +29,9 @@ func CopyLocalWildcardPayload(t testing.TB, variant LocalWildcardPayloadVariant)
 	}
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":          "name: wildcard-payload-proof\npins:\n  inputs:\n    - start\n  outputs:\n    - start\nconnect:\n  - {event: start, from: ., to: worker}\n",
+		"schema.yaml":          "name: wildcard-payload-proof\ninputs:\n  - start\noutputs:\n  - start\nconnect:\n  - {event: start, from: ., to: worker}\n",
 		"events.yaml":          "start:\n",
-		"worker/schema.yaml":   "name: worker\npins:\n  inputs:\n    - start\n",
+		"worker/schema.yaml":   "name: worker\ninputs:\n  - start\n",
 		"worker/entities.yaml": "work: {}\n",
 		"worker/events.yaml":   "task.done:\n  work_id: text\ntask.failed:\n  work_id: " + secondType + "\n",
 		"worker/nodes.yaml":    "observer:\n  \"" + pattern + "\":\n    rules:\n      - when: payload.work_id != \"\"\n",
@@ -49,9 +49,9 @@ func CopyScalarFanOutPayloadReader(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":           "name: scalar-fan-out-proof\npins:\n  inputs:\n    - scan.requested\n  outputs:\n    - scan.requested\nconnect:\n  - {event: scan.requested, from: ., to: scanner}\n",
+		"schema.yaml":           "name: scalar-fan-out-proof\ninputs:\n  - scan.requested\noutputs:\n  - scan.requested\nconnect:\n  - {event: scan.requested, from: ., to: scanner}\n",
 		"events.yaml":           "scan.requested:\n  industries: [text]\n",
-		"scanner/schema.yaml":   "name: scanner\npins:\n  inputs:\n    - scan.requested\n",
+		"scanner/schema.yaml":   "name: scanner\ninputs:\n  - scan.requested\n",
 		"scanner/entities.yaml": "scan: {}\n",
 		"scanner/events.yaml":   "market_research.industry_assigned:\n  industry: text\n  taxonomy_categories: [text]\n",
 		"scanner/nodes.yaml": `scan-orchestrator:

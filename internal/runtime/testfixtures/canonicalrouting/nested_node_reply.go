@@ -17,9 +17,8 @@ func CopyNestedNodeReplyDepth3(t testing.TB) string {
 stages:
   waiting: {}
   done: {final: true}
-pins:
-  inputs: [request.started, request.stop]
-  outputs: [request.finished]
+inputs: [request.started, request.stop]
+outputs: [request.finished]
 connect:
   - {event: provider.requested, from: ., to: provider}
   - event: provider.replied
@@ -48,9 +47,8 @@ func CopyNestedNodeReplyTwoRequesters(t testing.TB) string {
 stages:
   waiting: {}
   done: {final: true}
-pins:
-  inputs: [r1.started, r2.started, request.stop]
-  outputs: [request.finished]
+inputs: [r1.started, r2.started, request.stop]
+outputs: [request.finished]
 connect:
   - {event: r1.dispatched, from: ., to: r1, rename: request.dispatched}
   - {event: r2.dispatched, from: ., to: r2, rename: request.dispatched}
@@ -123,9 +121,8 @@ result-observer:
 `)
 	for _, requester := range []string{"r1", "r2"} {
 		writeClosedVariantFile(t, root, requester+"/schema.yaml", "name: "+requester+`
-pins:
-  inputs: [request.dispatched, provider.replied]
-  outputs: [provider.requested, request.finished]
+inputs: [request.dispatched, provider.replied]
+outputs: [provider.requested, request.finished]
 `)
 		writeClosedVariantFile(t, root, requester+"/events.yaml", `provider.requested:
   account_id: text
@@ -210,9 +207,8 @@ t.requested:
 `
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", nodes)
 	writeClosedVariantFile(t, root, "t/schema.yaml", `name: t
-pins:
-  inputs: [t.requested, u.replied]
-  outputs: [u.requested, t.replied]
+inputs: [t.requested, u.replied]
+outputs: [u.requested, t.replied]
 `)
 	writeClosedVariantFile(t, root, "t/events.yaml", `t.replied:
   account_id: text
@@ -238,9 +234,8 @@ u.requested:
         result: payload.result
 `)
 	writeClosedVariantFile(t, root, "u/schema.yaml", `name: u
-pins:
-  inputs: [u.requested]
-  outputs: [u.replied]
+inputs: [u.requested]
+outputs: [u.replied]
 `)
 	writeClosedVariantFile(t, root, "u/events.yaml", `u.replied:
   account_id: text

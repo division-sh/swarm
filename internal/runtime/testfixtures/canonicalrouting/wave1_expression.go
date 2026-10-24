@@ -10,9 +10,8 @@ func CopyWave1Expression(t testing.TB) string {
 	root := t.TempDir()
 
 	writeClosedVariantFile(t, root, filepath.Join("schema.yaml"), `name: wave1-expression-fixture
-pins:
-  inputs: [task.assigned, task.feedback]
-  outputs: [task.result]
+inputs: [task.assigned, task.feedback]
+outputs: [task.result]
 connect:
   - {event: task.assigned, from: ., to: child}
   - {event: task.feedback, from: ., to: child}
@@ -25,9 +24,8 @@ stages:
   idle: {}
   working: {}
   done: {final: true}
-pins:
-  inputs: [task.assigned, task.feedback]
-  outputs: [task.result]
+inputs: [task.assigned, task.feedback]
+outputs: [task.result]
 `)
 	writeClosedVariantFile(t, root, filepath.Join("child", "entities.yaml"), `
 task:

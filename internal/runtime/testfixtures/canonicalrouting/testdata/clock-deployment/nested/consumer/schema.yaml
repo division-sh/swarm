@@ -1,3 +1,2 @@
 stages: []
-pins:
-  inputs: [poll.tick]
+inputs: [poll.tick]

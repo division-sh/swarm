@@ -7718,17 +7718,14 @@ func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowCont
 stages:
   pending: {}
   scored: {final: true}
-pins:
-  inputs:
-    - score.dimension_complete
-  outputs:
-    - vertical.scored
+inputs:
+  - score.dimension_complete
+outputs:
+  - vertical.scored
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `
-types:
-  DimensionScore:
-    dimension: text
-    score: integer
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `DimensionScore:
+  dimension: text
+  score: integer
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
 vertical:
@@ -7780,18 +7777,15 @@ func loadEngineSingletonCoordinatorFlowBundle(t *testing.T) *runtimecontracts.Wo
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `name: coordinator
 stages:
   active: {}
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), `
-types:
-  VerticalState:
-    status: text
-    active_jobs: [Job]
-  Job:
-    id: text
-    title: text
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), `VerticalState:
+  status: text
+  active_jobs: [Job]
+Job:
+  id: text
+  title: text
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "entities.yaml"), `
 coordinator_state:

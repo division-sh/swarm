@@ -64,7 +64,6 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	out.Tools = append([]string(nil), in.Tools...)
 	out.ToolsTier2 = append([]string(nil), in.ToolsTier2...)
 	out.FlowDataAccess = append([]string(nil), in.FlowDataAccess...)
-	out.Criteria = append([]string(nil), in.Criteria...)
 	out.EmitEvents = append([]string(nil), in.EmitEvents...)
 	return out
 }

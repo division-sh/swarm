@@ -3,8 +3,7 @@ stages:
   promoted: {final: true}
   demoted: {final: true}
   rejected: {final: true}
-pins:
-  inputs:
-    - score.final
-  outputs:
-    - result.demoted
+inputs:
+  - score.final
+outputs:
+  - result.demoted

@@ -3,9 +3,8 @@ stages:
   pending: {}
   assigned: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
-  outputs:
-    - task.finalized
-    - task.acknowledged
+inputs:
+  - task.assigned
+outputs:
+  - task.finalized
+  - task.acknowledged

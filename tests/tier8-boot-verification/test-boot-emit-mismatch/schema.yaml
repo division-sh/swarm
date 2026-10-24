@@ -1,9 +1,8 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.requested
+inputs:
+  - task.requested
 required_agents:
   - role: worker
     subscribes_to: [task.requested]

@@ -5,8 +5,7 @@ stages:
   consume: {}
   done:
     final: true
-pins:
-  inputs:
-    - work.opened
-    - work.assessed
-    - work.annotated
+inputs:
+  - work.opened
+  - work.assessed
+  - work.annotated

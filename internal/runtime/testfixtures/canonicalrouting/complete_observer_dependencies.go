@@ -20,28 +20,25 @@ instance: item_id
 stages:
   active: {}
   done: {final: true}
-pins:
-  outputs:
-    - work.ready
+outputs:
+  - work.ready
 `, "work.ready:\n  item_id: text\n", "producer_state:\n  item_id: {type: text}\n", "")
 	writeLegacyInstanceFlow(t, root, "other", `name: other
 instance: item_id
 stages:
   active: {}
   done: {final: true}
-pins:
-  outputs:
-    - other.ready
+outputs:
+  - other.ready
 `, "other.ready:\n  item_id: text\n", "other_state:\n  item_id: {type: text}\n", "")
 	writeLegacyInstanceFlow(t, root, "observer", `name: observer
 instance: item_id
 stages:
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - work.ready
-    - other.ready
+inputs:
+  - work.ready
+  - other.ready
 `, "", "observer_state:\n  item_id: {type: text}\n", `observe:
   {}
 `)
@@ -56,8 +53,7 @@ func CopyConstructibleObserverDependencies(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   active: {}
   done: {final: true}
-pins:
-  inputs: [producer.create, other.create, observer.create]
+inputs: [producer.create, other.create, observer.create]
 connect:
   - {event: work.ready, from: producer, to: observer, resolution: select}
   - {event: other.ready, from: other, to: observer, resolution: select}
@@ -83,7 +79,7 @@ observer.create:
 			}
 			outputs = "  outputs: [" + local + "]\n"
 		}
-		schema := "name: " + flow + "\ninstance: item_id\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: " + inputs + "\n" + outputs
+		schema := "name: " + flow + "\ninstance: item_id\nstages:\n  active: {}\n  done: {final: true}\ninputs: " + inputs + "\n" + outputs
 		events := ""
 		if local != "" {
 			events += local + ":\n  item_id: text\n"
@@ -104,8 +100,7 @@ func CopyExecutableObserverDependencies(t testing.TB) string {
 	root := CopyConstructibleObserverDependencies(t)
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   active: {}
-pins:
-  inputs: [producer.create, other.create, observer.create, producer.fire, other.fire, observer.stop]
+inputs: [producer.create, other.create, observer.create, producer.fire, other.fire, observer.stop]
 connect:
   - {event: work.ready, from: producer, to: observer, resolution: select}
   - {event: other.ready, from: other, to: observer, resolution: select}
@@ -156,7 +151,7 @@ observer.stop:
 		} else {
 			local = "publisher:\n  item.fired:\n    emit: {event: " + output + ", fields: {item_id: payload.observer_id, marker: payload.marker}}\n"
 		}
-		schema := "name: " + flow + "\ninstance: item_id\n" + stages + "pins:\n  inputs: " + inputs + "\n  outputs: [" + output + "]\n"
+		schema := "name: " + flow + "\ninstance: item_id\n" + stages + "inputs: " + inputs + "\n  outputs: [" + output + "]\n"
 		events := output + ":\n  item_id: text\n  marker: text\n"
 		writeLegacyInstanceFlow(t, root, flow, schema, events, flow+"_state:\n  item_id: {type: text}\n", nodes+local)
 	}

@@ -3,10 +3,9 @@ stages:
   stage_one: {}
   stage_two: {}
   complete: {final: true}
-pins:
-  inputs:
-    - stage.one_done
-    - stage.two_done
-  outputs:
-    - stage.two_start
-    - stage.complete
+inputs:
+  - stage.one_done
+  - stage.two_done
+outputs:
+  - stage.two_start
+  - stage.complete

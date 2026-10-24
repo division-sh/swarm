@@ -93,7 +93,7 @@ func TestListSpellingRetirementPresenceMatrix(t *testing.T) {
 func TestListSpellingRetirementMetadataAndData(t *testing.T) {
 	for _, surface := range []string{"types", "entities", "events"} {
 		t.Run(surface, func(t *testing.T) {
-			typeRef, optional, _, err := listRetirementDecode(t, surface, listRetirementField(t, "{type: '[text]?', length: {min: 0, max: 3}, description: 'list<T> is business text'}"))
+			typeRef, optional, _, err := listRetirementDecode(t, surface, listRetirementField(t, "{type: '[text]?'} # list<T> is business text\n"))
 			if err != nil || typeRef != "[text]" || !optional {
 				t.Fatalf("metadata type slot changed: %q/%v/%v", typeRef, optional, err)
 			}
@@ -139,12 +139,12 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 				root := t.TempDir()
 				files := map[string]string{
 					"schema.yaml":   "name: list-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
-					"types.yaml":    "types:\n  ProbeItem:\n    value: text\n",
+					"types.yaml":    "ProbeItem:\n  value: text\n",
 					"entities.yaml": "probe:\n  item: text\n",
 				}
 				switch surface {
 				case "types":
-					files["types.yaml"] += "  Container:\n    items: " + strings.ReplaceAll(form.source, "\n", "\n  ") + "\n"
+					files["types.yaml"] += "Container:\n  items: " + form.source + "\n"
 				case "entities":
 					files["entities.yaml"] = "probe:\n  items: " + form.source + "\n"
 				case "events":
@@ -314,7 +314,7 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 					prefix := ""
 					switch surface {
 					case "types":
-						prefix = "types:\n  Unused:\n    items: "
+						prefix = "Unused:\n  items: "
 					case "entities":
 						prefix = "probe:\n  items: "
 					case "events":
@@ -358,7 +358,7 @@ func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 			root := t.TempDir()
 			for file, source := range map[string]string{
 				"schema.yaml":   "name: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
-				"types.yaml":    "types:\n  " + name + ":\n    value: text\n  Holder:\n    item: " + name + "\n",
+				"types.yaml":    name + ":\n  value: text\nHolder:\n  item: " + name + "\n",
 				"entities.yaml": "probe:\n  item: " + name + "\n",
 				"events.yaml":   "proof.received:\n  item: " + name + "\n",
 				"nodes.yaml":    "collector:\n  state_schema:\n    fields:\n      item: " + name + "\n",

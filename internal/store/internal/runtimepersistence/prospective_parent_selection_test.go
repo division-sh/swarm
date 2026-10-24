@@ -45,7 +45,7 @@ func newNativeProspectiveSelection(t *testing.T, backend string) (receiverConfig
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":          "name: prospective-selection-proof\n",
-		"worker/schema.yaml":   "name: worker\ninstance: item_id\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - item.created\n",
+		"worker/schema.yaml":   "name: worker\ninstance: item_id\nstages:\n  pending: {}\n  done: {final: true}\ninputs:\n  - item.created\n",
 		"worker/entities.yaml": "item:\n  item_id: text\n",
 		"worker/events.yaml":   "item.created:\n  item_id: text\nitem.finished:\n",
 		"worker/nodes.yaml":    "progress:\n  item.finished:\n    advances_to: done\n",

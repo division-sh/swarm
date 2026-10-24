@@ -330,7 +330,7 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 				EventHandlers: map[string]SystemNodeEventHandler{
 					"task.start": {
 						DataAccumulation: WorkflowDataAccumulation{
-							Writes: []WorkflowDataWrite{{Field: "status"}},
+							Writes: []WorkflowDataWrite{{SourceField: "status", TargetField: "status"}},
 						},
 						Emit: EmitSpec{Event: "task.done"},
 					},

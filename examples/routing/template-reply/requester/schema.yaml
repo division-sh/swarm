@@ -1,9 +1,8 @@
 name: requester
 instance: account_id
-pins:
-  inputs:
-    - requester.setup
-    - requester.requested
-    - provider.replied
-  outputs:
-    - provider.requested
+inputs:
+  - requester.setup
+  - requester.requested
+  - provider.replied
+outputs:
+  - provider.requested

@@ -122,9 +122,8 @@ func TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"scoring/schema.yaml": `name: scoring
-pins:
-  outputs:
-    - scoring.requested
+outputs:
+  - scoring.requested
 `,
 		"scoring/nodes.yaml": `scoring-node:
   {}

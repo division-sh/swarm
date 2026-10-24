@@ -1,4 +1,3 @@
 name: consumer
-pins:
-  inputs:
-    - work.ready
+inputs:
+  - work.ready

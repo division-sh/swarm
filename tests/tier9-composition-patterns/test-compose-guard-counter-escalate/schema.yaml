@@ -1,6 +1,5 @@
 stages: []
-pins:
-  inputs:
-    - retry.requested
-  outputs:
-    - limit.reached
+inputs:
+  - retry.requested
+outputs:
+  - limit.reached

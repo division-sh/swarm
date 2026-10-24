@@ -12,11 +12,10 @@ stages:
   waiting:
     timers:
       - {after: 40ms, emit: work.ready}
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.ready
+inputs:
+  - work.requested
+outputs:
+  - work.ready
 `)
 	writeClosedVariantFile(t, root, "producer/entities.yaml", "test_entity: {}\n")
 	return root

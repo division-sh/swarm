@@ -118,13 +118,13 @@ func TestCheckedYAMLRoutingArtifactRegistryEqualsLiveCensus(t *testing.T) {
 
 func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 	cases := map[string]string{
-		"flow-style-external": `{pins: {inputs: {events: [{name: ingress, event: ingress.received, source: external}]}}}`,
+		"flow-style-external": `{inputs: {events: [{name: ingress, event: ingress.received, source: external}]}}`,
 		"broadcast":           "emit:\n  event: result.ready\n  broadcast: true\n",
-		"node-subscription":   "worker:\n  subscribes_to: [work.requested]\n",
+		"node-subscription":   "worker:\n  {}\n",
 		"agent-subscription":  "worker:\n  subscriptions: [work.requested]\n",
-		"producer":            "worker:\n  produces: [work.completed]\n",
+		"producer":            "worker:\n  {}\n",
 		"handler-derived":     "worker:\n  work.requested: {emit: work.completed}\n",
-		"second-document":     "name: inert\n---\nworker:\n  subscribes_to: [work.requested]\n",
+		"second-document":     "name: inert\n---\nworker:\n",
 	}
 	for name, routing := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -164,7 +164,7 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\nversion: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("pins: {inputs: {events: [{name: ingress, event: ingress.received, source: external}]}}\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("inputs: {events: [{name: ingress, event: ingress.received, source: external}]}\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		live := liveCheckedYAMLRoutingRoots(t, repo)
@@ -395,7 +395,7 @@ func goFunctionExists(t testing.TB, path, name string) bool {
 
 func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
 	for name, source := range map[string]string{
-		"pins":             "pins: {inputs: {events: []}}\n",
+		"pins":             "inputs: {events: []}\n",
 		"connect":          "connect: [{from: a.out, to: b.in}]\n",
 		"emit":             "node: {emit: {event: result.ready}}\n",
 		"subscription":     "node: {subscribes_to: [work.ready]}\n",
@@ -413,7 +413,7 @@ func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
 			}
 		})
 	}
-	if err := routingOverlayError("types:\n  Account:\n    score: number\n"); err != nil {
+	if err := routingOverlayError("Account:\n  score: number\n"); err != nil {
 		t.Fatalf("non-routing overlay was rejected: %v", err)
 	}
 }
@@ -454,7 +454,7 @@ func TestCanonicalRoutingPublicAPIHasNoGenericPositiveMutation(t *testing.T) {
 }
 
 func TestCanonicalRoutingParserSnippetDecodesOneDocument(t *testing.T) {
-	snippet := NewParserSnippet(t, "pins: {inputs: {events: []}}\n")
+	snippet := NewParserSnippet(t, "inputs: {events: []}\n")
 	var decoded map[string]any
 	if err := snippet.Decode(&decoded); err != nil {
 		t.Fatal(err)

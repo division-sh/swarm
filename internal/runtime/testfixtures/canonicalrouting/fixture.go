@@ -130,11 +130,10 @@ imports:
   provider_trigger_events:
     - provider: telegram
       event: inbound.telegram.text_message
-pins:
-  inputs:
-    - inbound.telegram.text_message
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.text_message
+outputs:
+  - inbound.telegram.text_message
 connect:
   - {event: inbound.telegram.text_message, from: ., to: telegram-chat, resolution: select-or-create}
 `)
@@ -357,13 +356,12 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 		t.Fatalf("unsupported retired static mutation %q", mutation)
 	}
 	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
-pins:
-  inputs:
-    - account.requested
-    - legacy.seen
-  outputs:
-    - account.requested
-    - legacy.seen
+inputs:
+  - account.requested
+  - legacy.seen
+outputs:
+  - account.requested
+  - legacy.seen
 connect:
   - {event: account.requested, from: ., to: producer}
   - {event: account.ready, from: producer, to: account, resolution: select-or-create}
@@ -374,9 +372,8 @@ connect:
 stages:
   active: {}
   archived: {final: true}
-pins:
-  inputs:
-    - legacy.seen
+inputs:
+  - legacy.seen
 `)
 	writeClosedNegativeFile(t, root, "legacy_static/entities.yaml", `legacy_record:
   legacy_id:
@@ -406,9 +403,8 @@ func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
 	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
 stages:
   active: {}
-pins:
-  inputs:
-    - subject.created
+inputs:
+  - subject.created
 `)
 	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
   subject.created:

@@ -26,9 +26,8 @@ func TestRunVerifyCommand_PolicyLookupExecutablePathBoundary(t *testing.T) {
 stages:
   active: {}
   done: {final: true}
-pins:
-  inputs: [requested]
-  outputs: [completed]
+inputs: [requested]
+outputs: [completed]
 `)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "case: {}\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "requested:\n  selector: "+tc.fieldType+"\ncompleted:\n  choice: text\n")

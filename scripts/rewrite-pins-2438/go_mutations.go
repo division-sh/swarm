@@ -44,7 +44,7 @@ var pinMutationSpellings = map[string][]string{
 
 var inlinePinSpellings = map[string][]string{
 	"internal/runtime/bus/routing_derivation_test.go":          {"  inputs:\n    events: [root.start]", "  inputs: [root.start]"},
-	"internal/runtime/workflow_timer_startup_recovery_test.go": {"pins:\n  inputs:\n    events: [generic.tick]", "pins:\n  inputs: [generic.tick]"},
+	"internal/runtime/workflow_timer_startup_recovery_test.go": {"inputs:\n  events: [generic.tick]", "inputs: [generic.tick]"},
 	"internal/serveapp/provider_alias_authority_test.go": {
 		"  inputs:\n    events: [", "  inputs: [",
 		"  outputs:\n    events: [", "  outputs: [",
@@ -55,7 +55,7 @@ var inlinePinSpellings = map[string][]string{
 		"      - event: task.assigned\n        sink: harness\n", "    - task.assigned\n",
 	},
 	"internal/store/internal/runtimepersistence/mutation_protocol_composed_journey_test.go": {"      - start.closed\n", "    - start.closed\n", "      - fanout.requested\n", "    - fanout.requested\n", "events: [work.requested", "outputs: [work.requested", "events: [fanout.child, work.requested", "outputs: [fanout.child, work.requested"},
-	"internal/cliapp/main_test.go":                                        {"pins:\n  inputs:\n    events: [item.arrived]", "pins:\n  inputs: [item.arrived]"},
+	"internal/cliapp/main_test.go":                                        {"inputs:\n  events: [item.arrived]", "inputs: [item.arrived]"},
 	"internal/runtime/connector_schema_binding_test.go":                   {"      - activity.requested", "    - activity.requested", "      - inbound.telegram.text_message", "    - inbound.telegram.text_message"},
 	"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go": {"      - %s\n", "    - %s\n"},
 	"internal/runtime/conformance/fan_out_b17_mixed_dependency_test.go":   {"      - account.task.completed", "    - account.task.completed", "      - account.tasks.completed", "    - account.tasks.completed", "      - account.notification.completed", "    - account.notification.completed"},

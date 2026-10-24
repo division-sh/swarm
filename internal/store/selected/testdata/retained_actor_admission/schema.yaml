@@ -1,6 +1,5 @@
 name: retained-actor-admission
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.completed
+inputs:
+  - work.requested
+outputs:
+  - work.completed

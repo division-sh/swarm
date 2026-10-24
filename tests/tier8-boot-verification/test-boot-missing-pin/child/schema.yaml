@@ -3,9 +3,8 @@ stages:
   idle: {}
   working: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
-    - task.feedback
-  outputs:
-    - task.result
+inputs:
+  - task.assigned
+  - task.feedback
+outputs:
+  - task.result

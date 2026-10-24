@@ -87,9 +87,8 @@ func newIssue2564PublicationFixture(t *testing.T, backend string, observer *issu
 		"schema.yaml": `name: issue2564-publication-handoff
 stages:
   active: {}
-pins:
-  inputs: [bump, recurse]
-  outputs: [child]
+inputs: [bump, recurse]
+outputs: [child]
 `,
 		"entities.yaml": `work:
   count: {type: integer, initial: 0}

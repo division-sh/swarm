@@ -1,10 +1,9 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - root.check
-    - grandchild.check
+inputs:
+  - root.check
+  - grandchild.check
 connect:
   - event: grandchild.check
     from: .

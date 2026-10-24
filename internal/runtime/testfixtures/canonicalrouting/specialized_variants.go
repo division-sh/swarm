@@ -15,16 +15,15 @@ func CopyOutputModeVerify(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: output-mode-verify\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: output-mode-verify\ninputs:\n  - task.assigned\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeLegacyInstanceFlow(t, root, "child", `name: child
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
+inputs:
+  - task.assigned
 `, "", `case:
   priority:
     type: integer
@@ -50,9 +49,8 @@ func CopyManagedNativeLifecycle(t testing.TB, agentID string) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", `name: managed-native-lifecycle
 stages: []
-pins:
-  inputs:
-    - task.requested
+inputs:
+  - task.requested
 `)
 	writeClosedVariantFile(t, root, "agents.yaml", fmt.Sprintf(`%s:
   type: stub
@@ -80,13 +78,12 @@ func CopyDescribeStageGraph(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: stage-graph\npins:\n  inputs:\n    - ticket.opened\n    - ticket.closed\n  outputs:\n    - ticket.opened\n    - ticket.closed\nconnect:\n  - {event: ticket.opened, from: ., to: support}\n  - {event: ticket.closed, from: ., to: support}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: stage-graph\ninputs:\n  - ticket.opened\n  - ticket.closed\noutputs:\n  - ticket.opened\n  - ticket.closed\nconnect:\n  - {event: ticket.opened, from: ., to: support}\n  - {event: ticket.closed, from: ., to: support}\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
 	writeLegacyInstanceFlow(t, root, "support", `name: support
-pins:
-  inputs:
-    - ticket.opened
-    - ticket.closed
+inputs:
+  - ticket.opened
+  - ticket.closed
 stages:
   waiting: {}
   active:
@@ -196,15 +193,14 @@ ingress:
         event: inbound.partner_ack
         delivery_id: {source: body_sha256}
         payload: raw
-pins:
-  inputs:
-    - inbound.telegram
-    - inbound.telegram.text_message
-    - inbound.intercom
-    - inbound.acme_public
-    - inbound.partner_auth
-    - inbound.partner_open
-    - inbound.partner_ack
+inputs:
+  - inbound.telegram
+  - inbound.telegram.text_message
+  - inbound.intercom
+  - inbound.acme_public
+  - inbound.partner_auth
+  - inbound.partner_open
+  - inbound.partner_ack
 `,
 		"matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n",
 		"matrix/events.yaml":   inboundAdmissionEvents(),
@@ -247,10 +243,9 @@ func CopyServedTestSetup(t testing.TB) string {
 stages:
   waiting: {}
   done: {final: true}
-pins:
-  inputs:
-    - widget.started
-    - widget.scored
+inputs:
+  - widget.started
+  - widget.scored
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "widget:\n  score: integer\n")
 	writeClosedVariantFile(t, root, "events.yaml", `widget.scored:
@@ -306,7 +301,7 @@ func CopyFirstFlowTutorial(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: ticket-flow\nstages:\n  open: {}\n  assigned: {}\n  resolved: {final: true}\npins:\n  inputs:\n    - ticket.classified\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: ticket-flow\nstages:\n  open: {}\n  assigned: {}\n  resolved: {final: true}\ninputs:\n  - ticket.classified\n")
 	writeClosedVariantFile(t, root, "entities.yaml", `ticket:
   category:
     type: text
@@ -351,7 +346,7 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "nodes.yaml", "entities.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\npins:\n  inputs:\n    - agent.requested\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\ninputs:\n  - agent.requested\n")
 	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n")
 	identity := ""
 	if agentID != agentKey {
@@ -366,7 +361,7 @@ func CopyVerifyMissingPin(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-missing-pin-warning\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.requested\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-missing-pin-warning\nstages:\n  pending: {}\n  done: {final: true}\ninputs:\n  - task.requested\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\ntask.completed:\nchild/task.assigned:\nchild/task.result:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `dispatcher:
   task.requested:
@@ -376,7 +371,7 @@ func CopyVerifyMissingPin(t testing.TB) string {
     emit:
       event: task.completed
 `)
-	writeLegacyInstanceFlow(t, root, "child", "name: child\nstages:\n  idle: {}\n  working: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n    - task.feedback\n", "task.assigned:\ntask.feedback:\n  comment: string\ntask.result:\n", "work_item: {}\n", `worker:
+	writeLegacyInstanceFlow(t, root, "child", "name: child\nstages:\n  idle: {}\n  working: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n  - task.feedback\n", "task.assigned:\ntask.feedback:\n  comment: string\ntask.result:\n", "work_item: {}\n", `worker:
   task.assigned:
     advances_to: working
   task.feedback:
@@ -392,7 +387,7 @@ func CopyRunForkTarget(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "stages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.requested\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages:\n  pending: {}\n  done: {final: true}\ninputs:\n  - task.requested\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  task.requested:\n    advances_to: done\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n")
 	return root
@@ -404,7 +399,7 @@ func CopyScenarioSetup(t testing.TB) string {
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-setup-fixture\nstages:\n  waiting: {}\n  ready: {final: true}\npins:\n  inputs:\n    - opco.product_review_requested\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-setup-fixture\nstages:\n  waiting: {}\n  ready: {final: true}\ninputs:\n  - opco.product_review_requested\n")
 	writeClosedVariantFile(t, root, "events.yaml", "opco.product_review_requested:\n  product_id: text\n  note: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "product:\n  product_id:\n    type: text\n    _unused_reason: scenario setup identity\n  note: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `reviewer:
@@ -445,7 +440,7 @@ func CopyScenarioRootSetup(t testing.TB) string {
 	root := CopyServedTestSetup(t)
 	removeInheritedScenarios(t, root)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-root-setup-fixture\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - widget.scored\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-root-setup-fixture\nstages:\n  waiting: {}\n  done: {final: true}\ninputs:\n  - widget.scored\n")
 	writeClosedVariantFile(t, root, "events.yaml", "widget.scored:\n  delta: integer\n")
 	writeClosedVariantFile(t, root, "tests/root-setup.yaml", `name: root setup and expectation
 setup:
@@ -479,7 +474,7 @@ func CopyInputPinExternalScope(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml", "entities.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: input-pin-external-scope\n")
-	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - event: ticket.ready\n      source: external\n", "ticket.ready:\n  entity_id: string\n", "", "")
-	writeLegacyInstanceFlow(t, root, "plain_consumer", "name: plain_consumer\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - ticket.ready\n", "ticket.ready:\n  entity_id: string\n", "", "")
+	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\nstages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - event: ticket.ready\n    source: external\n", "ticket.ready:\n  entity_id: string\n", "", "")
+	writeLegacyInstanceFlow(t, root, "plain_consumer", "name: plain_consumer\nstages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - ticket.ready\n", "ticket.ready:\n  entity_id: string\n", "", "")
 	return root
 }

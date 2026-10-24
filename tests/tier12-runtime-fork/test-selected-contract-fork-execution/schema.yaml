@@ -1,5 +1,4 @@
 name: test-selected-contract-fork-execution
 stages: []
-pins:
-  inputs:
-    - task.ready
+inputs:
+  - task.ready

@@ -7,9 +7,8 @@ func CopyTemplateInstanceEmpireStyle(t testing.TB) string {
 	root := t.TempDir()
 	for path, contents := range map[string]string{
 		"schema.yaml": `name: test
-pins:
-  outputs:
-    - opco.spinup_created
+outputs:
+  - opco.spinup_created
 connect:
   - event: opco.spinup_created
     from: .
@@ -34,9 +33,8 @@ opco.spinup_created:
 `,
 		"operating/schema.yaml": `name: operating
 instance: instance_id
-pins:
-  inputs:
-    - opco.spinup_created
+inputs:
+  - opco.spinup_created
 stages:
   initializing: {}
   ready: {final: true}
@@ -69,9 +67,8 @@ func CopyTemplateInstanceActivationConfigSubscriber(t testing.TB) string {
 	root := t.TempDir()
 	for path, contents := range map[string]string{
 		"schema.yaml": `name: test
-pins:
-  outputs:
-    - opco.spinup_created
+outputs:
+  - opco.spinup_created
 connect:
   - event: opco.spinup_created
     from: .
@@ -96,9 +93,8 @@ opco.spinup_created:
 `,
 		"operating/schema.yaml": `name: operating
 instance: instance_id
-pins:
-  inputs:
-    - opco.spinup_created
+inputs:
+  - opco.spinup_created
 stages:
   initializing: {}
   ready: {final: true}

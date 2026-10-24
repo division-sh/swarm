@@ -17,7 +17,7 @@ func issue2567VerifySource(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	for name, body := range map[string]string{
-		"schema.yaml": "name: first-verify\nstages: {waiting: {}, done: {final: true}}\npins: {inputs: [work.requested]}\n",
+		"schema.yaml": "name: first-verify\nstages: {waiting: {}, done: {final: true}}\ninputs: [work.requested]\n",
 		"events.yaml": "work.requested:\n", "entities.yaml": "work: {}\n",
 		"nodes.yaml": "worker:\n  work.requested: {advances_to: done}\n",
 	} {

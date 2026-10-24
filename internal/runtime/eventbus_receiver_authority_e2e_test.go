@@ -523,9 +523,8 @@ func closedReceiverAuthorityFixtureFiles() map[string]string {
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
+inputs:
+  - task.assigned
 `,
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml": `task.assigned:

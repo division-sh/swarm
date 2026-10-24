@@ -677,7 +677,7 @@ func retiredProducerRoutingOutputError(pins map[string]struct{}, event string) e
 
 func TestProducerRoutingLedgerDetectsRestoredScalarOutput(t *testing.T) {
 	for _, restored := range []bool{false, true} {
-		source := "name: negative-proof\npins:\n  outputs: [work.retained]\n"
+		source := "name: negative-proof\noutputs: [work.retained]\n"
 		if restored {
 			source = strings.Replace(source, "[work.retained]", "[work.retained, work.removed]", 1)
 		}
@@ -690,9 +690,9 @@ func TestProducerRoutingLedgerDetectsRestoredScalarOutput(t *testing.T) {
 		}
 	}
 	for _, alternate := range []string{
-		"pins: {outputs: {events: [work.removed]}}",
-		"pins: {outputs: [{event: work.removed, sink: harness}]}",
-		"pins: {outputs: [{name: work.removed}]}",
+		"outputs: {events: [work.removed]}",
+		"outputs: [{event: work.removed, sink: harness}]",
+		"outputs: [{name: work.removed}]",
 	} {
 		if _, err := producerRoutingOutputPins([]byte(alternate)); err == nil {
 			t.Fatalf("ledger admitted alternate output spelling %s", alternate)

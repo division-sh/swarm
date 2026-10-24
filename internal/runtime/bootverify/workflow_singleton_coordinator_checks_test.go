@@ -14,9 +14,8 @@ import (
 func TestRun_ValidatesSingletonCoordinatorWithContainedState(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, singletonCoordinatorEntitiesYAML(), "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -29,9 +28,8 @@ pins:
 func TestRun_AllowsStatelessSingletonWithIndependentAgentMemory(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, `
 coordinator_state: {}
 `, `
@@ -55,9 +53,8 @@ func TestRun_AllowsTemplateContainedDeclarationWithoutCoordinatorDemand(t *testi
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 instance: vertical_id
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, `
 coordinator_state:
   vertical_id: text
@@ -74,9 +71,8 @@ coordinator_state:
 func TestRun_RejectsSingletonCoordinatorUnresolvedContainedType(t *testing.T) {
 	root := writeSingletonCoordinatorFixtureRoot(t, `
 name: coordinator
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, `
 coordinator_state:
   verticals: map[text]MissingType
@@ -102,9 +98,8 @@ coordinator_state:
 func TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, `
 coordinator_state:
   status: text
@@ -120,9 +115,8 @@ coordinator_state:
 func TestRun_SingletonCoordinatorRejectsDynamicContainedTargetPath(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, singletonCoordinatorEntitiesYAML(), "", `
 coordinator-node:
   job.received:
@@ -227,9 +221,8 @@ stages:
   active: {}
   done: {final: true}
   failed: {final: true}
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, tc.entities, "", tc.nodes)
 			demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
 			var matched *SingletonCoordinatorDemand
@@ -273,9 +266,8 @@ func TestBuildSingletonCoordinatorDemandProjection_PreservesDuplicateScopedNodeI
 func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatQuerySelectAsExpression(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, `
 coordinator_state:
   verticals:
@@ -400,9 +392,8 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 			}
 			bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, `
 coordinator_state:
   verticals:
@@ -436,9 +427,8 @@ loops:
     max_attempts: 2
     escape:
       advances_to: exhausted
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `, `
 coordinator_state:
   verticals:
@@ -468,9 +458,8 @@ stages:
   active: {}
   done: {final: true}
   failed: {final: true}
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `
 	const nodes = `
 coordinator-node:
@@ -563,14 +552,12 @@ job.received:
 }
 
 func singletonCoordinatorTypesYAML() string {
-	return `
-types:
-  VerticalState:
-    status: text
-    active_jobs: [Job]
-  Job:
-    id: text
-    title: text
+	return `VerticalState:
+  status: text
+  active_jobs: [Job]
+Job:
+  id: text
+  title: text
 `
 }
 

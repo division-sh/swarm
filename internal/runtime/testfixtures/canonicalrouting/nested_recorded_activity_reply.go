@@ -27,9 +27,8 @@ func CopyNestedRecordedActivityReply(t testing.TB, providerURL string) string {
 `)
 	removeClosedVariantFiles(t, root, "provider/entities.yaml", "provider/tools.yaml")
 	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
-pins:
-  inputs: [provider.requested, t.replied]
-  outputs: [t.requested, provider.replied]
+inputs: [provider.requested, t.replied]
+outputs: [t.requested, provider.replied]
 `)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `t.requested:
   account_id: text

@@ -194,8 +194,7 @@ func loadAuthoredEmitSiteFixture(t *testing.T, opts authoredEmitSiteFixture) Sou
 	root := t.TempDir()
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: authored-emit-site-fixture
-pins:
-  outputs: [root.ready]
+outputs: [root.ready]
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), `
 root.start:
@@ -221,9 +220,8 @@ root.audit:
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [support.start]
-  outputs: [support.ready]
+inputs: [support.start]
+outputs: [support.ready]
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 support.start:
@@ -261,9 +259,8 @@ func loadAuthoredEmitSiteLoweringFixture(t *testing.T) Source {
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [scan.corpus_dispatch]
-  outputs: [market_research.scan_assigned]
+inputs: [scan.corpus_dispatch]
+outputs: [market_research.scan_assigned]
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), `
 scan.corpus_dispatch:

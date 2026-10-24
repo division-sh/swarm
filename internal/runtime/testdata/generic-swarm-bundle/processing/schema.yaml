@@ -3,10 +3,9 @@ stages:
   ready: {}
   approved: {}
   rejected: {final: true}
-pins:
-  inputs:
-    - item.review_requested
-    - item.rejected
+inputs:
+  - item.review_requested
+  - item.rejected
 required_agents:
   - role: control-plane
     subscribes_to:

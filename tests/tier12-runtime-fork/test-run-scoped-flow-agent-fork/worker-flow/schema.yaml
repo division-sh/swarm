@@ -2,8 +2,7 @@ instance: worker_id
 stages:
   idle: {}
   complete: {final: true}
-pins:
-  inputs:
-    - worker.ready
-  outputs:
-    - worker.observed
+inputs:
+  - worker.ready
+outputs:
+  - worker.observed

@@ -5,8 +5,7 @@ stages:
   complete: {final: true}
 auto_emit_on_create:
   event: work.setup
-pins:
-  inputs:
-    - worker.requested
-    - work.setup
-    - work.assign
+inputs:
+  - worker.requested
+  - work.setup
+  - work.assign

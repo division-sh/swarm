@@ -195,11 +195,8 @@ func TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments(t *testing.
 
 	writeFixtureFile(t, root+"/schema.yaml", "name: wave1-bundle\n")
 	writeFixtureFile(t, root+"/types.yaml", `
-scalars:
-  URL: text
-types:
-  Brand:
-    name: text
+Brand:
+  name: text
 `)
 	writeFixtureFile(t, root+"/events.yaml", `
 root.ready:
@@ -210,20 +207,16 @@ root.ready:
 stages:
   discovered: {}
   shortlisted: {final: true}
-pins:
-  inputs:
-    - root.ready
-  outputs:
-    - vertical.shortlisted
+inputs:
+  - root.ready
+outputs:
+  - vertical.shortlisted
 `)
-	writeFixtureFile(t, root+"/scoring/types.yaml", `
-types:
-  ScoreBreakdown:
-    total: numeric
+	writeFixtureFile(t, root+"/scoring/types.yaml", `ScoreBreakdown:
+  total: numeric
 `)
 	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
-  _description: scoring vertical
   name: text
   review_count:
     type: integer
@@ -243,9 +236,6 @@ vertical.shortlisted:
 	}
 
 	rootTypes := bundle.RootTypeCatalog()
-	if got := rootTypes.Scalars["URL"].Base; got != "text" {
-		t.Fatalf("RootTypeCatalog().Scalars[URL] = %q", got)
-	}
 	if _, ok := rootTypes.Types["Brand"]; !ok {
 		t.Fatal("expected root Brand type")
 	}
@@ -270,8 +260,8 @@ vertical.shortlisted:
 		t.Fatal("review_count Indexed = false, want true")
 	}
 	resolvedTypes := bundle.ResolvedTypeCatalogForFlow("scoring")
-	if _, ok := resolvedTypes.Scalars["URL"]; !ok {
-		t.Fatal("expected resolved flow type catalog to include root scalar")
+	if _, ok := resolvedTypes.Types["Brand"]; !ok {
+		t.Fatal("expected resolved flow type catalog to include root record")
 	}
 	if _, ok := resolvedTypes.Types["ScoreBreakdown"]; !ok {
 		t.Fatal("expected resolved flow type catalog to include flow-local type")
@@ -761,13 +751,11 @@ vertical:
 
 func TestTypeCatalogDocumentDecode_RejectsInlineObjectField(t *testing.T) {
 	var doc TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte(`
-types:
-  Brand:
-    palette:
-      type: object
-      properties:
-        primary: text
+	err := decodeNodeTestYAML([]byte(`Brand:
+  palette:
+    type: object
+    properties:
+      primary: text
 `), &doc)
 	if err == nil || !strings.Contains(err.Error(), "is not supported") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED inline object rejection", err)
@@ -776,15 +764,12 @@ types:
 
 func TestTypeCatalogDocumentDecode_PreservesNamedFieldOptionalityAndMergedMappings(t *testing.T) {
 	var doc TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte(`
-types:
-  Contact:
-    <<: &contact_fields
-      email: text?
-    phone:
-      type: text?
-      description: Optional phone number.
-    name: text
+	err := decodeNodeTestYAML([]byte(`Contact:
+  <<: &contact_fields
+    email: text?
+  phone:
+    type: text?
+  name: text
 `), &doc)
 	if err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -811,7 +796,7 @@ func TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers(t *testing.T) {
 	for _, typeRef := range []string{"text??", "text? ", "[text?]"} {
 		t.Run(typeRef, func(t *testing.T) {
 			var doc TypeCatalogDocument
-			err := decodeNodeTestYAML([]byte("types:\n  Item:\n    value: {type: '"+typeRef+"'}\n"), &doc)
+			err := decodeNodeTestYAML([]byte("Item:\n  value: {type: '"+typeRef+"'}\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), "optional") {
 				t.Fatalf("yaml.Unmarshal error = %v, want optional-marker rejection", err)
 			}
@@ -840,7 +825,7 @@ func TestCustomContractDocumentsDecodeMergeExpandedMappings(t *testing.T) {
 	}
 
 	var types TypeCatalogDocument
-	if err := decodeNodeTestYAML([]byte("<<: &catalog\n  types:\n    Item: {}\n"), &types); err != nil {
+	if err := decodeNodeTestYAML([]byte("  Item: {}\n"), &types); err != nil {
 		t.Fatalf("yaml.Unmarshal types: %v", err)
 	}
 	if _, ok := types.Types["Item"]; !ok {
