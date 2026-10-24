@@ -16777,7 +16777,7 @@ platform_tables:
       closed_kinds:
         - inbound.received/v2
         - event.emitted/v2
-        - state.lifecycle/v2
+        - entity.lifecycle/v2
         - delivery.lifecycle/v2
         - dead_letter.recorded/v2
         - activity.lifecycle/v2
@@ -27152,7 +27152,7 @@ test_specification:
           setup rows use deterministic alias-specific entity_id values and may
           be consumed by `target` aliases. The runner MUST NOT write the
           database/store directly, call EventBus, create deliveries, infer
-          handler outcomes, or expose a generic state.create/state.update
+          handler outcomes, or expose a generic entity.create/entity.update
           public mutation surface.
           For supported root setup, the exact selected runtime independently admits
           the no-argument constructor before mutation, then applies the validated
@@ -27197,7 +27197,7 @@ test_specification:
           expect_entity_ref: >
             An entity expectation may use `ref: <setup-alias>`. The runner
             resolves the alias to the exact setup entity and reads it through
-            `state.get` for current_state, fields, and gates assertions.
+            `entity.get` for current_state, fields, and gates assertions.
             `ref` MUST NOT be combined with `count`.
         unsupported_forms:
           - private cataloge2e setup syntax such as trigger.entity, entity_state_before, entity_fields_before, or gates_before
@@ -27311,7 +27311,7 @@ test_specification:
           the assertion explicitly expects a count.
         ref: >
           `ref: <setup-alias>` resolves through setup_pre_state alias bindings
-          to exactly one setup-created entity and consumes `state.get` directly
+          to exactly one setup-created entity and consumes `entity.get` directly
           with that entity_id and the current scenario run_id. Unknown aliases
           fail before readback. `ref` MUST NOT be combined with `count`; when
           `type` is also supplied, it must match the setup binding's entity
@@ -27321,15 +27321,15 @@ test_specification:
           assertion. Expected values consume the scenario literal model, so
           `${...}` values are evaluated as CEL before comparison. The runner
           first resolves matching entity summaries through the canonical
-          `state.list` owner in the current run. The match must resolve to
+          `entity.list` owner in the current run. The match must resolve to
           exactly one entity, then the runner reads that entity through
-          `state.get` and compares `EntityFull.state.current_state` exactly.
+          `entity.get` and compares `EntityFull.entity.current_state` exactly.
         fields: >
           A row with `fields` is a detail assertion over
           `EntityFull.fields`. Expected field values consume the scenario
           literal model, so nested `${...}` values are evaluated as CEL before
           comparison. The expected YAML object is compared exactly to the
-          canonical `state.get` field map after JSON-compatible scalar
+          canonical `entity.get` field map after JSON-compatible scalar
           normalization; missing, extra, or differently-valued fields fail the
           scenario.
         gates: >
@@ -27337,7 +27337,7 @@ test_specification:
           Gate expectations consume the scenario literal model, so nested
           `${...}` values are evaluated as CEL and must resolve to booleans.
           The resulting boolean map compares exactly to the canonical
-          `state.get` gate map. Missing, extra, non-boolean, or
+          `entity.get` gate map. Missing, extra, non-boolean, or
           differently-valued gates fail the scenario.
         count_interaction: >
           `count` is a count-only assertion and MUST NOT be combined with
@@ -27604,7 +27604,7 @@ cli_specification:
       entities:
         disposition: promoted_first_slice
         tracker: '#892'
-        action: '`swarm entity list` (v2.2 spelling), `swarm entity view`, and `swarm entity aggregate` are promoted as one bounded read-only CLI child over /v1/rpc state.list, state.get, and state.aggregate; conversations and forkchat remain split.'
+        action: '`swarm entity list` (v2.2 spelling), `swarm entity view`, and `swarm entity aggregate` are promoted as one bounded read-only CLI child over /v1/rpc entity.list, entity.get, and entity.aggregate; conversations and forkchat remain split.'
       logs:
         disposition: promoted_first_slice
         tracker: '#876'
@@ -28284,7 +28284,7 @@ cli_specification:
             display_projection: full
             display_shortening_eligible: false
           entity:
-            candidate_source: /v1/rpc state.list
+            candidate_source: /v1/rpc entity.list
             scope_mode: full_run_required
             scope_rule: full run ID required for prefix resolution
             normalization_mode: trim_case_sensitive
@@ -29295,15 +29295,15 @@ cli_specification:
             entities_list:
               command: swarm entity list
               classification: shared_output
-              fact_owner: /v1/rpc state.list
-              json_shape: state.list result object (entities with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; next_cursor)
+              fact_owner: /v1/rpc entity.list
+              json_shape: entity.list result object (entities with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; next_cursor)
               quiet_values:
               - entity_id, one per returned entity, in API result order
             entity_view:
               command: swarm entity view
               classification: shared_output
-              fact_owner: /v1/rpc state.get
-              json_shape: state.get result object (entity with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; fields; gates; accumulated; loops when present)
+              fact_owner: /v1/rpc entity.get
+              json_shape: entity.get result object (entity with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; fields; gates; accumulated; loops when present)
               quiet_values:
               - entity_id
             entity_aggregate:
@@ -30278,7 +30278,7 @@ cli_specification:
       tier: should_have
       implementation_status: implemented_first_slice
       owner: platform-spec.yaml#test_specification.deterministic_scenario_runner
-      behavior: Public deterministic scenario-runner CLI consumer owning a fresh private MockOnly runtime through the shared serve composition. The command discovers v1 YAML scenarios only under tests/... and <flow-path>/tests/...; automatic discovery treats YAML files with version, steps, derive, or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps optionally consume setup/pre-state aliases seeded through /v1/rpc test.setup_entities before calling /v1/rpc event.publish; mailbox.decide/defer steps locate exactly one pending decision card through mailbox.list and then call the typed mailbox mutation RPC. The command waits for test quiescence by repeatedly reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt work, owed or unsettled fan-out publications, fan-out barriers, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic completion rule. Expectations consume run.trace, event.list dead-letter readback, paginated state.list, and state.get for detail assertions. The command selects exact mock execution through the canonical selector; it does not implement ProviderContract or a local provider, test live agent sessions/tool calls/audit/ spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables directly.
+      behavior: Public deterministic scenario-runner CLI consumer owning a fresh private MockOnly runtime through the shared serve composition. The command discovers v1 YAML scenarios only under tests/... and <flow-path>/tests/...; automatic discovery treats YAML files with version, steps, derive, or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps optionally consume setup/pre-state aliases seeded through /v1/rpc test.setup_entities before calling /v1/rpc event.publish; mailbox.decide/defer steps locate exactly one pending decision card through mailbox.list and then call the typed mailbox mutation RPC. The command waits for test quiescence by repeatedly reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt work, owed or unsettled fan-out publications, fan-out barriers, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic completion rule. Expectations consume run.trace, event.list dead-letter readback, paginated entity.list, and entity.get for detail assertions. The command selects exact mock execution through the canonical selector; it does not implement ProviderContract or a local provider, test live agent sessions/tool calls/audit/ spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables directly.
       derived_mode: >-
         `--derive <flow>` explicitly compiles and executes the canonical S6 derived plan without writing a scenario file.
         `--input` selects one exact public pin; ambiguity fails with candidate evidence; `--all-inputs` runs one plan per exact
@@ -30382,7 +30382,7 @@ cli_specification:
         - mailbox decisions are preceded by mailbox.list and fail closed unless exactly one pending mailbox item matches
         - scenario discovery rejects files outside tests and <flow-path>/tests
         - fixture from paths cannot escape the contract root, set overrides are applied before schema validation, and invalid fixture/schema variants fail before mutation
-        - entity current_state, fields, and gates expectations either resolve setup aliases through state.get or resolve unmatched rows through paginated state.list, fail closed on zero/multiple detail matches, and read canonical detail through state.get
+        - entity current_state, fields, and gates expectations either resolve setup aliases through entity.get or resolve unmatched rows through paginated entity.list, fail closed on zero/multiple detail matches, and read canonical detail through entity.get
         - no live LLM credentials, ProviderContract mock/local activation, or cataloge2e private scenario format is required
         - derived execution persists exact canonical profile bytes and effective-source digest through event.publish or test.setup_entities on SQLite and PostgreSQL; mismatches fail before mutation, process restart cannot substitute a current profile, and PostgreSQL fork inheritance compares the exact effective identity
         - every admitted swarm new archetype verifies, boots, and completes its public mock-only smoke scenario without credentials or Docker in less than 60 seconds
@@ -32519,7 +32519,7 @@ cli_specification:
       group: observe_debug
       tier: should_have
       implementation_status: implemented
-      owner: /v1/rpc state.list
+      owner: /v1/rpc entity.list
       params:
       - name: run_id
         flag: --run-id <run-id>
@@ -32542,7 +32542,7 @@ cli_specification:
         flag: --limit <1-500>
         required: false
         api_param: limit
-        rule: Omitted by the CLI when absent; server applies the state.list default.
+        rule: Omitted by the CLI when absent; server applies the entity.list default.
       - name: cursor
         flag: --cursor <cursor>
         required: false
@@ -32554,7 +32554,7 @@ cli_specification:
           empty: No entities match the current filters.
           pagination: A non-empty next_cursor renders below the table as `next_cursor=<cursor>`.
         verbose: Uses the default table and appends each row's absolute RFC3339 UPDATED value to its relative timestamp.
-        json: The complete validated state.list result object, including every returned EntitySummary field and next_cursor when present.
+        json: The complete validated entity.list result object, including every returned EntitySummary field and next_cursor when present.
         quiet: One canonical entity_id per returned entity, in API result order.
       exit_codes:
         success: 0
@@ -32562,7 +32562,7 @@ cli_specification:
         transport_or_malformed_response: 3
         auth_or_missing_token: 4
       proof_expectations:
-      - exact /v1/rpc state.list call with run_id, flow, type, current_state, limit, and cursor params only when supplied
+      - exact /v1/rpc entity.list call with run_id, flow, type, current_state, limit, and cursor params only when supplied
       - missing explicit token for non-loopback API targets, blank optional flags, invalid run_id OpaqueId envelope, invalid limit, invalid args, and unsupported flags make zero API calls
       - empty result, next_cursor rendering, auth/HTTP/RPC failures, malformed result, and malformed EntitySummary rows fail closed with tested exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
@@ -32571,7 +32571,7 @@ cli_specification:
       group: observe_debug
       tier: should_have
       implementation_status: implemented
-      owner: /v1/rpc state.get
+      owner: /v1/rpc entity.get
       params:
       - name: entity_id
         argument: <entity-id>
@@ -32590,7 +32590,7 @@ cli_specification:
           sections: Labeled Fields and Gates rows plus an Accumulated presence count and `Bookkeeping <N> facts (--verbose to expand)` or `Bookkeeping none`; empty sections render explicitly as `none`; every declared false gate remains visible.
           field_projection: Fields contains authored values only. Bookkeeping is a required independent API projection and is never inferred from field names.
         verbose: Uses the default projection with relative plus absolute RFC3339 timestamps, full accumulated rows, loop activation rows when present, and an expanded Bookkeeping section.
-        json: The complete validated state.get result object, including entity identity, fields, bookkeeping, gates, accumulated data, and loops when present.
+        json: The complete validated entity.get result object, including entity identity, fields, bookkeeping, gates, accumulated data, and loops when present.
         quiet: The canonical entity_id only.
       exit_codes:
         success: 0
@@ -32599,7 +32599,7 @@ cli_specification:
         auth_or_missing_token: 4
         entity_not_found: 5
       proof_expectations:
-      - exact /v1/rpc state.get call with required entity_id and optional run_id params only
+      - exact /v1/rpc entity.get call with required entity_id and optional run_id params only
       - missing/blank/invalid entity id, blank or invalid --run-id, invalid args, unsupported flags, and missing explicit token for non-loopback API targets make zero API calls
       - ENTITY_NOT_FOUND maps to resource-not-found exit 5
       - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/bookkeeping/gates/accumulated maps fail closed with tested exit-code behavior
@@ -32609,7 +32609,7 @@ cli_specification:
       group: observe_debug
       tier: should_have
       implementation_status: implemented
-      owner: /v1/rpc state.aggregate
+      owner: /v1/rpc entity.aggregate
       params:
       - name: run_id
         flag: --run-id <run-id>
@@ -32638,7 +32638,7 @@ cli_specification:
         transport_or_malformed_response: 3
         auth_or_missing_token: 4
       proof_expectations:
-      - exact /v1/rpc state.aggregate call with run_id, group_by, and type params only when supplied
+      - exact /v1/rpc entity.aggregate call with run_id, group_by, and type params only when supplied
       - missing explicit token for non-loopback API targets, blank optional flags, invalid run_id OpaqueId envelope, unsupported group_by, invalid args, and unsupported flags make zero API calls
       - omitted --group-by sends no group_by and relies on the server default current_state
       - empty result, deterministic aggregate rendering, auth/HTTP/RPC failures, missing counts, and negative counts fail closed with tested exit-code behavior
@@ -39936,7 +39936,7 @@ api_specification:
         This method seeds scenario-owned initial entity rows for exactly one
         scenario run after the runner has validated the authored setup against
         the loaded contract bundle. It is not a general product/runtime
-        state.create or state.update surface, does not publish events, does
+        entity.create or entity.update surface, does not publish events, does
         not create delivery rows, does not infer handler outcomes, and does not
         accept private cataloge2e setup syntax. The server persists the run
         row under canonical bundle context and writes the requested initial
@@ -39947,7 +39947,7 @@ api_specification:
         lifecycle planning. Acknowledged post-commit lifecycle and attachment work
         remains owned; field-only imports are not executable construction evidence.
         Scenario-visible verification
-        remains through event.publish, run.diagnose/run.trace, state.get/list,
+        remains through event.publish, run.diagnose/run.trace, entity.get/list,
         and other public read owners.
       scope:
         required:
@@ -40669,7 +40669,7 @@ api_specification:
       notification_cadence: Pushed per joined row as trace rows are committed by the runtime.
       errors:
       - RUN_NOT_FOUND
-    state.list:
+    entity.list:
       tier: should_have
       description: List entities with optional filters. Consolidates legacy "instance" and "entity" reads.
       scope:
@@ -40719,7 +40719,7 @@ api_specification:
             next_cursor:
               $ref: '#/components/schemas/Cursor'
       errors: []
-    state.get:
+    entity.get:
       tier: should_have
       description: Read one entity in full, including independent authored fields, platform bookkeeping, gates, and accumulator state.
       scope:
@@ -40742,7 +40742,7 @@ api_specification:
           $ref: '#/components/schemas/EntityFull'
       errors:
       - ENTITY_NOT_FOUND
-    state.aggregate:
+    entity.aggregate:
       tier: should_have
       description: Aggregate entity counts grouped by a field.
       scope:
@@ -42556,8 +42556,8 @@ api_specification:
         \ under /v1/rpc, canonical bundle_hash input only)."
       - "run.step / run.retry / run.skip \u2192 retired with the legacy Builder transport. A future debug.* namespace requires\
         \ a new product owner and spec."
-      - "state.list_instances \u2192 state.list (consolidated with /api/instances)."
-      - "state.get_entity \u2192 state.get (consolidated with /api/instances/{id})."
+      - "state.list_instances \u2192 entity.list (consolidated with /api/instances)."
+      - "state.get_entity \u2192 entity.get (consolidated with /api/instances/{id})."
       - "credentials.list / set / delete \u2192 retired with the legacy Builder transport. A future credentials.* namespace\
         \ requires a new product owner and spec."
       - "validate.full \u2192 DEPRECATED. No JSON-RPC equivalent in v1; verify.* namespace is deferred (see deferred_namespaces.verify).\
@@ -42588,9 +42588,9 @@ api_specification:
       - "GET /api/mailbox \u2192 mailbox.list"
       - "GET /api/mailbox/{id} \u2192 mailbox.get"
       - "(NEW) \u2192 mailbox.decide / mailbox.defer / mailbox.begin_input / mailbox.cancel_input / mailbox.acknowledge / mailbox.subscribe"
-      - "GET /api/instances \u2192 state.list"
-      - "GET /api/instances/{id} \u2192 state.get"
-      - "GET /api/instances/aggregate \u2192 state.aggregate"
+      - "GET /api/instances \u2192 entity.list"
+      - "GET /api/instances/{id} \u2192 entity.get"
+      - "GET /api/instances/aggregate \u2192 entity.aggregate"
       - "GET /api/runtime/logs \u2192 runtime.logs"
       - "GET /api/runtime/incidents \u2192 runtime.incidents"
       - "POST /api/runtime/actions {pause/resume} \u2192 runtime.pause / runtime.resume"

@@ -79,7 +79,7 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 				if got := countMutationLogAdapterRows(t, db, runID, "entity_mutations", ""); got != 1 {
 					t.Fatalf("entity mutation rows = %d, want 1", got)
 				}
-				if got := countMutationLogAdapterRows(t, db, runID, "author_activity_occurrences", "kind = 'state.lifecycle'"); got != 1 {
+				if got := countMutationLogAdapterRows(t, db, runID, "author_activity_occurrences", "kind = 'entity.lifecycle'"); got != 1 {
 					t.Fatalf("entity mutation story rows = %d, want 1", got)
 				}
 				return
@@ -90,7 +90,7 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 			if got := countMutationLogAdapterRows(t, db, runID, "entity_mutations", ""); got != 0 {
 				t.Fatalf("entity mutation rows after rejection = %d, want 0", got)
 			}
-			if got := countMutationLogAdapterRows(t, db, runID, "author_activity_occurrences", "kind = 'state.lifecycle'"); got != 0 {
+			if got := countMutationLogAdapterRows(t, db, runID, "author_activity_occurrences", "kind = 'entity.lifecycle'"); got != 0 {
 				t.Fatalf("entity mutation story rows after rejection = %d, want 0", got)
 			}
 		})

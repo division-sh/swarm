@@ -139,10 +139,10 @@ func waitListRetirementFields(t *testing.T, endpoint, runID string, want []any) 
 	var observed operatorread.OperatorEntityFull
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 		var result operatorread.OperatorEntityListResult
-		requireServedJSONRPCResult(t, endpoint, "state.list", map[string]any{"run_id": runID}, &result)
+		requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID}, &result)
 		if len(result.Entities) == 1 {
 			entityID := result.Entities[0].EntityID
-			requireServedJSONRPCResult(t, endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": entityID}, &observed)
+			requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &observed)
 			if reflect.DeepEqual(observed.Fields["entries"], want) && reflect.DeepEqual(observed.Fields["snapshots"], want) {
 				return entityID
 			}

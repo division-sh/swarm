@@ -1208,11 +1208,11 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 		},
 		"TestOperatorEntityHandlersServeContractEntityTypesFromSQLite": {
 			Backends: []string{"default_sqlite"},
-			Methods:  []string{"state.aggregate", "state.get", "state.list"},
+			Methods:  []string{"entity.aggregate", "entity.get", "entity.list"},
 		},
 		"TestOperatorEntityHandlersServeContractEntityTypesFromPostgres": {
 			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"state.aggregate", "state.get", "state.list"},
+			Methods:  []string{"entity.aggregate", "entity.get", "entity.list"},
 		},
 		"TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock": {
 			Backends: []string{"default_sqlite"},

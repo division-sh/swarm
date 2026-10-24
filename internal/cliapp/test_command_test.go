@@ -105,7 +105,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
 			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != testPublishedRunID {
-				t.Fatalf("state.get params = %#v", req.Params)
+				t.Fatalf("entity.get params = %#v", req.Params)
 			}
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)
@@ -230,7 +230,7 @@ func TestSwarmTestSetupEntitiesSeedsRootAliasAndExpectationThroughPublicRPC(t *t
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{scenarioTraceRowForEvent("event-setup-follow-up", "opco.product_review_requested")}})
 		case entityGetMethod:
 			if req.Params["entity_id"] != setupEntityID || req.Params["run_id"] != setupRunID {
-				t.Fatalf("state.get params = %#v", req.Params)
+				t.Fatalf("entity.get params = %#v", req.Params)
 			}
 			result := validEntityFullResult(setupEntityID)
 			entity := result["entity"].(map[string]any)
@@ -345,7 +345,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{scenarioTraceRowForEvent("event-root-setup", "widget.scored")}})
 		case entityGetMethod:
 			if req.Params["entity_id"] != setupEntityID || req.Params["run_id"] != setupRunID {
-				t.Fatalf("state.get root setup params = %#v", req.Params)
+				t.Fatalf("entity.get root setup params = %#v", req.Params)
 			}
 			result := validEntityFullResult(setupEntityID)
 			entity := result["entity"].(map[string]any)
@@ -418,7 +418,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{received, processed}})
 		case entityListMethod:
 			if req.Params["run_id"] != testPublishedRunID || req.Params["type"] != "item" {
-				t.Fatalf("state.list params = %#v", req.Params)
+				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
 			entity["entity_type"] = "item"
@@ -426,7 +426,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
 			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != testPublishedRunID {
-				t.Fatalf("state.get params = %#v", req.Params)
+				t.Fatalf("entity.get params = %#v", req.Params)
 			}
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)
@@ -728,7 +728,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": rows})
 		case entityListMethod:
 			if req.Params["run_id"] != activeRunID || req.Params["type"] != entityExpect.EntityType {
-				t.Fatalf("state.list params = %#v", req.Params)
+				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
 			entity["run_id"] = activeRunID
@@ -747,7 +747,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 				entityType = setupEntityTypes[entityExpect.Ref]
 			}
 			if req.Params["entity_id"] != entityID || req.Params["run_id"] != activeRunID {
-				t.Fatalf("state.get params = %#v, want run %s entity %s", req.Params, activeRunID, entityID)
+				t.Fatalf("entity.get params = %#v, want run %s entity %s", req.Params, activeRunID, entityID)
 			}
 			result := validEntityFullResult(entityID)
 			entity := result["entity"].(map[string]any)
@@ -1423,7 +1423,7 @@ func TestScenarioEntityExpectationConsumesAllPages(t *testing.T) {
 	}
 	assertScenarioTestMethods(t, calls, []string{entityListMethod, entityListMethod})
 	if calls[1].Params["cursor"] != "page-2" {
-		t.Fatalf("second state.list cursor = %#v", calls[1].Params)
+		t.Fatalf("second entity.list cursor = %#v", calls[1].Params)
 	}
 }
 
@@ -1438,7 +1438,7 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 		switch req.Method {
 		case entityListMethod:
 			if req.Params["run_id"] != "run-1" || req.Params["type"] != "widget" {
-				t.Fatalf("state.list params = %#v", req.Params)
+				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
 			entity["entity_type"] = "widget"
@@ -1446,7 +1446,7 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
 			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
-				t.Fatalf("state.get params = %#v", req.Params)
+				t.Fatalf("entity.get params = %#v", req.Params)
 			}
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)

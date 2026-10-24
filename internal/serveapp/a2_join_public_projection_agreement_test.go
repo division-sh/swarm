@@ -199,7 +199,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 func a2ReadJoinPublicObligation(t *testing.T, rt servedControlProofRuntime, runID string) (operatorread.OperatorEntityFull, joinruntime.Activation) {
 	t.Helper()
 	var raw json.RawMessage
-	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": runID}, &raw)
+	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &raw)
 	var entity operatorread.OperatorEntityFull
 	// Decode the public DTO itself, preserving numeric tokens without a SQL oracle.
 	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &entity); err != nil {
@@ -231,7 +231,7 @@ func a2ReadJoinPublicObligation(t *testing.T, rt servedControlProofRuntime, runI
 		t.Fatalf("public catalog and exact node/activation-key readers disagree: arm=%+v loaded=%+v err=%v", arm, loaded, err)
 	}
 	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "state.list", map[string]any{"run_id": runID, "limit": 10}, &list)
+	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 10}, &list)
 	if list.NextCursor != "" || len(list.Entities) != 1 || !reflect.DeepEqual(list.Entities[0], entity.Entity) {
 		t.Fatalf("public entity list/get disagree on the exact join receiver: list=%+v entity=%+v", list, entity)
 	}

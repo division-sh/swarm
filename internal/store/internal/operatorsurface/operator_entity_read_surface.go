@@ -71,7 +71,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 		where = append(where, fmt.Sprintf("fi.stage_defined AND fi.current_state = $%d", n))
 	}
 	if opts.Cursor != "" {
-		cursor, err := decodeEntityPositionCursor(opts.Cursor, "state.list")
+		cursor, err := decodeEntityPositionCursor(opts.Cursor, "entity.list")
 		if err != nil {
 			return operatorread.OperatorEntityListResult{}, err
 		}
@@ -125,7 +125,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 		entities = entities[:opts.Limit]
 		last := entities[len(entities)-1]
 		nextCursor = encodeEntityPositionCursor(entityPositionCursor{
-			Kind:      "state.list",
+			Kind:      "entity.list",
 			UpdatedAt: last.UpdatedAt.UTC().Format(time.RFC3339Nano),
 			EntityID:  last.EntityID,
 			RunID:     last.RunID,
@@ -172,7 +172,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 		where = append(where, "fi.stage_defined AND fi.current_state = ?")
 	}
 	if opts.Cursor != "" {
-		cursor, err := decodeEntityPositionCursor(opts.Cursor, "state.list")
+		cursor, err := decodeEntityPositionCursor(opts.Cursor, "entity.list")
 		if err != nil {
 			return operatorread.OperatorEntityListResult{}, err
 		}
@@ -228,7 +228,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 		entities = entities[:opts.Limit]
 		last := entities[len(entities)-1]
 		nextCursor = encodeEntityPositionCursor(entityPositionCursor{
-			Kind:      "state.list",
+			Kind:      "entity.list",
 			UpdatedAt: last.UpdatedAt.UTC().Format(time.RFC3339Nano),
 			EntityID:  last.EntityID,
 			RunID:     last.RunID,

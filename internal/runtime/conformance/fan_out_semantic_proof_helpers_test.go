@@ -31,7 +31,7 @@ import (
 
 const (
 	semanticProofPayloadEvent      = "portfolio.proof.payload.requested"
-	semanticProofEntityEvent       = "portfolio.proof.state.requested"
+	semanticProofEntityEvent       = "portfolio.proof.entity.requested"
 	semanticProofResourceEvent     = "portfolio.proof.resource.requested"
 	semanticProofJobflowEvent      = "portfolio.proof.jobflow.requested"
 	semanticProofKeylessEvent      = "portfolio.proof.keyless.requested"

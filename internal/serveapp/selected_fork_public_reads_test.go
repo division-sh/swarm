@@ -45,7 +45,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 		t.Fatalf("unloaded target missing from agent list: %+v", agents)
 	}
 	var entities operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, endpoint, "state.list", params, &entities)
+	requireServedJSONRPCResult(t, endpoint, "entity.list", params, &entities)
 	if len(entities.Entities) != get.Run.EntityCount || len(entities.Entities) == 0 {
 		t.Fatalf("selected entity census differs from header: %+v", entities)
 	}
@@ -56,7 +56,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 		}
 		counts[entity.EntityType]++
 		var full operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
+		requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
 		if !reflect.DeepEqual(full.Entity, entity) {
 			t.Fatalf("selected entity get/list disagree: %+v / %+v", entity, full)
 		}
@@ -65,7 +65,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 		}
 	}
 	var aggregate operatorread.OperatorEntityAggregateResult
-	requireServedJSONRPCResult(t, endpoint, "state.aggregate", map[string]any{"run_id": runID, "group_by": "entity_type"}, &aggregate)
+	requireServedJSONRPCResult(t, endpoint, "entity.aggregate", map[string]any{"run_id": runID, "group_by": "entity_type"}, &aggregate)
 	if !reflect.DeepEqual(aggregate.Counts, counts) {
 		t.Fatalf("selected aggregate disagrees with exact entities: %+v / %v", aggregate, counts)
 	}

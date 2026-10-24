@@ -595,7 +595,7 @@ store_parity:
       runtime_deps: [WorkflowPersistence, PipelineObligations]
       nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, FlowInstanceIndexReader, WorkflowEngineMutationOwner, FanOutSummaryOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader]}
       platform_tables: [entity_state, workflow_instance_initial_materializations, workflow_publication_stage_receipts, workflow_handler_stage_receipts, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
-      public_methods: [state.aggregate, state.get, state.list, run.diagnose, run.fan_out.list, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
+      public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.fan_out.list, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
     - id: session_conversation
       semantic_owners: [internal/runtime session registry, internal/store conversation]
       selected_purposes: [runtime]
@@ -1180,21 +1180,21 @@ operator_read_api_parity_ledger:
     proof_refs:
       - {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, backends: [default_sqlite, explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}
-  - method: state.aggregate
+  - method: entity.aggregate
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
       - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromSQLite, backends: [default_sqlite]}
       - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromPostgres, backends: [explicit_postgres]}
       - {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}
-  - method: state.get
+  - method: entity.get
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
       - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromSQLite, backends: [default_sqlite]}
       - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromPostgres, backends: [explicit_postgres]}
       - {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}
-  - method: state.list
+  - method: entity.list
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
@@ -1431,12 +1431,12 @@ rows:
       not claim that run start selects a backend, bootstraps storage or starts serve.
 
   - id: entity_read_api
-    surface: /v1/rpc state.list, state.get, and state.aggregate over selected stores
+    surface: /v1/rpc entity.list, entity.get, and entity.aggregate over selected stores
     classification: already_covered_by_existing_proof
     tier: required_smoke
     backends: [default_sqlite, explicit_postgres]
-    api_methods: [state.list, state.get, state.aggregate]
-    openrpc_matrix_methods: [state.list, state.get, state.aggregate]
+    api_methods: [entity.list, entity.get, entity.aggregate]
+    openrpc_matrix_methods: [entity.list, entity.get, entity.aggregate]
     store_owners:
       - apiv1.EntityReadStore
       - schema_storage.entity_state
@@ -1456,8 +1456,8 @@ rows:
     tier: required_smoke
     backends: [default_sqlite, explicit_postgres]
     cli_commands: [entities_list, entity_view, entity_aggregate]
-    api_methods: [state.list, state.get, state.aggregate]
-    openrpc_matrix_methods: [state.list, state.get, state.aggregate]
+    api_methods: [entity.list, entity.get, entity.aggregate]
+    openrpc_matrix_methods: [entity.list, entity.get, entity.aggregate]
     store_owners:
       - internal/cliapp entity CLI commands
       - apiv1.EntityReadStore

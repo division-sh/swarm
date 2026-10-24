@@ -81,53 +81,53 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 		}),
 	})
 
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"state.list","params":{"run_id":"run-1","flow":"review","type":"mvp_spec","current_state":"collecting","limit":10,"cursor":"abc"}}`)
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"run-1","flow":"review","type":"mvp_spec","current_state":"collecting","limit":10,"cursor":"abc"}}`)
 	if list.Error != nil {
-		t.Fatalf("state.list error = %#v", list.Error)
+		t.Fatalf("entity.list error = %#v", list.Error)
 	}
 	listResult := asMap(t, list.Result)
 	if rows, _ := listResult["entities"].([]any); len(rows) != 1 || listResult["next_cursor"] != "next" {
-		t.Fatalf("state.list result = %#v", list.Result)
+		t.Fatalf("entity.list result = %#v", list.Result)
 	}
 	if entities.lastList.RunID != "run-1" || entities.lastList.Flow != "review" || entities.lastList.Type != "mvp_spec" || entities.lastList.CurrentState != "collecting" || entities.lastList.Limit != 10 || entities.lastList.Cursor != "abc" {
-		t.Fatalf("state.list options = %#v", entities.lastList)
+		t.Fatalf("entity.list options = %#v", entities.lastList)
 	}
 
-	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"state.get","params":{"entity_id":"entity-1","run_id":"run-1"}}`)
+	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"entity-1","run_id":"run-1"}}`)
 	if get.Error != nil {
-		t.Fatalf("state.get error = %#v", get.Error)
+		t.Fatalf("entity.get error = %#v", get.Error)
 	}
 	getResult := asMap(t, get.Result)
 	if fields := asMap(t, getResult["fields"]); fields["priority"] != "high" {
-		t.Fatalf("state.get result = %#v", get.Result)
+		t.Fatalf("entity.get result = %#v", get.Result)
 	}
 	if fields, bookkeeping := asMap(t, getResult["fields"]), asMap(t, getResult["bookkeeping"]); fields["activation"] != "manual" || bookkeeping["activation"] != "standing" {
-		t.Fatalf("state.get field/bookkeeping collision = %#v/%#v", fields, bookkeeping)
+		t.Fatalf("entity.get field/bookkeeping collision = %#v/%#v", fields, bookkeeping)
 	}
 	accumulated := asMap(t, getResult["accumulated"])
 	if accumulated["score"] != float64(3) {
-		t.Fatalf("state.get accumulated = %#v, want score", accumulated)
+		t.Fatalf("entity.get accumulated = %#v, want score", accumulated)
 	}
 	if bucket := asMap(t, accumulated["accumulator"]); bucket["count"] != float64(2) {
-		t.Fatalf("state.get accumulated bucket = %#v, want count", accumulated["accumulator"])
+		t.Fatalf("entity.get accumulated bucket = %#v, want count", accumulated["accumulator"])
 	}
 	if got := asMap(t, getResult["entity"])["entity_type"]; got != "mvp_spec" {
-		t.Fatalf("state.get entity_type = %#v, want mvp_spec", got)
+		t.Fatalf("entity.get entity_type = %#v, want mvp_spec", got)
 	}
 	if entities.lastEntityID != "entity-1" || entities.lastRunID != "run-1" {
-		t.Fatalf("state.get args = entity_id=%q run_id=%q", entities.lastEntityID, entities.lastRunID)
+		t.Fatalf("entity.get args = entity_id=%q run_id=%q", entities.lastEntityID, entities.lastRunID)
 	}
 
-	aggregate := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg","method":"state.aggregate","params":{"run_id":"run-1","group_by":"current_state","type":"mvp_spec"}}`)
+	aggregate := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg","method":"entity.aggregate","params":{"run_id":"run-1","group_by":"current_state","type":"mvp_spec"}}`)
 	if aggregate.Error != nil {
-		t.Fatalf("state.aggregate error = %#v", aggregate.Error)
+		t.Fatalf("entity.aggregate error = %#v", aggregate.Error)
 	}
 	counts := asMap(t, asMap(t, aggregate.Result)["counts"])
 	if counts["collecting"] != float64(1) {
-		t.Fatalf("state.aggregate result = %#v", aggregate.Result)
+		t.Fatalf("entity.aggregate result = %#v", aggregate.Result)
 	}
 	if entities.lastAggregate.RunID != "run-1" || entities.lastAggregate.GroupBy != "current_state" || entities.lastAggregate.Type != "mvp_spec" {
-		t.Fatalf("state.aggregate options = %#v", entities.lastAggregate)
+		t.Fatalf("entity.aggregate options = %#v", entities.lastAggregate)
 	}
 }
 
@@ -143,48 +143,48 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	createOperatorReadbackEntities(t, ctx, pg, source, runID, entityA, entityB, time.Now().UTC())
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Entities: pg})})
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"state.list","params":{"run_id":"11111111-1111-1111-1111-111111111111","type":"vertical","limit":10}}`)
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"11111111-1111-1111-1111-111111111111","type":"vertical","limit":10}}`)
 	if list.Error != nil {
-		t.Fatalf("state.list error = %#v", list.Error)
+		t.Fatalf("entity.list error = %#v", list.Error)
 	}
 	rows, _ := asMap(t, list.Result)["entities"].([]any)
 	if len(rows) != 2 {
-		t.Fatalf("state.list rows = %#v", list.Result)
+		t.Fatalf("entity.list rows = %#v", list.Result)
 	}
 	for _, row := range rows {
 		assertOperatorDataOnlyLifecycle(t, asMap(t, row))
 		if got := asMap(t, row)["entity_type"]; got != "vertical" {
-			t.Fatalf("state.list entity_type = %#v, want vertical", got)
+			t.Fatalf("entity.list entity_type = %#v, want vertical", got)
 		}
 	}
-	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"state.get","params":{"entity_id":"22222222-2222-2222-2222-222222222222","run_id":"11111111-1111-1111-1111-111111111111"}}`)
+	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"22222222-2222-2222-2222-222222222222","run_id":"11111111-1111-1111-1111-111111111111"}}`)
 	if get.Error != nil {
-		t.Fatalf("state.get error = %#v", get.Error)
+		t.Fatalf("entity.get error = %#v", get.Error)
 	}
 	getResult := asMap(t, get.Result)
 	assertOperatorDataOnlyLifecycle(t, asMap(t, getResult["entity"]))
 	for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
 		if value, present := getResult[key]; !present || value != nil {
-			t.Fatalf("data-only state.get %s = %#v, present=%v, want explicit null", key, value, present)
+			t.Fatalf("data-only entity.get %s = %#v, present=%v, want explicit null", key, value, present)
 		}
 	}
 	if got := asMap(t, getResult["entity"])["entity_type"]; got != "vertical" {
-		t.Fatalf("state.get entity_type = %#v, want vertical", got)
+		t.Fatalf("entity.get entity_type = %#v, want vertical", got)
 	}
 	if fields := asMap(t, getResult["fields"]); fields["vertical_name"] != "Healthcare" {
-		t.Fatalf("state.get fields = %#v", fields)
+		t.Fatalf("entity.get fields = %#v", fields)
 	}
-	byType := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-type","method":"state.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"entity_type"}}`)
+	byType := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-type","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"entity_type"}}`)
 	if byType.Error != nil {
-		t.Fatalf("state.aggregate entity_type error = %#v", byType.Error)
+		t.Fatalf("entity.aggregate entity_type error = %#v", byType.Error)
 	}
 	typeCounts := asMap(t, asMap(t, byType.Result)["counts"])
 	if typeCounts["vertical"] != float64(2) || typeCounts["default"] != nil {
 		t.Fatalf("entity_type counts = %#v", typeCounts)
 	}
-	typedState := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-state","method":"state.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"current_state","type":"vertical"}}`)
+	typedState := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-state","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"current_state","type":"vertical"}}`)
 	if typedState.Error != nil {
-		t.Fatalf("state.aggregate typed current_state error = %#v", typedState.Error)
+		t.Fatalf("entity.aggregate typed current_state error = %#v", typedState.Error)
 	}
 	stateResult := asMap(t, typedState.Result)
 	stateCounts := asMap(t, stateResult["counts"])
@@ -212,50 +212,50 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 		}),
 	})
 
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"state.list","params":{"run_id":"11111111-1111-1111-1111-111111111111","type":"vertical","limit":10}}`)
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"11111111-1111-1111-1111-111111111111","type":"vertical","limit":10}}`)
 	if list.Error != nil {
-		t.Fatalf("state.list error = %#v", list.Error)
+		t.Fatalf("entity.list error = %#v", list.Error)
 	}
 	rows, _ := asMap(t, list.Result)["entities"].([]any)
 	if len(rows) != 2 {
-		t.Fatalf("state.list rows = %#v", list.Result)
+		t.Fatalf("entity.list rows = %#v", list.Result)
 	}
 	for _, row := range rows {
 		assertOperatorDataOnlyLifecycle(t, asMap(t, row))
 		if got := asMap(t, row)["entity_type"]; got != "vertical" {
-			t.Fatalf("state.list entity_type = %#v, want vertical", got)
+			t.Fatalf("entity.list entity_type = %#v, want vertical", got)
 		}
 	}
 
-	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"state.get","params":{"entity_id":"22222222-2222-2222-2222-222222222222","run_id":"11111111-1111-1111-1111-111111111111"}}`)
+	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"22222222-2222-2222-2222-222222222222","run_id":"11111111-1111-1111-1111-111111111111"}}`)
 	if get.Error != nil {
-		t.Fatalf("state.get error = %#v", get.Error)
+		t.Fatalf("entity.get error = %#v", get.Error)
 	}
 	getResult := asMap(t, get.Result)
 	assertOperatorDataOnlyLifecycle(t, asMap(t, getResult["entity"]))
 	for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
 		if value, present := getResult[key]; !present || value != nil {
-			t.Fatalf("data-only state.get %s = %#v, present=%v, want explicit null", key, value, present)
+			t.Fatalf("data-only entity.get %s = %#v, present=%v, want explicit null", key, value, present)
 		}
 	}
 	if got := asMap(t, getResult["entity"])["entity_type"]; got != "vertical" {
-		t.Fatalf("state.get entity_type = %#v, want vertical", got)
+		t.Fatalf("entity.get entity_type = %#v, want vertical", got)
 	}
 	if fields := asMap(t, getResult["fields"]); fields["vertical_name"] != "Healthcare" {
-		t.Fatalf("state.get fields = %#v", fields)
+		t.Fatalf("entity.get fields = %#v", fields)
 	}
 
-	byType := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-type","method":"state.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"entity_type"}}`)
+	byType := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-type","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"entity_type"}}`)
 	if byType.Error != nil {
-		t.Fatalf("state.aggregate entity_type error = %#v", byType.Error)
+		t.Fatalf("entity.aggregate entity_type error = %#v", byType.Error)
 	}
 	typeCounts := asMap(t, asMap(t, byType.Result)["counts"])
 	if typeCounts["vertical"] != float64(2) || typeCounts["default"] != nil {
 		t.Fatalf("entity_type counts = %#v", typeCounts)
 	}
-	typedState := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-state","method":"state.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"current_state","type":"vertical"}}`)
+	typedState := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-state","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"current_state","type":"vertical"}}`)
 	if typedState.Error != nil {
-		t.Fatalf("state.aggregate typed current_state error = %#v", typedState.Error)
+		t.Fatalf("entity.aggregate typed current_state error = %#v", typedState.Error)
 	}
 	stateResult := asMap(t, typedState.Result)
 	if counts := asMap(t, stateResult["counts"]); len(counts) != 0 || stateResult["absent_count"] != float64(2) {
@@ -323,29 +323,29 @@ func TestOperatorEntityHandlersTypedErrors(t *testing.T) {
 	}{
 		{
 			name:    "entity get missing",
-			method:  "state.get",
-			body:    `{"jsonrpc":"2.0","id":"get","method":"state.get","params":{"entity_id":"missing"}}`,
+			method:  "entity.get",
+			body:    `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"missing"}}`,
 			store:   &fakeEntityReadStore{getErr: operatorread.ErrEntityNotFound},
 			wantApp: EntityNotFoundCode,
 		},
 		{
 			name:     "entity get ambiguous",
-			method:   "state.get",
-			body:     `{"jsonrpc":"2.0","id":"get","method":"state.get","params":{"entity_id":"reused"}}`,
+			method:   "entity.get",
+			body:     `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"reused"}}`,
 			store:    &fakeEntityReadStore{getErr: operatorread.ErrAmbiguousEntityRunID},
 			wantCode: codeInvalidParams,
 		},
 		{
 			name:     "entity list bad cursor",
-			method:   "state.list",
-			body:     `{"jsonrpc":"2.0","id":"list","method":"state.list","params":{"run_id":"11111111-1111-4111-8111-111111111111","cursor":"bad"}}`,
+			method:   "entity.list",
+			body:     `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"11111111-1111-4111-8111-111111111111","cursor":"bad"}}`,
 			store:    &fakeEntityReadStore{listErr: operatorread.ErrInvalidEntityCursor},
 			wantCode: codeInvalidParams,
 		},
 		{
 			name:     "entity aggregate bad group",
-			method:   "state.aggregate",
-			body:     `{"jsonrpc":"2.0","id":"agg","method":"state.aggregate","params":{"group_by":"bad"}}`,
+			method:   "entity.aggregate",
+			body:     `{"jsonrpc":"2.0","id":"agg","method":"entity.aggregate","params":{"group_by":"bad"}}`,
 			store:    &fakeEntityReadStore{aggregateErr: &operatorread.EntityReadParamError{Field: "group_by", Reason: "unsupported entity aggregate group_by"}},
 			wantCode: codeInvalidParams,
 		},

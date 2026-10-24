@@ -845,7 +845,7 @@ node-a:
 	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{Check: `state.revision_count == 0 && !has(state.kill_reason)`},
 		Emit: runtimecontracts.EmitSpec{
-			Event: "state.created",
+			Event: "entity.created",
 			Fields: map[string]runtimecontracts.ExpressionValue{
 				"revision_count": runtimecontracts.CELExpression("state.revision_count"),
 			},
@@ -1074,7 +1074,7 @@ node-a:
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 			{Operation: runtimecontracts.WorkflowDataOperationClear, TargetRef: "state.revision_count"},
 		}},
-		Emit: runtimecontracts.EmitSpec{Event: "state.created"},
+		Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: state,

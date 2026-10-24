@@ -79,9 +79,9 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 			seedRun(runA, true)
 			state := seedRun(runB, false)
 			methods := apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: f.store.(apiv1.EntityReadStore)})
-			readList := methods["state.list"]
+			readList := methods["entity.list"]
 			readCalls := 0
-			methods["state.list"] = func(ctx context.Context, request apiv1.Request) (any, error) {
+			methods["entity.list"] = func(ctx context.Context, request apiv1.Request) (any, error) {
 				readCalls++
 				return readList(ctx, request)
 			}
@@ -93,7 +93,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, authorization := range []string{"", "Basic invalid", "Bearer wrong-token"} {
-				request := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"denied","method":"state.list","params":{"run_id":"`+runB+`"}}`)).WithContext(f.ctx)
+				request := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"denied","method":"entity.list","params":{"run_id":"`+runB+`"}}`)).WithContext(f.ctx)
 				request.Header.Set("Authorization", authorization)
 				recorder := httptest.NewRecorder()
 				handler.ServeHTTP(recorder, request)
@@ -101,7 +101,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 					t.Fatalf("unauthorized request reached entity reader: status=%d calls=%d body=%s", recorder.Code, readCalls, recorder.Body.String())
 				}
 			}
-			missingScope := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"missing-scope","method":"state.list","params":{"type":"cursor_item"}}`)).WithContext(f.ctx)
+			missingScope := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"missing-scope","method":"entity.list","params":{"type":"cursor_item"}}`)).WithContext(f.ctx)
 			missingScope.Header.Set("Authorization", "Bearer q10-cursor-token")
 			missingRecorder := httptest.NewRecorder()
 			handler.ServeHTTP(missingRecorder, missingScope)
@@ -123,7 +123,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 			}
 			publicPage := func(params map[string]any) operatorread.OperatorEntityListResult {
 				t.Helper()
-				body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "cursor", "method": "state.list", "params": params})
+				body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "cursor", "method": "entity.list", "params": params})
 				if err != nil {
 					t.Fatal(err)
 				}

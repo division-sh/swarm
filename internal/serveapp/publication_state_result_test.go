@@ -125,7 +125,7 @@ func TestServedStateResultPublicationBothStores(t *testing.T) {
 							t.Fatalf("state-result state lost request/content/outcome: %s", rawFields)
 						}
 						var entity operatorread.OperatorEntityFull
-						requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": route.EntityID}, &entity)
+						requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": route.EntityID}, &entity)
 						if entity.Entity.RunID != seed.RunID || entity.Entity.EntityID != route.EntityID || !reflect.DeepEqual(entity.Fields, fields) {
 							t.Fatalf("state-result public entity lost exact mutation owner: %+v", entity)
 						}

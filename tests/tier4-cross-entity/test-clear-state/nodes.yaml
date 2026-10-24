@@ -1,9 +1,9 @@
 test-node:
-  state.clear_requested:
+  gates.clear_requested:
     data_accumulation:
       writes:
         - {op: clear, target: state.accumulated_count}
         - {op: clear, target: state.accumulated_total}
     emit:
-      event: state.cleared
+      event: gates.cleared
     advances_to: cleared

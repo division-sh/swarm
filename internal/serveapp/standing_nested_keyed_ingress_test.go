@@ -82,7 +82,7 @@ func a9NestedKeyedIngressConstruction(t *testing.T, declarationLocal bool) {
 				event := a9RequireNestedIngressSettlement(t, served.Endpoint, receipt.EventIDs[0])
 				for _, delivery := range event.Deliveries {
 					var entity operatorread.OperatorEntityFull
-					requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": delivery.Target.EntityID}, &entity)
+					requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": delivery.Target.EntityID}, &entity)
 					if entity.Fields["seen"] != float64(1) {
 						t.Fatalf("constructor delivery not exactly once: %+v", entity)
 					}
@@ -111,7 +111,7 @@ func a9NestedKeyedIngressConstruction(t *testing.T, declarationLocal bool) {
 			}
 			for _, leaf := range leaves {
 				var entity operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": leaf.Target.EntityID}, &entity)
+				requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": leaf.Target.EntityID}, &entity)
 				if entity.Fields["seen"] != float64(1) {
 					t.Fatalf("retry or sibling delivery mutated a retained leaf: %+v", entity)
 				}

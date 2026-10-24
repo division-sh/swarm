@@ -66,7 +66,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 					t.Fatalf("scope %q lost exact child transition cause: %+v", scope, history)
 				}
 				var entity operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": fork.ForkRunID, "entity_id": entityID}, &entity)
+				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": fork.ForkRunID, "entity_id": entityID}, &entity)
 				if entity.Fields["result"] != scope+"first/alpha" {
 					t.Fatalf("scope %q wrong public result: %+v", scope, entity)
 				}

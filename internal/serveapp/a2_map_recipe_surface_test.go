@@ -104,7 +104,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 						workers = append(workers, worker)
 					}
 					var entities operatorread.OperatorEntityListResult
-					requireServedJSONRPCResult(t, rt.Endpoint, "state.list", map[string]any{"run_id": opened.RunID, "limit": 10}, &entities)
+					requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": opened.RunID, "limit": 10}, &entities)
 					if entities.NextCursor != "" || len(entities.Entities) != len(tc.members)+1 {
 						t.Fatalf("public exact root/worker census: %+v", entities)
 					}
@@ -166,7 +166,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened servedEventPublishRPCResult, items map[string][]int64, members []string, results [][]int64) (operatorread.OperatorEntityFull, joinruntime.Activation) {
 	t.Helper()
 	var raw json.RawMessage
-	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": opened.RunID, "entity_id": opened.RunID}, &raw)
+	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": opened.RunID, "entity_id": opened.RunID}, &raw)
 	var entity operatorread.OperatorEntityFull
 	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &entity); err != nil {
 		t.Fatal(err)
