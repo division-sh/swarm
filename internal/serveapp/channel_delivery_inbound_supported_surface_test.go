@@ -320,7 +320,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	if scenario == "action_pages" {
-		schemaPath := filepath.Join(sourceRoot, "telegram-ingress", "schema.yaml")
+		schemaPath := filepath.Join(sourceRoot, ".", "schema.yaml")
 		raw, err := os.ReadFile(schemaPath)
 		if err != nil {
 			t.Fatal(err)
@@ -343,7 +343,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	if scenario == "required_input" || scenario == "invalid_input" || scenario == "ordered_input" || scenario == "edit_loss_resend" ||
 		scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
-		flowNames := []string{"telegram-ingress"}
+		flowNames := []string{"."}
 		if scenario == "draft_chooser" || scenario == "quoted_two" {
 			flowNames = append(flowNames, "telegram-stopped")
 		}
@@ -621,10 +621,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
-		cardMessages["telegram-ingress"] = waitChannelCardMessageID(t, db, backend, "telegram-ingress")
+		cardMessages["."] = waitChannelCardMessageID(t, db, backend, ".")
 		if scenario == "draft_chooser" || scenario == "quoted_two" {
 			cardMessages["telegram-stopped"] = waitChannelCardMessageID(t, db, backend, "telegram-stopped")
-			if cardMessages["telegram-ingress"] == cardMessages["telegram-stopped"] {
+			if cardMessages["."] == cardMessages["telegram-stopped"] {
 				t.Fatal("independent standing cards share one provider message")
 			}
 		}
@@ -708,7 +708,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		cardMessageID := 2
 		if scenario == "quoted_two" || scenario == "draft_chooser" {
-			cardMessageID = cardMessages["telegram-ingress"]
+			cardMessageID = cardMessages["."]
 		}
 		deadline := time.Now().Add(15 * time.Second)
 		for provider.Delivery(cardMessageID-1) == nil {
@@ -850,14 +850,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("draft begin leaked business events: %v", admitted.EventNames)
 		}
-		proveChannelBareInputChooser(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["telegram-ingress"], restartInteraction)
+		proveChannelBareInputChooser(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["."], restartInteraction)
 		return
 	}
 	if scenario == "quoted_two" {
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("quoted-draft begin leaked business events: %v", admitted.EventNames)
 		}
-		proveChannelQuotedTwoDrafts(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["telegram-ingress"])
+		proveChannelQuotedTwoDrafts(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["."])
 		return
 	}
 	if (nativeInboxScenario || scenario == "verdict" || scenario == "verdict_ack_loss") && len(admitted.EventNames) != 0 {

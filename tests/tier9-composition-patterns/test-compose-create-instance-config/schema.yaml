@@ -1,4 +1,4 @@
-name: test-compose-create-instance-config
+# fixture: test-compose-create-instance-config
 stages:
   idle: {}
   spawned: {final: true}

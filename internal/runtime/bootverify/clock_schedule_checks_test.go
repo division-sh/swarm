@@ -30,7 +30,7 @@ func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
 			root := t.TempDir()
 			for name, content := range map[string]string{
 				"schema.yaml": "stages: []\nschedules:\n  poll: {every: 5m, emit: poll.tick}\n" + tc.pins,
-				"events.yaml": "poll.tick:\n" + tc.fields,
+				"events.yaml": "poll.tick:\n" + tc.fields, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			} {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
 					t.Fatal(err)

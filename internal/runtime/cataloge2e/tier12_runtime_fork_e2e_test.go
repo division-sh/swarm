@@ -124,7 +124,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 			MailboxStore:      h.pg,
 			LLMRuntime:        h.llm,
 			QuiescenceTimeout: 10 * time.Second,
-		},
+		}, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -407,7 +407,7 @@ func selectedContractAgentRuntimeOptionsForCatalogHarness(h *runtimeHarness, cfg
 }
 
 func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string, selected interface {
-	storetest.DurableDataCatalogStore
+	storetest.RootedDataCatalogStore
 	runtimerunforkexecution.SourceArtifactSelectedContractSourceStore
 }) (runtimerunforkexecution.SelectedContractSourceLoader, runfork.RunForkContractSelection, runtimerunforkexecution.LoadedSelectedContractSource) {
 	t.Helper()
@@ -439,8 +439,10 @@ func installCatalogSelectedSourceTopology(t testing.TB, ctx context.Context, h *
 	if h == nil || h.processTopology == nil || h.rt == nil || h.rt.Manager == nil {
 		t.Fatal("catalog selected source topology requires a live process capability")
 	}
-	bundleHash := loaded.SourceArtifactFact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := h.rt.Manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
 	if err != nil {
 		t.Fatalf("compile selected-contract source topology: %v", err)
@@ -510,7 +512,7 @@ func materializeSelectedContractForkCleanupProbe(
 	cfg.LLM.Backend = "anthropic"
 	prepared, err := owner.Prepare(h.ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: forkAt, SourceLoader: loader, ContractSelection: selection,
-		AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
+		AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg), ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +37,7 @@ func testRuntimePayloadAdmitter(t *testing.T, bundle *runtimecontracts.WorkflowC
 
 func admitRuntimePayload(admitter runtimebus.PayloadAdmitter, eventType string, payload json.RawMessage) (events.Event, error) {
 	event := eventtest.RunCreatingRootIngress("", events.EventType(eventType), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{})
-	admission, err := admitter(context.Background(), event, "")
+	admission, err := admitter(context.Background(), event, events.AuthoredPayloadProducer("."))
 	if err != nil {
 		return events.Event{}, err
 	}
@@ -51,9 +53,10 @@ func loadRootPayloadBundle(t *testing.T, eventsYAML, typesYAML string) *runtimec
 	t.Helper()
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"schema.yaml": "name: payload-admission-proof\n",
-		"events.yaml": eventsYAML,
-		"types.yaml":  typesYAML,
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   eventsYAML,
+		"types.yaml":    typesYAML,
 	} {
 		if contents == "" {
 			continue
@@ -104,6 +107,41 @@ func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 	}
 	if admission.Binding().SchemaClass() != events.PayloadSchemaAuthored {
 		t.Fatalf("payload schema class = %q, want authored", admission.Binding().SchemaClass())
+	}
+	// A valid producer scope with no event schema is distinct from missing scope.
+	schemaLess, err := admitRuntimePayload(admitter, "fixture.untyped", []byte(`{"ok":true}`))
+	if err != nil {
+		t.Fatalf("admit genuinely schema-less payload in declared root: %v", err)
+	}
+	if admission, found := schemaLess.PayloadAdmission(); !found || admission.Binding().SchemaClass() != events.PayloadSchemaSchemaLess {
+		t.Fatal("valid schema-less root event lost its admission")
+	}
+
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(repo, "tests/tier5-flow-lifecycle/test-timer-fire"), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	timerAdmitter := testRuntimePayloadAdmitter(t, bundle)
+	source, err := events.NewRootRoutingSource("timer-entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventType := range []events.EventType{"timer.check", "timer.undeclared"} {
+		timer := eventtest.RuntimeControlWithRoutingSource(uuid.NewString(), eventType, "runtime.workflow_timer", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{EntityID: "timer-entity"}, source, time.Time{})
+		proof, err := timerAdmitter(context.Background(), timer, events.EventPayloadProducer(timer, "."))
+		if eventType == "timer.undeclared" {
+			if err == nil || !strings.Contains(err.Error(), "not declared by flow") || proof.Valid() {
+				t.Fatalf("undeclared timer payload admission: %v", err)
+			}
+			continue
+		}
+		if err != nil || !proof.Binding().Producer().IsAuthored() || proof.Binding().FlowID() != "." {
+			t.Fatalf("authored timer payload admission: %v", err)
+		}
+		if _, err := events.ApplyPayloadAdmission(timer, proof); err != nil {
+			t.Fatalf("apply authored timer payload: %v", err)
+		}
 	}
 }
 
@@ -169,6 +207,137 @@ func TestRuntimePayloadAdmitter_ClassifiesPlatformCatalogSchema(t *testing.T) {
 	if !ok || admission.Binding().SchemaClass() != events.PayloadSchemaPlatform {
 		t.Fatalf("platform payload schema class = %q/%v", admission.Binding().SchemaClass(), ok)
 	}
+
+	// Reach: an actual diagnostic resolves reference law through its platform
+	// producer, never through an empty authored coordinate or structural schema.
+	admit := testRuntimePayloadAdmitter(t, bundle)
+	capture := &runtimeLogPersistenceCapture{}
+	logger := NewRuntimeLogger(capture, executionposture.Live, admit)
+	if err := logger.Log(context.Background(), RuntimeLogEntry{Level: "info", Message: "catalog reference", Component: "runtime", Action: "proof"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(capture.records) != 1 {
+		t.Fatalf("diagnostic records=%d", len(capture.records))
+	}
+	record := capture.records[0]
+	binding := record.PayloadAdmission.Binding()
+	if binding.SchemaClass() != events.PayloadSchemaPlatform || !binding.Producer().IsPlatform() || binding.Reference() != events.RuntimeLogSchemaReference || binding.FlowID() != "" || binding.SchemaDigest() == canonicaljson.HashBytes([]byte("{}")) {
+		t.Fatalf("diagnostic lost explicit reference authority: %+v", binding)
+	}
+	diagnostic := eventtest.DiagnosticDirect("", events.EventTypePlatformRuntimeLog, "runtime", "", record.Payload, 0, "", "", events.EventEnvelope{}, time.Time{})
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]semanticview.Source{"declaration": semanticview.Wrap(bundle), "effective": projection.Source()} {
+		resolved, err := semanticview.ResolveProducerEventSchema(source, events.PlatformPayloadProducer(diagnostic), diagnostic)
+		if err != nil || resolved.HasSchema || resolved.HasCompiled || resolved.Reference.Reference() != binding.Reference() || resolved.Reference.Digest() != binding.SchemaDigest() {
+			t.Fatalf("%s reference/schema disagreement: %+v err=%v", name, resolved, err)
+		}
+		if authored := semanticview.ResolveEventSchema(source, "", string(diagnostic.Type())); authored.HasSchema || authored.Reference.Digest() != "" {
+			t.Fatalf("%s recovered authority from empty authored flow", name)
+		}
+	}
+	boot := eventtest.RuntimeControl("", "platform.boot", "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})
+	for name, producer := range map[string]events.PayloadProducer{
+		"missing": {}, "empty_authored": events.AuthoredPayloadProducer(""), "dot_authored": events.AuthoredPayloadProducer("."),
+		"foreign_event_class": events.PlatformPayloadProducer(boot),
+	} {
+		if proof, err := admit(context.Background(), diagnostic, producer); err == nil || proof.Valid() {
+			t.Errorf("%s gained diagnostic authority", name)
+		}
+	}
+	if _, err := admit(context.Background(), boot, events.PlatformPayloadProducer(boot)); err == nil {
+		t.Fatal("invalid boot payload gained diagnostic validation privileges")
+	}
+	for _, payload := range []string{`{}`, `{"log_level":1,"message":"bad","details":{"component":"runtime","action":"proof"}}`, `{"log_level":"info","message":"bad","details":{"component":"runtime","action":"proof","error":"legacy"}}`} {
+		bad := eventtest.DiagnosticDirect("", events.EventTypePlatformRuntimeLog, "runtime", "", []byte(payload), 0, "", "", events.EventEnvelope{}, time.Time{})
+		if proof, err := admit(context.Background(), bad, events.PlatformPayloadProducer(bad)); err == nil || proof.Valid() {
+			t.Errorf("invalid diagnostic payload admitted: %s", payload)
+		}
+	}
+	if _, err := events.ApplyPayloadAdmission(boot, record.PayloadAdmission); err == nil {
+		t.Fatal("diagnostic binding applied to another event/class")
+	}
+	input := events.PayloadSchemaBindingInput{BundleHash: binding.BundleHash(), EventKey: binding.EventKey(), SchemaDigest: binding.SchemaDigest(), SchemaClass: binding.SchemaClass()}
+	restored, err := events.RestoreEventPayloadSchemaBinding(input, diagnostic.AdmissionClass(), diagnostic.Type(), diagnostic.Producer())
+	if err != nil || !restored.Equal(binding) {
+		t.Fatalf("explicit reference binding lost on restoration: %v", err)
+	}
+	if _, err := events.NewPlatformPayloadSchemaBinding(input, events.PlatformPayloadProducer(diagnostic), "wrong-reference"); err == nil {
+		t.Fatal("substituted reference admitted")
+	}
+	labelOnly, err := events.NewPayloadSchemaBinding(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labelAdmission, err := events.NewPayloadAdmission(record.Payload, labelOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := events.ApplyPayloadAdmission(diagnostic, labelAdmission); err == nil {
+		t.Fatal("platform label alone gained reference authority")
+	}
+	for name, mutate := range map[string]func(*events.PayloadSchemaBindingInput){
+		"foreign_event": func(in *events.PayloadSchemaBindingInput) { in.EventKey = "platform.boot" },
+		"borrowed_flow": func(in *events.PayloadSchemaBindingInput) { in.FlowID = "." },
+		"schema_less":   func(in *events.PayloadSchemaBindingInput) { in.SchemaClass = events.PayloadSchemaSchemaLess },
+	} {
+		bad := input
+		mutate(&bad)
+		if _, err := events.RestoreEventPayloadSchemaBinding(bad, diagnostic.AdmissionClass(), diagnostic.Type(), diagnostic.Producer()); err == nil {
+			t.Errorf("%s restored reference authority", name)
+		}
+	}
+
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", "pipeline", "emit", nil), "pipeline", "emit")
+	deadLetter := map[string]any{
+		"original_event": "task.completed", "original_payload": map[string]any{"ok": true},
+		"failure": failure, "retry_count": 0, "chain_depth": 51, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	deadLetterPayload, err := json.Marshal(deadLetter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadLetterEvent := eventtest.RuntimeDiagnostic("", "platform.dead_letter", "runtime", "", deadLetterPayload, 0, "", "", events.EventEnvelope{}, time.Time{})
+	deadLetterAdmission, err := admit(context.Background(), deadLetterEvent, events.PlatformPayloadProducer(deadLetterEvent))
+	if err != nil {
+		t.Fatalf("admit unparented dead letter through catalog law: %v", err)
+	}
+	deadLetterBinding := deadLetterAdmission.Binding()
+	if deadLetterBinding.Reference() != events.DeadLetterSchemaReference || deadLetterBinding.SchemaDigest() == binding.SchemaDigest() {
+		t.Fatal("dead letter did not retain its own catalog law")
+	}
+	if _, err := events.ApplyPayloadAdmission(deadLetterEvent, deadLetterAdmission); err != nil {
+		t.Fatal(err)
+	}
+	deadLetterInput := events.PayloadSchemaBindingInput{BundleHash: deadLetterBinding.BundleHash(), EventKey: deadLetterBinding.EventKey(), SchemaClass: deadLetterBinding.SchemaClass(), SchemaDigest: deadLetterBinding.SchemaDigest()}
+	if restored, err := events.RestoreEventPayloadSchemaBinding(deadLetterInput, deadLetterEvent.AdmissionClass(), deadLetterEvent.Type(), deadLetterEvent.Producer()); err != nil || !restored.Equal(deadLetterBinding) {
+		t.Fatalf("dead-letter reference restoration: %v", err)
+	}
+	wrongClass := eventtest.RuntimeControl("", "platform.dead_letter", "runtime", "", deadLetterPayload, 0, "", "", events.EventEnvelope{}, time.Time{})
+	if _, err := admit(context.Background(), wrongClass, events.PlatformPayloadProducer(wrongClass)); err == nil {
+		t.Fatal("dead-letter reference accepted the wrong admission class")
+	}
+	for field, invalid := range map[string]any{"failure": map[string]any{}, "original_payload": []any{}, "retry_count": "0", "source": map[string]any{"flow_id": 17}} {
+		bad := make(map[string]any, len(deadLetter))
+		for key, value := range deadLetter {
+			bad[key] = value
+		}
+		bad[field] = invalid
+		raw, err := json.Marshal(bad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		badEvent := eventtest.RuntimeDiagnostic("", "platform.dead_letter", "runtime", "", raw, 0, "", "", events.EventEnvelope{}, time.Time{})
+		if _, err := admit(context.Background(), badEvent, events.PlatformPayloadProducer(badEvent)); err == nil {
+			t.Errorf("dead-letter reference accepted invalid %s", field)
+		}
+	}
 }
 
 func TestRuntimePayloadAdmitter_SelectedForkValidatesTargetSchemaWithoutChangingHistoricalBytes(t *testing.T) {
@@ -192,7 +361,7 @@ func TestRuntimePayloadAdmitter_SelectedForkValidatesTargetSchemaWithoutChanging
 	if err != nil {
 		t.Fatalf("selected-fork event: %v", err)
 	}
-	admission, err := testRuntimePayloadAdmitter(t, booleanPayloadBundle(t))(context.Background(), event, "")
+	admission, err := testRuntimePayloadAdmitter(t, booleanPayloadBundle(t))(context.Background(), event, events.AuthoredPayloadProducer("."))
 	if err != nil {
 		t.Fatalf("admit selected-fork payload: %v", err)
 	}
@@ -216,6 +385,17 @@ func TestRuntimePayloadAdmitter_RejectsSchemaMismatch(t *testing.T) {
 	bundle := booleanPayloadBundle(t)
 	logs := &runtimeLogPersistenceCapture{}
 	admitter := NewRuntimePayloadAdmitter(newTestRuntimeLogger(logs), semanticview.Wrap(bundle), testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash()))
+	// Reach: invalid or absent producer authority must not turn schema refusal
+	// into schema-less approval, even when the supplied payload is otherwise valid.
+	for _, flow := range []string{"", " ", " .", ". ", "./", "child/../root", "foreign", "foreign/child"} {
+		for _, payload := range []json.RawMessage{[]byte(`{"ok":true}`), []byte(`{"ok":"yes"}`)} {
+			event := eventtest.RunCreatingRootIngress("", "task.completed", "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{})
+			admission, err := admitter(context.Background(), event, events.AuthoredPayloadProducer(flow))
+			if err == nil || !reflect.DeepEqual(admission, events.PayloadAdmission{}) {
+				t.Errorf("invalid producer coordinate %q gained payload admission: valid=%t err=%v", flow, admission.Valid(), err)
+			}
+		}
+	}
 	if _, err := admitRuntimePayload(admitter, "task.completed", []byte(`{"ok":"yes"}`)); err == nil {
 		t.Fatal("expected schema-invalid payload to be rejected")
 	}

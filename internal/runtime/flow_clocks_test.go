@@ -11,16 +11,21 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, nested))
+		bundle, found := semanticview.Bundle(source)
+		if !found || bundle.SourceArtifact == nil {
+			t.Fatal("declared clock fixture requires its actual captured source")
+		}
 		for _, enabled := range []bool{false, true} {
 			rt := &Runtime{Options: RuntimeOptions{
 				WorkflowModule:     semanticOnlyWorkflowRuntime{source: source},
-				SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA), EnableDeclaredClockBinding: enabled,
+				SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact), EnableDeclaredClockBinding: enabled,
 			}}
 			candidates, err := rt.PlanStandingServiceCandidates()
 			want := 0
@@ -54,7 +59,7 @@ func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 
 func TestFiniteClockSelectionPreservesIngressBindings(t *testing.T) {
 	source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, false))
-	declarations, err := ResolveStandingTargetDeclarations(source, nil)
+	declarations, err := ResolveStandingTargetDeclarations(source, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +87,7 @@ func TestClockDeploymentDeclarationsAndExactPublication(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		t.Run(map[bool]string{false: "root", true: "nested"}[nested], func(t *testing.T) {
 			source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, nested))
-			declarations, err := ResolveStandingTargetDeclarations(source, nil)
+			declarations, err := ResolveStandingTargetDeclarations(source, nil, nil)
 			if err != nil || len(declarations) != 1 || len(declarations[0].Clocks) != 1 || len(declarations[0].Ingress) != 0 || declarations[0].Alias != "" {
 				t.Fatalf("clock-only declaration=%+v err=%v", declarations, err)
 			}

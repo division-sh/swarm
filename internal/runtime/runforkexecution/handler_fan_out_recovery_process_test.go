@@ -66,7 +66,7 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "items.ready", "source-runtime", "",
-		[]byte(`{"items":["one","two"]}`), 0, sourceRun, events.EventEnvelope{}, events.NoRoutingSource(), time.Now().UTC().Add(-time.Minute), executionmode.Mock)
+		[]byte(`{"items":["one","two"]}`), 0, sourceRun, events.EventEnvelope{}, eventtest.RootRoutingSource(sourceRun), time.Now().UTC().Add(-time.Minute), executionmode.Mock)
 	bundle, found := semanticview.Bundle(loaded.Source)
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("handler fan-out source lacks its admitted artifact")
@@ -119,7 +119,8 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-handler-fan-out", IdempotencyKey: "intent-cut",
 			TransportHash: "retained-handler-fan-out-transport", SourceRunID: sourceRun, ForkEventID: eventID,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		},
 	})
 	if err != nil || !result.Activation.Activated {
 		t.Fatalf("activate handler fan-out: %+v error=%v", result.Activation, err)

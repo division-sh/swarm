@@ -1109,13 +1109,13 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 }
 
 func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType string, payload, envelope map[string]any, surface runtimeengine.EmitSurface) error {
-	proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType))
+	proof := semanticview.ResolveFlowEventProof(source, flowID, strings.TrimSpace(eventType))
 	if !proof.HasSchema {
 		return nil
 	}
 	resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
 	if !resolution.HasSchema {
-		return fmt.Errorf("%w: event %s has no resolvable payload schema in flow %s", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), strings.TrimSpace(flowID))
+		return fmt.Errorf("%w: event %s has no resolvable payload schema in flow %s", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), flowID)
 	}
 	if err := resolution.UnresolvedTypeError(); err != nil {
 		return &runtimeengine.EmitPayloadContractError{
@@ -1160,7 +1160,7 @@ func pipelineEmitPayloadProperties(source semanticview.Source, flowID, eventType
 	if source == nil {
 		return nil
 	}
-	proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType))
+	proof := semanticview.ResolveFlowEventProof(source, flowID, strings.TrimSpace(eventType))
 	if !proof.HasSchema {
 		return nil
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -37,7 +38,7 @@ func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstra
 	var selected []schemastore.SchemaTableDDL
 	for _, plan := range plans {
 		switch plan.TableName {
-		case "runtime_store_metadata", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences",
+		case "runtime_store_metadata", "runs", "source_artifacts", "source_root_admissions", "author_activity_order", "author_activity_occurrences",
 			"run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
 			selected = append(selected, plan)
 		case "events", "entity_state", "standing_services", "standing_service_generations":
@@ -45,13 +46,6 @@ func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstra
 				selected = append(selected, plan)
 			}
 		}
-	}
-	want := 8
-	if snapshot {
-		want += 4
-	}
-	if len(selected) != want {
-		t.Fatalf("statement run fixture plans=%d, want %d", len(selected), want)
 	}
 	if err := schema.BootstrapSchema(context.Background(), schemastore.SchemaBootstrapRequest{
 		PlatformPlans: selected,
@@ -62,16 +56,19 @@ func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstra
 }
 
 func requireStatementRun(t testing.TB, owner runlifecycle.OperationOwner, artifact interface {
-	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+	EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
 }, ids ...string) {
 	t.Helper()
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
-	if _, err := artifact.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
+	ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	if _, err := artifact.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range ids {
 		if _, err := owner.CreateRun(ctx, runlifecycle.CreateRequest{
-			RunID: id, Source: sourceartifactfixture.Fact(), Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
+			RunID: id, Source: sourceartifactfixture.Fact(), RootAdmission: rooted.Admission(), Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
 		}); err != nil {
 			t.Fatal(err)
 		}

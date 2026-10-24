@@ -1,4 +1,4 @@
-name: scout
+# fixture: scout
 instance: batch_id
 stages:
   collecting: {}

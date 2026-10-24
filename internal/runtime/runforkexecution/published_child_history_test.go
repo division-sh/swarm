@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -120,11 +121,21 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				target, err := loader.Store.LoadRunRootedSource(ctx, checkpoint.ForkRun)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fact, err := correlation.NewSourceArtifactFact(availability.BundleHash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				targetCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), target.Admission())
 				selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 				operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-descendant", IdempotencyKey: "child-cut", TransportHash: "descendant-transport",
-					SourceRunID: checkpoint.ForkRun, ForkEventID: id, TargetBundleHash: availability.BundleHash, AllowSourceFreeze: true, ContractSelection: selection}
-				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: checkpoint.ForkRun, At: id, AllowSourceFreeze: true,
-					Owner: owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+					SourceRunID: checkpoint.ForkRun, ForkEventID: id, TargetBundleHash: availability.BundleHash, TargetRootReference: target.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+				result, err := ExecuteSelectedContractRunFork(targetCtx, SelectedContractExecutionRequest{SourceRunID: checkpoint.ForkRun, At: id, AllowSourceFreeze: true,
+					ExpectedBundleHash: availability.BundleHash,
+					Owner:              owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 					AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 				if err != nil || !result.Activation.Activated {
 					t.Fatalf("child-as-source exact owed delivery: %+v err=%v", result, err)

@@ -181,15 +181,18 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 					t.Fatal("selected delay requires its actual loader-owned source artifact")
 				}
 				storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, target.SourceArtifactFact),
-					selected.(storetest.DurableDataCatalogStore), bundle)
+					selected.(storetest.RootedDataCatalogStore), bundle)
 			}
 			selection := runforkadmission.SelectedContractSelection(target.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-template-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-template-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: target.RootedSource.Admission().Reference(),
+			}
+			targetCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, target.SourceArtifactFact), target.RootedSource.Admission())
+			result, err := ExecuteSelectedContractRunFork(targetCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
-				SourceLoader: loader, ContractSelection: selection,
+				SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}, ContractSelection: selection,
+				SourceArtifactFact: target.SourceArtifactFact, ExpectedBundleHash: target.SourceArtifactFact.BundleHash(),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
 			if err != nil || !result.Activation.Activated {

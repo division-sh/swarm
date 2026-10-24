@@ -76,7 +76,9 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
+
 	"github.com/google/uuid"
 )
 
@@ -199,7 +201,8 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 
 func TestBindSelectedContractWorkspaceProjectionUsesSelectedArtifact(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: selected\n"), 0o644); err != nil {
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -246,7 +249,8 @@ func TestBindSelectedContractWorkspaceProjectionUsesSelectedArtifact(t *testing.
 
 func TestPrepareSelectedContractAgentRuntimeReleasesReboundProjectionOnPlanningError(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: selected\n"), 0o644); err != nil {
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -277,9 +281,15 @@ func TestPrepareSelectedContractAgentRuntimeReleasesReboundProjectionOnPlanningE
 			},
 		}},
 	}
+	repo := runForkExecutionRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = prepareSelectedContractAgentRuntimeMaterialization(context.Background(), LoadedSelectedContractSource{
-		Source:             semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source:             semanticview.Wrap(bundle),
 		SourceArtifactFact: sourceFact,
+		RootedSource:       sourceartifactfixture.CapturedRoot(t, artifact),
 		RuntimeProjection:  projection,
 	}, planning, nil, SelectedContractAgentRuntimeOptions{Workspace: workspace.NewHostManager()})
 	if err == nil || !strings.Contains(err.Error(), "missing selected-source declaration-owned agent materialization blueprint") {
@@ -295,7 +305,8 @@ func TestPrepareSelectedContractAgentRuntimeReleasesReboundProjectionOnPlanningE
 
 func TestSelectedContractAgentRuntimeShutdownReleasesReboundProjection(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: selected\n"), 0o644); err != nil {
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -451,7 +462,15 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					t.Fatalf("construct state-only joined receiver: %+v %v", committed, err)
 				}
 			} else if test.stateOnly {
-				seedSelectedExecutionStateOnlySourceRun(t, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
+				writeCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
+				writeCtx = runtimeauthoractivity.WithScope(writeCtx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+				storetest.RequireRun(t, writeCtx, pg, storetest.RunFixture{
+					Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute),
+					BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(),
+				})
+				event := eventtest.ExistingRunRootIngress(sourceEventID, events.EventType(test.eventName), "source-runtime", "", json.RawMessage(`{}`), 0,
+					sourceRunID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
+				storetest.CommitSemanticEventWithRoutes(t, writeCtx, pg, event, nil, runtimepipelineobligation.ScopeSubscribed)
 			} else {
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: sourceRunID, EntityID: sourceRunID})
@@ -1150,8 +1169,12 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
-		t.Fatalf("EnsureSourceArtifact: %v", err)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatalf("EnsureRootedSource: %v", err)
 	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
 
@@ -1162,7 +1185,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	if err != nil {
 		t.Fatalf("construct persisted source run bundle identity: %v", err)
 	}
-	loaded := LoadedSelectedContractSource{Source: semanticview.Wrap(bundle), SourceArtifactFact: persistedSource}
+	loaded := LoadedSelectedContractSource{Source: semanticview.Wrap(bundle), SourceArtifactFact: persistedSource, RootedSource: rooted}
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
@@ -3143,33 +3166,31 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
-	now := time.Now().UTC()
-	sourceRunID := uuid.NewString()
-	forkRunID := uuid.NewString()
-	forkEventID := uuid.NewString()
-	bindingID := uuid.NewString()
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
-		Artifact: runForkTestSourceArtifact,
-	})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
-		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	revision := captureSelectedExecutionSourceRevision(t, selected, sourceRunID)
-	forkOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, storerunlifecycle.ForkOriginPointEvent, revision, forkEventID)
+	root := t.TempDir()
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
+	repoRoot := runForkExecutionRepoRoot(t)
+	loader := admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repoRoot, SourceRoot: root,
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, selection)
 	if err != nil {
 		t.Fatal(err)
 	}
+	admittedRoot := loaded.RootedSource.Admission()
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), admittedRoot)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+	now := time.Now().UTC()
+	sourceRunID := uuid.NewString()
+	forkEventID := uuid.NewString()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: forkOrigin,
-		Artifact: runForkTestSourceArtifact, StartedAt: now,
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
+		Artifact: loaded.RootedSource.Artifact(), RootAdmission: admittedRoot,
 	})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_bindings
-			(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at)
-		VALUES ($1::uuid,$2::uuid,$3::uuid,'event',$4,$5::uuid,'selected_contracts',$6)
-	`, bindingID, forkRunID, sourceRunID, revision, forkEventID, now); err != nil {
-		t.Fatalf("seed selected-contract container competition binding: %v", err)
-	}
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
+		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
+	captureSelectedExecutionSourceRevision(t, selected, sourceRunID)
 
 	servedDB, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -3190,6 +3211,15 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
 	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
 	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
+	operation := selectedForkFixtureOperation(t, loaded, sourceRunID, forkEventID)
+	operation.AllowSourceFreeze = false
+	materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, selectedContractExecutionOwnerForTest(t, servedStore), SelectedContractExecutionRequest{
+		SourceRunID: sourceRunID, At: forkEventID, SourceLoader: loader, ContractSelection: selection,
+		SourceArtifactFact: loaded.SourceArtifactFact, ForkOperation: operation,
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: processCapability,
+			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}}},
+	})
+	forkRunID := materialized.ForkRunID
 	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
 	process := fixtureValue.(*runForkTestWorkFixture).process
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)
@@ -3200,7 +3230,11 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err := foreignOwner.BindSelectedProcess(ctx, process, processCapability); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := foreignOwner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); !errors.Is(err, runtimestartupownership.ErrProcessNotCurrent) {
+	if _, err := foreignOwner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
+		SourceLoader: loader,
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability, ExecutionPosture: executionposture.Live,
+			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}}},
+	}); !errors.Is(err, runtimestartupownership.ErrProcessNotCurrent) {
 		t.Fatalf("foreign store borrowed native process permission: %v", err)
 	}
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)
@@ -3215,14 +3249,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatal(err)
 	}
 
-	selection := runfork.RunForkContractSelection{
-		Mode: "selected_contracts",
-	}
-	selectedSource := testSelectedSource(selection)
-	deferredWorkAdmission, err := admitSelectedContractDeferredWork(fixedPlan, selectedSource)
-	if err != nil {
-		t.Fatal(err)
-	}
+	selectedSource := loaded.Source
+	deferredWorkAdmission := selectedContractDeferredWorkAdmissionForTest(t, sourceRunID, forkEventID, selectedSource)
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
 		Owner:                      runfork.RunForkSelectedContractExecutionAdmissionOwner,
 		FutureExecutionOwner:       runfork.RunForkSelectedContractExecutionOwner,
@@ -3238,8 +3266,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		AdmissionUse:               runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner:        runfork.RunForkSelectedContractExecutionModelOwner,
 		DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
-		SourceWorkflowName:         "workflow",
-		SourceWorkflowVersion:      "v1",
+		SourceWorkflowName:         selectedSource.WorkflowName(),
+		SourceWorkflowVersion:      selectedSource.WorkflowVersion(),
 	}
 	planning := runfork.RunForkSelectedContractRecipientPlanning{
 		Owner:                      runfork.RunForkSelectedContractRecipientPlanningOwner,
@@ -3249,13 +3277,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		ContractSelection:          selection,
 	}
 	baseRequest := publishSelectedContractForkEventsRequest{
-		Admission: admission,
-		LoadedSource: LoadedSelectedContractSource{
-			Selection:               selection,
-			Source:                  selectedSource,
-			SourceArtifactFact:      testEphemeralSourceArtifactFact(runForkTestBundleHash),
-			EffectiveSourceIdentity: testEffectiveSourceIdentity(testEphemeralSourceArtifactFact(runForkTestBundleHash)),
-		},
+		Admission:             admission,
+		LoadedSource:          loaded,
 		RecipientPlanning:     planning,
 		SourceRunID:           sourceRunID,
 		ForkRunID:             forkRunID,
@@ -3289,8 +3312,12 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseRequest.AgentRuntime.Declarations, err = runtimeagenttopology.NewSelectedDeclarationPlan(runForkTestBundleHash, []runtimeagenttopology.DesiredAgent{{
-		Identity: targetPlan, ConfigRevision: targetRevision, Source: runtimeagenttopology.SourceCoordinate{BundleHash: runForkTestBundleHash},
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(admittedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRequest.AgentRuntime.Declarations, err = runtimeagenttopology.NewSelectedDeclarationPlan(coordinate.BundleHash, []runtimeagenttopology.DesiredAgent{{
+		Identity: targetPlan, ConfigRevision: targetRevision, Source: coordinate,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -3341,7 +3368,9 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		if err := owner.BindSelectedProcess(ctx, process, processCapability); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := owner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); err != nil {
+		if _, err := owner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
+			SourceLoader: loader, AgentRuntime: baseRequest.AgentRuntime.Options,
+		}); err != nil {
 			t.Fatal(err)
 		}
 		prepared, err := prepareSelectedFork(ctx, operation, owner.ports, baseRequest.LoadedSource, fixedPlan, runfork.RunForkContractFrontierAdmission{}, planning, baseRequest.AgentRuntime)
@@ -4479,7 +4508,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	operation := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "scope-conflict-proof", IdempotencyKey: uuid.NewString(), TransportHash: "scope-conflict-proof",
 		SourceRunID: sourceRunID, ForkEventID: sourceEventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		ContractSelection: selection, AllowSourceFreeze: true,
+		ContractSelection: selection, AllowSourceFreeze: true, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 	}
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		ForkOperation:     &operation,
@@ -5297,6 +5326,7 @@ func materializeSelectedExecutionForkForTest(
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		Preparation: prepared.evidence(), OriginalLoopCarriage: original,
 		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection, SourceArtifactFact: loaded.SourceArtifactFact,
+		RootAdmission:           loaded.RootedSource.Admission(),
 		EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
 		FrontierAdmission:       frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, Readiness: readiness,
 	})
@@ -5360,15 +5390,13 @@ func seedSelectedExecutionStateOnlySourceRun(
 	db *sql.DB,
 	sourceRunID, sourceEventID, eventName string,
 	at time.Time,
-	sourceFacts ...runtimecorrelation.SourceArtifactFact,
+	rooted sourceartifact.RootedSource,
 ) {
 	t.Helper()
 	ctx := runForkTestContext(t)
-	sourceFact := testEphemeralSourceArtifactFact(runForkTestBundleHash)
-	if len(sourceFacts) > 0 {
-		sourceFact = sourceFacts[0]
-	}
+	sourceFact := sourceartifactfixture.FactFor(rooted.Artifact())
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = runtimeauthoractivity.WithScope(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
@@ -5377,6 +5405,7 @@ func seedSelectedExecutionStateOnlySourceRun(
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
+		Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 	})
 	event := eventtest.ExistingRunRootIngress(
 		sourceEventID,
@@ -5451,6 +5480,8 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		sourceFact = sourceFacts[0]
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
+	rooted, _ := sourceartifactfixture.Rooted(t, "original-source", selectedExecutionSourceArtifact(t, sourceFact.BundleHash()))
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = runtimeauthoractivity.WithScope(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
@@ -5463,6 +5494,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
+		Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 	})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(sourceEventID, events.EventType(eventName), "source-runtime", "", payload, 0, sourceRunID,
 		envelope, routingSource, at, mode)
@@ -5718,10 +5750,11 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 		t.Fatal("native source actor requires its actual admitted artifact")
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, identity.RunID), loaded.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID, StartedAt: at.Add(-time.Minute),
-		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
+		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, RootAdmission: loaded.RootedSource.Admission(),
 	})
 	live, err := llmselection.ResolveLiveBackend(llmselection.BackendAnthropic)
 	if err != nil {
@@ -5744,7 +5777,11 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 	if err != nil || !found {
 		t.Fatalf("native source actor lost its exact plan: found=%t err=%v", found, err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, runtimeagenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()})
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}

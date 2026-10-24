@@ -482,7 +482,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		nodes += "    " + name + ":\n      guard: {id: admit, check: true}\n"
 	}
 	pins := "pins:\n  inputs: [" + strings.Join(names, ", ") + "]\n"
-	rootSchema := "name: provider-authority\n" + imports + "pins:\n  inputs: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
+	rootSchema := "# fixture: provider-authority\n" + imports + "pins:\n  inputs: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
 	if scenario.publicConnected {
 		rootSchema = strings.Replace(rootSchema, "\nconnect:\n", "\n  outputs: ["+strings.Join(names[1:], ", ")+"]\nconnect:\n", 1)
 		for _, name := range names[1:] {

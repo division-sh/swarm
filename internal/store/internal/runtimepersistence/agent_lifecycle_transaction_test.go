@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -55,6 +56,11 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	agentID := "subordinate-transaction-agent"
 	activeRunID := uuid.NewString()
 	seedLifecycleRun(t, db, sqlite, activeRunID)
+	rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, activeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	identity := mustTestAgentIdentityForRun(activeRunID, agentID, "global")
 	rec := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -97,7 +103,11 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if err != nil || !found {
 		t.Fatalf("current lifecycle source set: found=%v err=%v", found, err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, store, sourceSet, runtimeagenttopology.SourceCoordinate{BundleHash: before.ProcessBinding.BundleHash})
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, store, sourceSet, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}

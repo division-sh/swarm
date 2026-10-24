@@ -67,7 +67,7 @@ func (r *permanentForkEvidenceRows) Next(values []driver.Value) error {
 			values[i] = "materialized"
 		case r.fault == "unsettled" && (column == "result_json" || column == "failure_json") && strings.Contains(r.query, "SELECT operation_id, actor,"):
 			values[i] = nil
-		case r.fault == "binding_cut" && column == "fork_revision" && len(r.Columns()) == 9:
+		case r.fault == "binding_cut" && column == "fork_revision" && strings.Contains(r.query, "FROM run_fork_selected_contract_bindings\n"):
 			values[i] = values[i].(int64) + 1
 		case r.fault == "typed_operation_cut" && column == "fork_revision" && strings.Contains(r.query, "SELECT operation_id, actor,"):
 			values[i] = values[i].(int64) + 1
@@ -230,7 +230,7 @@ func newPermanentCohortTimerFixture(t *testing.T, opened authorActivityReceiptFi
 	repo := canonicalrouting.RepoRoot(t)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: opened.store.(runforkexecution.SourceArtifactSelectedContractSourceStore)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-		SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		Responsibility: runforkexecution.OriginalRunSource(runID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -249,8 +249,9 @@ func newPermanentCohortTimerFixture(t *testing.T, opened authorActivityReceiptFi
 func permanentTimerDeploymentCommand(t *testing.T, selected any) (context.Context, bus.DeploymentRunCreationCommand) {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml": "name: permanent-evidence\npins:\n  outputs:\n    - records.ready\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n",
-		"events.yaml": "records.ready:\n  body: text\ntimer.elapsed:\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "pins:\n  outputs:\n    - records.ready\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n",
+		"events.yaml":   "records.ready:\n  body: text\ntimer.elapsed:\n",
 	}
 	f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 	catalog, err := contracts.BuildDurableDataCatalog(f.bundle)

@@ -24,7 +24,6 @@ type AgentNamePlan struct {
 func (p AgentNamePlan) Normalize() AgentNamePlan {
 	p.ScopeKind = strings.TrimSpace(p.ScopeKind)
 	p.ScopeID = strings.TrimSpace(p.ScopeID)
-	p.OwnerFlowID = strings.TrimSpace(p.OwnerFlowID)
 	p.LocalID = strings.TrimSpace(p.LocalID)
 	p.OwnerURI = strings.TrimSpace(p.OwnerURI)
 	p.AgentID = strings.TrimSpace(p.AgentID)
@@ -89,6 +88,11 @@ func ScopedAgentNamePlan(source Source, declaration AgentDeclaration) (AgentName
 }
 
 func FlowAgentNamePlan(source Source, scope FlowScope, localID string) (AgentNamePlan, error) {
+	var found bool
+	scope, found = FlowScopeByID(source, scope.ID)
+	if !found {
+		return AgentNamePlan{}, fmt.Errorf("agent name plan requires an exact admitted flow selector")
+	}
 	return agentNamePlanForScope(source, "flow", scope.ID, scope.ID, scope.AgentURIs[localID], localID)
 }
 

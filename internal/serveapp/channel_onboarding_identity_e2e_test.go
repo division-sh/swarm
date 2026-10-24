@@ -21,6 +21,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil"
+	"gopkg.in/yaml.v3"
 )
 
 var channelOnboardingExactChoicePattern = regexp.MustCompile(`source=.+? --interface (\S+) --target (\S+)`)
@@ -394,8 +395,8 @@ func requireChannelOnboardingTargetRow(t *testing.T, harness *channelOnboardingE
 
 func addSecondChannelOnboardingTarget(t *testing.T, sourceRoot string) {
 	t.Helper()
-	sourceDir := filepath.Join(sourceRoot, "telegram-ingress")
-	targetDir := filepath.Join(sourceRoot, "telegram-ingress-alt")
+	sourceDir := sourceRoot
+	targetDir := filepath.Join(sourceRoot, "support")
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatalf("create second channel onboarding target: %v", err)
 	}
@@ -405,12 +406,22 @@ func addSecondChannelOnboardingTarget(t *testing.T, sourceRoot string) {
 			t.Fatalf("read second channel onboarding target source %s: %v", name, err)
 		}
 		if name == "schema.yaml" {
-			contents = []byte(strings.ReplaceAll(strings.Replace(string(contents), "name: telegram-ingress", "name: telegram-ingress-alt", 1), "alias: chat", "alias: support"))
+			var schema map[string]any
+			if err := yaml.Unmarshal(contents, &schema); err != nil {
+				t.Fatal(err)
+			}
+			delete(schema, "connect")
+			contents, err = yaml.Marshal(schema)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 		if err := os.WriteFile(filepath.Join(targetDir, name), contents, 0o644); err != nil {
 			t.Fatalf("write second channel onboarding target %s: %v", name, err)
 		}
 	}
+	writeStandingCandidateFile(t, filepath.Join(targetDir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	copyReleaseFixtureTree(t, filepath.Join(sourceDir, "telegram"), filepath.Join(targetDir, "telegram"))
 }
 
 type channelOnboardingE2EHarness struct {

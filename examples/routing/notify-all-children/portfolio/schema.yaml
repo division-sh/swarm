@@ -1,4 +1,4 @@
-name: portfolio
+# fixture: portfolio
 pins:
   inputs:
     - portfolio.opened

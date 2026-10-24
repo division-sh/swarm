@@ -59,7 +59,11 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		ChannelPlans:   projection.ChannelPlans,
 		Runtime: &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live,
 			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID, SourceArtifactFact: fact, ChannelPlans: projection.ChannelPlans}}})
-	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), owner.Identity().RuntimeInstanceID, fact.BundleHash())
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), owner.Identity().RuntimeInstanceID, rooted.Admission())
 	definition.Runtime.Manager = manager.NewAgentManager(bus, nil)
 	if err := definition.Runtime.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)

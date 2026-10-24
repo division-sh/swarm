@@ -10,13 +10,14 @@ import (
 func CopyClockDeployment(t testing.TB, nested bool) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	if !nested {
-		writeClosedVariantFile(t, root, "schema.yaml", "name: clock-export\nstages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: clock-export\nstages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
 		writeClosedVariantFile(t, root, "events.yaml", "poll.tick:\n")
 		return root
 	}
 	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/nested"), root)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: clock-connected\nstages: []\nconnect:\n  - {event: poll.tick, from: clock, to: consumer}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: clock-connected\nstages: []\nconnect:\n  - {event: poll.tick, from: clock, to: consumer}\n")
 	return root
 }
 

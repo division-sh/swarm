@@ -1,4 +1,4 @@
-name: period
+# fixture: period
 instance: period_id
 stages:
   collecting: {}

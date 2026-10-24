@@ -175,7 +175,10 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 
 func writeComputeModuleSchema(t *testing.T, root string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: compute-module-check\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -106,7 +106,7 @@ func recoveredSelectedHeaderFixture(t *testing.T, value any) (LoadedSelectedCont
 		InstancePath: identity.InstancePath, OwningRunSource: loaded.SourceArtifactFact, RunStatus: "running", InstanceStatus: "active",
 	}
 	observation, err := pipeline.AdmitHistoricalFlowInstanceObservation(request, instance,
-		runlifecycle.Snapshot{RunID: runID, Origin: origin, State: runlifecycle.StateRunning, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at}, 3,
+		runlifecycle.Snapshot{RunID: runID, Origin: origin, State: runlifecycle.StateRunning, BundleHash: loaded.SourceArtifactFact.BundleHash(), RootReference: loaded.RootedSource.Admission().Reference(), StartedAt: at}, 3,
 		pipeline.HistoricalFlowInstanceConstruction{Identity: identity, InstanceKey: instance.InstanceKey, SourceRevision: 2, WorkflowVersion: instance.WorkflowVersion,
 			SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRunID, Route: identity.Route()}}, &readiness)
 	if err != nil {

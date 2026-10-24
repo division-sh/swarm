@@ -14,12 +14,14 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -41,6 +43,9 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 			t.Run(backend.name+"/"+mode, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
+				rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+				sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				eventBus, err := newRunConvergenceEventBus(t, fixture.store)
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
@@ -206,6 +211,9 @@ func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *tes
 			t.Run(backend.name+"/"+intent, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
+				rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+				sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				at := time.Date(2026, 7, 14, 10, 30, 0, 0, time.UTC)
 				runID := uuid.NewString()
 				root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.trigger", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
@@ -237,6 +245,9 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	fixture := openPostgresAuthorActivityReceiptFixture(t)
 	pg := fixture.store.(*PostgresStore)
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	candidate := eventtest.RuntimeControl(
 		uuid.NewString(), "platform.paused", "runtime", "", json.RawMessage(`{}`), 0,
 		"", "", events.EventEnvelope{}, time.Date(2026, 7, 19, 21, 0, 0, 0, time.UTC),

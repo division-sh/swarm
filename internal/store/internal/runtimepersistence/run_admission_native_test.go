@@ -49,7 +49,8 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
 			ctx := testAuthorActivitySourceArtifactContext()
-			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, runLifecycleCandidateParityReplacementArtifact)
+			replacementRoot, _ := sourceartifactfixture.Rooted(t, "candidate-replacement", runLifecycleCandidateParityReplacementArtifact)
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, replacementRoot.Artifact())
 			for _, change := range []string{"pause", "source-revision", "terminal", "complete", "fork-source", "terminal-uuid-alias", "terminal-unbound-caller"} {
 				t.Run(change, func(t *testing.T) {
 					if !fixture.postgres && strings.HasSuffix(change, "uuid-alias") {
@@ -84,7 +85,7 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 						case "pause":
 							_, err = writer.TransitionActiveTx(txctx, attempt, runtimerunlifecycle.ActiveTransitionRequest{RunID: writeID, State: runtimerunlifecycle.StatePaused})
 						case "source-revision":
-							_, err = writer.ReviseSourceTx(txctx, attempt, runtimerunlifecycle.SourceRevisionRequest{RunID: writeID, Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash)})
+							_, err = writer.ReviseSourceTx(txctx, attempt, runtimerunlifecycle.SourceRevisionRequest{RunID: writeID, Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash), RootAdmission: replacementRoot.Admission()})
 						case "terminal", "terminal-uuid-alias", "terminal-unbound-caller":
 							_, _, err = writer.MarkTerminalTx(writeCtx, attempt, runtimerunlifecycle.TerminalRequest{RunID: writeID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Minute)}, &cardChanges)
 						case "complete":
@@ -96,7 +97,7 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 							return err
 						}
 						if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-							if _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
+							if _, _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
 								return errors.Join(errors.New("canonical write retained old admission"), err)
 							}
 							fact, err := writer.RequireActiveSourceTx(txctx, tx, runID)
@@ -164,7 +165,7 @@ func TestRunAdmissionMissingRunRefusesBeforeMutationBothStores(t *testing.T) {
 					if !errors.As(err, &missing) || missing == nil || missing.RunID != runID || fact.Validate() == nil {
 						return fmt.Errorf("missing active run: fact=%q error=%v; want missing %q and invalid fact", fact.BundleHash(), err, runID)
 					}
-					if _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
+					if _, _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
 						return errors.Join(errors.New("missing run minted active admission"), err)
 					}
 					var runs, mutations int
@@ -208,7 +209,7 @@ func TestRunAdmissionWarmArtifactLossRefusesBothStores(t *testing.T) {
 					if err := sourceartifactstore.DeleteSourceArtifactForFixtureRefusalTx(txctx, tx, backend, original); err != nil {
 						return err
 					}
-					cachedFact, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID)
+					cachedFact, _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID)
 					if err != nil || !cached || !cachedFact.Matches(original) {
 						return errors.Join(errors.New("artifact fault erased warmed run admission"), err)
 					}

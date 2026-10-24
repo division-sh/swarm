@@ -1,4 +1,4 @@
-name: test-tool-override
+# fixture: test-tool-override
 stages:
   pending: {}
   done: {final: true}

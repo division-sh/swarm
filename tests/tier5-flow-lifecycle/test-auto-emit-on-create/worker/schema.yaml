@@ -1,4 +1,4 @@
-name: worker
+# fixture: worker
 instance: instance_id
 stages:
   idle: {}

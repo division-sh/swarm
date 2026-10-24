@@ -96,7 +96,7 @@ func TestTelegramPlatformReadsUseCompiledOperationPolicy(t *testing.T) {
 				return registrationResponse(http.StatusOK, tc.response), nil
 			})}}
 			ctx := h.Context(tc.tool)
-			credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+			credentials := map[string]any{"telegram.telegram_bot_token": "bot-secret"}
 			var projected map[string]any
 			if tc.registration {
 				operation, err := registration.Operation(tc.operation)

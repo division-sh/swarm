@@ -76,7 +76,7 @@ func prepareArmedArrivalSourceAtCut(t *testing.T, ctx context.Context, selected 
 	marker := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), initial.Type(), "source-runtime", "",
 		initial.Payload(), 0, sourceRun, events.EventEnvelope{}, events.NoRoutingSource(),
 		runlifecycle.CanonicalTimestamp(candidate.AdmittedAt), executionmode.Mock)
-	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, flowID)
+	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, flowID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,8 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			}
 			result, err := ExecuteSelectedContractRunFork(sourceCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
 				SourceLoader: loader, ContractSelection: selection,

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 )
 
@@ -77,30 +78,36 @@ func TestSignedFormProjectionBindsBothContentViews(t *testing.T) {
 
 func signedFormContentFixture(t *testing.T, normalized bool) (InboundAdmissionPlan, Request) {
 	t.Helper()
-	body := `provider: twilio
-payload_source: form
+	body := `payload_source: form
 secret: {required: true}
 signature: {type: hmac_sha1, header: X-Twilio-Signature, signed_payload: url_plus_sorted_form, encoding: base64}
 delivery_id: {form_param: MessageSid, required: true}
 event_type: {literal: message_received, required: true}
-event_name: {literal: inbound.twilio}
+event_name: {literal: raw}
 ack: {mode: durable_before_dispatch}
 `
 	if normalized {
 		body += `normalized_events:
-  - event: inbound.twilio.message
+  - event: message
     fields:
       text: {from: raw, schema: {type: string}}
       nested_text: {from: nested.text, schema: {type: string}}
       number: {from: number, schema: {type: number}}
 `
 	}
-	manifest, err := ParseManifest([]byte(body))
+	provider, err := s1LoadProviderMembers("twilio", map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n"),
+		"trigger.yaml":  []byte(body),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Identity: PackIdentity{
-		ID: "provider.twilio", Version: "1.0.0", ManifestHash: packs.ManifestHash([]byte(body)), Provenance: "test"}})
+	trigger, _ := provider.Body(packmodel.BodyTrigger)
+	manifest, err := AdmitBody(trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,12 +134,11 @@ func TestTriggerReadbackReceiverTransportMatrix(t *testing.T) {
 		}
 		if mode == "unsigned HTTP" {
 			body := strings.Replace(sessionTriggerFixture, "transport: session", "transport: webhook", 1)
-			manifest, err := ParseManifest([]byte(body))
+			manifest, err := admitTestTriggerBody(body)
 			if err != nil {
 				t.Fatal(err)
 			}
-			catalog, err = NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Identity: PackIdentity{
-				ID: "provider.acme", Version: "1.0.0", ManifestHash: packs.ManifestHash([]byte(body)), Provenance: "test"}})
+			catalog, err = NewCatalogSnapshotFromAdmittedBodies(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -156,8 +162,7 @@ func checkTriggerReadbackReceiverMatrix(t *testing.T, mode string, plan InboundA
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: *plan.manifest, Identity: PackIdentity{
-		ID: plan.packIdentity.ID(), Version: plan.packIdentity.Version(), ManifestHash: plan.packIdentity.ManifestHash(), Provenance: plan.packIdentity.Source().Provenance()}})
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(*plan.manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,24 +248,31 @@ func checkTriggerReadbackReceiverMatrix(t *testing.T, mode string, plan InboundA
 
 // The three reviewer probes are retained verbatim from the f92da4ee8 review.
 func TestReviewerSignedFormProjectionMutation(t *testing.T) {
-	body := `provider: twilio
-payload_source: form
+	body := `payload_source: form
 secret: {required: true}
 signature: {type: hmac_sha1, header: X-Twilio-Signature, signed_payload: url_plus_sorted_form, encoding: base64}
 delivery_id: {form_param: MessageSid, required: true}
 event_type: {literal: message_received, required: true}
-event_name: {literal: inbound.twilio}
+event_name: {literal: raw}
 normalized_events:
-  - event: inbound.twilio.message
+  - event: message
     fields:
       text: {from: raw, schema: {type: string}}
 ack: {mode: durable_before_dispatch}
 `
-	manifest, err := ParseManifest([]byte(body))
+	provider, err := s1LoadProviderMembers("twilio", map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n"),
+		"trigger.yaml":  []byte(body),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Identity: PackIdentity{ID: "provider.twilio", Version: "1.0.0", ManifestHash: packs.ManifestHash([]byte(body)), Provenance: "test"}})
+	trigger, _ := provider.Body(packmodel.BodyTrigger)
+	manifest, err := AdmitBody(trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

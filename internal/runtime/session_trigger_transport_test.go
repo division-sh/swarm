@@ -9,23 +9,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
+	"testing/fstest"
 )
 
 func compileSessionTriggerTransportFixture(t *testing.T) providertriggers.InboundAdmissionPlan {
 	t.Helper()
-	body := []byte("provider: acme\ntransport: session\nevent_name: {literal: inbound.acme}\ndelivery_id: {json_path: '$.id', required: true}\nevent_type: {json_path: '$.kind', required: true}\nack: {mode: durable_before_dispatch}\n")
-	manifest, err := providertriggers.ParseManifest(body)
+	body := []byte("transport: session\nevent_name: {literal: raw}\ndelivery_id: {json_path: '$.id', required: true}\nevent_type: {json_path: '$.kind', required: true}\nack: {mode: durable_before_dispatch}\n")
+	provider, err := packartifact.LoadProviderFS(fstest.MapFS{
+		"acme/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n")},
+		"acme/trigger.yaml":  {Data: body},
+	}, "acme", "0.7.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-		Identity: providertriggers.PackIdentity{ID: "provider.acme", Version: "1.0.0", ManifestHash: packs.ManifestHash(body), Provenance: "external"}})
+	trigger, _ := provider.Body(packmodel.BodyTrigger)
+	manifest, err := providertriggers.AdmitBody(trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -36,7 +36,8 @@ func constructNativeQueryEntitiesGuardInstanceForTest(t *testing.T, fixture *Pip
 func nativeEmitPersistenceBundleForTest(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: validation\nstages:\n  researching: {}\n  mvp_speccing: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  researching: {}\n  mvp_speccing: {}\n",
 		"entities.yaml": "test_entity:\n  business_brief: {type: BusinessBrief}\n",
 		"types.yaml":    "types:\n  BusinessBrief:\n    summary: text\n",
 		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested:\n",

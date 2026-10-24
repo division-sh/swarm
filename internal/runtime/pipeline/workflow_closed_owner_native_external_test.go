@@ -12,7 +12,8 @@ import (
 func workflowClosedOwnerNativeFixture(t *testing.T, backend string) pipeline.WorkflowClosedOwnerNativeFixtureForTest {
 	t.Helper()
 	selected, closeOwner, _ := openTimerReplayNativeStore(t, backend)
-	native := workflowStorageNativeFixtureFromSelectedSource(t, selected, sourceartifactfixture.Artifact())
+	rooted, _ := sourceartifactfixture.Rooted(t, "closed-workflow", sourceartifactfixture.Artifact())
+	native := workflowStorageNativeFixtureFromSelectedSource(t, selected, rooted.Artifact())
 	ctx := withLiveGateExecution(correlation.WithRunID(native.Context, "77777777-7777-7777-7777-777777777777"))
 	if err := native.RequireRun(ctx, correlation.RunIDFromContext(ctx)); err != nil {
 		t.Fatal(err)

@@ -9,9 +9,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -32,9 +36,40 @@ func workflowActivityNativeFixture(t *testing.T, backend string) pipeline.Workfl
 	return workflowActivityNativeFixtureFromSelected(t, selected, reopen)
 }
 
+func TestS1DirectoryConnectorDispatchUsesExactDeclarationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			pipeline.VerifyS1DirectoryConnectorDispatchUsesExactDeclarationForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
+				return workflowActivityNativeSourceFixture(t, backend, source)
+			}, composeS1NativeEffectiveSource)
+		})
+	}
+}
+
+func composeS1NativeEffectiveSource(t *testing.T, source semanticview.Source) semanticview.Source {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("native activity journey requires its compiled source")
+	}
+	admitted, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.PackAdmission = admitted
+	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
+		Source: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+	})
+	if err != nil {
+		t.Fatalf("compile real directory-owned effective source: %v", err)
+	}
+	return projection.Source()
+}
+
 func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
-	return workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, sourceartifactfixture.Artifact())
+	rooted, _ := sourceartifactfixture.Rooted(t, "workflow-activity", sourceartifactfixture.Artifact())
+	return workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, rooted.Artifact())
 }
 
 func workflowActivityNativeSourceFixture(t *testing.T, backend string, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
@@ -44,14 +79,23 @@ func workflowActivityNativeSourceFixture(t *testing.T, backend string, source se
 		t.Fatal("native activity source fixture requires its compiled source artifact")
 	}
 	selected, _, reopen := openTimerReplayNativeStore(t, backend)
-	return workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, bundle.SourceArtifact)
+	fixture := workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, bundle.SourceArtifact)
+	fixture.Source = source
+	return fixture
+}
+
+func workflowActivityNativeToolFixture(t *testing.T, backend string, tools map[string]runtimecontracts.ToolSchemaEntry) pipeline.WorkflowActivityNativeFixtureForTest {
+	t.Helper()
+	return workflowActivityNativeSourceFixture(t, backend, activityJournalProofSource(t, tools))
 }
 
 func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, artifact *sourceartifact.AdmittedSourceArtifact) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
 	// Keep the first artifact write inside RequireRun's accounting boundary.
+	rooted := sourceartifactfixture.CapturedRoot(t, artifact)
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	original := &nativeActivityJournalFixtureOwner{WorkflowPersistenceOwner: selected}
 	persistence := pipeline.NewWorkflowPersistence(original)
 	var buses []*runtimebus.EventBus
@@ -141,7 +185,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		Runs:    selected,
 		RequireRun: func(ctx context.Context, runID string) error {
 			if err := storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
-				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact,
+				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact, RootAdmission: rooted.Admission(),
 			}); err != nil {
 				return err
 			}
@@ -293,11 +337,11 @@ func TestActivityBoringProofRetryIsBoundedAndTraced(t *testing.T) {
 }
 
 func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest)
 }
 
 func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T) {
-	pipeline.VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t, workflowActivityNativeToolFixture)
 }
 
 func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
@@ -309,15 +353,15 @@ func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) 
 }
 
 func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t *testing.T) {
-	pipeline.VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresForTest(t, workflowActivityNativeToolFixture)
 }
 
 func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStores(t *testing.T) {
-	pipeline.VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStoresForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStoresForTest(t, workflowActivityNativeToolFixture)
 }
 
 func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *testing.T) {
-	pipeline.VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForTest(t, workflowActivityNativeToolFixture)
 }
 
 func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) {
@@ -325,23 +369,23 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 }
 
 func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchForTest)
 }
 
 func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournal(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournalForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournalForTest)
 }
 
 func TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForTest)
 }
 
 func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlan(t *testing.T) {
-	pipeline.VerifyPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlanForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlanForTest(t, workflowActivityNativeToolFixture)
 }
 
 func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTP(t *testing.T) {
-	pipeline.VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTPForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTPForTest(t, workflowActivityNativeToolFixture)
 }
 
 func TestWorkflowActivityNativeReopenUsesFreshOwnerAndRetainsJournalBothStores(t *testing.T) {
@@ -385,34 +429,61 @@ func verifyNativeActivityBothStores(t *testing.T, verify func(*testing.T, func(*
 	}
 }
 
+func verifyNativeToolActivityBothStores(t *testing.T, verify func(*testing.T, func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) pipeline.WorkflowActivityNativeFixtureForTest)) {
+	t.Helper()
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			verify(t, func(t *testing.T, tools map[string]runtimecontracts.ToolSchemaEntry) pipeline.WorkflowActivityNativeFixtureForTest {
+				return workflowActivityNativeToolFixture(t, backend, tools)
+			})
+		})
+	}
+}
+
 func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentials(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			pipeline.VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
+				return workflowActivityNativeSourceFixture(t, backend, source)
+			})
+		})
+	}
+}
+
+func TestS1ScopedActivityDispatchUsesExactDeclarationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			pipeline.VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
+				return workflowActivityNativeSourceFixture(t, backend, source)
+			}, composeS1NativeEffectiveSource)
+		})
+	}
 }
 
 func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTest)
 }
 
 func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest)
 }
 
 func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestNonIdempotentTransportErrorMarksUncertainForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyPipelineActivityRequestNonIdempotentTransportErrorMarksUncertainForTest)
 }
 
 func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizing(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizingForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizingForTest)
 }
 
 func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResult(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResultForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResultForTest)
 }
 
 func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatchForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatchForTest)
 }
 
 func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatch(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatchForTest)
+	verifyNativeToolActivityBothStores(t, pipeline.VerifyPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatchForTest)
 }

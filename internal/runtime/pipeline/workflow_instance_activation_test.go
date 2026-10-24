@@ -121,8 +121,9 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 func TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"scoring/schema.yaml": `name: scoring
-pins:
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"scoring/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"scoring/schema.yaml": `pins:
   outputs:
     - scoring.requested
 `,
@@ -166,8 +167,9 @@ func VerifyNativeTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKeyForTe
 			source := loadWorkflowTempSource(t, map[string]string{
 
 				"operating/entities.yaml": "test_entity:\n  instance_key: text\n",
-				"operating/schema.yaml": `name: operating
-instance: instance_key
+				"manifest.yaml":           "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"operating/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+				"operating/schema.yaml": `instance: instance_key
 stages:
   initializing: {}
   ready: {final: true}

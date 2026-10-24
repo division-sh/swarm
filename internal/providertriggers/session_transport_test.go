@@ -6,17 +6,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 )
 
-const sessionTriggerFixture = `provider: acme
-transport: session
+const sessionTriggerFixture = `transport: session
 payload_object_required: true
 delivery_id: {json_path: '$.id', required: true}
 event_type: {json_path: '$.kind', required: true}
-event_name: {literal: inbound.acme}
+event_name: {literal: raw}
 normalized_events:
-  - event: inbound.acme.message
+  - event: message
     fields:
       text: {from: text, schema: {type: string}}
 ack: {mode: durable_before_dispatch}
@@ -24,15 +24,11 @@ ack: {mode: durable_before_dispatch}
 
 func sessionTriggerCatalog(t *testing.T) (*CatalogSnapshot, Manifest) {
 	t.Helper()
-	manifest, err := ParseManifest([]byte(sessionTriggerFixture))
+	manifest, err := admitTestTriggerBody(sessionTriggerFixture)
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := CatalogEntry{Manifest: manifest,
-		Identity: PackIdentity{ID: "provider.acme", Version: "1.0.0",
-			ManifestHash: packs.ManifestHash([]byte(sessionTriggerFixture)), Provenance: "external"},
-		Source: "session-transport-proof", SourcePath: "packs/acme/trigger.yaml"}
-	catalog, err := NewCatalogSnapshot(entry)
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +159,19 @@ func mustInstalledTriggerSubjects(t *testing.T, catalog *CatalogSnapshot) []pack
 }
 
 func TestSessionTriggerTransportRejectsHTTPPolicyWithExactSource(t *testing.T) {
+	provider, err := s1LoadProviderMembers("acme", map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {verify_secret: webhook_signing_secret}, cannot: [execute code]}\n"),
+		"trigger.yaml":  []byte(sessionTriggerFixture),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := provider.Body(packmodel.BodyTrigger)
+	if _, err := AdmitBody(body); err == nil || !strings.Contains(err.Error(), "verify_secret") || !strings.Contains(err.Error(), "transport: session") {
+		t.Fatalf("session BODY admitted manifest signing capability: %v", err)
+	}
 	for _, cell := range []struct{ name, old, replacement string }{
+		{"duplicate transport", "transport: session", "transport: session\ntransport: webhook"},
 		{"secret", "payload_object_required: true", "secret: {required: false}"},
 		{"signature", "payload_object_required: true", "signature: {}"},
 		{"challenge", "payload_object_required: true", "challenge: {when: {json_path: '$.kind', equals: challenge}, response: {json_path: '$.challenge'}}"},
@@ -195,13 +203,20 @@ func TestSessionTriggerTransportRejectsHTTPPolicyWithExactSource(t *testing.T) {
 func TestTriggerWebhookTransportIsExplicitOrOmittedWithoutProviderGuessing(t *testing.T) {
 	for _, provider := range []string{"acme", "whatsapp"} {
 		for _, transport := range []string{"", "transport: webhook\n"} {
-			body := transport + "provider: " + provider + "\nevent_name: {literal: inbound." + provider + "}\ndelivery_id: {literal: receipt, required: true}\nevent_type: {literal: message, required: true}\n"
-			manifest, err := ParseManifest([]byte(body))
+			body := transport + "event_name: {literal: raw}\ndelivery_id: {literal: receipt, required: true}\nevent_type: {literal: message, required: true}\n"
+			captured, err := s1LoadProviderMembers(provider, map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n"),
+				"trigger.yaml":  []byte(body),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			trigger, _ := captured.Body(packmodel.BodyTrigger)
+			manifest, err := AdmitBody(trigger)
 			if err != nil || manifest.Transport() != packs.ChannelTransportWebhook {
 				t.Fatalf("webhook declaration = %+v, %v", manifest, err)
 			}
-			catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest,
-				Identity: PackIdentity{ID: "provider." + provider, Version: "1.0.0", ManifestHash: packs.ManifestHash([]byte(body)), Provenance: "external"}})
+			catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -215,6 +230,12 @@ func TestTriggerWebhookTransportIsExplicitOrOmittedWithoutProviderGuessing(t *te
 			}
 			if _, err := plan.AdmitRequest(Request{Payload: map[string]any{}}); err != nil {
 				t.Fatal(err)
+			}
+			for _, token := range []string{"true", "unsigned", " unsigned_webhook", "unsigned_webhook "} {
+				if plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: provider,
+					Declaration: AdmissionDeclaration{Acknowledge: token}}); err == nil || plan.Valid() {
+					t.Fatalf("noncanonical deployment consent %q admitted", token)
+				}
 			}
 		}
 	}

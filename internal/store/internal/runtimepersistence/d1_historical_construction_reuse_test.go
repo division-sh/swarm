@@ -85,10 +85,10 @@ func TestD1HistoricalReforkExactRequireSurvivesReopenBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, connector := newP16RaceStore(t, backend)
 			files := map[string]string{
-				"schema.yaml":          "name: historical-reopen\n",
-				"review/schema.yaml":   "name: review\ninstance: request_id\nstages: {pending: {}}\npins:\n  inputs: [task.create]\n",
+				"schema.yaml":          "stages: []\n",
+				"review/schema.yaml":   "instance: request_id\nstages: {pending: {}}\npins:\n  inputs: [task.create]\n",
 				"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
-				"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n",
+				"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}
 			component := newReceiverConfigActivationFixtureForStore(t, any(selected).(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 			f := newOrdinaryForkPredecessorFixtureForReceiver(t, backend, component)

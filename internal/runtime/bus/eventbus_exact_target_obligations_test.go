@@ -12,10 +12,20 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
 func TestEventBusExactTargetObligationMatrix(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":          "stages: []\n",
+		"events.yaml":          "test.work:\n",
+		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"review/schema.yaml":   "instance: item_id\nstages: []\n",
+		"review/entities.yaml": "review_state:\n  item_id: {type: text}\n",
+		"review/events.yaml":   "test.work:\n",
+	}))
 	dispatchModes := []string{"direct", "subscribed_outbox", "committed_replay"}
 	scenarios := []struct {
 		name       string
@@ -83,7 +93,7 @@ func TestEventBusExactTargetObligationMatrix(t *testing.T) {
 				if dispatchMode != "direct" {
 					store = newTargetRouteMemoryStore()
 				}
-				bus, channels, recipients, routes := exactSiblingObligationBus(t, store, scenario.installB)
+				bus, channels, recipients, routes := exactSiblingObligationBus(t, store, scenario.installB, source)
 				scenario.prepare(t, bus)
 				ctx := scenario.context()
 				evt := exactSiblingObligationEvent(dispatchMode + "/" + scenario.name)
@@ -137,9 +147,9 @@ func TestEventBusExactTargetObligationMatrix(t *testing.T) {
 	}
 }
 
-func exactSiblingObligationBus(t *testing.T, store *targetRouteMemoryStore, installB bool) (*EventBus, map[string]<-chan *LocalDelivery, []RoutePlanLiveRecipient, []events.DeliveryRoute) {
+func exactSiblingObligationBus(t *testing.T, store *targetRouteMemoryStore, installB bool, source semanticview.Source) (*EventBus, map[string]<-chan *LocalDelivery, []RoutePlanLiveRecipient, []events.DeliveryRoute) {
 	t.Helper()
-	bus, err := newScopedTestEventBus(store)
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)
 	}

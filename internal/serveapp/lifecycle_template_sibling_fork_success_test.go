@@ -256,7 +256,7 @@ func requireLifecycleTemplatePendingCut(t *testing.T, bundleHash string, selecte
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()}
 	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-		SourceRunID: runID, BundleHash: bundleHash, Selection: selection})
+		Responsibility: runforkexecution.OriginalRunSource(runID), BundleHash: bundleHash, Selection: selection})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func logLifecycleTemplateForkTopology(t *testing.T, family storeselected.RunFork
 		return
 	}
 	loaded, err := inspector.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-		SourceRunID: request.SourceRunID, BundleHash: request.ExpectedBundleHash, Selection: request.ContractSelection})
+		Responsibility: runforkexecution.OriginalRunSource(request.SourceRunID), BundleHash: request.ExpectedBundleHash, Selection: request.ContractSelection})
 	if err != nil {
 		t.Logf("T17_TOPOLOGY_READBACK call=InspectRunForkSelectedContractSourceForRequest error=%v", err)
 		return

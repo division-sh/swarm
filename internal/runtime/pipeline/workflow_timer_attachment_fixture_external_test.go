@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -20,6 +21,17 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 	if !found || fact.Validate() != nil {
 		t.Fatal("native timer attachment requires its admitted source")
 	}
+	rooted, err := selected.(interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	}).LoadRunRootedSource(ctx, correlation.RunIDFromContext(ctx))
+	if err != nil || rooted.Admission().BundleHash() != fact.BundleHash() {
+		t.Fatalf("native timer attachment requires its exact persisted source: %v", err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	workflows := selected.(pipeline.DynamicFlowRuntimeReadinessPersistence)
 	process, err := selected.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 		OwnerID: "timer-replay-proof", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
@@ -53,7 +65,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 		})
 	}
 	t.Cleanup(closeOwner)
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

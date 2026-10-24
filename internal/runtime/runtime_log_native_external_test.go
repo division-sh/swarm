@@ -41,7 +41,12 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 		selected = storetest.StartSQLiteRuntimeStore(t)
 	}
 	fact := sourceartifactfixture.FactFor(artifact)
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := correlation.WithSourceArtifactFact(context.Background(), fact)
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("00000000-0000-4000-8000-000000001331", fact.BundleHash()))
 	if err := sourceartifactfixture.EnsureArtifact(ctx, selected, artifact); err != nil {
 		t.Fatal(err)
@@ -49,7 +54,7 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 	return runtimepkg.RuntimeLogNativeFixtureForTest{
 		Persistence: selected, Deliveries: selected, Runs: selected, Context: ctx, FanOutCapacity: capacity,
 		RequireRun: func(ctx context.Context, run string) error {
-			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact, BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()})
+			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact, RootAdmission: rooted.Admission(), BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()})
 		},
 		RunSnapshot: func(ctx context.Context, run string) (runlifecycle.Snapshot, error) {
 			return storetest.ReadRuntimeLogRunSnapshot(ctx, selected, run)

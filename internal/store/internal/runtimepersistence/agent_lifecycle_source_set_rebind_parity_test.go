@@ -28,8 +28,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -66,7 +68,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			}
 			ctx := testAuthorActivityContext()
 			identity := testAgentIdentity(t, "removed-source-agent", "")
-			requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
+			ctx = requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 			record := runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "sonnet", Model: "regular",
@@ -85,8 +87,26 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			hash := "bundle-v2:sha256:" + strings.Repeat("e", 64)
-			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 2.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":   []byte("stages: []\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			replacement, _ := sourceartifactfixture.Rooted(t, "replacement-source", artifact)
+			if _, err := store.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, replacement); err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(replacement.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash := coordinate.BundleHash
+			if hash == before.ProcessBinding.BundleHash {
+				t.Fatal("replacement source must have different captured content")
+			}
+			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,7 +182,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					db = selected.backend.ConstructionHandle()
 				}
 				identity := testAgentIdentity(t, "census-drift-agent", "")
-				requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
+				ctx = requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 				seedTestAgentRow(t, ctx, db, postgres, identity, "active")
 				fields := testAgentIdentityStorageFields(t, identity)
 				identityArgs := []any{
@@ -211,9 +231,15 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					t.Fatalf("acquire census-drift capability: %v", err)
 				}
 				t.Cleanup(func() { _ = capability.Release(context.Background()) })
-				plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
-					BundleHash: testAgentTopologyBundleHash,
-				}}, nil)
+				root, present, err := correlation.RootAdmissionFromContext(ctx)
+				if err != nil || !present {
+					t.Fatalf("census source root: present=%t err=%v", present, err)
+				}
+				coordinate, err := runtimeagenttopology.NewSourceCoordinate(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 				if err != nil {
 					t.Fatalf("construct census-drift source set: %v", err)
 				}
@@ -283,8 +309,8 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
 	runID := uuid.NewString()
 	readinessIdentity := mustTestAgentIdentityForRun(runID, "process-readiness-agent", "readiness/instance-1")
-	requireRunningRunForTest(t, ctx, store, staticIdentity.RunID, now)
-	requireRunningRunForTest(t, ctx, store, runID, now)
+	ctx = requireRunningRunForTest(t, ctx, store, staticIdentity.RunID, now)
+	ctx = requireRunningRunForTest(t, ctx, store, runID, now)
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: "process-static-agent", Identity: staticIdentity,
@@ -776,10 +802,11 @@ func seedLifecycleReadinessOwner(
 	}
 	flowID := plan.Identity.TemplateID
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
-		"schema.yaml":             "name: lifecycle-readiness-proof\n",
-		flowID + "/schema.yaml":   "name: " + flowID + "\ninstance: fixture_key\nstages:\n  pending: {}\npins:\n  inputs: [lifecycle.constructed]\n",
+		"schema.yaml":             "stages: []\n",
+		flowID + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		flowID + "/schema.yaml":   "instance: fixture_key\nstages:\n  pending: {}\npins:\n  inputs: [lifecycle.constructed]\n",
 		flowID + "/events.yaml":   "lifecycle.constructed:\n  fixture_key: text\n",
-		flowID + "/entities.yaml": "item:\n  fixture_key: text\n",
+		flowID + "/entities.yaml": "item:\n  fixture_key: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	})
 	bundle.Semantics.Version = plan.WorkflowVersion
 	source := semanticview.Wrap(bundle)
@@ -838,7 +865,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "source-set-rebind-agent"
 	identity := testAgentIdentity(t, agentID, "global")
-	requireRunningRunForTest(t, ctx, store, identity.RunID, now)
+	ctx = requireRunningRunForTest(t, ctx, store, identity.RunID, now)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
@@ -878,7 +905,25 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 		t.Fatalf("current source set: found=%v err=%v", found, err)
 	}
 	sources := append([]runtimeagenttopology.SourceCoordinate(nil), current.Sources...)
-	sources = append(sources, runtimeagenttopology.SourceCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64)})
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 2.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	additional, _ := sourceartifactfixture.Rooted(t, "additional-source", artifact)
+	if _, err := store.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, additional); err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(additional.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coordinate.BundleHash == before.ProcessBinding.BundleHash {
+		t.Fatal("additional source must have different captured content")
+	}
+	sources = append(sources, coordinate)
 	plan, err := runtimeagenttopology.NewSourceSetPlan(sources, current.Agents)
 	if err != nil {
 		t.Fatal(err)

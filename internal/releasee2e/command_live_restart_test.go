@@ -369,7 +369,7 @@ func TestCommandLiveReceiptUsesExactConfiguredConversation(t *testing.T) {
 	for _, chat := range []string{"42", "424242"} {
 		t.Run(chat, func(t *testing.T) {
 			receipt := fullLifecycleIngressReceipt{Status: "accepted", ServiceID: "standing", RunID: "standing-run", Generation: 1,
-				FlowPath: "telegram-ingress", Provider: "telegram", ProviderEventID: "1001", PublicationID: "publication",
+				FlowPath: ".", Provider: "telegram", ProviderEventID: "1001", PublicationID: "publication",
 				EventIDs: []string{"raw", "normalized"}, EventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}}
 			events := []fullLifecycleEvent{
 				{EventID: "raw", EventName: "inbound.telegram", RunID: "standing-run", NoDelivery: &fullLifecycleNoDelivery{Reason: "no_subscriber_by_design"}},

@@ -95,7 +95,7 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 			var interfaceKey string
 			telegramIdentities := 0
 			for _, channel := range channels.Channels {
-				if channel.Identity.Interface.ChannelPackID == "provider.telegram.hitl_channel" {
+				if channel.Identity.Interface.ChannelPackID == "telegram" {
 					telegramIdentities++
 					interfaceKey = channel.Identity.Interface.Key()
 				}
@@ -376,7 +376,10 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := credentials.Set(context.Background(), "telegram_bot_token", token); err != nil {
+	if err := credentials.Set(context.Background(), "telegram.telegram_bot_token", token); err != nil {
+		t.Fatal(err)
+	}
+	if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
 		t.Fatal(err)
 	}
 	h.start(t)
@@ -541,8 +544,9 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != "name: telegram-agent\n" {
-		t.Fatalf("channel anchor fixture requires the isolated root declaration, got:\n%s", body)
+	var rootSchema map[string]any
+	if err := yaml.Unmarshal(body, &rootSchema); err != nil {
+		t.Fatal(err)
 	}
 	var pins, connects strings.Builder
 	pins.WriteString("pins:\n  inputs:\n")
@@ -563,7 +567,21 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 		}
 		fmt.Fprintf(&connects, "  - {event: %s, from: ., to: %s}\n", event, target)
 	}
-	body = append(body, []byte(pins.String()+connects.String())...)
+	var routes map[string]any
+	if err := yaml.Unmarshal([]byte(pins.String()+connects.String()), &routes); err != nil {
+		t.Fatal(err)
+	}
+	rootPins := rootSchema["pins"].(map[string]any)
+	for key, values := range routes["pins"].(map[string]any) {
+		original, _ := rootPins[key].([]any)
+		rootPins[key] = append(original, values.([]any)...)
+	}
+	originalConnections, _ := rootSchema["connect"].([]any)
+	rootSchema["connect"] = append(originalConnections, routes["connect"].([]any)...)
+	body, err = yaml.Marshal(rootSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}

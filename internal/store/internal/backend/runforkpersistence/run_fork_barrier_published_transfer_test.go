@@ -47,7 +47,18 @@ func transferredBarrierHistoryFixture(t *testing.T, root bool, mode executionmod
 		t.Fatal(err)
 	}
 	originalAdmission, _ := continuation.SourceEvent().PayloadAdmission()
-	bound, err := events.NewPayloadAdmission(event.Payload(), originalAdmission.Binding())
+	digest, err := events.JoinOccurrencePayloadDigest(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := events.NewPlatformPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash: originalAdmission.Binding().BundleHash(), EventKey: string(event.Type()),
+		SchemaDigest: digest, SchemaClass: events.PayloadSchemaPlatform,
+	}, events.EventPayloadProducer(event, ""), events.JoinOccurrencePayloadReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := events.NewPayloadAdmission(event.Payload(), binding)
 	if err != nil {
 		t.Fatal(err)
 	}

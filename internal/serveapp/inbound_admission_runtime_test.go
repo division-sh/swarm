@@ -64,41 +64,10 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 			}
 
 			for _, tc := range []struct {
-				name         string
-				mutateSchema func(string) string
-				mutateBody   func(string) string
-				want         string
+				name       string
+				mutateBody func(string) string
+				want       string
 			}{
-				{
-					name: "missing pinned pack",
-					mutateSchema: func(body string) string {
-						return strings.Replace(body, "pack: {id: provider.telegram}", "pack: {id: provider.telegram_missing}", 1)
-					},
-					want: `verified pack for "telegram" is "provider.telegram"`,
-				},
-				{
-					name: "provider pack mismatch",
-					mutateSchema: func(body string) string {
-						return strings.Replace(body, "pack: {id: provider.telegram}", "pack: {id: provider.slack}", 1)
-					},
-					want: `which provides "slack"`,
-				},
-				{
-					name: "missing project pack",
-					mutateSchema: func(body string) string {
-						return strings.Replace(body, `    - provider: acme_public
-      admission:
-        kind: raw
-        acknowledge: unsigned_webhook
-        authentication: {kind: none}
-        event: inbound.acme_public
-        delivery_id: {source: body_sha256}
-        payload: json`, `    - provider: acme_public
-      admission:
-        pack: {id: provider.acme_public}`, 1)
-					},
-					want: `pins pack "provider.acme_public", but that id is not selected`,
-				},
 				{
 					name: "authored default acknowledgement",
 					mutateBody: func(body string) string {
@@ -123,18 +92,13 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					sourceRoot := writeInboundAdmissionPolicyMatrixFixture(t)
-					path := filepath.Join(sourceRoot, "matrix", "schema.yaml")
-					mutate := tc.mutateSchema
-					if tc.mutateBody != nil {
-						importProjectTelegramTrigger(t, sourceRoot)
-						path = filepath.Join(sourceRoot, "packs", "provider.telegram", "trigger.yaml")
-						mutate = tc.mutateBody
-					}
+					importProjectTelegramTrigger(t, sourceRoot)
+					path := filepath.Join(sourceRoot, "telegram", "trigger.yaml")
 					body, err := os.ReadFile(path)
 					if err != nil {
 						t.Fatal(err)
 					}
-					changed := mutate(string(body))
+					changed := tc.mutateBody(string(body))
 					if changed == string(body) {
 						t.Fatal("startup proof did not mutate its admitted source")
 					}
@@ -181,9 +145,9 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		t.Fatal(err)
 	}
 	for key, value := range map[string]string{
-		"webhook_signing.telegram": "telegram-secret",
-		"webhook_signing.intercom": "intercom-secret",
-		"webhook_signing.partner":  "partner-secret",
+		"telegram.webhook_signing_secret": "telegram-secret",
+		"webhook_signing.intercom":        "intercom-secret",
+		"webhook_signing.partner":         "partner-secret",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
@@ -447,10 +411,10 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 func importProjectTelegramTrigger(t testing.TB, sourceRoot string) {
 	t.Helper()
 	base := packfixture.EmbeddedBase(t)
-	if changed, err := packartifact.ImportEmbeddedPack(sourceRoot, "provider.telegram", base); err != nil || !changed {
+	if changed, err := packartifact.ImportEmbeddedPack(sourceRoot, "telegram", base); err != nil || !changed {
 		t.Fatalf("import project Telegram trigger changed=%t: %v", changed, err)
 	}
-	path := filepath.Join(sourceRoot, packartifact.ProjectPackDirectory, "provider.telegram", packartifact.TriggerManifestFileName)
+	path := filepath.Join(sourceRoot, "telegram", "trigger.yaml")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

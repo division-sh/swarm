@@ -116,9 +116,13 @@ func materializeReceiverConstructionProofFork(t *testing.T, f receiverConfigActi
 	if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, marker); err != nil {
 		t.Fatal(err)
 	}
+	rootAdmission, present, err := correlation.RootAdmissionFromContext(f.ctx)
+	if err != nil || !present {
+		t.Fatalf("historical receiver fixture root admission: present=%t err=%v", present, err)
+	}
 	fork, err := f.store.(interface {
 		MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-	}).MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()})
+	}).MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rootAdmission})
 	if err != nil {
 		t.Fatal(err)
 	}

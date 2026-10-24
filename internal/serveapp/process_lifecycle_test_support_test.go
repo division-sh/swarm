@@ -217,6 +217,10 @@ func newProcessIngressEventStore(t testing.TB, source semanticview.Source, runID
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("transport construction requires its admitted source")
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	fact := mustServeTestEphemeralSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	flowID := semanticview.RootExecutionFlowID(source)
 	identity, err := runtimeflowidentity.StandingForGeneration(source, flowID, runID)
@@ -252,7 +256,7 @@ func newProcessIngressEventStore(t testing.TB, source semanticview.Source, runID
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: origin, BundleHash: fact.BundleHash(), StartedAt: at}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: origin, BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := runtimepipeline.DynamicFlowRuntimeReadiness{
 		Plan:            runtimepipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},

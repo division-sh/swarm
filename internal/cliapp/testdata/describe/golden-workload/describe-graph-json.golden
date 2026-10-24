@@ -1,5 +1,5 @@
 {
-  "source_label": "golden-agent-workload@1.0.0",
+  "source_label": "golden_agent_workload@1.0.0",
   "workflow_name": ".",
   "workflow_version": "\u003cadmitted-bundle\u003e",
   "source_hash": "\u003cadmitted-bundle\u003e",

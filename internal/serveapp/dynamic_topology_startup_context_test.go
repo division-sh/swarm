@@ -114,6 +114,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 				if err != nil {
 					t.Fatalf("construct runtime context %s: %v", fact.BundleHash(), err)
 				}
+				loaded[index].source = rt.Options.WorkflowModule.SemanticSource()
 				runtimes = append(runtimes, rt)
 			}
 			for index := range facts {
@@ -171,7 +172,14 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 			var coordinates []runtimeagenttopology.SourceCoordinate
 			var desired []runtimeagenttopology.DesiredAgent
 			for index, rt := range runtimes {
-				coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: facts[index].BundleHash()}
+				rooted, err := loaded[index].bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
 				agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(loaded[index].source, coordinate)
 				if err != nil {
 					t.Fatal(err)
@@ -304,8 +312,13 @@ func seedServeDynamicTopologyReadiness(t *testing.T, selected *selectedStoreOwne
 		t.Fatal("startup construction requires its exact compiled and stored artifact")
 	}
 	ctx := worklifetime.WithOccurrence(serveDynamicTopologySetupContext(fact, runID, rt.Options.RuntimeInstanceID), rt.WorkOccurrence())
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	storetest.RequireRun(t, ctx, selected.RuntimeDeps().EventBusDurable.RunLifecycle.(storetest.RunFixtureStore),
-		storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+		storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission()})
 	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
 	rootPlan, err := rt.Manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: parent, OccurredAt: time.Now().UTC(),

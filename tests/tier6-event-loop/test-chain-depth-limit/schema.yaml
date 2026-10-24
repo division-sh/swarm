@@ -1,4 +1,4 @@
-name: test-chain-depth-limit
+# fixture: test-chain-depth-limit
 stages: []
 pins:
   inputs:

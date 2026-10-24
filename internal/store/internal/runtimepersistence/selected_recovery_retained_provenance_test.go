@@ -104,8 +104,16 @@ func TestSelectedRecoveryUsesNativeAdmittedPreparationWithoutProcessJournalBothS
 					if err != nil {
 						t.Fatal(err)
 					}
+					rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, fixture.forkRun)
+					if err != nil {
+						t.Fatal(err)
+					}
+					coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+					if err != nil {
+						t.Fatal(err)
+					}
 					request.DeclarationPlan, err = agenttopology.NewSelectedDeclarationPlan(request.DeclarationPlan.BundleHash, []agenttopology.DesiredAgent{{
-						Identity: plan, Source: agenttopology.SourceCoordinate{BundleHash: request.DeclarationPlan.BundleHash}, ConfigRevision: strings.Repeat("f", 64),
+						Identity: plan, Source: coordinate, ConfigRevision: strings.Repeat("f", 64),
 					}})
 					if err != nil {
 						t.Fatal(err)

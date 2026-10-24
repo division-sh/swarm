@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -21,6 +22,7 @@ import (
 )
 
 type WorkflowContractValidationOptions struct {
+	TriggerEntries                 map[string]config.TriggerConfig
 	Purpose                        runtimebootverify.ValidationPurpose
 	ExecutionPosture               executionposture.Posture
 	Credentials                    runtimecredentials.Store
@@ -206,7 +208,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	result.finishAdmissionClause(phase)
 	phase = "standing_ingress_declaration"
 	result.startAdmissionClause(phase)
-	declarations, err := ResolveStandingTargetDeclarations(source, opts.ProviderTriggerCatalog)
+	declarations, err := ResolveStandingTargetDeclarations(source, opts.ProviderTriggerCatalog, opts.TriggerEntries)
 	if err != nil {
 		return result, fmt.Errorf("standing ingress validation failed: %w", err)
 	}
@@ -228,7 +230,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 			return result, fmt.Errorf("provider credential projection failed: %w", err)
 		}
 	}
-	result.CapabilitySubjects, err = ProviderTriggerCapabilitySubjects(ctx, source, opts.ProviderTriggerCatalog, providerCredentialOwner)
+	result.CapabilitySubjects, err = ProviderTriggerCapabilitySubjects(ctx, source, opts.ProviderTriggerCatalog, providerCredentialOwner, opts.TriggerEntries)
 	if err != nil {
 		return result, fmt.Errorf("provider trigger capability projection failed: %w", err)
 	}

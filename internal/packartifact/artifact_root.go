@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+type admittedArtifactRoot struct {
+	directory *os.File
+}
+
+func (r *admittedArtifactRoot) openCapturedDirectory(relative string) (*admittedArtifactRoot, error) {
+	directory, err := r.openDirectory(relative)
+	if err != nil {
+		return nil, err
+	}
+	return &admittedArtifactRoot{directory: directory}, nil
+}
+
 func artifactPathSegments(relative string) ([]string, error) {
 	relative = filepath.Clean(filepath.FromSlash(strings.TrimSpace(relative)))
 	if relative == "." {

@@ -22,9 +22,14 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	}
 	template := mode == "template" || mode == "nested_template"
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sibling/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	prefix := flow + "/"
 	if flow == "." {
 		prefix = ""
+	} else {
+		writeClosedVariantFile(t, root, prefix+"manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	}
 	request := "activity.requested:\n  key: case_id\n  case_id: text\n  message: text\n"
 	results := []string{"send.succeeded", "send.failed"}
@@ -36,16 +41,17 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		outputs += "    - " + event + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", event, flow)
 	}
-	schema := "name: publication-activity\npins:\n  inputs:\n    - activity.requested\n  outputs:\n" + outputs
+	schema := "# fixture: publication-activity\npins:\n  inputs:\n    - activity.requested\n  outputs:\n" + outputs
 	if template {
-		schema = strings.Replace(schema, "name: publication-activity\n", "name: publication-activity\ninstance: case_id\n", 1)
+		schema = strings.Replace(schema, "# fixture: publication-activity\n", "# fixture: publication-activity\ninstance: case_id\n", 1)
 		writeClosedVariantFile(t, root, "events.yaml", request+"activity.dispatch:\n  key: case_id\n  case_id: text\n  message: text\n")
 		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      emit: {event: activity.dispatch, fields: {case_id: payload.case_id, message: payload.message}}\n")
 		connects += fmt.Sprintf("  - {event: activity.dispatch, from: ., to: %s, rename: activity.requested, resolution: select-or-create}\n", flow)
-		writeClosedVariantFile(t, root, "schema.yaml", "name: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.dispatch\nconnect:\n"+connects)
+		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.dispatch\nconnect:\n"+connects)
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
 		if mode == "nested_template" {
-			writeClosedVariantFile(t, root, "outer/schema.yaml", "name: outer\n")
+			writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+			writeClosedVariantFile(t, root, "outer/schema.yaml", "stages: []\n# fixture: outer\n")
 		}
 	} else {
 		if flow == "." {
@@ -53,7 +59,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 			schema += "connect:\n" + connects
 		} else {
 			writeClosedVariantFile(t, root, "events.yaml", request)
-			writeClosedVariantFile(t, root, "schema.yaml", "name: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.requested\nconnect:\n  - {event: activity.requested, from: ., to: source}\n"+connects)
+			writeClosedVariantFile(t, root, "schema.yaml", "# fixture: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.requested\nconnect:\n  - {event: activity.requested, from: ., to: source}\n"+connects)
 		}
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
@@ -97,7 +103,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
     url: %q
     body: {message: "{{input.message}}"}
 `, providerURL))
-	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n"+outputs)
+	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n"+outputs)
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	// Reused names with an incompatible schema must not supply source authority.
 	siblingInputs, siblingSchemas, siblingTriggerSchemas, siblingConnects := "", "", "", ""
@@ -112,7 +118,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		siblingSchemas += event + ":\n  activity_id: integer\n"
 		siblingNode += "    " + event + ":\n      guard: {id: sibling_only, check: payload.activity_id > 0}\n"
 	}
-	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\npins:\n  inputs:\n"+siblingInputs)
+	writeClosedVariantFile(t, root, "sibling/schema.yaml", "# fixture: sibling\npins:\n  inputs:\n"+siblingInputs)
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingSchemas)
 	writeClosedVariantFile(t, root, "sibling/nodes.yaml", siblingProducers+siblingNode)
 	rootSchema := filepath.Join(root, "schema.yaml")

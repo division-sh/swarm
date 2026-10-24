@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -29,11 +29,9 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 			}
 			instances, agents := &flowActivationTestInstanceStore{}, &flowActivationTestStore{}
 			bus := &flowActivationTestBus{}
-			am := newFlowActivationManager(t, bus, instances, agents)
 			bundle := testFlowBundle(t, autoEmit)
-			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-			ctx := testAuthorActivityContext(context.Background())
 			if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 				t.Fatal(err)
 			}
@@ -67,13 +65,12 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 				t.Fatal(err)
 			}
 			defer accepted.Release()
-			fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("e", 64))
+			revisedBundle := testFlowBundleWithTwoAgents(t, autoEmit)
+			revisedCtx, err := setFlowActivationManagerSemanticSource(am, ctx, semanticview.Wrap(revisedBundle))
 			if err != nil {
 				t.Fatal(err)
 			}
-			revisedBundle := testFlowBundleWithTwoAgents(t, autoEmit)
-			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(revisedBundle), fact)
-			revisedCtx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, fact), req.TriggerEvent.RunID())
+			revisedCtx = runtimecorrelation.WithRunID(revisedCtx, req.TriggerEvent.RunID())
 			revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
@@ -167,13 +164,12 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 				return
 			}
 			restartBus := &flowActivationTestBus{}
-			restarted := newFlowActivationManager(t, restartBus, instances, agents)
-			setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), fact)
+			restarted, restartCtx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(revisedBundle), agents)
 			restartReq := testActivationRequest(revisedBundle, "review", "inst-1", "ent-1", "review/inst-1")
-			if created, err := restarted.EnsureFlowInstance(revisedCtx, restartReq); err != nil || created {
+			if created, err := restarted.EnsureFlowInstance(restartCtx, restartReq); err != nil || created {
 				t.Fatalf("restart did not reuse desired instance: created=%t err=%v", created, err)
 			}
-			if !flowActivationAttemptReadyForTest(restarted, revisedCtx, restartReq) || len(restartBus.published) != 0 {
+			if !flowActivationAttemptReadyForTest(restarted, restartCtx, restartReq) || len(restartBus.published) != 0 {
 				t.Fatal("restart missed readiness or repeated the creation occurrence")
 			}
 			if err := restarted.Shutdown(); err != nil {
@@ -185,7 +181,7 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 
 func TestReadinessShutdownRefusalRequiresEveryExactOwnerBranch(t *testing.T) {
 	t.Run("joined native cancellation disposition", proveReadinessShutdownCancellationDisposition)
-	identity := lifecycleTestPersistedAgent(t).Config.Identity
+	identity := runtimeagentidentitytest.RootRuntime(t, "agent-lifecycle-test", "lifecycle-test")
 	shutdown := executableReadinessError(identity, runtimeLifecycleShuttingDown, AgentLifecycleState{}, "manager lifecycle does not admit executable readiness")
 	for _, tc := range []struct {
 		name string

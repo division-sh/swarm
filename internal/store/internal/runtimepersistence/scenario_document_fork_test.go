@@ -72,7 +72,11 @@ connector_responses: {tool: "${{'content': '${1 + 1}', 'items': [null, 7.0]}}"}
 				RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 				LoadScenarioExecutionProfile(context.Context, string) (scenarioexecution.Profile, bool, error)
 			})
-			request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: pointID, EffectiveSourceIdentity: identity, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
+			rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: pointID, EffectiveSourceIdentity: identity, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
 			different, _ := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("c", 64))
 			bad := request
 			bad.EffectiveSourceIdentity = different

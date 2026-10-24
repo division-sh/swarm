@@ -45,7 +45,8 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 			AllowSourceFreeze: true, Owner: parent, SourceLoader: loader, ContractSelection: selection,
 			ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-parent", IdempotencyKey: "original-cut",
 				TransportHash: "pending-join-parent-transport", SourceRunID: ancestor, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			},
 			AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 		parentDone <- err
 	}()
@@ -100,7 +101,8 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	}
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-crash", IdempotencyKey: "parent-start",
 		TransportHash: "pending-join-crash-transport", SourceRunID: parentRun, AtStart: true,
-		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+	}
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: parentRun, AtStart: true,
 		AllowSourceFreeze: true, Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})

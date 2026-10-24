@@ -443,8 +443,7 @@ func TestRoleScopedEntityTools_EqualityUsesFinalCandidateValidation(t *testing.T
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
-			SchemaYAML: `name: validation
-stages:
+			SchemaYAML: `stages:
   queued: {}
   closed: {final: true}
 `,
@@ -1457,18 +1456,22 @@ accounts:
 	at := time.Unix(1700000710, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
-	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
-		t.Fatalf("EnsureSourceArtifact: %v", err)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatalf("EnsureRootedSource: %v", err)
 	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash, RootAdmission: rooted.Admission()})
 	source := semanticview.Wrap(bundle)
 	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, sourceRunID), sourceFact)
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, sourceRunID), sourceFact), rooted.Admission())
 	constructEntityToolFixture(t, ctx, pg, newEntityToolPipeline(t, pg, source), source, "review", "review/inst-1", entityID, "queued",
 		map[string]any{"fixture_key": "inst-1", "status": "open"}, at)
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
@@ -1506,7 +1509,7 @@ accounts:
 		t.Fatalf("advance live source entity_state: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
-	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
+	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1564,12 +1567,16 @@ accounts:
 	at := time.Unix(1700000720, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
-	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
-		t.Fatalf("EnsureSourceArtifact: %v", err)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatalf("EnsureRootedSource: %v", err)
 	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash, RootAdmission: rooted.Admission()})
 	source := semanticview.Wrap(bundle)
 	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
@@ -1599,7 +1606,7 @@ accounts:
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, forkAt,
 	))
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1935,15 +1942,16 @@ func TestEntityTools_RootActorImplicitReadToolsDoNotReadChildFlowRows(t *testing
 	root := t.TempDir()
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 
-	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-read-bundle\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeEntityToolFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 root_subject:
   status: text
   score: integer
 `)
 	writeEntityToolFixtureFile(t, filepath.Join(root, "agents.yaml"), entityToolAgentYAML(actor))
-	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
+	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `stages:
   active: {}
   done: {final: true}
 `)
@@ -3011,17 +3019,17 @@ func loadWave1EntityToolBundleWithInitialStage(t *testing.T, actor models.AgentC
 	root := t.TempDir()
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 
-	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: entity-tool-bundle\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	if strings.TrimSpace(typesYAML) != "" {
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "types.yaml"), typesYAML)
 	}
-	schemaYAML := fmt.Sprintf(`name: %s
-instance: fixture_key
+	schemaYAML := `instance: fixture_key
 stages:
   queued: {}
   marginal_review: {}
   closed: {final: true}
-`, flowID)
+`
 	switch initial {
 	case "queued":
 	case "marginal_review":
@@ -3029,6 +3037,7 @@ stages:
 	default:
 		t.Fatalf("unsupported entity-tool fixture initial stage %q; want queued or marginal_review", initial)
 	}
+	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  entity_writes:\n    "+entityType+": {save: all}\n")
@@ -3080,7 +3089,6 @@ func loadRoleScopedEntityToolBundle(t *testing.T, actor models.AgentConfig) *run
 	return loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
 			SchemaYAML: `
-name: validation
 instance: fixture_key
 stages:
   queued: {}
@@ -3184,14 +3192,14 @@ func loadWave1EntityToolMultiFlowBundle(t *testing.T, flows map[string]entityToo
 	}
 	sort.Strings(flowIDs)
 
-	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: entity-tool-bundle\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
 	for _, flowID := range flowIDs {
 		fixture := flows[flowID]
 		schemaYAML := strings.TrimSpace(fixture.SchemaYAML)
 		if schemaYAML == "" {
-			schemaYAML = fmt.Sprintf(`name: %s
-instance: fixture_key
+			schemaYAML = `instance: fixture_key
 stages:
   queued: {}
   active: {}
@@ -3202,8 +3210,9 @@ stages:
   finished: {final: true}
   closed: {final: true}
   killed: {final: true}
-`, flowID)
+`
 		}
+		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)
 		if strings.TrimSpace(fixture.TypesYAML) != "" {
 			writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "types.yaml"), fixture.TypesYAML)

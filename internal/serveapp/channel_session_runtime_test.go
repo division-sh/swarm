@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -54,8 +53,7 @@ func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 		}
 	})
 	loaded := manager.LoadedContexts()[0]
-	catalog := sessionDiscoveryCatalog(t)
-	plan := packfixture.WhatsAppSessionChannel(t, runtimePlatformSpecPath(t), catalog)
+	catalog, plan := sessionDiscoveryProvider(t)
 	trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "reception", Provider: "whatsapp"})
 	if err != nil {
 		t.Fatal(err)
@@ -99,8 +97,7 @@ func runtimePlatformSpecPath(t testing.TB) string {
 }
 
 func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) {
-	catalog := sessionDiscoveryCatalog(t)
-	plan := packfixture.WhatsAppSessionChannel(t, runtimePlatformSpecPath(t), catalog)
+	catalog, plan := sessionDiscoveryProvider(t)
 	var declarations []runtimepkg.StandingTargetDeclaration
 	for _, flow := range []string{".", "support"} {
 		alias := "reception"

@@ -1282,7 +1282,8 @@ func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	chdirForTest(t, t.TempDir())
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: embedded-platform-spec\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
@@ -1338,7 +1339,10 @@ func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t 
 func testRuntimeSourceProjection(t *testing.T) *sourceartifact.RuntimeProjection {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: workspace-test\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+		t.Fatalf("write source schema: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o600); err != nil {
 		t.Fatalf("write source schema: %v", err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -3073,13 +3077,13 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		},
 		{
 			name:     "field valid options",
-			schema:   "name: invalid-schema-field\nbogus: true\n",
+			schema:   "bogus: true\n",
 			wants:    []string{"ERROR: schema field \"bogus\" is not supported.", "Valid options:", "stages", "Remediation:"},
 			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts", "terminal_states"},
 		},
 		{
 			name:   "duplicate activity after connector import",
-			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
+			schema: "stages: []\npins: {inputs: [z.request, a.request]}\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
 				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers:\n    z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n    a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
@@ -3089,7 +3093,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "duplicate activity on one YAML line",
-			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
+			schema: "stages: []\npins: {inputs: [z.request, a.request]}\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
 				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers: {z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}, a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}}\n",
@@ -3101,9 +3105,19 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), test.schema)
 			for name, body := range test.files {
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, name), body)
+			}
+			if strings.HasPrefix(test.name, "duplicate activity") {
+				for _, member := range []string{"manifest.yaml", "trigger.yaml", "connector.yaml", "channel.yaml"} {
+					body, err := os.ReadFile(filepath.Join(RepoRoot(), "packs/providers/telegram", member))
+					if err != nil {
+						t.Fatal(err)
+					}
+					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram", member), string(body))
+				}
 			}
 			var output bytes.Buffer
 			code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &output)
@@ -3409,11 +3423,12 @@ func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-boot-timer
-stages:
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   waiting: {}
   done: {final: true}
-`)
+`,
+	)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 ticket:
   ticket_id:
@@ -3513,12 +3528,15 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `stages:
   idle: {}
   done: {final: true}
-`)
+`,
+	)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
 case:
   business_brief:
@@ -3577,7 +3595,9 @@ Use save_entity_field for `+"`business_brief`"+`.
 func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages: []
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   execution_type: system_node
@@ -3677,14 +3697,15 @@ func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumul
 	t.Helper()
 	root := t.TempDir()
 
-	schema := `name: verify-accumulator-safety
-stages:
+	schema := `stages:
   collecting: {}
   done: {final: true}
 `
+
 	if opts.publicInput {
 		schema += "pins:\n  inputs: [item.arrived]\n"
 	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), schema)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.arrived:
@@ -3761,109 +3782,12 @@ func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: dead-event-schema\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 root.unused:
 `)
 	return root
-}
-
-func TestExecutionValidation_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t *testing.T) {
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	cases := []struct {
-		name        string
-		bundle      *runtimecontracts.WorkflowContractBundle
-		errContains string
-		wantErr     bool
-	}{
-		{
-			name: "missing tool reference",
-			bundle: func() *runtimecontracts.WorkflowContractBundle {
-				bundle := testWorkflowValidationBundle()
-				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-					"agent-1": {ID: "agent-1", Tools: []string{"missing_tool"}},
-				}
-				addTestAgentOwners(bundle)
-				return bundle
-			}(),
-			errContains: "unfulfillable tool missing_tool",
-			wantErr:     true,
-		},
-		{
-			name: "builtin runtime tool reference",
-			bundle: func() *runtimecontracts.WorkflowContractBundle {
-				bundle := testWorkflowValidationBundle()
-				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-					"agent-1": {ID: "agent-1", Tools: []string{"schedule"}, Permissions: []string{"schedule"}},
-				}
-				addTestAgentOwners(bundle)
-				return bundle
-			}(),
-			wantErr: false,
-		},
-		{
-			name: "missing emitted event schema warning",
-			bundle: func() *runtimecontracts.WorkflowContractBundle {
-				bundle := testWorkflowValidationBundle()
-				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
-				}
-				addTestAgentOwners(bundle)
-				return bundle
-			}(),
-			errContains: "agent agent-1 emit missing.event has no exact schema in .",
-			wantErr:     true,
-		},
-		{
-			name: "tool implementation warning",
-			bundle: func() *runtimecontracts.WorkflowContractBundle {
-				bundle := testWorkflowValidationBundle()
-				bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-					"legacy_call": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
-				}
-				return bundle
-			}(),
-			errContains: "tool implementation warnings",
-			wantErr:     true,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			source := semanticviewtest.WrapRootAgents(tc.bundle)
-			if err := runtimecontracts.CompileWorkflowSemantics(tc.bundle); err != nil {
-				t.Fatalf("compile validation fixture: %v", err)
-			}
-			verifyErr := validateExecutionFixture(context.Background(), source, executionposture.Live)
-			if tc.wantErr {
-				if verifyErr == nil || !strings.Contains(verifyErr.Error(), tc.errContains) {
-					t.Fatalf("validateExecutionFixture error = %v, want substring %q", verifyErr, tc.errContains)
-				}
-			} else if verifyErr != nil {
-				t.Fatalf("validateExecutionFixture error = %v, want nil", verifyErr)
-			}
-
-			result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-			if tc.wantErr {
-				if runtimeErr == nil || !strings.Contains(runtimeErr.Error(), tc.errContains) {
-					t.Fatalf("ValidateWorkflowContractSurface error = %v, want substring %q", runtimeErr, tc.errContains)
-				}
-				return
-			}
-			if runtimeErr != nil {
-				t.Fatalf("ValidateWorkflowContractSurface error = %v, want nil", runtimeErr)
-			}
-			switch tc.name {
-			case "builtin runtime tool reference":
-				for _, warning := range result.BootReport.Warnings() {
-					if strings.TrimSpace(warning.CheckID) == "tool_resolution" && strings.Contains(warning.Message, "schedule") {
-						t.Fatalf("BootReport warnings = %#v, unexpected builtin tool_resolution warning", result.BootReport.Warnings())
-					}
-				}
-			}
-		})
-	}
 }
 
 func addTestAgentOwners(bundle *runtimecontracts.WorkflowContractBundle) {

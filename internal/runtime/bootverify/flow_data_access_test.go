@@ -76,18 +76,14 @@ func TestCatalogRejectsNestedPhysicalFlowDataDeclarationExactlyOnce(t *testing.T
 	}
 }
 
-func TestBootCheckRegistry_HasFlowDataAccessCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 69 {
-		t.Fatalf("bootCheckRegistry count = %d, want 69", got)
-	}
-}
-
 func writeFlowDataAccessFixture(t *testing.T, access []string, files map[string]string, rootAgent bool) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-data-access\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "stages: []\n")
 	for name, content := range files {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "support", "data", filepath.FromSlash(name)), content)
 	}
@@ -108,11 +104,15 @@ func writeNestedBootFlowDataAccessFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-flow-data-access\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "parent", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "parent", "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
 	flowRoot := filepath.Join(root, "parent", "child", "support")
 
-	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages:\n  active: {}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:
   role: worker

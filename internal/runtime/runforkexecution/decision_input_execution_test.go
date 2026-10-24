@@ -69,8 +69,8 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at})
 			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-				Instance: flowidentity.Stored(loaded.Source, ".", source, source, "", ""), OccurredAt: at})
+			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
+				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", source, source, "", ""), OccurredAt: at})
 			if err != nil || !created {
 				t.Fatalf("construct control source: created=%t error=%v", created, err)
 			}
@@ -276,7 +276,8 @@ func activatePendingDecisionFork(t *testing.T, ctx context.Context, owner Select
 func pendingDecisionStartInvocation(sourceRun string, loaded LoadedSelectedContractSource, selection runfork.RunForkContractSelection) *runfork.ForkOperationRequest {
 	return &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "card-control-proof", IdempotencyKey: uuid.NewString(),
 		TransportHash: "card-control-proof", SourceRunID: sourceRun, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		AllowSourceFreeze: true, ContractSelection: selection}
+		AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+	}
 }
 
 func forkCardControlRequest(card decisioncard.Card, principal, method string) apiidempotency.Request {

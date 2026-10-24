@@ -81,13 +81,13 @@ func forkTimerInventoryDialects(t *testing.T, check func(*testing.T, bool)) {
 }
 
 func expectForkTimerInventorySource(mock sqlmock.Sqlmock, postgres bool, runID, status, bundle string, artifact bool) {
-	query := `SELECT status, bundle_hash FROM runs WHERE run_id = ?`
+	query := `SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = ?`
 	if postgres {
-		query = `SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid FOR UPDATE`
+		query = `SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = $1::uuid FOR UPDATE`
 	}
-	rows := sqlmock.NewRows([]string{"status", "bundle_hash"})
+	rows := sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"})
 	if status != "" {
-		rows.AddRow(status, bundle)
+		rows.AddRow(status, bundle, "fixture")
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(runID).WillReturnRows(rows)
 	if status == "running" || status == "paused" {
@@ -101,6 +101,13 @@ func expectForkTimerInventoryArtifact(mock sqlmock.Sqlmock, postgres bool, bundl
 		query = `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)`
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(bundle).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(present))
+	if present {
+		query := `SELECT EXISTS (SELECT 1 FROM source_root_admissions WHERE bundle_hash = ? AND root_directory = ?)`
+		if postgres {
+			query = `SELECT EXISTS (SELECT 1 FROM source_root_admissions WHERE bundle_hash = $1 AND root_directory = $2)`
+		}
+		mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(bundle, "fixture").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	}
 }
 
 func forkTimerInventoryQuery(postgres bool) string {

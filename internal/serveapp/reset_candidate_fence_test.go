@@ -171,7 +171,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 						}
 					}
 				})
-				credentials := processIngressCredentialStore{"telegram_bot_token": "reset-test-token", "webhook_signing.telegram": "reset-test-secret"}
+				credentials := processIngressCredentialStore{"telegram.telegram_bot_token": "reset-test-token", "telegram.webhook_signing_secret": "reset-test-secret"}
 				probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 				binding, err := createServeToolGatewayBinding(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8081})
 				if err != nil {
@@ -187,10 +187,10 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					candidate, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 						ExecutionPosture: executionposture.Live,
 						Ctx:              ctx, Stores: projectServeRuntimePersistence(stores), Config: cfg, Loaded: loaded,
-						WorkspaceBackend:       cliapp.WorkspaceBackendSelection{Backend: "host"},
-						EnableToolGateway:      true,
-						ToolGatewayBinding:     binding,
-						ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process, RuntimeInstanceID: instance,
+						WorkspaceBackend:   cliapp.WorkspaceBackendSelection{Backend: "host"},
+						EnableToolGateway:  true,
+						ToolGatewayBinding: binding,
+						ProcessWorkOwner:   process, RuntimeInstanceID: instance,
 						Credentials: credentials, ProviderCredentials: credentials,
 						Options: cliapp.ServeOptions{TestLLMRuntime: servedNoopLLMRuntime{}, TestLifecycleProbe: probe, ShutdownGrace: 5 * time.Second},
 					})

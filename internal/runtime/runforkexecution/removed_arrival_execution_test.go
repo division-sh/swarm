@@ -115,11 +115,12 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			if !found || bundle.SourceArtifact == nil {
 				t.Fatal("removed rule requires a genuine selected artifact")
 			}
-			storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, target.SourceArtifactFact), selected.(storetest.DurableDataCatalogStore), bundle)
+			storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, target.SourceArtifactFact), selected.(storetest.RootedDataCatalogStore), bundle)
 			selection := runforkadmission.SelectedContractSelection(target.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "removed-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "removed-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: target.RootedSource.Admission().Reference(),
+			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
 				SourceLoader: loader, ContractSelection: selection,

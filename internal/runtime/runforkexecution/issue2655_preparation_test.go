@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -34,8 +36,9 @@ func TestIssue2655MaterializationOperationIsDetached(t *testing.T) {
 	point := prepared.plan.ForkPoint
 	prepared.forkOperation = &runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "operator", TransportHash: "request",
-		SourceRunID: prepared.plan.SourceRunID, TargetBundleHash: runForkTestBundleHash,
-		ContractSelection: testContractSelection(), ResolvedPoint: &point,
+		SourceRunID: prepared.plan.SourceRunID, TargetBundleHash: prepared.loadedSource.SourceArtifactFact.BundleHash(),
+		TargetRootReference: prepared.loadedSource.RootedSource.Admission().Reference(),
+		ContractSelection:   testContractSelection(), ResolvedPoint: &point,
 		DataPinOverrides: []durabledata.ExplicitPin{{
 			Declaration: durabledata.DeclarationRef{FlowPath: ".", EventName: "work.ready"},
 			VersionID:   durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("a", 64)),
@@ -68,10 +71,17 @@ func issue2655PreparedProjection(t *testing.T) *PreparedSelectedFork {
 	t.Helper()
 	ctx := runForkTestContext(t)
 	selection := testContractSelection()
+	repo := runForkExecutionRepoRoot(t)
+	loaded, err := (admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"),
+	}).LoadRunForkSelectedContractSource(ctx, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
 	frontier := testContractFrontierAdmission(selection)
 	routes := testSelectedContractRouteAdmission(frontier)
 	prepared := &PreparedSelectedFork{
-		operation: selectedContractOperationForTest(t, ctx), loadedSource: testLoadedSelectedSource(selection),
+		operation: selectedContractOperationForTest(t, ctx), loadedSource: loaded,
 		frontier: frontier, routeTopology: testSelectedContractRouteTopologyFromAdmission(t, frontier, routes),
 		model: testSelectedContractExecutionModel(t, frontier),
 		plan: runfork.RunForkPlan{SourceRunID: uuid.NewString(), ForkPoint: runfork.RunForkPoint{
@@ -87,13 +97,14 @@ func issue2655PreparedProjection(t *testing.T) *PreparedSelectedFork {
 }
 
 func TestIssue2655PreparedOperationPointBinding(t *testing.T) {
+	target, _ := sourceartifactfixture.Rooted(t, "operation-target", sourceartifactfixture.Artifact())
 	plan := runfork.RunForkPlan{SourceRunID: uuid.NewString(), ForkPoint: runfork.RunForkPoint{
 		Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), EventName: "work.ready", Revision: 3,
 		Timestamp: time.Now().UTC(), ProducedBy: "producer", ProducedByType: "node",
 	}}
 	base := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "operator", TransportHash: "request",
-		SourceRunID: plan.SourceRunID, TargetBundleHash: runForkTestBundleHash, ContractSelection: testContractSelection(),
+		SourceRunID: plan.SourceRunID, TargetBundleHash: target.Artifact().BundleHash(), TargetRootReference: target.Admission().Reference(), ContractSelection: testContractSelection(),
 	}
 	for _, supplied := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unresolved", true: "equal"}[supplied], func(t *testing.T) {
@@ -147,6 +158,7 @@ func TestIssue2655PreparedOperationPointBinding(t *testing.T) {
 }
 
 func TestIssue2655PreparedOperationOriginalSelectorCorrespondence(t *testing.T) {
+	target, _ := sourceartifactfixture.Rooted(t, "operation-target", sourceartifactfixture.Artifact())
 	for _, explicit := range []bool{false, true} {
 		for _, resolved := range []bool{false, true} {
 			t.Run(map[bool]string{false: "omitted", true: "explicit"}[explicit]+"/"+map[bool]string{false: "unresolved", true: "resolved"}[resolved], func(t *testing.T) {
@@ -158,7 +170,7 @@ func TestIssue2655PreparedOperationOriginalSelectorCorrespondence(t *testing.T) 
 				}
 				operation := runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "operator", TransportHash: "request", SourceRunID: plan.SourceRunID,
-					ForkEventID: plan.ForkPoint.Input, TargetBundleHash: runForkTestBundleHash, ContractSelection: testContractSelection(),
+					ForkEventID: plan.ForkPoint.Input, TargetBundleHash: target.Artifact().BundleHash(), TargetRootReference: target.Admission().Reference(), ContractSelection: testContractSelection(),
 				}
 				if resolved {
 					point := plan.ForkPoint

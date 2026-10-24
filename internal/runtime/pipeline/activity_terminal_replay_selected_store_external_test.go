@@ -377,8 +377,13 @@ func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, sour
 	}
 	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
 	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(context.Background(), runID), fact))
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
 	})
 	return ctx
 }

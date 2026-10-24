@@ -106,7 +106,10 @@ func ExampleRoot(t testing.TB, id ArtifactID) string {
 // CopyExample materializes a canonical example for a focused overlay or negative mutation.
 func CopyExample(t testing.TB, id ArtifactID) string {
 	t.Helper()
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), string(id))
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if root, ok := canonicalExamplePath(id); ok && root == telegramAgentExamplePath {
 		// Consume release bytes so ignored runtime state cannot enter test fixtures.
 		copyFS(t, swarmassets.EmbeddedTelegramAgentExample(), ".", target)
@@ -125,11 +128,8 @@ func CopyTelegramChatWithoutIngress(t testing.TB) string {
 			t.Fatalf("remove Telegram %s branch: %v", branch, err)
 		}
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", `name: telegram-agent
-imports:
-  provider_trigger_events:
-    - provider: telegram
-      event: inbound.telegram.text_message
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: telegram-agent
 pins:
   inputs:
     - inbound.telegram.text_message
@@ -356,7 +356,7 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 	default:
 		t.Fatalf("unsupported retired static mutation %q", mutation)
 	}
-	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
+	writeClosedNegativeFile(t, root, "schema.yaml", `# fixture: template-select-or-create
 pins:
   inputs:
     - account.requested
@@ -370,7 +370,7 @@ connect:
   - {event: legacy.seen, from: ., to: legacy_static}
 `)
 	writeClosedNegativeFile(t, root, "events.yaml", "account.requested:\n  account_id: text\nlegacy.seen:\n  entity_id: uuid\n  legacy_id: text\n  amount: number\n")
-	writeClosedNegativeFile(t, root, "legacy_static/schema.yaml", `name: legacy_static
+	writeClosedNegativeFile(t, root, "legacy_static/schema.yaml", `# fixture: legacy_static
 stages:
   active: {}
   archived: {final: true}
@@ -406,7 +406,7 @@ func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
 	t.Helper()
 	writeClosedNegativeFile(t, root, "entities.yaml", "subject:\n  display_name: text\n")
 	writeClosedNegativeFile(t, root, "events.yaml", "subject.created:\n  entity_id: text\n  display_name: text\n")
-	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
+	writeClosedNegativeFile(t, root, "schema.yaml", `# fixture: template-select-or-create
 stages:
   active: {}
 pins:

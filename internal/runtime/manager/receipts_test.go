@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -318,6 +319,11 @@ func ProveNativeProcessEventConsumesDrainedCompletionObservationWithoutSecondRec
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, harness.Token.Identity.RunID, "", events.EventEnvelope{}, time.Now().UTC())
 			agent := drainedCompletionObservationAgent{id: harness.Token.AgentID, withOutput: test.withOutput, bypassDisposition: test.withOutput}
 			base := testAuthorActivityContext(harness.CompletionContext(t.Name()))
+			root, present, err := runtimecorrelation.RootAdmissionFromContext(nativeDelivery.Context)
+			if err != nil || !present {
+				t.Fatalf("native drained completion requires its captured root: present=%t err=%v", present, err)
+			}
+			base = runtimecorrelation.WithRootAdmission(base, root)
 			nativeDelivery.seedClaim(t, base, evt, agent.ID())
 			ctx := managerClaimedDeliveryContext(t, am, base, evt, agent.ID())
 			claim, ok := runtimedelivery.ClaimFromContext(ctx)
@@ -475,7 +481,7 @@ func registerReceiptTestAgent(t *testing.T, am *AgentManager, cfg runtimeactors.
 	} else {
 		cfg.Identity = managerRuntimeAgentIdentityForFlowPath(cfg.ID, cfg.FlowPath)
 	}
-	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test", Topology: managerTestEphemeralTopologyAdmission(t)}, true, panicStubAgent{id: cfg.ID}, testManagerSubscriptionAdmission(t, cfg)); err != nil {
+	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test", Topology: managerTestEphemeralTopologyAdmissionForSource(t, am.semanticSource)}, true, panicStubAgent{id: cfg.ID}, testManagerSubscriptionAdmission(t, cfg)); err != nil {
 		t.Fatalf("register receipt test agent: %v", err)
 	}
 }
@@ -1129,15 +1135,15 @@ func ProveNativeProcessEventSettlementFailureIsNotReportedAsReplayed(t *testing.
 func ProveNativeClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
 	nativeDelivery := newNativeDelivery(t)
 	store := nativeDelivery
-	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: store})
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: store, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact()})
 	agent := &serializingAgent{id: "agent-a", started: make(chan struct{}), release: make(chan struct{})}
 	runID := uuid.NewString()
 	first := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.first", "gateway", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 	second := eventtest.ExistingRunRootIngress(uuid.NewString(), "input.second", "gateway", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{first})
-	firstCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), first, agent.ID())
+	firstCtx := managerClaimedDeliveryContext(t, am, nativeDelivery.Context, first, agent.ID())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{second})
-	secondCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), second, agent.ID())
+	secondCtx := managerClaimedDeliveryContext(t, am, nativeDelivery.Context, second, agent.ID())
 	results := make(chan eventProcessResult, 2)
 	go func() {
 		results <- am.processEventDetailed(firstCtx, agent, first)
@@ -1190,8 +1196,8 @@ func ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBus
 		childStarted:   make(chan struct{}),
 		childCompleted: make(chan struct{}),
 	}
-	am := newTestAgentManagerWithOptions(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil }, AgentManagerOptions{DeliveryStore: nativeDelivery})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestEphemeralTopologyAdmission(t), Config: managerTestAgentConfig(runtimeactors.AgentConfig{
+	am := newTestAgentManagerWithOptions(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil }, AgentManagerOptions{DeliveryStore: nativeDelivery, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact()})
+	if err := am.spawnAgentInternal(nativeDelivery.Context, PersistedAgent{Topology: managerTestEphemeralTopologyAdmissionForSource(t, nativeDelivery.SemanticSource), Config: managerTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.ID(),
 		Identity:      managerAgentIdentity(agent.ID()),
@@ -1199,14 +1205,14 @@ func ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBus
 	})}, true); err != nil {
 		t.Fatalf("spawn lane test agent: %v", err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	if err := am.Run(nativeDelivery.normalRunContext(t)); err != nil {
 		t.Fatalf("run lane test manager: %v", err)
 	}
 
 	root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.root", "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	agent.child = eventtest.ChildWithLineage(uuid.NewString(), "test.lane.child", agent.ID(), "", nil, 0, events.LineageFromEvent(root), events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{root, agent.child})
-	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), root); err != nil {
+	if err := eventBus.Publish(nativeDelivery.Context, root); err != nil {
 		t.Fatalf("publish lane root: %v", err)
 	}
 	select {
@@ -1217,7 +1223,7 @@ func ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBus
 
 	later := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.lane.later", "test", "", nil, 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{later})
-	laterCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), later, agent.ID())
+	laterCtx := managerClaimedDeliveryContext(t, am, nativeDelivery.Context, later, agent.ID())
 	laterResult := make(chan eventProcessResult, 1)
 	go func() {
 		laterResult <- am.processEventDetailed(laterCtx, agent, later)
@@ -1394,7 +1400,9 @@ func ProveNativeWriteReceiptUsesCanonicalHandlerRetryBase(t *testing.T, newNativ
 		name   string
 		source semanticview.Source
 		want   time.Duration
-	}{{name: "default", want: time.Second}, {name: "configured", source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{"handler_retry_base_seconds": {Value: 37}}}}), want: 37 * time.Second}} {
+	}{{name: "default", want: time.Second}, {name: "configured", source: semanticview.Wrap(testFlowBundle(t, "", func(root string) {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "handler_retry_base_seconds: 37\n")
+	})), want: 37 * time.Second}} {
 		t.Run(test.name, func(t *testing.T) {
 			nativeDelivery := newNativeDelivery(t)
 			deliveryStore := nativeDelivery

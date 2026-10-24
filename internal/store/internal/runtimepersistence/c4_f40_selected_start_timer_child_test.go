@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -97,10 +98,15 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			}
 			baseline := work.process.ActiveCount()
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundleHash}
+			root, present, err := correlation.RootAdmissionFromContext(ctx)
+			if err != nil || !present {
+				t.Fatalf("selected timer target root: present=%t err=%v", present, err)
+			}
 			operation := &runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "c4-f40-start-timer", IdempotencyKey: uuid.NewString(), TransportHash: "c4-f40-start-timer",
 				SourceRunID: sourceRun, AtStart: true, ResolvedPoint: &sourcePlan.ForkPoint, TargetBundleHash: bundleHash,
-				AllowSourceFreeze: true, ContractSelection: selection,
+				TargetRootReference: root.Reference(),
+				AllowSourceFreeze:   true, ContractSelection: selection,
 			}
 			if _, _, err := operation.Canonical(); err != nil {
 				t.Fatal(err)

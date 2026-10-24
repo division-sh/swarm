@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -23,22 +25,51 @@ func parseManifestAt(body []byte, file string) (Manifest, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return Manifest{}, err
 	}
-	if err := root.ValidateUniqueMappings(); err != nil {
-		return Manifest{}, err
-	}
 	definition, err := admitTriggerDefinition(root)
 	if err != nil {
 		return Manifest{}, err
 	}
+	return freezeTriggerManifest(definition, root, snapshot.Bytes())
+}
+
+// AdmitBody projects the captured role view without decoding or rewriting its
+// source bytes. Provider identity comes only from its admitted directory.
+func AdmitBody(body packartifact.ProviderBody) (Manifest, error) {
+	if !body.Valid() || body.Role() != packmodel.BodyTrigger {
+		return Manifest{}, fmt.Errorf("provider trigger admission requires an admitted trigger.yaml BODY")
+	}
+	root := body.SourceValue()
+	definition, err := admitTriggerDefinition(root)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if capabilities, present := body.Metadata().Capabilities(); present && definition.Transport == packs.ChannelTransportSession && capabilities.Can.VerifySecret != "" {
+		return Manifest{}, triggerSourceError(root, "verify_secret is forbidden by transport: session in trigger.yaml")
+	}
+	definition.Provider = body.ProviderKey()
+	if err := qualifyTriggerBodyNames(root, &definition); err != nil {
+		return Manifest{}, err
+	}
+	manifest, err := freezeTriggerManifest(definition, root, body.Bytes())
+	if err != nil {
+		return Manifest{}, err
+	}
+	manifest.value.providerBody = body
+	return manifest, nil
+}
+
+func freezeTriggerManifest(definition manifestDefinition, root yamlsource.Value, body []byte) (Manifest, error) {
 	if err := definition.validate(); err != nil {
 		return Manifest{}, triggerSourceError(root, err.Error())
 	}
-	definition.Provider = NormalizeProviderName(definition.Provider)
 	definition.outputs = definition.OutputManifest()
-	return Manifest{value: &manifestValue{definition: definition, source: root, body: snapshot.Bytes()}}, nil
+	return Manifest{value: &manifestValue{definition: definition, source: root, body: body}}, nil
 }
 
 func admitTriggerDefinition(root yamlsource.Value) (manifestDefinition, error) {
+	if err := root.ValidateUniqueMappings(); err != nil {
+		return manifestDefinition{}, err
+	}
 	f, err := triggerFields(root, "provider", "transport", "payload_object_required", "payload_object_error", "payload_source", "secret", "signature", "challenge", "delivery_condition", "delivery_id", "event_type", "event_name", "normalized_events", "ack", "redact_keys", "metadata")
 	if err != nil {
 		return manifestDefinition{}, err

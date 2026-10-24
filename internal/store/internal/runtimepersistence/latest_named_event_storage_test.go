@@ -9,7 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -17,6 +19,9 @@ func TestLatestNamedEventStoragePreservesGlobalOrderAndExactOriginalReadBothStor
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			ids := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
 			at := time.Date(2026, 10, 8, 14, 0, 0, 0, time.UTC)
 			for i, name := range []string{"latest.match", "latest.match", "latest.foreign"} {

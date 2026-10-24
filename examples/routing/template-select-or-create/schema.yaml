@@ -1,4 +1,4 @@
-name: template-select-or-create
+# fixture: template-select-or-create
 pins:
   inputs:
     - account.requested

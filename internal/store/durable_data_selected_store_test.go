@@ -1,10 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -1688,6 +1687,7 @@ func TestDurableDataPruneValidatesCurrentAggregateBeforeHeadConflict(t *testing.
 func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
 		ctx := context.Background()
+		rooted, _ := sourceartifactfixture.Rooted(t, "durable-data-test", testDataSourceArtifact)
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -1715,9 +1715,10 @@ func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 		for index := 0; index < pinCount; index++ {
 			runID := fmt.Sprintf("00000000-0000-4000-8000-%012d", index+1)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-				RunID:      runID,
-				State:      runtimerunlifecycle.StateRunning,
-				Origin:     storetest.ScenarioSetupOrigin(),
+				RunID:    runID,
+				State:    runtimerunlifecycle.StateRunning,
+				Origin:   storetest.ScenarioSetupOrigin(),
+				Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 				BundleHash: testDataBundle,
 				StartedAt:  time.Unix(int64(index+1), 0).UTC(),
 			})
@@ -1829,25 +1830,10 @@ func registerDurableDataTestCatalog(ctx context.Context, selected durableDataSel
 }
 
 func durableDataTestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
-	const label = "schema.yaml"
-	const body = "name: durable-data-test\n"
-	var blob bytes.Buffer
-	blob.WriteString("swarm-bundle-v2\x00")
-	if err := binary.Write(&blob, binary.BigEndian, uint64(1)); err != nil {
-		panic(err)
-	}
-	if err := blob.WriteByte(byte(sourceartifact.DispositionDeclaration)); err != nil {
-		panic(err)
-	}
-	if err := binary.Write(&blob, binary.BigEndian, uint64(len(label))); err != nil {
-		panic(err)
-	}
-	blob.WriteString(label)
-	if err := binary.Write(&blob, binary.BigEndian, uint64(len(body))); err != nil {
-		panic(err)
-	}
-	blob.WriteString(body)
-	artifact, err := sourceartifact.DecodeLogical(blob.Bytes())
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
 	if err != nil {
 		panic(err)
 	}

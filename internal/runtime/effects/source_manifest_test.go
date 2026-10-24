@@ -39,6 +39,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/sessionprovider/runtime_logout_unix.go:executeSessionLogout:sdk_logout:1":                                                   ownerOperatorInfra,
 	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:1":             ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:2":             ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/fixture.go:CopyExample:filesystem_write:1":                                            ownerBuildTest,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                                  ownerRuntimeDependency,
 	"internal/runtime/channelactivation/owner.go:Release:http_do:1":                                                                       ownerRuntimeDependency,
 	"internal/runtime/channelactivation/presentation.go:Acquire:http_do:1":                                                                ownerRuntimeDependency, // sync.Once request release, not HTTP.
@@ -145,7 +146,6 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/testfixtures/canonicalrouting/root_connect.go:CopyRootOutputConnect:filesystem_write:1":                             ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/root_connect.go:CopyRootSingletonBoomerang:filesystem_write:1":                        ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/root_connect.go:copySingletonOutputRootConnect:filesystem_write:1":                    ownerBuildTest,
-	"internal/runtime/testfixtures/canonicalrouting/publication_connector.go:CopyPublicationConnector:filesystem_write:1":                 ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/semantic_numeric_ingress.go:CopySemanticNumericIngress:filesystem_write:1":            ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/specialized_variants.go:removeInheritedScenarios:filesystem_write:1":                  ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:1":              ownerBuildTest,

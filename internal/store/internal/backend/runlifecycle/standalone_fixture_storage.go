@@ -32,7 +32,7 @@ func ReadPostgresRunOriginLockCountTx(ctx context.Context, tx *sql.Tx) (int, err
 SELECT count(*) FROM pg_stat_activity
 WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'
   AND btrim(regexp_replace(query, '[[:space:]]+', ' ', 'g'))
-      LIKE 'SELECT r.run_id::text, lower(r.status), r.bundle_hash, r.origin_kind,%'
+      LIKE 'SELECT r.run_id::text, lower(r.status), r.bundle_hash, r.source_root_directory, r.origin_kind,%'
 `).Scan(&count)
 	return count, err
 }

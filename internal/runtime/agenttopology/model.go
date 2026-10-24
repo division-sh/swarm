@@ -11,6 +11,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -237,7 +238,15 @@ func (a Authority) Validate() error {
 }
 
 type SourceCoordinate struct {
-	BundleHash string `json:"bundle_hash"`
+	BundleHash    string `json:"bundle_hash"`
+	RootDirectory string `json:"root_directory"`
+}
+
+func NewSourceCoordinate(admission sourceartifact.RootAdmission) (SourceCoordinate, error) {
+	if err := admission.Validate(); err != nil {
+		return SourceCoordinate{}, err
+	}
+	return SourceCoordinate{BundleHash: admission.BundleHash(), RootDirectory: admission.RootDirectory()}, nil
 }
 
 func (c SourceCoordinate) Normalize() SourceCoordinate {
@@ -247,7 +256,11 @@ func (c SourceCoordinate) Normalize() SourceCoordinate {
 
 func (c SourceCoordinate) Validate() error {
 	c = c.Normalize()
-	return validateSourceCoordinate(c.BundleHash)
+	return c.RootReference().Validate()
+}
+
+func (c SourceCoordinate) RootReference() sourceartifact.RootAdmissionReference {
+	return sourceartifact.RootAdmissionReference{BundleHash: c.BundleHash, RootDirectory: c.RootDirectory}
 }
 
 func (c SourceCoordinate) Key() string {
@@ -341,6 +354,9 @@ func (p *SourceSetPlan) normalizeAndValidate(requireRevision bool) error {
 			return fmt.Errorf("source set agent %d: %w", i, err)
 		}
 	}
+	if err := p.validateRootedAgentMembership(); err != nil {
+		return err
+	}
 	var keyErr error
 	sort.Slice(p.Agents, func(i, j int) bool {
 		left, err := p.Agents[i].Key()
@@ -376,6 +392,19 @@ func (p *SourceSetPlan) normalizeAndValidate(requireRevision bool) error {
 		}
 		if p.Revision != want {
 			return errors.New("agent topology source-set revision does not match canonical plan")
+		}
+	}
+	return nil
+}
+
+func (p *SourceSetPlan) validateRootedAgentMembership() error {
+	sources := make(map[SourceCoordinate]struct{}, len(p.Sources))
+	for _, source := range p.Sources {
+		sources[source] = struct{}{}
+	}
+	for i, agent := range p.Agents {
+		if _, ok := sources[agent.Source]; !ok {
+			return fmt.Errorf("source set agent %d differs from the exact rooted source set", i)
 		}
 	}
 	return nil

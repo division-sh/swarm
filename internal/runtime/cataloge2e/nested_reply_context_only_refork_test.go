@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -54,11 +55,11 @@ func proveNativeNestedContextOnlyRefork(t *testing.T, h *runtimeHarness, selecte
 		handoffs, handoffErr := storetest.ReadServedIncompletePipelineHandoffCount(ctx, selected, sourceRun)
 		t.Logf("terminal source before reconstruction: deliveries=%+v handoffs=%d errors=%v/%v", deliveries, handoffs, deliveryErr, handoffErr)
 	}
-	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-context-only", IdempotencyKey: uuid.NewString(),
-		TransportHash: "nested-context-only", SourceRunID: sourceRun, ForkEventID: cut, AtStart: state == replycontext.StateOpen,
-		TargetBundleHash: selection.BundleHash, AllowSourceFreeze: true, ContractSelection: selection}
+	operation := catalogStagedForkOperation(t, ctx, selected, selection, sourceRun, cut)
+	operation.Actor, operation.TransportHash = "nested-context-only", "nested-context-only"
+	operation.AtStart = state == replycontext.StateOpen
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{SourceRunID: sourceRun, At: cut, AtStart: operation.AtStart,
-		AllowSourceFreeze: true, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+		AllowSourceFreeze: true, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash})
 	if err != nil {
 		t.Fatalf("prepare exact context-only source cut: %v", err)
 	}
@@ -72,7 +73,8 @@ func proveNativeNestedContextOnlyRefork(t *testing.T, h *runtimeHarness, selecte
 		t.Fatal(err)
 	}
 	request.ForkOperation = &operation
-	child, err := selected.MaterializeRunForkForSelectedContractExecution(ctx, request)
+	materializeCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), request.RootAdmission)
+	child, err := selected.MaterializeRunForkForSelectedContractExecution(materializeCtx, request)
 	if err != nil || child.SourceRunID != sourceRun || child.ForkRunStatus != runfork.RunForkMaterializedStatus || child.SelectedContractBinding == nil ||
 		child.ForkPoint.Kind == runfork.RunForkPointRunStart != operation.AtStart {
 		t.Fatalf("materialize context-only descendant at exact source cut: %+v error=%v", child, err)

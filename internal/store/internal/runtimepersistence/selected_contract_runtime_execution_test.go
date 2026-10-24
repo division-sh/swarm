@@ -1201,7 +1201,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	go func() {
 		discardDone <- store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun)
 	}()
-	waitForPostgresQueryLock(t, ctx, db, "SELECT run_id::text, status, bundle_hash, origin_kind")
+	waitForPostgresQueryLock(t, ctx, db, "SELECT run_id::text, status, bundle_hash, source_root_directory, origin_kind")
 
 	var status string
 	var committedRevisionRows int
@@ -1392,9 +1392,14 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	requirePausedRunForTest(t, ctx, store, forkRunID, now)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
 	captureRunForkTestRevision(t, db, forkRunID, runforkrevision.FamilyEvents)
+	rooted, err := store.LoadRunRootedSource(ctx, forkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	dependent, err := store.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-		SourceRunID: forkRunID,
-		At:          forkEventID,
+		SourceRunID:   forkRunID,
+		At:            forkEventID,
+		RootAdmission: rooted.Admission(),
 	})
 	if err != nil {
 		t.Fatalf("materialize dependent fork: %v", err)
@@ -1494,9 +1499,9 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	if len(sourceArtifacts) != 0 {
 		artifact := sourceArtifacts[0]
 		ctx = testAuthorActivityContextForBundle(artifact.BundleHash())
-		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
+		ctx = requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
 	} else {
-		requireRunningRunForTest(t, ctx, store, sourceRun, now)
+		ctx = requireRunningRunForTest(t, ctx, store, sourceRun, now)
 	}
 	eventStore, ok := any(store).(semanticEventFixtureStore)
 	if !ok {
@@ -1528,14 +1533,20 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	if len(sourceArtifacts) != 0 {
 		child.Artifact = sourceArtifacts[0]
 	}
-	requireRunFixtureForTest(t, ctx, store, child)
+	ctx = requireRunFixtureForTest(t, ctx, store, child)
+	target, err := store.(interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	}).LoadRunRootedSource(ctx, forkRun)
+	if err != nil {
+		t.Fatal(err)
+	}
 	seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(forkRun, "selected-agent", "selected-test"), "active")
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES (?,?,?,?,?,?,'selected_contracts',?)`, bindingID, forkRun, sourceRun, point.Kind, point.Revision, point.EventID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,target_bundle_hash,source_root_directory,created_at) VALUES (?,?,?,?,?,?,'selected_contracts',?,?,?)`, bindingID, forkRun, sourceRun, point.Kind, point.Revision, point.EventID, target.Admission().BundleHash(), target.Admission().RootDirectory(), now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid,'selected_contracts',$7)`, bindingID, forkRun, sourceRun, point.Kind, point.Revision, point.EventID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,target_bundle_hash,source_root_directory,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid,'selected_contracts',$7,$8,$9)`, bindingID, forkRun, sourceRun, point.Kind, point.Revision, point.EventID, target.Admission().BundleHash(), target.Admission().RootDirectory(), now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	}

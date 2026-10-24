@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -43,8 +44,14 @@ func TestInstanceClockSchedulerConsumesCommittedReceiptBothStores(t *testing.T) 
 				selected, _, seed := backend.open(t)
 				ctx := clockAcknowledgmentContext(t, seed)
 				runID := correlation.RunIDFromContext(ctx)
-				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
-				publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore))
+				catalogContext := testAuthorActivityContext()
+				var options bus.EventBusOptions
+				if scope, present := authoractivity.ScopeFromContext(ctx); present {
+					catalogContext = ctx
+					options.RuntimeInstanceID = scope.RuntimeInstanceID
+				}
+				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), catalogContext)
+				publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), options)
 				if err != nil {
 					t.Fatal(err)
 				}

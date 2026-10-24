@@ -121,7 +121,14 @@ func nativeRecoveryLogRuntimeForTest(t *testing.T, fixture RuntimeLogNativeFixtu
 		}
 	})
 	fact := deps.Options.SourceArtifactFact
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !present || root.BundleHash() != fact.BundleHash() {
+		t.Fatalf("native recovery source root differs from its fact: present=%v err=%v", present, err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		return nil, err
+	}
 	agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(deps.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		return nil, err
@@ -227,6 +234,10 @@ func VerifyRuntimeLoggerNativeArtifactLossCutsForTest(t *testing.T, open Runtime
 	for _, shape := range []string{"missing", "running", "cancelled", "runless"} {
 		t.Run(shape, func(t *testing.T) {
 			artifact := admittedRuntimeLogSourceArtifactForTest(t)
+			rooted, rootErr := artifact.RootedSource()
+			if rootErr != nil {
+				t.Fatal(rootErr)
+			}
 			fixture := open(t, artifact)
 			ctx, runID := fixture.Context, ""
 			var beforeRun runlifecycle.Snapshot
@@ -267,7 +278,7 @@ func VerifyRuntimeLoggerNativeArtifactLossCutsForTest(t *testing.T, open Runtime
 			}
 			beforeCreate := fixture.Physical(ctx)
 			fact, _ := correlation.SourceArtifactFactFromContext(ctx)
-			_, err = fixture.Runs.CreateRun(ctx, runlifecycle.CreateRequest{RunID: uuid.NewString(), Source: fact, Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC()})
+			_, err = fixture.Runs.CreateRun(ctx, runlifecycle.CreateRequest{RunID: uuid.NewString(), Source: fact, RootAdmission: rooted.Admission(), Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC()})
 			if !errors.Is(err, runlifecycle.ErrSourceArtifactUnavailable) || fixture.Physical(ctx) != beforeCreate {
 				t.Fatalf("new run crossed deleted-source admission: %v", err)
 			}

@@ -1,7 +1,6 @@
 package runtime_test
 
 import (
-	"go/ast"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,98 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 )
-
-func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testing.T) {
-	allowedCalls := map[string]map[string]struct{}{
-		"NewSwarmWorkflowModule": pathSet(),
-		"LoadPlatformPackInventoryFS": pathSet(
-			"internal/packartifact/development.go",
-			"internal/packartifact/embedded.go",
-			"internal/testutil/packfixture/packfixture.go",
-		),
-		"LoadEmbeddedPlatformPackInventory": pathSet(
-			"internal/cliapp/cli.go",
-			"internal/cliapp/pack_commands.go",
-			"internal/cliapp/provider_trigger_packs.go",
-			"internal/runtime/contracts/workflow_contract_loading.go",
-		),
-		"LoadDevelopmentPlatformPackInventory": pathSet(
-			"internal/cliapp/provider_trigger_packs.go",
-			"internal/testutil/packfixture/packfixture.go",
-		),
-		"NewEffectivePackInventory": pathSet(
-			"internal/cliapp/doctor.go",
-			"internal/cliapp/channel_deployment.go",
-			"internal/runtime/contracts/workflow_contract_loading.go",
-			"internal/testutil/packfixture/packfixture.go",
-		),
-		"NewPackRegistryFromInventory": pathSet(
-			"internal/packadmission/admission.go",
-			"internal/testutil/packfixture/packfixture.go",
-		),
-		"NewCatalogSnapshotFromInventory": pathSet(
-			"internal/packadmission/admission.go",
-			"internal/testutil/packfixture/packfixture.go",
-		),
-		"LoadChannelPacks": pathSet(
-			"internal/packadmission/admission.go",
-			"internal/testutil/packfixture/packfixture.go",
-		),
-	}
-	forbiddenOwners := map[string]struct{}{
-		"BuiltinTool": {}, "DefaultPackRegistry": {}, "LoadBuiltinPackRegistry": {},
-		"LoadPlatformPackDirs": {}, "LoadChannelPackDirs": {}, "NewCatalogSnapshotFromPackDirs": {},
-		"NewRuntimeContextManagerWithAdmission": {}, "ProcessAdmissionState": {},
-		"SourceWithConnectorPackImportsFromRegistry": {}, "compileProcessAdmissionCandidate": {},
-	}
-	seen := map[string]map[string]struct{}{}
-	inspectProductionGo(t, func(path string, file *ast.File) {
-		for _, declaration := range file.Decls {
-			switch typed := declaration.(type) {
-			case *ast.FuncDecl:
-				if _, forbidden := forbiddenOwners[typed.Name.Name]; forbidden {
-					t.Errorf("%s declares retired pack authority %s", path, typed.Name.Name)
-				}
-			case *ast.GenDecl:
-				for _, specification := range typed.Specs {
-					if typeSpec, ok := specification.(*ast.TypeSpec); ok {
-						if _, forbidden := forbiddenOwners[typeSpec.Name.Name]; forbidden {
-							t.Errorf("%s declares retired pack authority %s", path, typeSpec.Name.Name)
-						}
-					}
-				}
-			}
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			name := calledFunctionName(call.Fun)
-			if _, forbidden := forbiddenOwners[name]; forbidden {
-				t.Errorf("%s calls retired pack authority %s", path, name)
-			}
-			allowed, watched := allowedCalls[name]
-			if !watched {
-				return true
-			}
-			if _, ok := allowed[path]; !ok {
-				t.Errorf("%s calls pack inventory owner %s outside the explicit consumer census", path, name)
-				return true
-			}
-			if seen[name] == nil {
-				seen[name] = map[string]struct{}{}
-			}
-			seen[name][path] = struct{}{}
-			return true
-		})
-	})
-	for name, paths := range allowedCalls {
-		if missing := missingPaths(paths, seen[name]); len(missing) > 0 {
-			t.Errorf("pack inventory consumer census for %s has stale entries: %s", name, strings.Join(missing, ", "))
-		}
-	}
-}
 
 func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))

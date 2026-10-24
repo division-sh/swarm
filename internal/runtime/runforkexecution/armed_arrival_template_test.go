@@ -134,7 +134,8 @@ func TestIssue642ArmedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(t *
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "armed-template-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "armed-template-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
 				SourceLoader: loader, ContractSelection: selection,

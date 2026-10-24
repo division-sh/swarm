@@ -66,7 +66,8 @@ func TestSelectedDecisionControlClassificationDoesNotMintExecution(t *testing.T)
 	if use, _, err := owner.AcquireSelectedDecisionCardControl(managedexecution.WithAdmission(ctx, admission), runID, runfork.ControlMailboxDecide); err == nil || use != nil {
 		t.Fatal("child execution fell through to its ordinary source's control path")
 	}
-	store.binding, store.exists = testSelectedContractBinding(runID), true
+	store.binding, _ = rootedDirectAdmissionFixture(t, runID)
+	store.exists = true
 	store.binding.BindingID = uuid.NewString()
 	var unsupported *runfork.SelectedForkControlUnsupported
 	if use, selected, err := owner.AcquireSelectedDecisionCardControl(ctx, runID, runfork.ControlMailboxDecide); !errors.As(err, &unsupported) || !selected || use != nil || unsupported.RunID != runID || unsupported.BindingID != store.binding.BindingID || unsupported.Operation != runfork.ControlMailboxDecide {
@@ -85,10 +86,10 @@ func TestSelectedDecisionControlClassificationDoesNotMintExecution(t *testing.T)
 
 func TestSelectedDecisionControlJoinsOnlyOwnRetainedOccurrence(t *testing.T) {
 	runID := uuid.NewString()
-	binding := testSelectedContractBinding(runID)
+	binding, loaded := rootedDirectAdmissionFixture(t, runID)
 	binding.BindingID = uuid.NewString()
 	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, uuid.NewString(), 1,
-		runID, "decision-census", runForkTestBundleHash, nil)
+		runID, "decision-census", loaded.SourceArtifactFact.BundleHash(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

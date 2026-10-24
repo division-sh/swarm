@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
@@ -47,6 +48,7 @@ type timerHistoryNativeScheduleOwner interface {
 }
 
 type timerHistoryNativeFixture struct {
+	rooted         sourceartifact.RootedSource
 	requireCurrent func() error
 	db             *sql.DB
 	postgres       *postgresbackend.Backend
@@ -210,7 +212,8 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := artifacts.EnsureSourceArtifact(setup, sourceartifactfixture.Artifact()); err != nil {
+		f.rooted, _ = sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+		if _, err := artifacts.EnsureRootedSource(setup, f.rooted); err != nil {
 			t.Fatal(err)
 		}
 		runs, err := storerunlifecycle.NewPostgres(f.postgres, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
@@ -250,7 +253,8 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := artifacts.EnsureSourceArtifact(setup, sourceartifactfixture.Artifact()); err != nil {
+		f.rooted, _ = sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+		if _, err := artifacts.EnsureRootedSource(setup, f.rooted); err != nil {
 			t.Fatal(err)
 		}
 		runs, err := storerunlifecycle.NewSQLite(f.sqlite, schema.RequireCurrent, runhandoff.NewCandidateCoordinator(), nil)
@@ -274,7 +278,8 @@ func (f *timerHistoryNativeFixture) runContext(t *testing.T, runID string, at ti
 	t.Helper()
 	fact := sourceartifactfixture.Fact()
 	ctx := authoractivity.WithScope(correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID), authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
-	disposition, err := f.runs.CreateRun(ctx, runtimerunlifecycle.CreateRequest{RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: fact, StartedAt: runtimerunlifecycle.CanonicalTimestamp(at)})
+	ctx = correlation.WithRootAdmission(ctx, f.rooted.Admission())
+	disposition, err := f.runs.CreateRun(ctx, runtimerunlifecycle.CreateRequest{RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: fact, RootAdmission: f.rooted.Admission(), StartedAt: runtimerunlifecycle.CanonicalTimestamp(at)})
 	if err != nil || disposition != runtimerunlifecycle.MutationApplied {
 		t.Fatalf("canonical native run creation: disposition=%s err=%v", disposition, err)
 	}

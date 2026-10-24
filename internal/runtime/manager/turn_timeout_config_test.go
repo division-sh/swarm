@@ -15,10 +15,12 @@ import (
 )
 
 func TestIssue2269StaticAndTemplateAgentsRetainExactTurnTimeout(t *testing.T) {
-	root := t.TempDir()
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: turn-timeout-config\n")
+	root := filepath.Join(t.TempDir(), "turn-timeout-config")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	for _, flow := range []string{"static", "template"} {
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "name: "+flow+"\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "stages: []\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "events.yaml"), "work.requested:\nwork.aborted:\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "agents.yaml"), "worker:\n  intent: {inline: handle requests}\n  model: regular\n  subscriptions: [work.requested]\n  turn_timeout: {after: 10m, emit: work.aborted}\n")
 	}

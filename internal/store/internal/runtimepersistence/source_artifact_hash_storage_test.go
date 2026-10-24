@@ -9,7 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -17,6 +19,9 @@ func TestSourceArtifactHashStoragePreservesExactRunBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.storage", "runtime", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticEventFixture(ctx, fixture.store, event); err != nil {
 				t.Fatal(err)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
@@ -192,12 +193,12 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 func VerifyPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowIDForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": `name: runtime-test
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   ready: {}
 `,
-		"child/schema.yaml": `name: child
-stages:
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"child/schema.yaml": `stages:
   queued: {}
 `,
 		"child/entities.yaml": `
@@ -507,10 +508,13 @@ func VerifyUpdateEntityState_ReturnsWorkflowStoreMutationErrorForTest(t *testing
 
 func VerifyPipelineEngineMutationOwnerRejectsForeignFlowWriteForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":          "name: foreign-flow-write\n",
-		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {}\n",
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":          "stages: []\n",
+		"flow-a/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"flow-a/schema.yaml":   "stages:\n  pending: {}\n",
 		"flow-a/entities.yaml": "test_entity: {}\n",
-		"flow-b/schema.yaml":   "name: flow-b\nstages:\n  pending: {}\n",
+		"flow-b/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"flow-b/schema.yaml":   "stages:\n  pending: {}\n",
 		"flow-b/entities.yaml": "test_entity: {}\n",
 	})
 	fixture := open(t, source)
@@ -694,9 +698,10 @@ func VerifyWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntity
 func VerifyPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaultsForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "name: runtime-test\n",
-		"review/schema.yaml": `name: review
-stages:
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":          "stages: []\n",
+		"review/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"review/schema.yaml": `stages:
   queued: {}
 `,
 		"review/entities.yaml": `
@@ -731,7 +736,8 @@ review_entity:
 
 func VerifyPipelineEngineMutationOwnerRoundTripsTypedCarrierForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: root\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: []\n",
 		"entities.yaml": "test_entity:\n  score: integer\n  subject_id: text\n",
 	})
 	fixture := open(t, source)
@@ -1041,11 +1047,13 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnDeclarativeSurface(t
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
-		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
+		"events.yaml":   "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 
-		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
-		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"child/schema.yaml":   "stages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
+		"child/events.yaml":   "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1096,10 +1104,12 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSu
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n",
-		"events.yaml": "parent.trigger:\n  entity_id: string\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n",
+		"events.yaml":   "parent.trigger:\n  entity_id: string\n",
 
-		"child/schema.yaml":   "name: child\ninstance: entity_id\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.done\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"child/schema.yaml":   "instance: entity_id\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.done\n",
 		"child/entities.yaml": "work:\n  entity_id: text\n",
 		"child/events.yaml":   "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
 	})
@@ -1153,11 +1163,13 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
-		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
+		"events.yaml":   "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 
-		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
-		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"child/schema.yaml":   "stages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
+		"child/events.yaml":   "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1206,12 +1218,14 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarati
 func TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
-		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
-		"types.yaml":  "enums:\n  Mode:\n    values: [fast, deep]\n    default: fast\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n  outputs:\n    - parent.result\n",
+		"events.yaml":   "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
+		"types.yaml":    "enums:\n  Mode:\n    values: [fast, deep]\n    default: fast\n",
 
-		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
-		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"child/schema.yaml":   "stages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.internal\n",
+		"child/events.yaml":   "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n",
 	})
 
 	err := validatePipelineEmitPayload(source, "child", "child.internal", map[string]any{
@@ -1233,24 +1247,12 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface(t 
 }
 
 func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
-	root := &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Events: map[string]runtimecontracts.EventCatalogEntry{
-		"company.registered": {
-			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{
-					"gem_score":   {Type: "number"},
-					"external_id": {Type: "uuid"},
-				},
-				Required: []string{"gem_score", "external_id"},
-			},
-		},
-	}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}},
+	files := map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "company.registered:\n  gem_score: double\n  external_id: uuid\n",
 	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
-	source := semanticview.Wrap(bundle)
+	source := loadWorkflowTempSource(t, files)
 
 	tests := []struct {
 		name       string
@@ -1266,14 +1268,14 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 			name: "schema mismatch", event: "company.registered", kind: runtimeengine.EmitPayloadSchemaMismatch,
 			path: "$.gem_score", constraint: "type", expected: "number", actual: "string",
 			run: func() error {
-				return validatePipelineEmitPayload(source, "", "company.registered", map[string]any{"gem_score": "7.2", "external_id": uuid.NewString()}, nil, runtimeengine.EmitSurfaceDeclarative)
+				return validatePipelineEmitPayload(source, ".", "company.registered", map[string]any{"gem_score": "7.2", "external_id": uuid.NewString()}, nil, runtimeengine.EmitSurfaceDeclarative)
 			},
 		},
 		{
 			name: "schema mismatch empty value", event: "company.registered", kind: runtimeengine.EmitPayloadSchemaMismatch,
 			path: "$.external_id", constraint: "format", expected: "uuid", actual: "",
 			run: func() error {
-				return validatePipelineEmitPayload(source, "", "company.registered", map[string]any{"gem_score": 7.2, "external_id": ""}, nil, runtimeengine.EmitSurfaceDeclarative)
+				return validatePipelineEmitPayload(source, ".", "company.registered", map[string]any{"gem_score": 7.2, "external_id": ""}, nil, runtimeengine.EmitSurfaceDeclarative)
 			},
 		},
 		{
@@ -1298,13 +1300,15 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 		})
 	}
 	t.Run("unresolved schema rejected before execution", func(t *testing.T) {
-		root.Events["company.unresolved"] = runtimecontracts.EventCatalogEntry{
-			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{"evidence": {Type: "NotDeclared"}},
-				Required:   []string{"evidence"},
-			},
+		files["events.yaml"] += "company.unresolved:\n  evidence: NotDeclared\n"
+		root := t.TempDir()
+		for name, body := range files {
+			if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
+		repo := WorkflowRepoRoot()
+		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
 			t.Fatalf("unresolved schema escaped compiler admission: %v", err)
 		}
 	})
@@ -1313,11 +1317,13 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 func TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  outputs:\n    - handoff.completed\n",
-		"types.yaml":  "types:\n  Evidence:\n    root_field: text\n",
-		"events.yaml": "handoff.completed:\n  evidence: Evidence\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  idle: {}\n  done: {final: true}\npins:\n  outputs:\n    - handoff.completed\n",
+		"types.yaml":    "types:\n  Evidence:\n    root_field: text\n",
+		"events.yaml":   "handoff.completed:\n  evidence: Evidence\n",
 
-		"child/schema.yaml": "name: child\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  outputs:\n    - handoff.completed\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"child/schema.yaml":   "stages:\n  waiting: {}\n  processed: {final: true}\npins:\n  outputs:\n    - handoff.completed\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1450,7 +1456,8 @@ func (r *pipelineTestEntityCollectionPersistenceReader) QueryWorkflowEntityColle
 func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *testing.T) {
 	runID := uuid.NewString()
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: work\nstages:\n  active: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  active: {}\n",
 		"entities.yaml": "items:\n  id: text\n  status: text\n",
 	})
 	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{

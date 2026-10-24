@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -32,7 +33,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -47,6 +47,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -375,7 +376,24 @@ func (o flowActivationOutcomeCommitter) CommitFlowInstanceActivation(ctx context
 	return committed, errors.Join(err, o.err)
 }
 
-func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
+func newFlowActivationManagerForSource(t *testing.T, bus Bus, instances flowInstancePersistence, source semanticview.Source, stores ...ManagerPersistence) (*AgentManager, context.Context) {
+	t.Helper()
+	options, _, binding := sourceSetFixtureAdmission(t, source)
+	bundle, _ := semanticview.Bundle(source)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), options.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(binding.RuntimeInstanceID, binding.BundleHash))
+	options.BaseContext = ctx
+	manager := newFlowActivationManagerWithOptions(t, bus, instances, options, stores...)
+	manager.semanticReadinessSource = dynamicFlowRuntimeReadinessSource{fact: options.SourceArtifactFact, source: source}
+	return manager, ctx
+}
+
+func newFlowActivationManagerWithOptions(t *testing.T, bus Bus, instances flowInstancePersistence, options AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
 	t.Helper()
 	if len(stores) == 0 {
 		stores = []ManagerPersistence{&flowActivationTestStore{}}
@@ -383,10 +401,15 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 	var lifecycleStore AgentLifecyclePersistence
 	lifecycleStore, _ = stores[0].(AgentLifecyclePersistence)
 	if selected, ok := stores[0].(*flowActivationTestStore); ok {
-		lifecycleStore = &flowActivationTestGenerationStore{
+		generation := &flowActivationTestGenerationStore{
 			flowActivationTestStore: selected,
 			processBootID:           uuid.NewString(), grantID: uuid.NewString(), runtimeID: uuid.NewString(),
 		}
+		if options.SemanticSource != nil {
+			generation.bundleHash = options.SourceArtifactFact.BundleHash()
+			selected.bindingHash = generation.bundleHash
+		}
+		lifecycleStore = generation
 	}
 	var terminalOwner FlowInstanceTerminalMutationOwner
 	terminalOwner, _ = instances.(FlowInstanceTerminalMutationOwner)
@@ -409,30 +432,31 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 		}
 		activationOwner = construction
 	}
-	manager := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
-		WorkflowInstances:  instances,
-		LifecycleStore:     lifecycleStore,
-		WorkOwner:          newTestManagerWorkOwner(t),
-		BaseContext:        testAuthorActivityContext(context.Background()),
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
-		PersistenceRoles: PersistenceRoles{
-			FlowActivation:  activationOwner,
-			FlowTermination: terminalOwner,
-		},
-	}, stores...)
-	manager.semanticSource = nil
-	manager.semanticReadinessSource = dynamicFlowRuntimeReadinessSource{}
-	return manager
+	options.WorkflowInstances = instances
+	options.LifecycleStore = lifecycleStore
+	options.WorkOwner = newTestManagerWorkOwner(t)
+	options.PersistenceRoles.FlowActivation = activationOwner
+	options.PersistenceRoles.FlowTermination = terminalOwner
+	return newTestAgentManagerWithOptions(t, bus, nil, options, stores...)
 }
 
 func setFlowActivationManagerSemanticSource(
 	am *AgentManager,
+	ctx context.Context,
 	source semanticview.Source,
-	facts ...runtimecorrelation.SourceArtifactFact,
-) {
-	fact := authorActivityTestSourceArtifactFact
-	if len(facts) > 0 {
-		fact = facts[0]
+) (context.Context, error) {
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		return ctx, fmt.Errorf("flow activation fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return ctx, err
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
+	if scope, present := runtimeauthoractivity.ScopeFromContext(ctx); present {
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(scope.RuntimeInstanceID, fact.BundleHash()))
 	}
 	am.semanticSource = source
 	if generation, ok := am.lifecycle.store.(*flowActivationTestGenerationStore); ok {
@@ -450,6 +474,7 @@ func setFlowActivationManagerSemanticSource(
 		}
 		instances.readinessMu.Unlock()
 	}
+	return ctx, nil
 }
 
 func activateFlowInstanceForTest(
@@ -458,11 +483,11 @@ func activateFlowInstanceForTest(
 	req runtimepipeline.FlowInstanceActivationRequest,
 ) error {
 	if am.semanticReadinessSource.source == nil {
-		fact := authorActivityTestSourceArtifactFact
-		if contextFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
-			fact = contextFact
+		var err error
+		ctx, err = setFlowActivationManagerSemanticSource(am, ctx, req.ContractBundle)
+		if err != nil {
+			return err
 		}
-		setFlowActivationManagerSemanticSource(am, req.ContractBundle, fact)
 	}
 	return am.ActivateFlowInstance(ctx, req)
 }
@@ -1433,87 +1458,48 @@ func registerTestFlowAgentOwner(bundle *runtimecontracts.WorkflowContractBundle,
 	bundle.URIRegistry.ByURI[ref.Full] = ref
 }
 
-func testFlowBundle(t *testing.T, autoEmit string) *runtimecontracts.WorkflowContractBundle {
+func testFlowBundle(t *testing.T, autoEmit string, edits ...func(string)) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	reviewFlow := runtimecontracts.FlowContractView{
-		Path:  "review",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.started": {
-				Payload: runtimecontracts.EventPayloadSpec{
-					Properties: map[string]runtimecontracts.EventFieldSpec{"instance_key": {Type: "text"}},
-				},
-			},
-		},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"reviewer": {
-				ID:             "reviewer",
-				Type:           "generic",
-				Role:           "reviewer",
-				ResolvedIntent: managerTestResolvedIntent("reviewer"),
-				Subscriptions:  []string{"task.started"},
-			},
-		},
+	root := filepath.Join(t.TempDir(), "flow-activation-test")
+	for _, flow := range []string{".", "review"} {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	}
-	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{reviewFlow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		URIRegistry: runtimecontracts.ContractURIRegistry{
-			Agents: map[string]runtimecontracts.ContractURIRef{
-				"review/reviewer": testFlowAgentURIRef("review", "reviewer"),
-			},
-			ByURI: map[string]runtimecontracts.ContractURIRef{
-				testFlowAgentURIRef("review", "reviewer").Full: testFlowAgentURIRef("review", "reviewer"),
-			},
-		},
-		FlowTree: runtimecontracts.FlowTree{
-			Root: root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"review": &root.Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"review": {
-				Instance: mustManagerTemplateField(t, "instance_key"),
-				Pins: runtimecontracts.FlowPins{
-					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.started"}}},
-				},
-				AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{Event: autoEmit},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	schema := "instance: instance_key\npins: {inputs: [task.started]}\n"
+	if autoEmit != "" {
+		schema += fmt.Sprintf("auto_emit_on_create: {event: %s}\n", autoEmit)
 	}
-	return admitFlowActivationEntityContracts(t, bundle, map[string]string{"review": "review_entity"})
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/schema.yaml"), schema)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/entities.yaml"), "review_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/events.yaml"), "task.started:\n  instance_key: text\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/agents.yaml"), "reviewer:\n  role: reviewer\n  intent: {inline: \"Perform the manager test agent's assigned work.\"}\n  subscriptions: [task.started]\n")
+	for _, edit := range edits {
+		edit(root)
+	}
+	repo := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bundle
 }
 
 func testFlowRouteRevisionBundle(t *testing.T, nodeEvent string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	bundle := testFlowBundle(t, "")
-	review := bundle.FlowTree.ByID["review"]
-	review.Schema = bundle.FlowSchemas["review"]
-	review.Path = "review"
-	review.Events["task.revised"] = runtimecontracts.EventCatalogEntry{
-		Payload: runtimecontracts.EventPayloadSpec{
-			Properties: map[string]runtimecontracts.EventFieldSpec{},
-		},
-	}
-	review.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"route-observer": {
-			SubscribesTo: []string{nodeEvent},
-		},
-	}
-	bundle.FlowTree.Root.Children[0] = *review
-	compileFlowActivationFixture(t, bundle)
-	return bundle
+	return testFlowBundle(t, "", func(root string) {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "review/events.yaml"), "task.started:\n  instance_key: text\ntask.revised:\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "review/nodes.yaml"), fmt.Sprintf("route-observer:\n  execution_type: system_node\n  subscribes_to: [%s]\n", nodeEvent))
+	})
 }
 
-func testFlowBundleWithTwoAgents(t *testing.T, autoEmit string) *runtimecontracts.WorkflowContractBundle {
+func testFlowBundleWithTwoAgents(t *testing.T, autoEmit string, revisions ...string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	bundle := testFlowBundle(t, autoEmit)
-	bundle.FlowTree.ByID["review"].Agents["writer"] = runtimecontracts.AgentRegistryEntry{
-		ID: "writer", Type: "generic", Role: "writer", ResolvedIntent: managerTestResolvedIntent("writer"), Subscriptions: []string{"task.started"},
-	}
-	registerTestFlowAgentOwner(bundle, "review", "writer")
-	compileFlowActivationFixture(t, bundle)
+	bundle := testFlowBundle(t, autoEmit, func(root string) {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "review/agents.yaml"), "reviewer:\n  role: reviewer\n  intent: {inline: \"Perform the manager test agent's assigned work.\"}\n  subscriptions: [task.started]\nwriter:\n  role: writer\n  intent: {inline: \"Perform the manager test agent's assigned work.\"}\n  subscriptions: [task.started]\n")
+		if len(revisions) != 0 {
+			writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), fmt.Sprintf("# fixture revision: %s\nstages: []\n", revisions[0]))
+		}
+	})
 	return bundle
 }
 
@@ -1613,7 +1599,8 @@ func loadFlowActivationEntityContracts(
 	flowEntityTypes map[string]string,
 ) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "flow-activation-test")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	flowIDs := make([]string, 0, len(flowEntityTypes))
 	for flowID := range flowEntityTypes {
 		flowIDs = append(flowIDs, strings.TrimSpace(flowID))
@@ -1624,10 +1611,11 @@ func loadFlowActivationEntityContracts(
 		if flowID == "" || entityType == "" {
 			t.Fatalf("flow activation entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "stages:\n  active: {}\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType))
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-activation-test\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -1856,28 +1844,28 @@ func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, 
 func TestActivateFlowInstanceUsesConstructedAttachmentEvidence(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	schema := bundle.FlowSchemas["review"]
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "queued"}}}
 	bundle.FlowSchemas["review"] = schema
 	compileFlowActivationFixture(t, bundle)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.InitialState = "queued"
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	stored, found, err := instances.Load(flowActivationRunContext(), testActivationFlowIdentity(req))
+	stored, found, err := instances.Load(ctx, testActivationFlowIdentity(req))
 	if err != nil || !found || stored.StorageRef != req.Instance.InstancePath || stored.EntityID != req.Instance.EntityID {
 		t.Fatalf("constructed instance evidence = %+v found=%t err=%v", stored, found, err)
 	}
-	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), req.TriggerEvent.RunID(), req.Instance.Route())
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
 	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady || readiness.Plan.Identity != req.Instance {
 		t.Fatalf("exact attachment evidence = %+v found=%t err=%v", readiness, found, err)
 	}
-	if !flowActivationAttemptReadyForTest(am, flowActivationRunContext(), req) {
+	if !flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("constructed receiver did not acquire its exact ready activation attempt")
 	}
 	if len(instances.creates) != 1 || instances.creates[0].EntityType != "review_entity" {
@@ -1900,11 +1888,9 @@ func TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness(t *testing.
 				commitErr := errors.New("commit cleanup failed")
 				readinessErr := errors.New("readiness finalization failed")
 				instances := &flowActivationTestInstanceStore{topologyMarkErr: readinessErr}
-				am := newFlowActivationManager(t, bus, instances)
 				bundle := testFlowBundle(t, "")
 				req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-				ctx := testAuthorActivityContext(context.Background())
-				setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+				am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 				am.roles.FlowActivation = flowActivationOutcomeCommitter{
 					base: am.roles.FlowActivation, acknowledged: acknowledged, err: commitErr,
 				}
@@ -1935,14 +1921,14 @@ func TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness(t *testing.
 func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	bundle = loadFlowActivationEntityContracts(t, bundle, map[string]string{"unrelated": "other_entity"})
 	if _, err := bundle.ResolveFlowTemplateInstance("review"); err == nil {
 		t.Fatal("missing canonical entity contract passed instance admission")
 	}
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err == nil || !strings.Contains(err.Error(), "flow review has no entity assignment contract") {
 		t.Fatalf("missing canonical entity error = %v", err)
 	}
@@ -1954,10 +1940,10 @@ func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T)
 func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	ctx := runtimepipelinefixture.WithSQLTx(testAuthorActivityContext(context.Background()), &sql.Tx{})
+	ctx = runtimepipelinefixture.WithSQLTx(ctx, &sql.Tx{})
 	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 
 	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
@@ -1966,7 +1952,7 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("flow agent did not start from the closed activation result")
 	}
-	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
 	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady {
 		t.Fatalf("committed attachment evidence = %+v found=%t err=%v", readiness, found, err)
 	}
@@ -1982,11 +1968,12 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	var am *AgentManager
+	var ctx context.Context
 	instances.armInitialEntry = func(instanceID string) error {
 		if instanceID != "review/inst-1" {
 			return fmt.Errorf("armed instance = %q, want review/inst-1", instanceID)
 		}
-		readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+		readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
 		if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentRouteInstalled || len(instances.creates) != 1 || instances.creates[0].StorageRef != instanceID {
 			return fmt.Errorf("timer armed without exact constructed attachment: readiness=%+v found=%t creates=%+v err=%v", readiness, found, instances.creates, err)
 		}
@@ -1995,8 +1982,9 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 		}
 		return nil
 	}
-	am = newFlowActivationManager(t, bus, instances)
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	bundle := testFlowBundle(t, "")
+	am, ctx = newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
+	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(instances.armedEntries) != 1 || instances.armedEntries[0] != "review/inst-1" {
@@ -2010,9 +1998,8 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 func TestFlowAttachmentReadyReplayDoesNotRepeatInstallation(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
-	ctx := testAuthorActivityContext(context.Background())
 	req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatal(err)
 	}
@@ -2090,9 +2077,8 @@ func proveFlowReadinessFinalizationBoundaries(t *testing.T, run func(*AgentManag
 				},
 			}
 			agentStore := &flowActivationTestStore{}
-			am := newFlowActivationManager(t, bus, instances, agentStore)
 			bundle := testFlowBundleWithTwoAgents(t, "task.started")
-			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agentStore)
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
 			switch boundary {
@@ -2110,7 +2096,7 @@ func proveFlowReadinessFinalizationBoundaries(t *testing.T, run func(*AgentManag
 				instances.creationMarkErr = errors.New("injected completion mark failure")
 			}
 
-			err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+			err := activateFlowInstanceForTest(am, ctx, req)
 			if err == nil {
 				t.Fatal("direct activation succeeded across injected finalization failure")
 			}
@@ -2121,7 +2107,7 @@ func proveFlowReadinessFinalizationBoundaries(t *testing.T, run func(*AgentManag
 					0,
 				)
 			}
-			if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+			if flowActivationAttemptReadyForTest(am, ctx, req) {
 				t.Fatal("failed readiness attempt retained an executable activation receipt")
 			}
 			wantTimerRetirements := 0
@@ -2149,9 +2135,13 @@ func proveFlowReadinessFinalizationBoundaries(t *testing.T, run func(*AgentManag
 			instances.readinessLoadErr = nil
 			bus.publishErr = nil
 			instances.creationMarkErr = nil
-			runCtx := managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))
+			runCtx := managedExecutionTestContextForCapturedSource(t, ctx)
+			captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+			if !capturedOK {
+				t.Fatal("retry requires captured source")
+			}
 			if kind == managedexecution.KindSelectedContractFork {
-				admission, err := managedexecution.New(kind, uuid.NewString(), 1, req.TriggerEvent.RunID(), "readiness-retry-test-actors", authorActivityTestSourceArtifactFact.BundleHash(), nil)
+				admission, err := managedexecution.New(kind, uuid.NewString(), 1, req.TriggerEvent.RunID(), "readiness-retry-test-actors", captured.BundleHash(), nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -2183,7 +2173,7 @@ func proveFlowReadinessFinalizationBoundaries(t *testing.T, run func(*AgentManag
 			if len(instances.armedEntries) == 0 {
 				t.Fatal("initial timers were not armed after readiness recovery")
 			}
-			recoveryCtx := testAuthorActivityContext(context.Background())
+			recoveryCtx := ctx
 			readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(recoveryCtx, req.TriggerEvent.RunID(), req.Instance.Route())
 			if err != nil || !found || (readiness.Phase != runtimepipeline.FlowAttachmentReady) || readiness.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("completed readiness: found=%v readiness=%#v err=%v", found, readiness, err)
@@ -2216,14 +2206,19 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 		t.Run(failure, func(t *testing.T) {
 			bus := &flowActivationTestBus{}
 			instances := &flowActivationTestInstanceStore{}
-			am := newFlowActivationManager(t, bus, instances)
-			ctx := testAuthorActivityContext(context.Background())
+			req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
+			am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 			if failure == "agent_join" {
-				if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+				runCtx := managedExecutionTestContextForCapturedSource(t, ctx)
+				execution, executionOK := managedexecution.FromContext(runCtx)
+				captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+				if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+					t.Fatalf("retirement managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+				}
+				if err := am.Run(runCtx); err != nil {
 					t.Fatalf("run agent-join fixture manager: %v", err)
 				}
 			}
-			req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
 			if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 				t.Fatalf("activate exact flow owner: %v", err)
 			}
@@ -2340,14 +2335,12 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 
 func TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{activationAttempts: make(map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt)}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
 	am.dynamicFlowActiveAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt)
-	ctx := testAuthorActivityContext(context.Background())
-	binding := runtimeprocessbinding.Binding{
-		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "flow-retirement-test",
-		ProcessBootID: uuid.NewString(), GenerationGrantID: uuid.NewString(),
-		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
-		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
+	binding, err := am.lifecycle.store.(processExecutionBindingProvider).ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
 	}
 	const count = runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit + 1
 	retiredTimers := 0
@@ -2430,7 +2423,8 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 	for _, kind := range []string{"root", "static", "keyed"} {
 		t.Run(kind, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{activationAttempts: make(map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt)}
-			am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+			bundle := testFlowBundle(t, "")
+			am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
 			binding, err := am.lifecycle.store.(processExecutionBindingProvider).ProcessExecutionBinding()
 			if err != nil {
 				t.Fatal(err)
@@ -2450,7 +2444,6 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 			}
 			foreign := owner
 			foreign.RunID = uuid.NewString()
-			ctx := testAuthorActivityContext(context.Background())
 			if err := am.AdoptSelectedFlowActivation(ctx, foreign, attempt, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
 				t.Fatalf("foreign transfer changed ownership: %v", err)
 			}
@@ -2470,7 +2463,7 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, true); err == nil {
 				t.Fatal("duplicate transfer acquired a second owner")
 			}
-			if err := am.retireDynamicFlowAttemptsAfterJoin(testAuthorActivityContext(context.Background())); err != nil {
+			if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil {
 				t.Fatal(err)
 			}
 			if len(am.dynamicFlowActiveAttempts) != 0 || !reflect.DeepEqual(instances.retiredTimerOwners, []runtimeflowidentity.RunScopedFlowInstance{owner}) {
@@ -2479,7 +2472,7 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 			if _, found := instances.retiredAttemptIDs[attempt]; !found {
 				t.Fatal("cleanup did not settle the exact durable attempt")
 			}
-			if err := am.retireDynamicFlowAttemptsAfterJoin(testAuthorActivityContext(context.Background())); err != nil || len(instances.retiredTimerOwners) != 1 {
+			if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil || len(instances.retiredTimerOwners) != 1 {
 				t.Fatalf("joined cleanup was repeated: owners=%+v err=%v", instances.retiredTimerOwners, err)
 			}
 		})
@@ -2518,17 +2511,22 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 		}
 		return nil
 	}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("ActivateFlowInstance succeeded across injected first readiness failure")
 	}
 	if armCalls != 1 || len(bus.published) != 0 {
 		t.Fatalf("first committed readiness attempt: arms=%d published=%d", armCalls, len(bus.published))
 	}
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	runCtx := managedExecutionTestContextForCapturedSource(t, ctx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		t.Fatalf("retry managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := am.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	select {
@@ -2537,7 +2535,7 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 		t.Fatal("automatic readiness retry did not complete durable readiness")
 	}
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
@@ -2552,14 +2550,13 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
 	var revisionErr error
 	instances.beforeTopologyMark = func(expected runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
-		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(context.Background(), expected.RunID, expected.Identity.Route())
+		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, expected.RunID, expected.Identity.Route())
 		if err != nil || !found {
 			revisionErr = errors.Join(err, errors.New("concurrent readiness observation not found"))
 			return
@@ -2567,7 +2564,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		revised := expected
 		revised.WorkflowVersion += "-concurrent-revision"
 		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
-			context.Background(),
+			ctx,
 			observed,
 			revised,
 			time.Now().UTC(),
@@ -2581,7 +2578,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		}
 	}
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if revisionErr != nil {
 		t.Fatalf("inject concurrent readiness revision: %v", revisionErr)
 	}
@@ -2589,7 +2586,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		t.Fatalf("ActivateFlowInstance error = %v, want exact-plan topology completion rejection", err)
 	}
 	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
@@ -2601,7 +2598,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		!readiness.Pending() {
 		t.Fatalf("concurrently revised readiness was falsely completed: %#v", readiness)
 	}
-	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+	if flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("stale topology attempt retained an executable activation receipt")
 	}
 }
@@ -2609,11 +2606,9 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -2680,11 +2675,9 @@ func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution
 func TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -2745,7 +2738,6 @@ func TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution(t *t
 func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	oldBundle := testFlowBundle(t, "")
 	currentBundle := testFlowBundle(t, "")
 	currentBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
@@ -2755,13 +2747,13 @@ func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *t
 	oldSource := semanticview.Wrap(oldBundle)
 	currentSource := semanticview.Wrap(currentBundle)
 	currentFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("d", 64),
+		currentBundle.SourceArtifact.BundleHash(),
 	)
 	if err != nil {
 		t.Fatalf("current bundle source fact: %v", err)
 	}
-	setFlowActivationManagerSemanticSource(am, currentSource, currentFact)
-	ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), currentFact)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, currentSource)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, currentFact)
 	req := testActivationRequest(currentBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance current source: %v", err)
@@ -2787,15 +2779,13 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 				instances := &flowActivationTestInstanceStore{}
 				agents := &flowActivationTestStore{}
 				bus := &flowActivationTestBus{}
-				manager := newFlowActivationManager(t, bus, instances, agents)
 				currentBundle := testFlowBundle(t, "")
 				foreignBundle := testFlowBundle(t, "")
 				foreignBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
 					ID: "editor", Type: "generic", Role: "editor",
 				}
 				registerTestFlowAgentOwner(foreignBundle, "review", "editor")
-				setFlowActivationManagerSemanticSource(manager, semanticview.Wrap(currentBundle))
-				ctx := testAuthorActivityContext(context.Background())
+				manager, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(currentBundle), agents)
 				currentReq := testActivationRequest(
 					currentBundle,
 					"review",
@@ -2869,44 +2859,91 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 	}
 }
 
+type readinessAttemptWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *readinessAttemptWaitContext) Done() <-chan struct{} {
+	// Admission may inspect cancellation earlier. Only observe the retained
+	// readiness executor selecting this caller's wait, without a production hook.
+	var callers [16]uintptr
+	frames := runtime.CallersFrames(callers[:runtime.Callers(2, callers[:])])
+	for {
+		frame, more := frames.Next()
+		if strings.HasSuffix(frame.Function, ".reconcileDeclaredDynamicFlowRuntimeReadiness") {
+			c.once.Do(func() { close(c.waiting) })
+			break
+		}
+		if !more {
+			break
+		}
+	}
+	return c.Context.Done()
+}
+
 func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{respectReadinessContext: true}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	source := semanticview.Wrap(bundle)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, source)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	intermediateSource := semanticview.Wrap(bundle)
-	revisedSource := semanticview.Wrap(bundle)
+	capturedCallbackSource := func(label string) *runtimecontracts.WorkflowContractBundle {
+		t.Helper()
+		root := t.TempDir()
+		for _, member := range bundle.SourceArtifact.Entries() {
+			body := string(member.Bytes())
+			if member.Label() == "review/schema.yaml" {
+				body += "\n# captured callback source " + label + "\n"
+			}
+			writeFlowActivationFixtureFile(t, filepath.Join(root, member.Label()), body)
+		}
+		repo := runtimepipeline.WorkflowRepoRoot()
+		captured, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("capture callback source %s: %v", label, err)
+		}
+		return captured
+	}
+	intermediateBundle := capturedCallbackSource("B")
+	revisedBundle := capturedCallbackSource("C")
+	intermediateSource := semanticview.Wrap(intermediateBundle)
+	revisedSource := semanticview.Wrap(revisedBundle)
 	intermediateFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("b", 64),
+		intermediateBundle.SourceArtifact.BundleHash(),
 	)
 	if err != nil {
 		t.Fatalf("intermediate bundle source fact: %v", err)
 	}
 	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("c", 64),
+		revisedBundle.SourceArtifact.BundleHash(),
 	)
 	if err != nil {
 		t.Fatalf("revised bundle source fact: %v", err)
+	}
+	if intermediateFact.Matches(revisedFact) || intermediateFact.BundleHash() == bundle.SourceArtifact.BundleHash() || revisedFact.BundleHash() == bundle.SourceArtifact.BundleHash() {
+		t.Fatal("post-CAS callbacks require three distinct captured sources")
 	}
 	successorErr := make(chan error, 1)
 	key, err := newDynamicFlowRuntimeReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
 	if err != nil {
 		t.Fatalf("readiness key: %v", err)
 	}
-	activationCtx, cancelActivation := context.WithCancel(testAuthorActivityContext(context.Background()))
+	activationCtx, cancelActivation := context.WithCancel(ctx)
 	defer cancelActivation()
 	intermediateCtx := runtimecorrelation.WithSourceArtifactFact(
-		testAuthorActivityContext(context.Background()),
+		ctx,
 		intermediateFact,
 	)
-	successorCtx := runtimecorrelation.WithSourceArtifactFact(
-		testAuthorActivityContext(context.Background()),
+	revisedCtx := runtimecorrelation.WithSourceArtifactFact(
+		ctx,
 		revisedFact,
 	)
-	successorCtx, cancelSuccessor := context.WithCancel(successorCtx)
+	sameSourceCtx, cancelSuccessor := context.WithCancel(ctx)
 	defer cancelSuccessor()
+	successorCtx := &readinessAttemptWaitContext{Context: sameSourceCtx, waiting: make(chan struct{})}
 	barrierCtx, cancelBarrier := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelBarrier()
 	activationErr := make(chan error, 1)
@@ -2948,91 +2985,71 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	var staleSourceErr error
 	instances.afterTopologyMark = func(completed runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
 		defer markRevisionReady()
-		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(intermediateCtx, completed.RunID, completed.Identity.Route())
+		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, completed.RunID, completed.Identity.Route())
 		if err != nil || !found {
-			revisionErr = errors.Join(err, errors.New("intermediate readiness observation not found"))
+			revisionErr = errors.Join(err, errors.New("post-CAS A readiness observation not found"))
 			return
 		}
-		intermediate := completed
-		intermediate.BundleHash = intermediateFact.BundleHash()
-		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
+		agentBefore, agentFound := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
+		if !agentFound {
+			revisionErr = errors.New("post-CAS A process agent not found")
+			return
+		}
+		processBefore := am.ListAgentConfigs()
+		armedBefore, publishedBefore := len(instances.armedEntries), len(bus.published)
+		staleErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
 			intermediateCtx,
-			observed,
-			intermediate,
-			time.Now().UTC(),
+			completed,
+			observed.AttemptOrdinal,
+			intermediateSource,
 		)
-		if err != nil {
-			revisionErr = err
-			return
-		}
-		if !changed {
-			revisionErr = errors.New("post-CAS intermediate readiness plan was not revised")
-			return
-		}
-		observed, found, err = instances.LoadDynamicFlowRuntimeReadiness(successorCtx, completed.RunID, completed.Identity.Route())
-		if err != nil || !found {
-			revisionErr = errors.Join(err, errors.New("successor readiness observation not found"))
-			return
-		}
-		revised := intermediate
-		revised.BundleHash = revisedFact.BundleHash()
-		changed, err = instances.ReconcileDynamicFlowRuntimeReadinessPlan(
-			successorCtx,
-			observed,
-			revised,
-			time.Now().UTC(),
+		staleSourceErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
+			revisedCtx,
+			completed,
+			observed.AttemptOrdinal,
+			revisedSource,
 		)
-		if err != nil {
-			revisionErr = err
+		for _, staleCtx := range []context.Context{intermediateCtx, revisedCtx} {
+			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(staleCtx, completed, observed.AttemptOrdinal, source); !errors.Is(err, errDynamicFlowRuntimeReadinessSourceStale) {
+				revisionErr = errors.Join(err, errors.New("foreign captured source fact did not receive the exact source refusal"))
+				return
+			}
+		}
+		after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, completed.RunID, completed.Identity.Route())
+		agentAfter, agentFound := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
+		if err != nil || !found || !reflect.DeepEqual(observed, after) || !agentFound || !reflect.DeepEqual(agentBefore, agentAfter) ||
+			!reflect.DeepEqual(processBefore, am.ListAgentConfigs()) || len(instances.armedEntries) != armedBefore || len(bus.published) != publishedBefore {
+			revisionErr = errors.Join(err, errors.New("foreign callbacks changed A readiness or process evidence before release"))
 			return
 		}
-		if !changed {
-			revisionErr = errors.New("post-CAS readiness plan was not revised")
-			return
-		}
-		intermediateRevision := observed.AttemptOrdinal
-		revisedRevision := intermediateRevision
-		setFlowActivationManagerSemanticSource(am, revisedSource, revisedFact)
 		close(successorStarted)
 		go func() {
 			defer close(successorDone)
 			successorErr <- am.reconcileDynamicFlowRuntimeReadinessPlan(
 				successorCtx,
-				revised,
-				revisedRevision,
-				revisedSource,
+				completed,
+				observed.AttemptOrdinal,
+				source,
 			)
 		}()
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			am.dynamicFlowReadinessMu.Lock()
-			attempt := am.dynamicFlowReadinessAttempts[key]
-			successorQueued := attempt != nil &&
-				attempt.successorRequired &&
-				attempt.successor != nil &&
-				attempt.successor.planHash != attempt.planHash
-			am.dynamicFlowReadinessMu.Unlock()
-			if successorQueued {
-				break
-			}
-			if time.Now().After(deadline) {
-				revisionErr = errors.New("post-CAS readiness successor was not queued")
-				return
-			}
-			runtime.Gosched()
+		// Observe the same-plan caller at the existing retained wait before canceling.
+		select {
+		case <-successorCtx.waiting:
+		case <-successorDone:
+			revisionErr = errors.New("same-plan caller returned before coalesced wait")
+			return
+		case <-barrierCtx.Done():
+			revisionErr = errors.New("same-plan caller did not reach the retained wait")
+			return
 		}
-		staleSourceErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
-			intermediateCtx,
-			revised,
-			revisedRevision,
-			revisedSource,
-		)
-		staleErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
-			intermediateCtx,
-			intermediate,
-			intermediateRevision,
-			intermediateSource,
-		)
+		am.dynamicFlowReadinessMu.Lock()
+		attempt := am.dynamicFlowReadinessAttempts[key]
+		coalesced := attempt != nil && attempt.attemptOrdinal == observed.AttemptOrdinal && attempt.planHash == observed.PlanHash && !attempt.successorRequired && attempt.successor == nil
+		am.dynamicFlowReadinessMu.Unlock()
+		if !coalesced {
+			revisionErr = errors.New("same-plan caller did not retain the exact A attempt")
+			return
+		}
 		cancelActivation()
 		cancelSuccessor()
 		markRevisionReady()
@@ -3054,7 +3071,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 		t.Fatalf("wait for post-CAS cancellation barrier: %v", barrierCtx.Err())
 	}
 	if revisionErr != nil {
-		t.Fatalf("inject post-CAS readiness revision: %v", revisionErr)
+		t.Fatalf("post-CAS source refusal and same-plan coalescing: %v", revisionErr)
 	}
 	if !errors.Is(staleErr, errDynamicFlowRuntimeReadinessSourceStale) {
 		t.Fatalf("delayed intermediate plan error = %v, want stale-source rejection", staleErr)
@@ -3065,7 +3082,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	select {
 	case err := <-activationErr:
 		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("canceled readiness caller returned %v, want context cancellation without canceling the retained successor", err)
+			t.Fatalf("canceled readiness caller returned %v, want context cancellation without canceling retained A work", err)
 		}
 	case <-barrierCtx.Done():
 		t.Fatalf("join canceled activation caller: %v", barrierCtx.Err())
@@ -3073,35 +3090,37 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	select {
 	case err := <-successorErr:
 		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("canceled post-CAS successor caller: %v", err)
+			t.Fatalf("canceled post-CAS same-plan caller: %v", err)
 		}
 	case <-barrierCtx.Done():
-		t.Fatalf("join canceled post-CAS successor caller: %v", barrierCtx.Err())
+		t.Fatalf("join canceled post-CAS same-plan caller: %v", barrierCtx.Err())
 	}
 	releaseCompletion()
-	if err := am.lifecycle.waitForWork(testAuthorActivityContext(barrierCtx)); err != nil {
-		t.Fatalf("join owned post-CAS successor: %v", err)
+	if err := am.lifecycle.waitForWork(barrierCtx); err != nil {
+		t.Fatalf("join owned post-CAS A work: %v", err)
 	}
 	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
 	if loadErr != nil || !found {
 		t.Fatalf("load post-CAS revised readiness: found=%v err=%v", found, loadErr)
 	}
-	revisedHash := revisedFact.BundleHash()
 	if readiness.Plan.WorkflowVersion != strings.TrimSpace(bundle.WorkflowVersion()) ||
-		readiness.Plan.BundleHash != revisedHash ||
+		readiness.Plan.BundleHash != bundle.SourceArtifact.BundleHash() ||
 		(readiness.Phase != runtimepipeline.FlowAttachmentReady) ||
 		readiness.Pending() {
-		t.Fatalf("post-CAS revised readiness successor did not complete: %#v", readiness)
+		t.Fatalf("post-CAS A readiness did not complete: %#v", readiness)
 	}
-	if !flowActivationAttemptReadyForTest(am, testAuthorActivityContext(barrierCtx), req) {
-		t.Fatal("post-CAS revised attachment has no exact owned activation attempt")
+	if !flowActivationAttemptReadyForTest(am, ctx, req) {
+		t.Fatal("post-CAS A attachment has no exact owned activation attempt")
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
-		t.Fatal("post-CAS revised topology agent was not published")
+		t.Fatal("post-CAS A topology agent was not published")
+	}
+	if err := am.Shutdown(); err != nil {
+		t.Fatalf("post-CAS A Manager cleanup: %v", err)
 	}
 }
 
@@ -3131,16 +3150,14 @@ func TestDynamicFlowRuntimeReadinessWaitOutcomeOrdering(t *testing.T) {
 	}
 }
 
-func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(t *testing.T) {
+func TestDynamicFlowRuntimeReadinessSourceReplacementQueuesExactPlan(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	source := semanticview.Wrap(bundle)
-	setFlowActivationManagerSemanticSource(am, source)
+	am, initialCtx := newFlowActivationManagerForSource(t, bus, instances, source)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEventWithMode(req.TriggerEvent.ID(), executionmode.Mock, req.TriggerEvent.RunID())
-	initialCtx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, initialCtx, req); err != nil {
 		t.Fatalf("activate initial source: %v", err)
 	}
@@ -3153,24 +3170,25 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 		t.Fatalf("initial readiness: found=%v err=%v readiness=%#v", found, err, initial)
 	}
 
-	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("d", 64),
-	)
-	if err != nil {
-		t.Fatalf("revised bundle source fact: %v", err)
+	revisedBundle := testFlowBundle(t, "", func(root string) {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture revision: metadata-only replacement\nstages: []\n")
+	})
+	revisedFact := sourceartifactfixture.FactFor(revisedBundle.SourceArtifact)
+	if revisedFact.BundleHash() == bundle.SourceArtifact.BundleHash() {
+		t.Fatal("source replacement requires distinct captured bytes")
 	}
-	setFlowActivationManagerSemanticSource(am, source, revisedFact)
+	revisedCtx, err := setFlowActivationManagerSemanticSource(am, initialCtx, semanticview.Wrap(revisedBundle))
+	if err != nil {
+		t.Fatal(err)
+	}
 	foreignKey := seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
-	revisedCtx := runtimecorrelation.WithRunID(
-		runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact),
-		req.TriggerEvent.RunID(),
-	)
+	revisedCtx = runtimecorrelation.WithRunID(revisedCtx, req.TriggerEvent.RunID())
 	revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
 	if err := am.ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		revisedCtx,
 		time.Now().UTC(),
 	); err != nil {
-		t.Fatalf("reconcile same-version revised source: %v", err)
+		t.Fatalf("reconcile revised source: %v", err)
 	}
 	completed, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		revisedCtx,
@@ -3181,12 +3199,12 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 		t.Fatalf("load completed revised source: found=%v err=%v", found, err)
 	}
 	revisedHash := revisedFact.BundleHash()
-	if completed.Plan.WorkflowVersion != initial.Plan.WorkflowVersion ||
+	if completed.Plan.WorkflowVersion != revisedBundle.WorkflowVersion() ||
 		completed.Plan.BundleHash != revisedHash ||
 		completed.Plan.ExecutionMode != executionmode.Mock ||
 		(completed.Phase != runtimepipeline.FlowAttachmentReady) ||
 		completed.Pending() {
-		t.Fatalf("same-version revised source did not recomplete exact plan: %#v", completed)
+		t.Fatalf("revised source did not recomplete exact plan: %#v", completed)
 	}
 	instances.readinessMu.Lock()
 	_, foreignSurvived := instances.readiness[foreignKey]
@@ -3200,12 +3218,10 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	initialBundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(initialBundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(initialBundle), agents)
 	req := testActivationRequest(initialBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEventWithMode(req.TriggerEvent.ID(), executionmode.Mock, req.TriggerEvent.RunID())
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("activate initial source: %v", err)
 	}
@@ -3225,17 +3241,11 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 
 	revisedBundle := testFlowBundleWithTwoAgents(t, "")
 	revisedSource := semanticview.Wrap(revisedBundle)
-	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("e", 64),
-	)
+	revisedCtx, err := setFlowActivationManagerSemanticSource(am, ctx, revisedSource)
 	if err != nil {
-		t.Fatalf("revised bundle source fact: %v", err)
+		t.Fatal(err)
 	}
-	setFlowActivationManagerSemanticSource(am, revisedSource, revisedFact)
-	revisedCtx := runtimecorrelation.WithRunID(
-		runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact),
-		req.TriggerEvent.RunID(),
-	)
+	revisedCtx = runtimecorrelation.WithRunID(revisedCtx, req.TriggerEvent.RunID())
 	revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
 	if err := am.ReconcileDynamicFlowRuntimeReadinessPlansForRun(revisedCtx, time.Now().UTC()); err != nil {
 		t.Fatalf("reconcile sibling addition: %v", err)
@@ -3313,7 +3323,7 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 	}
 }
 
-func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopology(t *testing.T) {
+func TestDynamicFlowRuntimeReadinessRouteRevisionReplacesExactTopology(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 
@@ -3324,9 +3334,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 		t.Fatalf("derive source A process routes: %v", err)
 	}
 	busA := &flowActivationTestBus{}
-	managerA := newFlowActivationManager(t, busA, instances, agents)
-	setFlowActivationManagerSemanticSource(managerA, sourceA)
-	ctxA := testAuthorActivityContext(context.Background())
+	managerA, ctxA := newFlowActivationManagerForSource(t, busA, instances, sourceA, agents)
 	reqA := testActivationRequest(sourceABundle, "review", "inst-1", "ent-1", "review/inst-1")
 	if err := activateFlowInstanceForTest(managerA, ctxA, reqA); err != nil {
 		t.Fatalf("activate source A: %v", err)
@@ -3364,28 +3372,24 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 
 	sourceBBundle := testFlowRouteRevisionBundle(t, "task.revised")
 	sourceB := semanticview.Wrap(sourceBBundle)
-	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("d", 64),
-	)
-	if err != nil {
-		t.Fatalf("revised bundle source fact: %v", err)
-	}
 	processB, err := runtimebus.DeriveRouteTable(sourceB)
 	if err != nil {
 		t.Fatalf("derive source B process routes: %v", err)
 	}
 	busB := &flowActivationTestBus{}
-	managerB := newFlowActivationManager(t, busB, instances, agents)
+	managerB, ctxB := newFlowActivationManagerForSource(t, busB, instances, sourceB, agents)
 	if err := managerA.Shutdown(); err != nil {
 		t.Fatalf("retire source A manager: %v", err)
 	}
-	setFlowActivationManagerSemanticSource(managerB, sourceB, revisedFact)
-	ctxB := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact)
+	ctxB, err = setFlowActivationManagerSemanticSource(managerB, ctxB, sourceB)
+	if err != nil {
+		t.Fatal(err)
+	}
 	reqB := testActivationRequest(sourceBBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	if created, err := managerB.EnsureFlowInstance(ctxB, reqB); err != nil {
 		t.Fatalf("ensure source B: %v", err)
 	} else if created {
-		t.Fatal("same-version route revision reported a new instance")
+		t.Fatal("route revision reported a new instance")
 	}
 	revised, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		ctxB,
@@ -3395,7 +3399,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	if err != nil || !found || (revised.Phase != runtimepipeline.FlowAttachmentReady) {
 		t.Fatalf("source B readiness: found=%v err=%v readiness=%#v", found, err, revised)
 	}
-	if revised.Plan.WorkflowVersion != initial.Plan.WorkflowVersion ||
+	if revised.Plan.WorkflowVersion != sourceBBundle.WorkflowVersion() ||
 		revised.Plan.BundleHash == initial.Plan.BundleHash ||
 		!reflect.DeepEqual(revised.Plan.Agents, initial.Plan.Agents) {
 		t.Fatalf("route-only revision changed wrong plan facts: before=%#v after=%#v", initial.Plan, revised.Plan)
@@ -3434,24 +3438,23 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 		return nil
 	}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	foreignKey := seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("ActivateFlowInstance succeeded across injected timer arm failure")
 	}
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
 	if err != nil || !found || !readiness.Pending() || (readiness.Phase == runtimepipeline.FlowAttachmentReady) {
 		t.Fatalf("failed no-auto readiness: found=%v readiness=%#v err=%v", found, readiness, err)
 	}
-	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+	if flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("failed no-auto readiness retained an executable activation receipt")
 	}
 	for {
@@ -3464,7 +3467,13 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 	}
 	am.dynamicFlowReadinessRetryInterval = 10 * time.Millisecond
 
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	runCtx := managedExecutionTestContextForCapturedSource(t, ctx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		t.Fatalf("no-auto retry managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := am.Run(runCtx); err != nil {
 		t.Fatalf("Run automatic readiness owner: %v", err)
 	}
 	select {
@@ -3496,7 +3505,7 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 		t.Fatal("retry did not complete the exact successor attachment")
 	}
 	readiness, found, err = instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
@@ -3560,9 +3569,12 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
 	am.mu.Lock()
 	am.startupAgentsHydrated = true
 	am.mu.Unlock()
@@ -3583,7 +3595,7 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	}
 	leaderErr := make(chan error, 1)
 	go func() {
-		leaderErr <- activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+		leaderErr <- activateFlowInstanceForTest(am, ctx, req)
 	}()
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelWait()
@@ -3592,9 +3604,9 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	}
 
 	followerErrs := make(chan error, 3)
-	ensureCtx, cancelEnsure := context.WithCancel(testAuthorActivityContext(context.Background()))
-	pendingCtx, cancelPending := context.WithCancel(testAuthorActivityContext(context.Background()))
-	startupCtx, cancelStartup := context.WithCancel(testAuthorActivityContext(context.Background()))
+	ensureCtx, cancelEnsure := context.WithCancel(ctx)
+	pendingCtx, cancelPending := context.WithCancel(ctx)
+	startupCtx, cancelStartup := context.WithCancel(ctx)
 	go func() {
 		_, err := am.EnsureFlowInstance(ensureCtx, req)
 		followerErrs <- err
@@ -3603,7 +3615,7 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 		followerErrs <- am.reconcilePendingDynamicFlowRuntimeReadiness(pendingCtx)
 	}()
 	go func() {
-		followerErrs <- reconcileDynamicFlowRuntimeStartupForTest(am, startupCtx, authorActivityTestSourceArtifactFact, true)
+		followerErrs <- reconcileDynamicFlowRuntimeStartupForTest(am, startupCtx, fact, true)
 	}()
 	cancelEnsure()
 	cancelPending()
@@ -3613,11 +3625,57 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 			t.Fatalf("coalesced follower: %v, want context cancellation from in-flight attempt", err)
 		}
 	}
+	liveCtx, cancelLive := context.WithCancel(ctx)
+	defer cancelLive()
+	liveResults := make(chan error, 3)
+	liveDone := []chan struct{}{make(chan struct{}), make(chan struct{}), make(chan struct{})}
+	liveStarted := 0
+	t.Cleanup(func() {
+		cancelLive()
+		joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelJoin()
+		for _, done := range liveDone[:liveStarted] {
+			select {
+			case <-done:
+			case <-joinCtx.Done():
+				t.Errorf("join non-cancelled coalescing control: %v", joinCtx.Err())
+			}
+		}
+	})
+	for i, call := range []func(context.Context) error{
+		func(c context.Context) error { _, err := am.EnsureFlowInstance(c, req); return err },
+		am.reconcilePendingDynamicFlowRuntimeReadiness,
+		func(c context.Context) error { return reconcileDynamicFlowRuntimeStartupForTest(am, c, fact, true) },
+	} {
+		observed := &readinessAttemptWaitContext{Context: liveCtx, waiting: make(chan struct{})}
+		liveStarted++
+		go func() {
+			defer close(liveDone[i])
+			liveResults <- call(observed)
+		}()
+		select {
+		case <-observed.waiting:
+		case err := <-liveResults:
+			t.Fatalf("non-cancelled follower %d returned before the retained wait: %v", i, err)
+		case <-waitCtx.Done():
+			t.Fatalf("non-cancelled follower %d did not reach the retained wait: %v", i, waitCtx.Err())
+		}
+	}
 	close(admissionRelease)
 	if err := receiveFlowActivationResult(t, leaderErr); err != nil {
 		t.Fatalf("coalesced leader: %v", err)
 	}
-	if len(instances.creates) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 || !flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+	for range 3 {
+		select {
+		case err := <-liveResults:
+			if err != nil {
+				t.Fatalf("non-cancelled coalesced follower lost leader completion: %v", err)
+			}
+		case <-waitCtx.Done():
+			t.Fatalf("non-cancelled coalesced follower did not receive leader completion: %v", waitCtx.Err())
+		}
+	}
+	if len(instances.creates) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 || !flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatalf(
 			"coalesced side effects: create=%d arm=%d publish=%d, want 1/1/1 with exact ready attachment",
 			len(instances.creates),
@@ -3631,11 +3689,10 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceDoesNotArmOrEmit(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{failAgentID: "writer"}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("activation unexpectedly completed the readiness plan")
 	}
 	agents.failAgentID = ""
@@ -3655,7 +3712,7 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceDoesNotArmOrEmit(t *testing.T) {
 	reconciled := make(chan error, 1)
 	go func() {
 		reconciled <- am.reconcileDynamicFlowRuntimeReadiness(
-			testAuthorActivityContext(context.Background()),
+			ctx,
 			req.TriggerEvent.RunID(),
 			req.Instance.InstancePath,
 		)
@@ -3665,14 +3722,14 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceDoesNotArmOrEmit(t *testing.T) {
 	if err := waitFlowActivationBoundary(waitCtx, stageEntered, reconciled); err != nil {
 		t.Fatal(err)
 	}
-	if err := instances.MarkTerminated(context.Background(), testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
+	if err := instances.MarkTerminated(ctx, testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	close(stageRelease)
 	if err := receiveFlowActivationResult(t, reconciled); err != nil {
 		t.Fatalf("terminal reconciliation: %v", err)
 	}
-	current, found, err := instances.LoadDynamicFlowRuntimeReadiness(context.Background(), req.TriggerEvent.RunID(), req.Instance.Route())
+	current, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
 	if err != nil || !found || !current.Terminal() {
 		t.Fatalf("terminal authority lost after admission race: found=%v row=%+v err=%v", found, current, err)
 	}
@@ -3685,11 +3742,9 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	instances := &flowActivationTestInstanceStore{creationMarkErr: errors.New("hold creation commit pending")}
 	agents := &flowActivationTestStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 
 	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("activation unexpectedly completed the creation occurrence")
@@ -3697,7 +3752,7 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	instances.creationMarkErr = nil
 	instances.beforeCreation = func() {
 		instances.beforeCreation = nil
-		if err := instances.MarkTerminated(context.Background(), testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
+		if err := instances.MarkTerminated(ctx, testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 			t.Fatalf("terminalize at creation boundary: %v", err)
 		}
 	}
@@ -3732,15 +3787,20 @@ func (b *readinessRecoveryTestBus) Store() runtimebus.EventStore { return b.stor
 func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) {
 	runID := uuid.NewString()
 	path := "review/inst-1"
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	bundle := testFlowBundle(t, "")
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleHash := fact.BundleHash()
 	instances := &flowActivationTestInstanceStore{
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(runID, path): {
 				InstancePath:    path,
-				OwningRunSource: authorActivityTestSourceArtifactFact,
+				OwningRunSource: fact,
 				RunStatus:       "running", InstanceStatus: "active",
 				Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-					RunID: runID, BundleHash: bundleHash, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
+					RunID: runID, BundleHash: bundleHash, WorkflowVersion: bundle.WorkflowVersion(), ExecutionMode: executionmode.Live,
 					Identity: runtimeflowidentity.Instance{
 						TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
 						InstancePath: path, EntityID: uuid.NewString(), HasStoredPath: true,
@@ -3749,10 +3809,9 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 			},
 		},
 	}
-	am := newFlowActivationManager(t, &readinessRecoveryTestBus{flowActivationTestBus: &flowActivationTestBus{}, store: &recoveryTestBus{}}, instances)
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(testFlowBundle(t, "")))
+	am, ctx := newFlowActivationManagerForSource(t, &readinessRecoveryTestBus{flowActivationTestBus: &flowActivationTestBus{}, store: &recoveryTestBus{}}, instances, semanticview.Wrap(bundle))
 	seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
-	snapshot, err := am.RecoverableStateSnapshot(testAuthorActivityContext(context.Background()))
+	snapshot, err := am.RecoverableStateSnapshot(ctx)
 	if err != nil {
 		t.Fatalf("RecoverableStateSnapshot: %v", err)
 	}
@@ -3765,7 +3824,12 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 }
 
 func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing.T) {
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	bundle := testFlowBundle(t, "")
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleHash := fact.BundleHash()
 	runKinds := flowActivationStandingRestarts{
 		uuid.NewString(): runtimestanding.StandingRestartOrdinary,
 		uuid.NewString(): runtimestanding.StandingRestartActiveIntrinsic,
@@ -3781,11 +3845,11 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 		index++
 		path := fmt.Sprintf("review/standing-%d", index)
 		instances.readiness[flowActivationReadinessKey(runID, path)] = runtimepipeline.DynamicFlowRuntimeReadiness{
-			InstancePath: path, OwningRunSource: authorActivityTestSourceArtifactFact,
+			InstancePath: path, OwningRunSource: fact,
 			RunStatus: "running", InstanceStatus: "active",
 			Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 				RunID: runID, BundleHash: bundleHash,
-				WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
+				WorkflowVersion: bundle.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				Identity: runtimeflowidentity.Instance{
 					TemplateID: "review", ScopeKey: "review", InstanceID: fmt.Sprintf("standing-%d", index),
 					InstancePath: path, EntityID: uuid.NewString(), HasStoredPath: true,
@@ -3793,9 +3857,9 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 			},
 		}
 	}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
 	am.roles.StandingRestarts = runKinds
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact)
+	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, fact)
 	if err != nil {
 		t.Fatalf("inspect standing readiness: %v", err)
 	}
@@ -3814,10 +3878,13 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{failAgentID: "writer"}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 
 	if err := activateFlowInstanceForTest(first, ctx, req); err == nil {
 		t.Fatal("activation succeeded across injected partial agent failure")
@@ -3833,9 +3900,8 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 
 	agents.failAgentID = ""
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, true); err != nil {
+	restarted, restartCtx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, restartCtx, fact, true); err != nil {
 		t.Fatalf("ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
 	if _, ok := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/inst-1"); !ok {
@@ -3850,7 +3916,7 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	if len(restartBus.published) != 1 {
 		t.Fatalf("startup creation event count = %d, want one", len(restartBus.published))
 	}
-	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, true); err != nil {
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, restartCtx, fact, true); err != nil {
 		t.Fatalf("second ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
 	if len(restartBus.published) != 1 {
@@ -3863,8 +3929,8 @@ func TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay(t *te
 	agents := &flowActivationTestStore{}
 	initialBundle := testFlowBundleWithTwoAgents(t, "task.started")
 	req := testActivationRequest(initialBundle, "review", "inst-1", "ent-1", "review/inst-1")
-	initial := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	if err := activateFlowInstanceForTest(initial, testAuthorActivityContext(context.Background()), req); err != nil {
+	initial, initialCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(initialBundle), agents)
+	if err := activateFlowInstanceForTest(initial, initialCtx, req); err != nil {
 		t.Fatalf("activate predecessor source: %v", err)
 	}
 	before, found, err := instances.LoadDynamicFlowRuntimeReadiness(context.Background(), req.TriggerEvent.RunID(), req.Instance.Route())
@@ -3872,15 +3938,13 @@ func TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay(t *te
 		t.Fatalf("completed predecessor readiness: found=%v readiness=%#v err=%v", found, before, err)
 	}
 
-	revisedFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("d", 64))
+	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started", "v-revised")
+	revisedFact := sourceartifactfixture.FactFor(revisedBundle.SourceArtifact)
+	restarted, revisedCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(revisedBundle), agents)
+	revisedCtx, err = setFlowActivationManagerSemanticSource(restarted, revisedCtx, semanticview.Wrap(revisedBundle))
 	if err != nil {
 		t.Fatal(err)
 	}
-	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started")
-	revisedBundle.Semantics.Version = "v-revised"
-	restarted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), revisedFact)
-	revisedCtx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact)
 	startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false)
 	if err != nil {
 		t.Fatalf("canonicalize completed predecessor without replay: %v", err)
@@ -3899,7 +3963,7 @@ func TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay(t *te
 	}
 	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(revisedCtx, req.TriggerEvent.RunID(), req.Instance.Route())
 	wantHash := revisedFact.BundleHash()
-	if err != nil || !found || after.Pending() || after.Plan.BundleHash != wantHash || after.Plan.WorkflowVersion != "v-revised" {
+	if err != nil || !found || after.Pending() || after.Plan.BundleHash != wantHash || after.Plan.WorkflowVersion != revisedBundle.WorkflowVersion() {
 		t.Fatalf("canonical completed successor: found=%v readiness=%#v err=%v", found, after, err)
 	}
 	if !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
@@ -3915,23 +3979,20 @@ func TestSourceScopedStartupDerivesEntireTransitionSetBeforeWriting(t *testing.T
 		testActivationRequest(initialBundle, "review", "inst-1", "ent-1", "review/inst-1"),
 		testActivationRequest(initialBundle, "review", "inst-2", "ent-2", "review/inst-2"),
 	}
-	initial := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	ctx := testAuthorActivityContext(context.Background())
+	initial, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(initialBundle), agents)
 	for _, req := range requests {
 		if err := activateFlowInstanceForTest(initial, ctx, req); err != nil {
 			t.Fatalf("activate predecessor source %s: %v", req.Instance.InstancePath, err)
 		}
 	}
 
-	revisedFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
+	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started", "v-transition-set")
+	revisedFact := sourceartifactfixture.FactFor(revisedBundle.SourceArtifact)
+	restarted, revisedCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(revisedBundle), agents)
+	revisedCtx, err := setFlowActivationManagerSemanticSource(restarted, revisedCtx, semanticview.Wrap(revisedBundle))
 	if err != nil {
 		t.Fatal(err)
 	}
-	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started")
-	revisedBundle.Semantics.Version = "v-transition-set"
-	restarted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), revisedFact)
-	revisedCtx := runtimecorrelation.WithSourceArtifactFact(ctx, revisedFact)
 
 	secondKey := flowActivationReadinessKey(requests[1].TriggerEvent.RunID(), requests[1].Instance.InstancePath)
 	instances.readinessMu.Lock()
@@ -3959,23 +4020,21 @@ func TestSourceScopedStartupPostBatchPendingRequiresReplayAfterRestart(t *testin
 	agents := &flowActivationTestStore{}
 	initialBundle := testFlowBundleWithTwoAgents(t, "task.started")
 	req := testActivationRequest(initialBundle, "review", "inst-1", "ent-1", "review/inst-1")
-	initial := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	if err := activateFlowInstanceForTest(initial, testAuthorActivityContext(context.Background()), req); err != nil {
+	initial, initialCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(initialBundle), agents)
+	if err := activateFlowInstanceForTest(initial, initialCtx, req); err != nil {
 		t.Fatalf("activate predecessor source: %v", err)
 	}
 	if err := initial.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}); err != nil {
 		t.Fatalf("retire predecessor process before source recovery: %v", err)
 	}
 
-	revisedFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("b", 64))
+	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started", "v-post-batch")
+	revisedFact := sourceartifactfixture.FactFor(revisedBundle.SourceArtifact)
+	canonicalizer, revisedCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(revisedBundle), agents)
+	revisedCtx, err := setFlowActivationManagerSemanticSource(canonicalizer, revisedCtx, semanticview.Wrap(revisedBundle))
 	if err != nil {
 		t.Fatal(err)
 	}
-	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started")
-	revisedBundle.Semantics.Version = "v-post-batch"
-	revisedCtx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact)
-	canonicalizer := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	setFlowActivationManagerSemanticSource(canonicalizer, semanticview.Wrap(revisedBundle), revisedFact)
 	if _, err := canonicalizer.CanonicalizeDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false); err != nil {
 		t.Fatalf("commit completed-predecessor transition batch: %v", err)
 	}
@@ -3984,9 +4043,8 @@ func TestSourceScopedStartupPostBatchPendingRequiresReplayAfterRestart(t *testin
 		t.Fatalf("post-batch readiness: found=%v readiness=%#v err=%v", found, committed, err)
 	}
 
-	blocked := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	setFlowActivationManagerSemanticSource(blocked, semanticview.Wrap(revisedBundle), revisedFact)
-	if _, err := blocked.CanonicalizeDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false); err == nil || !strings.Contains(err.Error(), "requires recovery") {
+	blocked, blockedCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(revisedBundle), agents)
+	if _, err := blocked.CanonicalizeDynamicFlowRuntimeStartupReadiness(blockedCtx, revisedFact, false); err == nil || !strings.Contains(err.Error(), "requires recovery") {
 		t.Fatalf("recovery-disabled post-batch startup error = %v", err)
 	}
 	afterRefusal, found, err := instances.LoadDynamicFlowRuntimeReadiness(revisedCtx, req.TriggerEvent.RunID(), req.Instance.Route())
@@ -3995,8 +4053,7 @@ func TestSourceScopedStartupPostBatchPendingRequiresReplayAfterRestart(t *testin
 	}
 
 	recoveryBus := &flowActivationTestBus{}
-	recovered := newFlowActivationManager(t, recoveryBus, instances, agents)
-	setFlowActivationManagerSemanticSource(recovered, semanticview.Wrap(revisedBundle), revisedFact)
+	recovered, revisedCtx := newFlowActivationManagerForSource(t, recoveryBus, instances, semanticview.Wrap(revisedBundle), agents)
 	startup, err := recovered.CanonicalizeDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, true)
 	if err != nil {
 		t.Fatalf("admit explicit post-batch recovery: %v", err)
@@ -4024,21 +4081,19 @@ func TestSourceScopedStartupRequiresReplayForPendingPredecessor(t *testing.T) {
 	agents := &flowActivationTestStore{failAgentID: "writer"}
 	initialBundle := testFlowBundleWithTwoAgents(t, "task.started")
 	req := testActivationRequest(initialBundle, "review", "inst-1", "ent-1", "review/inst-1")
-	initial := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	if err := activateFlowInstanceForTest(initial, testAuthorActivityContext(context.Background()), req); err == nil {
+	initial, initialCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(initialBundle), agents)
+	if err := activateFlowInstanceForTest(initial, initialCtx, req); err == nil {
 		t.Fatal("predecessor activation unexpectedly completed")
 	}
 
-	revisedFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("c", 64))
+	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started", "v-revised")
+	revisedFact := sourceartifactfixture.FactFor(revisedBundle.SourceArtifact)
+	agents.failAgentID = ""
+	restarted, revisedCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(revisedBundle), agents)
+	revisedCtx, err := setFlowActivationManagerSemanticSource(restarted, revisedCtx, semanticview.Wrap(revisedBundle))
 	if err != nil {
 		t.Fatal(err)
 	}
-	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started")
-	revisedBundle.Semantics.Version = "v-revised"
-	agents.failAgentID = ""
-	restarted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), revisedFact)
-	revisedCtx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact)
 	_, err = restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false)
 	if !IsDynamicFlowRuntimeReadinessFinalizationError(err) || !strings.Contains(err.Error(), "requires recovery") {
 		t.Fatalf("pending predecessor without replay error = %v", err)
@@ -4060,10 +4115,9 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{failAgentID: "writer"}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(first, ctx, req); err == nil {
 		t.Fatal("activation succeeded across injected partial agent failure")
 	}
@@ -4071,16 +4125,15 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 
 	agents.failAgentID = ""
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
+	restarted, restartCtx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
 	restarted.executionPosture = executionposture.MockOnly
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if err := restarted.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
+	if err := restarted.reconcilePendingDynamicFlowRuntimeReadiness(restartCtx); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 		t.Fatalf("readiness reconciliation error = %v, want live-plan rejection", err)
 	}
 	if len(agents.upserts) != baselineAgents || len(restarted.lifecycle.executionIdentities()) != 0 || len(restartBus.published) != 0 || len(instances.armedEntries) != 0 {
 		t.Fatalf("readiness mutations agents=%d/%d executions=%d events=%d timers=%d", len(agents.upserts), baselineAgents, len(restarted.lifecycle.executionIdentities()), len(restartBus.published), len(instances.armedEntries))
 	}
-	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(restartCtx, req.TriggerEvent.RunID(), req.Instance.Route())
 	if err != nil || !found || !readiness.Pending() || readiness.Plan.ExecutionMode != executionmode.Live {
 		t.Fatalf("readiness after rejection = %#v found=%v err=%v", readiness, found, err)
 	}
@@ -4089,7 +4142,11 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 	bundle := testFlowBundle(t, "")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	bundleHash := bundle.SourceArtifact.BundleHash()
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: req.Instance,
 		RunID:    req.TriggerEvent.RunID(), BundleHash: bundleHash,
@@ -4127,7 +4184,7 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(plan.RunID, req.Instance.InstancePath): {
 				InstancePath: req.Instance.InstancePath, Plan: plan,
-				OwningRunSource: authorActivityTestSourceArtifactFact,
+				OwningRunSource: fact,
 				RunStatus:       "cancelled", InstanceStatus: "terminated", InstanceTerminatedAt: terminatedAt,
 			},
 		},
@@ -4141,15 +4198,14 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 		Status: "active",
 	}}}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
-	if err := reconcileDynamicFlowRuntimeStartupForTest(am, testAuthorActivityContext(context.Background()), authorActivityTestSourceArtifactFact, false); err != nil {
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
+	if err := reconcileDynamicFlowRuntimeStartupForTest(am, ctx, fact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("terminal readiness retained a process agent")
 	}
-	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+	if flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("terminal readiness retained or restored an executable activation receipt")
 	}
 	if len(instances.armedEntries) != 0 || len(bus.published) != 0 {
@@ -4161,10 +4217,9 @@ func TestEnsureFlowInstanceRebindsPersistedDeclaredAgentsToNewActivationAttempt(
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 
 	if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4178,9 +4233,8 @@ func TestEnsureFlowInstanceRebindsPersistedDeclaredAgentsToNewActivationAttempt(
 	}
 
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if created, err := restarted.EnsureFlowInstance(ctx, req); err != nil {
+	restarted, restartCtx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
+	if created, err := restarted.EnsureFlowInstance(restartCtx, req); err != nil {
 		t.Fatalf("EnsureFlowInstance: %v", err)
 	} else if created {
 		t.Fatal("EnsureFlowInstance reported a new instance")
@@ -4200,39 +4254,34 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	agents := &flowActivationTestStore{}
 	firstBundle := testFlowBundleWithTwoAgents(t, "")
 	firstReq := testActivationRequest(firstBundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
-	first := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
+	first, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(firstBundle), agents)
 	if err := activateFlowInstanceForTest(first, ctx, firstReq); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 
-	revisedBundle := testFlowBundleWithTwoAgents(t, "")
-	revisedBundle.Semantics.Version = "v-revised"
-	delete(revisedBundle.FlowTree.ByID["review"].Agents, "reviewer")
-	writer := revisedBundle.FlowTree.ByID["review"].Agents["writer"]
-	writer.Role = "writer-v2"
-	revisedBundle.FlowTree.ByID["review"].Agents["writer"] = writer
-	revisedBundle.FlowTree.ByID["review"].Agents["editor"] = managerTestAgentEntry("editor", runtimecontracts.AgentRegistryEntry{
-		ID: "editor", Type: "generic", Role: "editor", Subscriptions: []string{"task.started"},
+	revisedBundle := testFlowBundle(t, "", func(root string) {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "review/agents.yaml"), "writer:\n  role: writer-v2\n  intent: {inline: \"Perform the manager test agent's assigned work.\"}\n  subscriptions: [task.started]\neditor:\n  role: editor\n  intent: {inline: \"Perform the manager test agent's assigned work.\"}\n  subscriptions: [task.started]\n")
 	})
-	registerTestFlowAgentOwner(revisedBundle, "review", "editor")
 	revisedReq := testActivationRequest(revisedBundle, "review", "inst-1", "ent-1", "review/inst-1")
-	restarted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle))
-	if created, err := restarted.EnsureFlowInstance(ctx, revisedReq); err != nil {
+	restarted, revisedCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(revisedBundle), agents)
+	revisedCtx, err := setFlowActivationManagerSemanticSource(restarted, revisedCtx, semanticview.Wrap(revisedBundle))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created, err := restarted.EnsureFlowInstance(revisedCtx, revisedReq); err != nil {
 		t.Fatalf("EnsureFlowInstance revised source: %v", err)
 	} else if created {
 		t.Fatal("EnsureFlowInstance reported a new instance for source revision")
 	}
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
-		ctx,
+		revisedCtx,
 		revisedReq.TriggerEvent.RunID(),
 		revisedReq.Instance.Route(),
 	)
 	if err != nil || !found {
 		t.Fatalf("load revised readiness: found=%v err=%v", found, err)
 	}
-	if readiness.Plan.WorkflowVersion != "v-revised" || (readiness.Phase != runtimepipeline.FlowAttachmentReady) {
+	if readiness.Plan.WorkflowVersion != revisedBundle.WorkflowVersion() || (readiness.Phase != runtimepipeline.FlowAttachmentReady) {
 		t.Fatalf("revised readiness = %#v", readiness)
 	}
 	if _, ok := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/inst-1"); ok {
@@ -4247,7 +4296,7 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	if len(agents.terminated) != 1 || agents.terminated[0] != "reviewer" {
 		t.Fatalf("retired agents = %#v, want reviewer", agents.terminated)
 	}
-	persisted, err := agents.LoadAgents(ctx)
+	persisted, err := agents.LoadAgents(revisedCtx)
 	if err != nil {
 		t.Fatalf("LoadAgents after source revision: %v", err)
 	}
@@ -4259,10 +4308,10 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
-	first := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := activateFlowInstanceForTest(first, testAuthorActivityContext(context.Background()), req); err != nil {
+	first, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, req.ContractBundle, agents)
+	if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if err := first.Shutdown(); err != nil {
@@ -4270,9 +4319,7 @@ func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.
 	}
 
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	ctx := testAuthorActivityContext(context.Background())
+	restarted, ctx := newFlowActivationManagerForSource(t, restartBus, instances, req.ContractBundle, agents)
 	ctx = worklifetime.WithOccurrence(ctx, restarted.workOwner)
 	if created, err := restarted.EnsureFlowInstance(ctx, req); err != nil {
 		t.Fatalf("EnsureFlowInstance: %v", err)
@@ -4292,7 +4339,6 @@ func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.
 func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	store := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, store)
 	bundle := testFlowBundle(t, "")
 	schema := bundle.FlowSchemas["review"]
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{
@@ -4306,7 +4352,8 @@ func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 	compileFlowActivationFixture(t, bundle)
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	am, ctx := newFlowActivationManagerForSource(t, bus, store, req.ContractBundle)
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(store.creates) != 1 {
@@ -4318,7 +4365,6 @@ func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 }
 
 func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict(t *testing.T) {
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
 	schema := bundle.FlowSchemas["review"]
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
@@ -4329,8 +4375,7 @@ func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict
 	schema.StageDeclarations.Entries[0], schema.StageDeclarations.Entries[1] = schema.StageDeclarations.Entries[1], schema.StageDeclarations.Entries[0]
 	bundle.FlowSchemas["review"] = schema
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
-	ctx := testAuthorActivityContext(context.Background())
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{}, req.ContractBundle)
 	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil || plan.Instance.CurrentState != "queued" {
 		t.Fatalf("compiled initial plan = %q, %v, want queued", plan.Instance.CurrentState, err)
@@ -4344,14 +4389,12 @@ func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict
 func TestActivateFlowInstanceRouteMaterializationExcludesBusinessState(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"vertical_id": {Type: "string"}})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"vertical_id": "11111111-1111-4111-8111-111111111111"})
-	ctx := testAuthorActivityContext(context.Background())
-	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil {
 		t.Fatalf("PrepareFlowInstanceActivation: %v", err)
@@ -4378,7 +4421,6 @@ func TestActivateFlowInstanceRouteMaterializationExcludesBusinessState(t *testin
 
 func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{
 		"flow_instance_path": {Type: "string"}, "flow_scope_key": {Type: "string"},
@@ -4398,7 +4440,8 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 		"instance_id":    "wrong-config-instance",
 		"template_id":    "wrong-config-template",
 	})
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, req.ContractBundle)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "contains interpolation") || !strings.Contains(err.Error(), "instance.by") {
 		t.Fatalf("ActivateFlowInstance error = %v, want agent-name interpolation teaching error", err)
 	}
@@ -4410,11 +4453,11 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	const runID = "11111111-1111-1111-1111-111111111115"
 	const triggerEventID = "33333333-3333-3333-3333-333333333333"
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEventWithMode(triggerEventID, executionmode.Mock, runID)
 	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")
@@ -4465,10 +4508,10 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 func TestActivateFlowInstancePreservesReplyContextIntoAutoEmit(t *testing.T) {
 	bundle := testFlowBundle(t, "review.created")
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:child-activation"}}
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(bus.publishedContexts) != 1 || bus.publishedContexts[0].ReplyContextID() != req.Context.ReplyContextID() {
@@ -4481,12 +4524,12 @@ func TestActivateFlowInstancePreservesReplyContextIntoAutoEmit(t *testing.T) {
 
 func TestActivateFlowInstanceAutoEmitRejectsMissingTriggerLineage(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "task.started")
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = events.Event{}
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "requires exact trigger run_id and parent_event_id") {
 		t.Fatalf("ActivateFlowInstance error = %v, want exact trigger lineage failure", err)
 	}
@@ -4497,7 +4540,6 @@ func TestActivateFlowInstanceAutoEmitRejectsMissingTriggerLineage(t *testing.T) 
 
 func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationContext(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "component.scaffold.start", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4513,6 +4555,7 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 		"component_id": {Type: "string"}, "component_type": {Type: "string"},
 		"integer_score": {Type: "integer"}, "double_score": {Type: "number"},
 	})
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1",
 		"component_type": "api",
@@ -4520,7 +4563,7 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 		"double_score":   float64(75),
 	})
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
@@ -4549,7 +4592,6 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 
 func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "component.scaffold.start", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4559,13 +4601,14 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 		},
 	})
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"source_event_id": {Type: "string"}})
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	const triggerEventID = "44444444-4444-4444-4444-444444444444"
 	const payloadSourceEventID = "business-payload-source"
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
 	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "source_event_id": payloadSourceEventID})
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
@@ -4583,7 +4626,6 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 
 func TestActivateFlowInstanceCommittedAutoEmitUsesInitialStatePayload(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "component.scaffold.start", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4593,7 +4635,7 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesInitialStatePayload(t *testing
 		},
 	})
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"component_id": {Type: "string"}})
-	ctx := testAuthorActivityContext(context.Background())
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"component_id": "component-1"})
 
@@ -4614,7 +4656,6 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesInitialStatePayload(t *testing
 
 func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "repo.template.selected", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4624,10 +4665,11 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 		},
 	})
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"template_id": {Type: "string"}})
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"template_id": "application-basic-v1"})
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/repo.template.selected")
@@ -4639,11 +4681,11 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 
 func TestActivateFlowInstancePublishesAutoEmitAfterNamedCommit(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "task.started")
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	const runID = "22222222-2222-2222-2222-222222222215"
 	const triggerEventID = "55555555-5555-5555-5555-555555555555"
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID, runID)
 	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")
@@ -4675,11 +4717,11 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	store := &flowActivationTestStore{}
-	am := newFlowActivationManager(t, bus, instances, store)
 	bundle := testFlowBundle(t, "task.started")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), store)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("first ActivateFlowInstance: %v", err)
 	}
 	firstCreates := len(instances.creates)
@@ -4688,7 +4730,7 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 	firstAgents := len(store.upserts)
 
 	instances.replayConstruction = true
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("identical replay ActivateFlowInstance: %v", err)
 	}
 	if len(instances.creates) != firstCreates {
@@ -4708,7 +4750,6 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundleWithAutoEmitEntry(t, "task.started", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4717,8 +4758,9 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 			Required: []string{"reason"},
 		},
 	})
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err == nil || !strings.Contains(err.Error(), "constructor task.started payload") || !strings.Contains(err.Error(), "reason is required") {
 		t.Fatalf("ActivateFlowInstance error = %v, want missing required auto-emit schema failure", err)
 	}
@@ -4742,11 +4784,11 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"unexpected": {Type: "string"}})
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
+	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"unexpected": "value"})
 
@@ -4777,13 +4819,13 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigField(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"entity_id": {Type: "string"}})
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"entity_id": "business-value"})
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "entity_id is not allowed") {
 		t.Fatalf("ActivateFlowInstance error = %v, want undeclared envelope-like config field failure", err)
 	}
@@ -4900,7 +4942,6 @@ func TestDeclaredAgentEmitEventsKeepPermissionIndependentOfInstance(t *testing.T
 func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundleWithAutoEmitEntry(t, "task.started", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4912,12 +4953,13 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{
 		"name": {Type: "string"}, "priority": {Type: "integer"},
 	})
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "name": "alpha",
 		"priority": 1,
 	})
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -4942,12 +4984,12 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 func TestActivateFlowInstancePersistsFullParentRouteMetadata(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-legacy", "review/inst-1")
 	parent := req.Instance.ParentRoute
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(instances.creates) != 1 {
@@ -4964,17 +5006,16 @@ func TestActivateFlowInstancePersistsFullParentRouteMetadata(t *testing.T) {
 		t.Fatalf("parent_entity_id = %#v, want %q", got, parent.EntityID)
 	}
 	foreignInstances := &flowActivationTestInstanceStore{}
-	foreignManager := newFlowActivationManager(t, &flowActivationTestBus{}, foreignInstances)
+	foreignManager, foreignCtx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, foreignInstances, req.ContractBundle)
 	req.Instance.ParentRoute = runtimeflowidentity.ParentRoute{FlowID: "operating", FlowInstance: "operating/root", EntityID: "parent-ent"}
 	req.Instance.ParentEntityID = "parent-ent"
-	if err := activateFlowInstanceForTest(foreignManager, testAuthorActivityContext(context.Background()), req); err == nil || len(foreignInstances.creates) != 0 {
+	if err := activateFlowInstanceForTest(foreignManager, foreignCtx, req); err == nil || len(foreignInstances.creates) != 0 {
 		t.Fatalf("foreign complete parent admitted or mutated: err=%v creates=%d", err, len(foreignInstances.creates))
 	}
 }
 
 func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
 	reviewFlow := bundle.FlowTree.ByID["review"]
 	reviewFlow.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
@@ -4992,8 +5033,9 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	entry.Permissions = []string{"schedule"}
 	reviewFlow.Agents["reviewer"] = entry
 	bundle.FlowTree.Root.Children[0].Agents["reviewer"] = entry
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -5025,14 +5067,15 @@ func requireTerminatedFlowActivationForTest(t *testing.T, instances *flowActivat
 func TestDeactivateFlowInstanceRemovesAgentsAndTerminatesOwner(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
+	ctx = runtimecorrelation.WithRunID(ctx, flowActivationTestRunID)
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+	if err := deactivateFlowInstanceForTest(am, ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
@@ -5051,10 +5094,11 @@ func TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit(t *testi
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	managerStore := &flowActivationTestStore{}
-	am := newFlowActivationManager(t, bus, instances, managerStore)
 	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), managerStore)
+	ctx = runtimecorrelation.WithRunID(ctx, flowActivationTestRunID)
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	quiescenceCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -5062,7 +5106,7 @@ func TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit(t *testi
 	if err := am.lifecycle.waitForWork(quiescenceCtx); err != nil {
 		t.Fatalf("wait for activation backlog replay: %v", err)
 	}
-	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+	if err := deactivateFlowInstanceForTest(am, ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 
@@ -5088,13 +5132,14 @@ func TestDeactivateFlowInstanceReportsPostCommitAgentFailureAfterTerminalCommit(
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	managerStore := &flowActivationTestStore{terminateErr: errors.New("agent terminate failed")}
-	am := newFlowActivationManager(t, bus, instances, managerStore)
 	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), managerStore)
+	ctx = runtimecorrelation.WithRunID(ctx, flowActivationTestRunID)
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err == nil || !strings.Contains(err.Error(), "agent terminate failed") {
+	if err := deactivateFlowInstanceForTest(am, ctx, "review", "inst-1", "review/inst-1", "ent-1"); err == nil || !strings.Contains(err.Error(), "agent terminate failed") {
 		t.Fatalf("DeactivateFlowInstance error = %v, want committed teardown failure", err)
 	}
 	if len(bus.runtimeLogs) != 1 {
@@ -5121,10 +5166,11 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenTerminalCommi
 	commitFailure := errors.New("terminal commit failed")
 	instances := &flowActivationTestInstanceStore{terminalCommitErr: commitFailure}
 	managerStore := &flowActivationTestStore{}
-	am := newFlowActivationManager(t, bus, instances, managerStore)
 	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), managerStore)
+	ctx = runtimecorrelation.WithRunID(ctx, flowActivationTestRunID)
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(flowActivationTestRunID, runtimeflowidentity.RouteForInstancePath("review/inst-1"))
@@ -5140,7 +5186,7 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenTerminalCommi
 		t.Fatalf("load readiness before failed commit: found=%v err=%v", found, err)
 	}
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
+	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 	err = deactivateFlowInstanceForTest(am, ctx, "review", "inst-1", "review/inst-1", "ent-1")
 	if !errors.Is(err, commitFailure) || !strings.Contains(err.Error(), "persist flow instance terminalization") {
 		t.Fatalf("DeactivateFlowInstance error = %v, want exact terminal commit failure", err)
@@ -5175,14 +5221,15 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenTerminalCommi
 func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testNestedFlowBundle(t)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
+	ctx = runtimecorrelation.WithRunID(ctx, flowActivationTestRunID)
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "grandchild", "inst-1", "ent-1", "child/grandchild/inst-1"))
+	err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "grandchild", "inst-1", "ent-1", "child/grandchild/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "grandchild", "inst-1", "child/grandchild/inst-1", "ent-1"); err != nil {
+	if err := deactivateFlowInstanceForTest(am, ctx, "grandchild", "inst-1", "child/grandchild/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 	requireTerminatedFlowActivationForTest(t, instances, "child/grandchild/inst-1")
@@ -5390,11 +5437,9 @@ func TestStandingFlowAgentsBindAttemptBeforeManagerRun(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	created, finish, err := am.PrepareStandingFlowInstance(ctx, req)
 	if err != nil || !created || finish == nil {
 		t.Fatalf("prepare standing flow: created=%t finish=%t err=%v", created, finish != nil, err)
@@ -5431,7 +5476,14 @@ func TestStandingFlowAgentsBindAttemptBeforeManagerRun(t *testing.T) {
 		t.Fatal("admitted pre-run preparation completed attachment or armed timer work")
 	}
 	runCtx, cancelRun := context.WithCancel(ctx)
-	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+	runCtx = managedExecutionTestContextForCapturedSource(t, runCtx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		cancelRun()
+		t.Fatalf("standing managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := am.Run(runCtx); err != nil {
 		cancelRun()
 		t.Fatalf("run attempt-bound standing agents: %v", err)
 	}
@@ -5661,7 +5713,7 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 				Instance: runtimeflowidentity.Stored(source, "support", tc.instancePath, tc.instanceID,
 					runtimepipeline.FlowInstanceEntityID(tc.instancePath), "ent-1"),
 			}
-			am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
+			am, _ := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{}, source)
 			records, err := am.flowInstanceAgentRecords(managerIdentityTestRunID, req, schema, scope)
 			if err != nil {
 				t.Fatalf("flowInstanceAgentRecords: %v", err)
@@ -5693,9 +5745,10 @@ func TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore(t *testing.T) {
 func loadRootAndFlowStaticAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "root-and-flow-static-agents")
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-and-flow-static-agents\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned:\ntask.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 test-agent:
@@ -5706,7 +5759,8 @@ test-agent:
   emit_events: [task.completed]
 `)
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "schema.yaml"), "name: ops-flow\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "events.yaml"), "work.requested:\nwork.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "agents.yaml"), `
 operator:
@@ -5728,12 +5782,15 @@ func loadFilesystemStaticAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
+	for _, flow := range []string{".", "parent", "parent/child", "parent/child/support"} {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	}
 
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -5741,8 +5798,7 @@ item.created:
 
 	flowRoot := filepath.Join(root, "parent", "child", "support")
 
-	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), `name: support
-stages:
+	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), `stages:
   waiting: {}
   done: {}
 `)
@@ -5776,12 +5832,15 @@ func loadNestedProjectAgentSource(t *testing.T, mode string) semanticview.Source
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
+	for _, flow := range []string{".", "support"} {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	}
 
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -5791,8 +5850,7 @@ item.created:
 		shape = "instance: instance_key\n"
 		writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`name: support
-%sstages:
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`%sstages:
   waiting: {}
   done: {}
 `, shape))
@@ -6034,10 +6092,12 @@ func loadAgentPlatformDefaultsMaterializationSource(t *testing.T) semanticview.S
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-defaults-materialization\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
 	for _, flowID := range []string{"static_support", "template_support"} {
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "stages: []\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), flowID+".requested:\n  entity_id: string\n")
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "static_support", "agents.yaml"), `

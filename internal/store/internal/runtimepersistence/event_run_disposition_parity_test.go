@@ -13,11 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -172,6 +174,9 @@ func TestOnlyRootAndStandaloneAdmissionCreateRunsParity(t *testing.T) {
 				t.Run(test.name, func(t *testing.T) {
 					fixture := backend.open(t)
 					ctx := testAuthorActivityContext()
+					rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+					sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+					ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 					before := eventMutationSurfaceCounts(t, fixture.db, ctx)
 					admitted, outcome, err := appendAdmittedBoundaryFixture(ctx, fixture.store, test.make(uuid.NewString(), time.Date(2026, 7, 19, 18, 30, 0, 0, time.UTC)))
 					if err != nil || outcome != runtimebus.EventAppendInserted {
@@ -202,6 +207,9 @@ func TestRunCreatingRootRejectsTerminalRunParity(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			in := newRunDispositionFixtureInput()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
 			setRunDispositionFixtureStatus(t, fixture, ctx, in.RunID, "completed")

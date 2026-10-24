@@ -13,12 +13,15 @@ func Test2376MemberDispositionMutationParity(t *testing.T) {
 	} {
 		t.Run(label, func(t *testing.T) {
 			root := t.TempDir()
+			writeTestFile(t, root, "manifest.yaml", manifest2376)
 			writeTestFile(t, root, "schema.yaml", "description: root\n")
 			body := "description: original\n"
 			if label == "manifest.yaml" || label == "child/manifest.yaml" {
 				body = manifest2376
 			}
 			if label == "child/manifest.yaml" {
+				writeTestFile(t, root, "child/manifest.yaml", manifest2376)
+				writeTestFile(t, root, "manifest.yaml", manifest2376)
 				writeTestFile(t, root, "child/schema.yaml", "description: child\n")
 			}
 			writeTestFile(t, root, label, body)

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -200,7 +201,12 @@ func TestSelectedOperationSameInvocationRefusesChangedMeaningBothStores(t *testi
 						altered := *request.ForkOperation
 						switch change {
 						case "bundle":
-							altered.TargetBundleHash = "sha256:different-same-invocation-bundle"
+							other, _ := sourceartifactfixture.Rooted(t, "other-selection", sourceartifactfixture.Artifact())
+							if other.Admission().BundleHash() == altered.TargetBundleHash {
+								t.Fatal("changed selection must have distinct captured content")
+							}
+							altered.TargetBundleHash = other.Admission().BundleHash()
+							altered.TargetRootReference = other.Admission().Reference()
 						case "fixed_revision":
 							point := materialized.ForkPoint
 							point.Revision++

@@ -6,9 +6,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -71,6 +72,7 @@ type RootInputSource struct {
 	Kind             string             `json:"kind"`
 	Alias            string             `json:"alias"`
 	Provider         string             `json:"provider"`
+	SigningSecret    string             `json:"signing_secret,omitempty"`
 	Target           RootInputTarget    `json:"target"`
 	AuthoredLocation string             `json:"authored_location,omitempty"`
 	Admission        RootInputAdmission `json:"admission"`
@@ -187,6 +189,7 @@ func Build(source semanticview.Source) Topology {
 	builder.addTypedPubSubRelations(relations)
 	builder.addBoundaryExposures()
 	builder.addConnectEdges(plans)
+	rootInputs, rootInputError := rootInputSourceViews(source)
 	topology := Topology{
 		SchemaVersion:     SchemaVersion,
 		ProjectionOnly:    true,
@@ -195,10 +198,13 @@ func Build(source semanticview.Source) Topology {
 		Consumers:         endpointViews(census.Consumers()),
 		InputPins:         endpointViews(census.InputPins()),
 		OutputPins:        endpointViews(census.OutputPins()),
-		RootInputSources:  rootInputSourceViews(source),
+		RootInputSources:  rootInputs,
 		BoundaryExposures: builder.sortedExposures(),
 		Edges:             builder.sortedEdges(),
 		Issues:            issueViews(planIssues),
+	}
+	if rootInputError != nil {
+		topology.Issues = append(topology.Issues, NewDiagnosticIssue("provider_ingress_projection", "error", ".", rootInputError.Error(), "Use the captured provider directory and its holder's declared inputs.", ""))
 	}
 	topology.Issues = append(topology.Issues, connectReceiverPinCollisionIssueViews(connectGraph.ReceiverPinCollisions())...)
 	sort.SliceStable(topology.Issues, func(i, j int) bool { return topology.Issues[i].ID < topology.Issues[j].ID })
@@ -231,23 +237,64 @@ func connectReceiverPinCollisionIssueViews(collisions []pinrouting.ConnectReceiv
 	return issues
 }
 
-func rootInputSourceViews(source semanticview.Source) []RootInputSource {
+func rootInputSourceViews(source semanticview.Source) ([]RootInputSource, error) {
+	out := make([]RootInputSource, 0)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
-		return []RootInputSource{}
+		return out, nil
 	}
-	out := make([]RootInputSource, 0)
-	for _, view := range bundle.FlowViews() {
-		if view.Schema.Ingress == nil {
+	if bundle.SourceArtifact == nil || len(bundle.SourceArtifact.ProviderDirectories()) == 0 {
+		return out, nil
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return out, err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		return out, err
+	}
+	for _, flowPath := range providers.FlowPaths() {
+		scope, err := providers.Scope(flowPath)
+		if err != nil {
+			return out, err
+		}
+		inputs := make([]string, 0)
+		for _, pin := range source.FlowInputEventPins(flowPath) {
+			inputs = append(inputs, pin.EventType())
+		}
+		consumed := scope.ConsumedTriggerProviders(inputs)
+		if len(consumed) == 0 {
 			continue
 		}
-		flowPath := strings.TrimSpace(view.Paths.FlowPath)
 		alias, present := bundle.FlowIngressAlias(flowPath)
 		if !present {
-			continue
+			return out, fmt.Errorf("flow %q has no compiled directory webhook alias", flowPath)
 		}
-		for providerIndex, binding := range view.Schema.Ingress.Providers {
-			out = append(out, rootInputProviderSource(view, alias, binding, providerIndex))
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			return out, err
+		}
+		for _, definition := range consumed {
+			entry, present := catalog.EntryByProvider(definition.Provider().Key())
+			if !present {
+				return out, fmt.Errorf("flow %q consumed provider %q is absent from its scoped catalog", flowPath, definition.Provider().Key())
+			}
+			secret := ""
+			if required := providertriggers.DerivedRequires(entry.Manifest).Secrets; len(required) > 0 {
+				secret = required[0]
+			}
+			auth, err := entry.Manifest.RequestAuthentication()
+			if err != nil {
+				return out, err
+			}
+			item := RootInputSource{
+				Kind: RootInputSourceStandingIngress, Alias: alias, Provider: definition.Provider().Key(), SigningSecret: secret,
+				Target: RootInputTarget{FlowPath: flowPath}, AuthoredLocation: entry.SourcePath,
+				Admission: RootInputAdmission{Kind: string(providertriggers.AdmissionKindPack), DeclaredAuthentication: string(auth), PackID: entry.Identity.ID},
+			}
+			item.ID = rootInputSourceID(item)
+			out = append(out, item)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -265,33 +312,7 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out
-}
-
-func rootInputProviderSource(view runtimecontracts.FlowContractView, alias string, binding runtimecontracts.ProjectFlowIngressProvider, providerIndex int) RootInputSource {
-	admissionKind := strings.ToLower(strings.TrimSpace(binding.Admission.Kind))
-	if admissionKind == "" {
-		admissionKind = "pack-required"
-	}
-	item := RootInputSource{
-		Kind:             RootInputSourceStandingIngress,
-		Alias:            alias,
-		Provider:         strings.TrimSpace(binding.Provider),
-		Target:           RootInputTarget{FlowPath: strings.TrimSpace(view.Paths.FlowPath)},
-		AuthoredLocation: strings.TrimSpace(view.Paths.SchemaFile) + ":ingress.providers[" + strconv.Itoa(providerIndex) + "]",
-		Admission:        RootInputAdmission{Kind: admissionKind, Event: strings.TrimSpace(binding.Admission.Event), Acknowledgement: strings.TrimSpace(binding.Admission.Acknowledge)},
-	}
-	if binding.Admission.Pack != nil {
-		item.Admission.PackID = strings.TrimSpace(binding.Admission.Pack.ID)
-	}
-	if binding.Admission.Authentication != nil {
-		item.Admission.DeclaredAuthentication = strings.ToUpper(strings.TrimSpace(binding.Admission.Authentication.Kind))
-		if item.Admission.DeclaredAuthentication == "NONE" {
-			item.Admission.DeclaredAuthentication = "UNAUTHENTICATED"
-		}
-	}
-	item.ID = rootInputSourceID(item)
-	return item
+	return out, nil
 }
 
 type topologyBuilder struct {
