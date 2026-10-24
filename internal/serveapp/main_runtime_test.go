@@ -677,7 +677,7 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 		RunID: uuid.NewString(), Artifact: pinnedArtifact,
 	})
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: otherRunID, State: storerunlifecycle.StatePaused,
+		RunID: otherRunID, State: storerunlifecycle.StateRunning,
 		Artifact: otherArtifact,
 	})
 	standingSource := mustServeTestPersistedSourceArtifactFact(otherHash)
@@ -720,6 +720,12 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 	}
 	if strings.Contains(got, standingOtherRunID) {
 		t.Fatalf("pinned-hash admission claimed current standing run %s: %q", standingOtherRunID, got)
+	}
+	if _, err := pg.TransitionActiveRun(standingCtx, storerunlifecycle.ActiveTransitionRequest{RunID: otherRunID, State: storerunlifecycle.StatePaused}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, []string{pinnedHash}); err != nil {
+		t.Fatalf("non-executing paused source blocked boot: %v", err)
 	}
 
 	if err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, nil); err != nil {
