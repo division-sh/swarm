@@ -12,6 +12,7 @@ func TestFanOutFiniteFairnessPreservesOlderSuffixAgainstNewcomersOnBothStores(t 
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			long := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 64, time.Now().UTC())
 			request := pipeline.FanOutClaimRequest{Owner: "finite-fairness", BundleHash: long.bundleHash, Now: time.Now().UTC(), Lease: time.Minute}
 			_, first, found, err := owner.ClaimFanOutIntent(ctx, request)

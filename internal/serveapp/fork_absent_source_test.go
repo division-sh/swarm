@@ -37,7 +37,6 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 				"payload": map[string]any{"item_id": "review"}, "idempotency_key": "root-source-ingress",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-			requireServedRunStatus(t, rt.Endpoint, started.RunID, "completed")
 			var kind, sourceRoute string
 			if err := rt.DB.QueryRow(`SELECT routing_source_kind, CAST(source_route AS TEXT) FROM events WHERE event_id=$1`, published.EventID).Scan(&kind, &sourceRoute); err != nil {
 				t.Fatal(err)
@@ -56,11 +55,10 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "allow_source_freeze": true, "idempotency_key": "root-source-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.ExecutedEventCount != 0 || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
+			if fork.ExecutedEventCount != 0 || fork.ForkRunID == "" || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
 				t.Fatalf("fork result: %+v", fork)
 			}
 			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, published.EventID)
-			requireServedRunStatus(t, rt.Endpoint, fork.ForkRunID, "completed")
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -28,6 +29,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
@@ -58,6 +60,7 @@ type forkJoinNativeScheduleOwner interface {
 }
 
 type forkJoinNativeFixture struct {
+	original  context.Context
 	db        *sql.DB
 	postgres  *postgresbackend.Backend
 	sqlite    *sqlitebackend.Backend
@@ -230,13 +233,50 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 	if err != nil {
 		t.Fatal(err)
 	}
+	if f.postgres != nil {
+		lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(t.Context(), f.postgres, "swarm:runtime:shared-store-owner")
+		if err != nil || !acquired {
+			t.Fatalf("retain native statement process: acquired=%v err=%v", acquired, err)
+		}
+		t.Cleanup(func() {
+			if err := lease.Release(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		f.original = statementOriginalContext(t, false, lease.RunProcessAcquisitionOutcome)
+	} else {
+		f.original = statementOriginalContext(t, true, f.sqlite.RunProcessAcquisitionOutcome)
+	}
 	return f
+}
+
+// The statement fixture retains its actual acquisition, not a full runtime grant.
+func statementOriginalContext(t testing.TB, sqlite bool, acquire func(context.Context, func(context.Context, *sql.Tx) error) (bool, error)) context.Context {
+	t.Helper()
+	identity := processbinding.LeaseIdentity{LeaseID: uuid.NewString(), OwnerID: "native-statement-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend}
+	if sqlite {
+		identity.Backend = processbinding.SQLiteLeaseBackend
+	}
+	var original processbinding.LeaseStamp
+	committed, err := acquire(t.Context(), func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, identity, sqlite)
+		return err
+	})
+	if err != nil || !committed {
+		t.Fatalf("acquire original statement process: committed=%v err=%v", committed, err)
+	}
+	ctx, err := generationauthority.MutationContext(t.Context(), original, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func forkJoinNativeRunContext(t *testing.T, f *forkJoinNativeFixture, runID string) context.Context {
 	t.Helper()
 	fact := sourceartifactfixture.Fact()
-	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID)
+	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(f.original, fact), runID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
 	if _, err := f.artifact.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
 		t.Fatal(err)

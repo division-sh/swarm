@@ -453,6 +453,7 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -510,6 +511,7 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()

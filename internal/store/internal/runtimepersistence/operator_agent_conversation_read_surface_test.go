@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
@@ -354,6 +355,7 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-2", "active")
 

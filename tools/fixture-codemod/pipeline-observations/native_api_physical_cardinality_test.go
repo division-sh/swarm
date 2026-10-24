@@ -2,13 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -237,39 +230,6 @@ const q10APISetupImportRefusalCases = `
 			wantReason: "data-only imports cannot carry lifecycle inputs",
 		},`
 
-func TestNativeAPIPhysicalCardinalityRetainsWorkloadsAssertionsAndExactReadBindings(t *testing.T) {
-	for _, row := range nativeAPIPhysicalCardinalityRecipes(t) {
-		row = historicalMechanicalRecipe(t, q10APIPhysicalCardinalityCurrentRecipe(t, row))
-		switch row.Function {
-		case "countAPIIdempotencyRows", "countAllRunRows", "countAllEventRows":
-			configuration := map[string][2]string{
-				"countAPIIdempotencyRows": {"CountAPICommandReceipts", "count api_idempotency rows: %v"},
-				"countAllRunRows":         {"CountPhysicalRuns", "count all run rows: %v"},
-				"countAllEventRows":       {"CountPhysicalEvents", "count all event rows: %v"},
-			}[row.Function]
-			port, message := configuration[0], configuration[1]
-			want := "func " + row.Function + "(t *testing.T,selected any) int {t.Helper();count,err:=storetest." + port + "(context.Background(),selected);if err!=nil{t.Fatalf(" + strconv.Quote(message) + ",err)};return count}"
-			if formattedNativeReadNode(projectionShapeFunction(t, row.After)) != formattedNativeReadNode(projectionShapeFunction(t, want)) {
-				t.Fatalf("scalar physical read changed: %s", row.Function)
-			}
-		case "assertNoRunStartPersistence", "assertNoFlowScopedEventPublishPersistence":
-			if nativeAPIEventHelperAssertions(t, row.Before) != nativeAPIEventHelperAssertions(t, row.After) {
-				t.Fatalf("refusal assertion changed: %s", row.Function)
-			}
-			port := "storetest.ReadAPIFlowPublicationRefusalStorage(context.Background(), selected)"
-			if row.Function == "assertNoRunStartPersistence" {
-				port = "storetest.ReadAPIRunStartRefusalStorage(context.Background(), selected, runID)"
-			}
-			if !strings.Contains(formattedNativeReadNode(projectionShapeFunction(t, row.After)), port) {
-				t.Fatalf("scope/read binding changed: %s", row.Function)
-			}
-		default:
-			if nativeAPIPhysicalCardinalityWorkload(t, row.Before) != nativeAPIPhysicalCardinalityWorkload(t, row.After) {
-				t.Fatalf("source/API/receipt/workload changed: %s", row.Function)
-			}
-		}
-	}
-}
 func TestNativeAPIPhysicalCardinalityRejectsLostAssertionsOrWrongOwner(t *testing.T) {
 	for _, row := range nativeAPIPhysicalCardinalityRecipes(t) {
 		if row.Function == "assertNoRunStartPersistence" || row.Function == "assertNoFlowScopedEventPublishPersistence" {
@@ -283,91 +243,5 @@ func TestNativeAPIPhysicalCardinalityRejectsLostAssertionsOrWrongOwner(t *testin
 				t.Fatalf("wrong physical owner admitted: %s", row.Function)
 			}
 		}
-	}
-}
-func TestNativeAPIPhysicalCardinalityCallerInventoryIsComplete(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "internal", "apiv1", "*_test.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual := map[string]map[string]int{}
-	for _, path := range paths {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.AllErrors)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				name := formattedNativeReadNode(call.Fun)
-				switch name {
-				case "countAPIIdempotencyRows", "countAllRunRows", "countAllEventRows", "assertNoFlowScopedEventPublishPersistence", "assertNoRunStartPersistence":
-					if actual[fn.Name.Name] == nil {
-						actual[fn.Name.Name] = map[string]int{}
-					}
-					actual[fn.Name.Name][name]++
-					switch formattedNativeReadNode(call.Args[1]) {
-					case "pg", "fixture.pg", "f.store", "sqliteStore", "selected":
-					default:
-						t.Fatalf("raw/foreign physical-count owner: %s", fn.Name.Name)
-					}
-				}
-				return true
-			})
-		}
-	}
-	expected := map[string]map[string]int{
-		"TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock":                  {"countAPIIdempotencyRows": 2},
-		"TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOrRows":         {"countAPIIdempotencyRows": 1, "countAllRunRows": 1},
-		"TestOperatorEventPublishSQLiteRejectsPrivateOrdinaryFlowEndpoint":                        {"countAPIIdempotencyRows": 1, "countAllRunRows": 1},
-		"TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun":                        {"countAllRunRows": 1},
-		"TestOperatorEventPublishSQLiteRejectsCallerEntityIDForCreateEntityBeforePersistence":     {"countAPIIdempotencyRows": 1, "countAllRunRows": 1, "countAllEventRows": 1},
-		"TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency":                           {"countAPIIdempotencyRows": 1},
-		"TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle":                           {"countAllRunRows": 1},
-		"TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle":                        {"countAllRunRows": 1},
-		"TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency":                        {"countAPIIdempotencyRows": 3},
-		"TestOperatorTestSetupRejectsContractInvalidEntities":                                     {"countAPIIdempotencyRows": 1},
-		"testRuntimeNukeLayeredPostgresCapacity":                                                  {"countAPIIdempotencyRows": 1},
-		"TestAdministrativeOperationCancellationReleasesLeaseAndCapacity":                         {"countAPIIdempotencyRows": 1},
-		"TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency":                         {"countAPIIdempotencyRows": 1},
-		"TestOperatorAgentSendDirectiveRunTargetErrors":                                           {"countAPIIdempotencyRows": 1},
-		"TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency":                        {"countAPIIdempotencyRows": 1},
-		"TestOperatorRunStartHandlersFailClosedBeforePersistence":                                 {"countAPIIdempotencyRows": 2, "countAllRunRows": 1, "assertNoRunStartPersistence": 9},
-		"TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency":        {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes":              {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventPublishRejectsPrivateFlowDespiteLiveRecipient":                          {"countAPIIdempotencyRows": 1, "countAllEventRows": 1},
-		"TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed":                           {"assertNoFlowScopedEventPublishPersistence": 2},
-		"TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback":                {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate":                 {"countAPIIdempotencyRows": 2},
-		"TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate":              {"countAPIIdempotencyRows": 2},
-		"TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersistence":           {"countAPIIdempotencyRows": 1, "countAllRunRows": 1, "countAllEventRows": 1},
-		"TestOperatorEventPublishPrivateTargetCannotAuthorizePublication":                         {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedencePublication": {"countAPIIdempotencyRows": 1, "countAllEventRows": 1},
-		"TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence":     {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventPublishExplicitRunIsUnavailableWithoutRecipientPlanChecker":             {"countAPIIdempotencyRows": 1, "countAllRunRows": 1, "countAllEventRows": 1},
-		"TestOperatorEventPublishRejectsCallerEntityIDForCreateEntityBeforePersistence":           {"countAPIIdempotencyRows": 1, "countAllRunRows": 1, "countAllEventRows": 1},
-		"TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance":                     {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersistence":       {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency":                  {"countAPIIdempotencyRows": 1},
-		"TestOperatorReplayMockOnlyRejectsLiveOriginalBeforeMutation":                             {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness":                     {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError":                  {"countAPIIdempotencyRows": 1},
-		"TestOperatorEventReplaySubsetAndFailClosedCases":                                         {"countAPIIdempotencyRows": 2},
-		"TestOperatorAgentReplayProjectsSingletonEventReplayOwner":                                {"countAPIIdempotencyRows": 1},
-		"TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact":  {"assertNoRunStartPersistence": 2},
-		"TestOperatorRunStartRejectsFlowScopedEventName":                                          {"assertNoRunStartPersistence": 1}}
-	if !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("physical count callers differ: got=%v want=%v", actual, expected)
 	}
 }

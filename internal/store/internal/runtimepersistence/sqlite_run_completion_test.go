@@ -78,6 +78,7 @@ func assertSQLiteRunCompletionStatus(t *testing.T, db *sql.DB, runID, want strin
 func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRuntimeLogs(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
 	if err := acknowledgePipelineEventFixture(ctx, store, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
@@ -115,6 +116,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	runID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
@@ -140,6 +142,7 @@ func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *
 func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	eventEntityA := uuid.NewString()
@@ -189,6 +192,7 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryActive(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
 	event := loadSQLiteDeliveryFixtureEvent(t, ctx, store.backend.ConstructionHandle(), fixture.EventID)
 	route := testEntitylessNodeDeliveryRoute("terminal-node")

@@ -20,6 +20,7 @@ import (
 func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEvents(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	runID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
@@ -83,6 +84,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	runID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})

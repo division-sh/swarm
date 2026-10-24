@@ -64,6 +64,7 @@ func TestFanOutBatchPhysicalReadCountAndScalarParityBothStores(t *testing.T) {
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx := testAuthorActivityContext()
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 129, base)
 			ids := make([]string, 129)
 			for i := range ids {
@@ -350,7 +351,9 @@ func TestFanOutBatchDeliveryMembershipHostileBothStores(t *testing.T) {
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx := testAuthorActivityContext()
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			other := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
 			event := fanOutBarrierChildEvent(t, fixture, 0, base)
 			if err := commitSemanticEventFixtureWithRoutes(ctx, owner, event, []events.DeliveryRoute{fanOutBarrierRoute("first"), fanOutBarrierRoute("second")}); err != nil {

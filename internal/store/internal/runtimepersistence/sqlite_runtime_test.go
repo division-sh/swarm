@@ -53,6 +53,7 @@ import (
 func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
@@ -248,6 +249,7 @@ func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t 
 	ctx := testAuthorActivityContext()
 	dbPath := filepath.Join(t.TempDir(), "notice-reopen.db")
 	store := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	noticeID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		FromAgent: "reviewer", Type: runtimetools.NotifyHumanMailboxItemType,
 		Priority: "normal", Status: "pending", Summary: "strong match found",
@@ -289,6 +291,7 @@ func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t 
 func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	now := time.Now().UTC()
@@ -577,6 +580,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle(t)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
@@ -1107,6 +1111,7 @@ func assertFixtureActivationVariables(t *testing.T, plan runtimepipeline.FlowIns
 func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

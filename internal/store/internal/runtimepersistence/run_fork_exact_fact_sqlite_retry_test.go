@@ -31,6 +31,7 @@ func TestRunForkExactFactsSQLiteBusyRetryGeneratedIDs(t *testing.T) {
 				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEvents, f.eventID), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), f.initialRevision+1, true)
 			})
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			defer cancel()
 			if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
 				t.Fatal(err)

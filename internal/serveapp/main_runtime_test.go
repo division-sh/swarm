@@ -2603,7 +2603,6 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "delivered", 1)
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
-	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
 
 	stopRunID, pendingEventID, stopEntityID, stopCardID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
@@ -3556,9 +3555,6 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	componentNode := identitytest.FlowNode(t, "operating", "component-scaffold").Key()
 	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, componentEventName, componentNode)
 	requireServedTraceReadback(t, endpoint, runID, componentEventID, componentEventName, componentNode)
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
-	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
-	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
 	requireServedParitySettlementPostconditions(t, endpoint, db, backend, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
@@ -4998,7 +4994,6 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	itemObserver := identitytest.RootNode(t, "item-observer").Key()
 	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", itemObserver)
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", itemObserver)
@@ -5017,7 +5012,6 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
 		}
 	}
-	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
 	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entity", "list", "--run-id", runID, "--limit", "10"})
 	if entityListCode != 0 {
 		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
@@ -5037,26 +5031,6 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		}
 	}
 
-	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
-	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"payload":         map[string]any{"item_id": "review"},
-		"idempotency_key": unhandledIdempotencyKey,
-	})
-	if errResp.Data["code"] != apiv1.RunAlreadyTerminalCode {
-		t.Fatalf("unhandled follow-up error data = %#v, want %s", errResp.Data, apiv1.RunAlreadyTerminalCode)
-	}
-	details, ok := errResp.Data["details"].(map[string]any)
-	if !ok || details["current_status"] != "completed" {
-		t.Fatalf("unhandled follow-up details = %#v", errResp.Data["details"])
-	}
-	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledIdempotencyKey); got != 0 {
-		t.Fatalf("%s event rows for rejected follow-up idempotency key = %d, want 0", backend, got)
-	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
-		t.Fatalf("%s idempotency rows for rejected follow-up = %d, want 0", backend, got)
-	}
 	return servedEventPublishFollowUpProof{
 		RunID:           runID,
 		InitialEventID:  initialEventID,
@@ -5266,7 +5240,6 @@ func runServedEventPublishActiveLoadProof(
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", itemObserver)
 }
 

@@ -61,6 +61,7 @@ func TestFanOutClaimSettlementAcknowledgedPostCommitErrorBothStores(t *testing.T
 					store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 					db, owner = store.backend.ConstructionHandle(), store
 				}
+				ctx = storeTestOriginalProcessContext(t, ctx, owner)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 2, time.Now().UTC().Truncate(time.Microsecond))
 				_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 					Owner: "fan-out-ack-proof", BundleHash: fixture.bundleHash,

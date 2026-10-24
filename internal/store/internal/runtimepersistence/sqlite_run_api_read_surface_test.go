@@ -21,6 +21,7 @@ import (
 func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
 	now := time.Unix(1700000000, 0).UTC()
 	newer := uuid.NewString()
 	older := uuid.NewString()

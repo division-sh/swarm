@@ -235,6 +235,7 @@ func TestPostgresQuiescencePreviewAndEmptySelectionRollBackInitialization(t *tes
 	t.Cleanup(cleanup)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	var before int
 	if err := db.QueryRow(`SELECT count(*) FROM author_activity_order`).Scan(&before); err != nil {
 		t.Fatal(err)

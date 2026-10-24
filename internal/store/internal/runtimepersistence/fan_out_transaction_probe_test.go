@@ -22,6 +22,7 @@ func TestFanOutGrantedActualCommitCountBothStores(t *testing.T) {
 				independent.acceptCurrentSchemaForTest()
 				sibling = independent
 			}
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 4, time.Now().UTC())
 			owner, _, grant, _ := grantedFanOutOwnerForTest(t, ctx, selected, fixture)
 			ctx = testAuthorActivityContextForBundle(fixture.bundleHash)

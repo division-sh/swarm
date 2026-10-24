@@ -14,11 +14,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
@@ -32,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/google/uuid"
 )
 
 type timerHistoryNativeOwner interface {
@@ -47,6 +50,7 @@ type timerHistoryNativeScheduleOwner interface {
 }
 
 type timerHistoryNativeFixture struct {
+	original       context.Context
 	requireCurrent func() error
 	db             *sql.DB
 	postgres       *postgresbackend.Backend
@@ -190,7 +194,6 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		t.Fatal(err)
 	}
 	bootstrap := schemastore.SchemaBootstrapRequest{PlatformPlans: plans, Origin: schemastore.RuntimeStoreOrigin{SwarmVersion: "timer-history-native-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()}}
-	setup := authoractivity.WithScope(t.Context(), authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", sourceartifactfixture.BundleHash))
 	f := &timerHistoryNativeFixture{}
 	if dialect == "postgres" {
 		_, f.db, _ = testutil.StartPostgres(t)
@@ -205,11 +208,22 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
+		lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(t.Context(), f.postgres, "swarm:runtime:shared-store-owner")
+		if err != nil || !acquired {
+			t.Fatalf("retain native statement process: acquired=%v err=%v", acquired, err)
+		}
+		t.Cleanup(func() {
+			if err := lease.Release(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		f.original = statementOriginalContext(t, false, lease.RunProcessAcquisitionOutcome)
 		f.requireCurrent = schema.RequireCurrent
 		artifacts, err := artifactstore.NewPostgres(f.postgres, schema.RequireCurrent)
 		if err != nil {
 			t.Fatal(err)
 		}
+		setup := authoractivity.WithScope(f.original, authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", sourceartifactfixture.BundleHash))
 		if _, err := artifacts.EnsureSourceArtifact(setup, sourceartifactfixture.Artifact()); err != nil {
 			t.Fatal(err)
 		}
@@ -245,11 +259,13 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
+		f.original = statementOriginalContext(t, true, f.sqlite.RunProcessAcquisitionOutcome)
 		f.requireCurrent = schema.RequireCurrent
 		artifacts, err := artifactstore.NewSQLite(f.sqlite, schema.RequireCurrent, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
+		setup := authoractivity.WithScope(f.original, authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", sourceartifactfixture.BundleHash))
 		if _, err := artifacts.EnsureSourceArtifact(setup, sourceartifactfixture.Artifact()); err != nil {
 			t.Fatal(err)
 		}
@@ -273,10 +289,32 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 func (f *timerHistoryNativeFixture) runContext(t *testing.T, runID string, at time.Time) context.Context {
 	t.Helper()
 	fact := sourceartifactfixture.Fact()
-	ctx := authoractivity.WithScope(correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID), authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
+	ctx := authoractivity.WithScope(correlation.WithRunID(correlation.WithSourceArtifactFact(f.original, fact), runID), authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
 	disposition, err := f.runs.CreateRun(ctx, runtimerunlifecycle.CreateRequest{RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: fact, StartedAt: runtimerunlifecycle.CanonicalTimestamp(at)})
 	if err != nil || disposition != runtimerunlifecycle.MutationApplied {
 		t.Fatalf("canonical native run creation: disposition=%s err=%v", disposition, err)
+	}
+	return ctx
+}
+
+func statementOriginalContext(t testing.TB, sqlite bool, acquire func(context.Context, func(context.Context, *sql.Tx) error) (bool, error)) context.Context {
+	t.Helper()
+	identity := processbinding.LeaseIdentity{LeaseID: uuid.NewString(), OwnerID: "native-statement-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend}
+	if sqlite {
+		identity.Backend = processbinding.SQLiteLeaseBackend
+	}
+	var original processbinding.LeaseStamp
+	committed, err := acquire(t.Context(), func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, identity, sqlite)
+		return err
+	})
+	if err != nil || !committed {
+		t.Fatalf("acquire original statement process: committed=%v err=%v", committed, err)
+	}
+	ctx, err := generationauthority.MutationContext(t.Context(), original, false)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return ctx
 }

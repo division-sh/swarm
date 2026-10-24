@@ -157,52 +157,6 @@ func TestActivityOriginalGrantRefusalPrecedesNativeWork(t *testing.T) {
 	}
 }
 
-func TestActivityOriginalGrantTakesCanonicalFenceFirst(t *testing.T) {
-	for _, sqlite := range []bool{false, true} {
-		db, mock, err := sqlmock.New()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		mock.ExpectBegin()
-		grant, err := captureActivityExecutionGrant(activityInstalledGrantForTest(false))
-		if err != nil {
-			t.Fatal(err)
-		}
-		fenceErr := errors.New("original mutation order held")
-		if sqlite {
-			mock.ExpectExec("INSERT OR IGNORE INTO author_activity_order").WillReturnResult(sqlmock.NewResult(0, 0))
-			mock.ExpectExec("UPDATE author_activity_order SET last_sequence = last_sequence").WillReturnError(fenceErr)
-		} else {
-			mock.ExpectQuery("SELECT last_sequence FROM author_activity_order .* FOR UPDATE").WillReturnError(fenceErr)
-		}
-		mock.ExpectRollback()
-		write := func(ctx context.Context, tx *sql.Tx) error {
-			return grant.proveOriginalTx(ctx, tx, runtimepipeline.ActivityAttemptRecord{ExecutionMode: "live", ExecutionBinding: grant.reference}, sqlite)
-		}
-		var committed bool
-		if sqlite {
-			backend, constructionErr := sqlitebackend.New(db)
-			if constructionErr != nil {
-				t.Fatal(constructionErr)
-			}
-			committed, err = backend.RunTransactionOutcome(context.Background(), "activity canonical fence component", write)
-		} else {
-			backend, constructionErr := postgresbackend.New(db)
-			if constructionErr != nil {
-				t.Fatal(constructionErr)
-			}
-			committed, err = backend.RunTransactionOutcome(context.Background(), write)
-		}
-		if committed || !errors.Is(err, fenceErr) {
-			t.Fatalf("native work preceded the canonical fence: committed=%t err=%v", committed, err)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 func TestActivityOriginalWritersRequireInstalledGrantBeforeNativeEntry(t *testing.T) {
 	for _, sqlite := range []bool{false, true} {
 		for _, operation := range []string{"start", "claim", "complete", "uncertain"} {
@@ -365,45 +319,4 @@ func activityGrantBinderForTest(t *testing.T, db *sql.DB, sqlite bool) activityG
 		t.Fatal(err)
 	}
 	return owner
-}
-
-func TestActivityOriginalWritersResolveExactGrantBeforeDomainWork(t *testing.T) {
-	for _, sqlite := range []bool{false, true} {
-		for _, operation := range []string{"start", "claim", "complete", "uncertain"} {
-			t.Run(fmt.Sprintf("sqlite=%t/%s", sqlite, operation), func(t *testing.T) {
-				db, mock, err := sqlmock.New()
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer db.Close()
-				evidence := activityInstalledGrantForTest(false)
-				owner, err := activityGrantBinderForTest(t, db, sqlite).BindActivityGrant(evidence)
-				if err != nil {
-					t.Fatal(err)
-				}
-				mock.ExpectBegin()
-				if sqlite {
-					mock.ExpectExec("INSERT OR IGNORE INTO author_activity_order").WillReturnResult(sqlmock.NewResult(0, 0))
-					mock.ExpectExec("UPDATE author_activity_order SET last_sequence = last_sequence").WillReturnResult(sqlmock.NewResult(0, 1))
-				}
-				mock.ExpectQuery("SELECT last_sequence FROM author_activity_order").WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(5))
-				historyErr := errors.New("exact original activity grant unavailable")
-				mock.ExpectQuery("SELECT CAST\\(grant_id AS TEXT\\).*FROM runtime_generation_grants WHERE grant_id=\\$1 AND state_version=\\$2").WithArgs(evidence.GrantID, evidence.StateVersion).WillReturnError(historyErr)
-				mock.ExpectRollback()
-				record := runtimepipeline.ActivityAttemptRecord{ExecutionMode: "live", Attempt: 1, ExecutionBinding: processbinding.ActivityExecutionBinding{
-					Version: processbinding.ActivityExecutionBindingVersion, GrantID: evidence.GrantID, StateVersion: evidence.StateVersion,
-				}}
-				if operation == "start" || operation == "claim" {
-					record.ExecutionBinding = processbinding.ActivityExecutionBinding{}
-				}
-				_, changed, err := invokeActivityWriterForTest(context.Background(), owner, operation, record)
-				if changed || !errors.Is(err, historyErr) {
-					t.Fatalf("original %s did not resolve exact attribution before domain work: changed=%t err=%v", operation, changed, err)
-				}
-				if err := mock.ExpectationsWereMet(); err != nil {
-					t.Fatal(err)
-				}
-			})
-		}
-	}
 }

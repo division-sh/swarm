@@ -36,6 +36,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
 				pg := admitTestPostgresStore(t, db)
+				ctx := storeTestOriginalProcessContext(t, ctx, pg)
 				requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
 					_, err := markRunTerminalStatusForTest(ctx, pg, runID, status, nil, at)
@@ -43,6 +44,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 				}
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				ctx := storeTestOriginalProcessContext(t, ctx, store)
 				db = store.backend.ConstructionHandle()
 				requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {

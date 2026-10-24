@@ -29,6 +29,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, s)
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 
@@ -427,6 +428,7 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, s)
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 	fork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{

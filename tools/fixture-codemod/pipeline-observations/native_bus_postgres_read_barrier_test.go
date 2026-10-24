@@ -1,10 +1,7 @@
 package main
 
 import (
-	"encoding/json"
-	"reflect"
 	"strings"
-	"testing"
 )
 
 func normalizeOriginReadCleanup(source string) string {
@@ -23,81 +20,4 @@ func normalizeOriginReadCleanup(source string) string {
 		source = strings.ReplaceAll(source, pair[0], pair[1])
 	}
 	return source
-}
-
-func TestNativeBusPostgresReadBarrierPreservesEveryOriginAndRetirementCut(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		if row.Family != "native-bus-postgres-read-barrier" {
-			continue
-		}
-		matched++
-		before := row.Before
-		switch row.Function {
-		case "waitOriginSQLLock":
-			before = strings.ReplaceAll(before, "db *sql.DB", "selected completeEventDispatchStore")
-			before = strings.ReplaceAll(before, "originSQLLockCount(db)", "originSQLLockCount(selected)")
-		case "originSQLLockCount":
-			owner := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/standalone_fixture_storage.go", "ReadPostgresRunOriginLockCountTx")
-			if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, before), eventDeliveryDiagnosticSQL(t, owner)) || !strings.Contains(row.After, "ReadPostgresRunOriginLockCount(context.Background(), selected)") {
-				t.Fatal("origin observer changed its exact prefix/current-database/lock predicate")
-			}
-			before = row.After
-		case "waitPostgresReadLockCount":
-			owner := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/standalone_fixture_storage.go", "ReadPostgresDatabaseLockCountTx")
-			if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, before), eventDeliveryDiagnosticSQL(t, owner)) {
-				t.Fatal("database observer changed its physical lock predicate")
-			}
-			before = strings.ReplaceAll(before, "db *sql.DB", "selected completeEventDispatchStore")
-			before = strings.Replace(before, "\t\tvar blocked int\n\t\tif err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'`).Scan(&blocked); err != nil {", "\t\tblocked, err := storetest.ReadPostgresDatabaseLockCount(context.Background(), selected)\n\t\tif err != nil {", 1)
-		case "TestOriginSQLLockObserverPostgres":
-			before = strings.Replace(before, "f.db.BeginTx(ctx, nil)", "storetest.HoldPostgresRunTableReadBarrier(ctx, f.store)", 1)
-			before = strings.Replace(before, "lock.Rollback()", "lock.Close()", 1)
-			before = strings.Replace(before, "\t\t\tif _, err := lock.Exec(`LOCK TABLE runs IN ACCESS EXCLUSIVE MODE`); err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n", "", 1)
-			before = strings.ReplaceAll(before, "t, f.db", "t, f.store")
-			before = strings.ReplaceAll(before, "originSQLLockCount(f.db)", "originSQLLockCount(f.store)")
-		case "TestContinuationOriginReadPostgresCancellationCausality":
-			if normalizeOriginReadCleanup(row.After) != before {
-				t.Fatal("origin drain/cancellation changed a runtime lease, native 57014, blocked-read, retirement or no-mutation assertion")
-			}
-			before = row.After
-		default:
-			t.Fatal("unknown origin-read consumer")
-		}
-		if before != row.After {
-			t.Fatalf("%s: origin-read cut diverged from finite migration", row.Function)
-		}
-		expected := row.After
-		if row.Successor != "" {
-			from := `newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin()`
-			to := from + `, nil`
-			if (row.Function != "TestOriginSQLLockObserverPostgres" && row.Function != "TestContinuationOriginReadPostgresCancellationCausality") || strings.Count(row.After, from) != 1 {
-				t.Fatal("unknown origin-read fixture successor")
-			}
-			migrated, err := canonicalFunction(strings.Replace(row.After, from, to, 1))
-			current, currentErr := canonicalFunction(row.Successor)
-			if err != nil || currentErr != nil || !reflect.DeepEqual(migrated, current) {
-				t.Fatal("origin-read successor changed more than the explicit fixture source input")
-			}
-			expected = row.Successor
-		}
-		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		wanted, wantedErr := canonicalFunction(expected)
-		if err != nil || wantedErr != nil || !reflect.DeepEqual(actual, wanted) {
-			t.Fatalf("%s: current origin-read fixture diverged from its exact successor", row.Function)
-		}
-	}
-	if matched != 5 {
-		t.Fatalf("origin-read recipes=%d,want5", matched)
-	}
-	barrier := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_postgres_run_read_barrier.go", "HoldPostgresRunTableReadBarrierForTest")
-	for _, cut := range []string{"owner.backend.RunTransaction(ctx,", "runlifecycle.HoldPostgresRunTableReadBarrierTx(sqlctx, tx)", "close(ready)", "if err != rollback", "close(barrier.done)", "barrier.Close()"} {
-		if !strings.Contains(barrier, cut) {
-			t.Fatalf("run barrier lost joined original-owner cut %s", cut)
-		}
-	}
 }

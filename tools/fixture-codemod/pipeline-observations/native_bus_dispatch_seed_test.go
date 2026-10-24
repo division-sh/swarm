@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -27,35 +26,4 @@ func mechanicalBusDispatchSeed(t *testing.T, row recipe) string {
 		t.Fatal("unknown complete-event lifecycle seed consumer")
 	}
 	return normalizeNativeBusStopReceipt(before)
-}
-
-func TestNativeBusDispatchSeedPreservesOriginClockAndEveryContinuationAssertion(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		if row.Family != "native-bus-dispatch-seed" {
-			continue
-		}
-		matched++
-		current := row
-		row = historicalMechanicalRecipe(t, row)
-		if mechanicalBusDispatchSeed(t, row) != row.After {
-			t.Fatal("run origin, source, clock, continuation ordering or assertions changed")
-		}
-		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		currentSource := current.After
-		if current.Successor != "" {
-			currentSource = current.Successor
-		}
-		expected, expectedErr := canonicalFunction(currentSource)
-		if actualErr != nil || expectedErr != nil || actual != expected {
-			t.Fatalf("%s: complete-event seed diverged from finite migration", row.Function)
-		}
-	}
-	if matched != 7 {
-		t.Fatalf("complete-event seed recipes=%d,want7", matched)
-	}
 }

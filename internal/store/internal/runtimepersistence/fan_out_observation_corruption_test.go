@@ -27,6 +27,7 @@ func TestFanOutGrantedCorruptHeaderNeverObservesEligibleBothStores(t *testing.T)
 				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
 				defer cancel()
 				selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx = storeTestOriginalProcessContext(t, ctx, selected)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 4, time.Now().UTC())
 				if err := acknowledgePipelineEventFixture(ctx, selected, fixture.eventID); err != nil {
 					t.Fatal(err)

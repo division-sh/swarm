@@ -999,6 +999,7 @@ func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testin
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
@@ -1026,6 +1027,7 @@ func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testin
 func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
+	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
 
 	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{

@@ -73,7 +73,9 @@ func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 
 func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
-	return worklifetime.WithOccurrence(ctx, storeTestWorkOwner(t))
+	owner := storeTestWorkOwner(t)
+	value, _ := externalStoreTestWorkFixtures.Load(t)
+	return worklifetime.WithProcess(worklifetime.WithOccurrence(ctx, owner), value.(*externalStoreTestWorkFixture).process)
 }
 
 func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {

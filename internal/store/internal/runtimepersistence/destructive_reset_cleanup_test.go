@@ -220,6 +220,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix(t *t
 			store := admitTestPostgresStore(t, db)
 			fixture := newCompletionSettlementFixture(t, store, db, false)
 			ctx := providerDrainContext(t, fixture, "destructive-reset-"+candidate.name)
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", candidate.name)
 			if candidate.drained {
 				transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)

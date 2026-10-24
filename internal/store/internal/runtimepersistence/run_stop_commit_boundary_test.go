@@ -435,6 +435,7 @@ func prepareStopRacePublications(t *testing.T, selected selectedFanOutLifecycleO
 	runtimeID := uuid.NewString()
 	ctx := runtimeauthoractivity.WithScope(testAuthorActivityContextForBundle(artifact.BundleHash()), runtimeauthoractivity.BundleScope(runtimeID, artifact.BundleHash()))
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(artifact.BundleHash()))
+	ctx = storeTestOriginalProcessContext(t, ctx, owner)
 	fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, owner, backend == "postgres", 5, time.Now().UTC(), artifact)
 	ctx = runtimecorrelation.WithRunID(ctx, fixture.runID)
 	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)

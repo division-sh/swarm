@@ -20,6 +20,7 @@ func TestFanOutGrantedGlobalReadinessIsNotOwedSuffixBothStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 64, time.Now().UTC())
 			if err := acknowledgePipelineEventFixture(ctx, selected, fixture.eventID); err != nil {
 				t.Fatal(err)
@@ -83,6 +84,7 @@ func TestFanOutGrantedGlobalReadinessIsNotOwedSuffixBothStores(t *testing.T) {
 			assertReady(true)
 			// A materialized selected binding reserves the run before any
 			// selected execution/grant exists. Ordinary serving must skip it.
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			source := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 0, time.Now().UTC(), fixture.artifact)
 			if err := acknowledgePipelineEventFixture(ctx, selected, source.eventID); err != nil {
 				t.Fatal(err)

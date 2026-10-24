@@ -24,7 +24,7 @@ func TestCanonicalEventFixtureReadbackUsesOriginalReadOwnerParity(t *testing.T) 
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.originalContext(testAuthorActivityContext())
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "fixture.readback", "gateway", "read-task", []byte("{\n  \"value\": 1.0\n}"), 2, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 10, 2, 12, 0, 0, 123456000, time.UTC))
 			if err := commitSemanticEventFixture(ctx, fixture.store.(semanticEventFixtureStore), event); err != nil {
 				t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	runID := uuid.NewString()
 	activeEntity := uuid.NewString()
 	terminalEntity := uuid.NewString()

@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -95,6 +96,10 @@ func selectedHTTPSettlementContext(t *testing.T, selected httpSettlementSelected
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
+	ctx, err = agentfixture.ProcessContext(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return runtimetools.WithActor(ctx, actor), actor
 }
 

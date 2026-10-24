@@ -628,6 +628,7 @@ func TestGenericScheduleRunStateAndGlobalAdmissionOnBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, _, ctx := tc.open(t)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			dueAt := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
 			activeCommand := testAgentGenericScheduleCommand(

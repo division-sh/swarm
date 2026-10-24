@@ -159,6 +159,7 @@ func TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStore
 				selected = admitTestPostgresStore(t, db)
 			}
 			ctx := context.Background()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			now := time.Date(2026, 8, 27, 14, 15, 0, 0, time.UTC)
 			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
@@ -237,6 +238,7 @@ func TestFailedOnboardingFenceRejectsCredentialReadmissionSelectedStoreParity(t 
 				selected = admitTestPostgresStore(t, db)
 			}
 			ctx := context.Background()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			now := time.Date(2026, 8, 30, 23, 0, 0, 0, time.UTC)
 			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
@@ -365,6 +367,7 @@ func TestChannelRebindPublicationRetiresEverySiblingActivationForInterface(t *te
 				selected = admitTestPostgresStore(t, db)
 			}
 			ctx := context.Background()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			now := time.Date(2026, 8, 27, 2, 0, 0, 0, time.UTC)
 			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
 			if err != nil {

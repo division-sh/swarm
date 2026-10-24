@@ -15,6 +15,7 @@ func TestFanOutFoldJoinRollbackAndFreshSiblingBothStores(t *testing.T) {
 			owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			selected := restarted.(storeTestDurableEventBusStore)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			first := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
 			second := seedFanOutOwnerIntent(t, ctx, db, first, 0, base)
 			if first.semanticPath > second.semanticPath {

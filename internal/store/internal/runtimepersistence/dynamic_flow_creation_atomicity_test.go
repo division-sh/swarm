@@ -34,6 +34,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -252,6 +253,11 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	runID := uuid.NewString()
 	ctx := runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(context.Background(), sourceFact), runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
 	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
+	ctx = storeTestWorkContext(t, ctx)
+	ctx, err = agentfixture.ProcessContext(t, runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundleHash := sourceFact.BundleHash()
 	fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, Artifact: bundle.SourceArtifact}
 	if sqlite {

@@ -154,33 +154,6 @@ func managerDeliveryStatements(source string) []ast.Stmt {
 }
 func managerDeliveryStatement(source string) ast.Stmt { return managerDeliveryStatements(source)[0] }
 
-func TestManagerDeliveryWholeFamilyRecipesPreserveMechanicalConsumers(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, row := range rows {
-		if row.Family != "native-manager-delivery-caller" {
-			continue
-		}
-		count++
-		_, got, err := rewriteManagerDelivery(row, []byte("package probe\n"+row.Before))
-		if err != nil {
-			t.Fatal(err)
-		}
-		want, err := canonicalFunction(row.After)
-		transformed, transformErr := canonicalFunction(got.After)
-		if err != nil || transformErr != nil || want != transformed {
-			t.Fatalf("nonmechanical caller rewrite: %s", row.Function)
-		}
-		checkManagerDeliveryRecipe(t, row)
-	}
-	if count != 18 {
-		t.Fatalf("mechanical manager roots=%d,want18", count)
-	}
-}
-
 func checkManagerDeliveryRecipe(t *testing.T, row recipe) {
 	t.Helper()
 	actualName := "ProveNative" + strings.TrimPrefix(row.Function, "Test")

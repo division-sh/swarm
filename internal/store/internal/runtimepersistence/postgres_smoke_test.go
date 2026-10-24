@@ -2,9 +2,10 @@ package runtimepersistence
 
 import (
 	"encoding/json"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"testing"
 	"time"
+
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -22,6 +23,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	pg := newTestPostgresStore(t, db)
 	const runID = "66666666-6666-6666-6666-666666666666"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	// Seed entity.
 	entityID := uuid.NewString()

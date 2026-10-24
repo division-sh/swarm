@@ -22,6 +22,7 @@ func TestDeliveryAuthorityActivationOutcomeAcknowledgesOnlyCommittedAttemptBothS
 				store = admitTestPostgresStore(t, db)
 			}
 			ctx := testAuthorActivityContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			commit, err := store.ActivateDeliveryAuthorityOutcome(ctx, runtimedelivery.ExecutionAuthority{})
 			if commit.Acknowledged || err == nil {
 				t.Fatalf("invalid authority activation = %+v, %v", commit, err)

@@ -39,7 +39,7 @@ func TestFanOutCompositeStoragePreservesTriggerKeySourceAndPhysicalCapsuleBothSt
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.originalContext(testAuthorActivityContext())
 			active, sibling := seedFanOutCompositeStorageNodeClaim(t, ctx, fixture), seedFanOutCompositeStorageNodeClaim(t, ctx, fixture)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, active, 2)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, sibling, 1)
@@ -142,7 +142,7 @@ func TestFanOutCompositeStorageRejectsInvalidOwnersOriginsAndPartialEvidenceBoth
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.originalContext(testAuthorActivityContext())
 			active := seedFanOutCompositeStorageNodeClaim(t, ctx, fixture)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, active, 2)
 			key := fanoutobligation.IntentKey{RunID: active.Claim.RunID(), TriggeringDeliveryID: active.Snapshot.DeliveryID, ElementRef: ref}

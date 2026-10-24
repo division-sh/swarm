@@ -334,6 +334,7 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 	t.Cleanup(cancel)
 	ctx = storeTestOriginalProcessContext(t, ctx, f.raw)
 	artifact, bundle := fanOutMixedRouteSource(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, f.raw)
 	f.seed = seedFanOutOwnerFixtureWithArtifact(t, ctx, f.db, f.raw, f.postgres, count, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, f.seed.bundleHash))
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, f.seed.runID), mustStoreTestSourceArtifactFact(f.seed.bundleHash))

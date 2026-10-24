@@ -23,6 +23,7 @@ func TestPostgresStore_RunConsumesCanonicalSourceArtifactIdentity(t *testing.T) 
 
 	runID := uuid.NewString()
 	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	registerTestAuthorActivityCatalogForContext(t, pg, ctx)
 	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "scan.requested", "test", "", []byte(`{}`), 0,

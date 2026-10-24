@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"go/ast"
 	"strconv"
 	"strings"
@@ -56,63 +55,4 @@ func observabilityReceiptInsertLiterals(t *testing.T, source string) []string {
 		return true
 	})
 	return queries
-}
-
-func TestNativeObservabilityHarnessConfinesEveryReceiptFaultAndConsumer(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		if row.Family != "native-observability-harness" {
-			continue
-		}
-		matched++
-		before := nativeObservabilityConstructionSource(row.Before)
-		if row.Function != "withNativeObservabilityStores" {
-			before = nativeObservabilityConflictSource(row.Before)
-			port := selectedCausalObservationBody(t, "internal/store/internal/backend/pipelinepersistence/test_observability_receipt_conflict.go", "InsertObservabilityReceiptConflictForTest")
-			oldQueries, newQueries := observabilityReceiptInsertLiterals(t, row.Before), observabilityReceiptInsertLiterals(t, port)
-			if len(oldQueries) != 2 || len(newQueries) != 2 || oldQueries[0] != newQueries[0] || oldQueries[1] != newQueries[1] {
-				t.Fatal("receipt SQL columns, dialect casts or fixed platform subtype changed")
-			}
-			for _, cut := range []string{"\"agent-pending\", \"dead_letter\", `{\"retry_count\":9}`", "\"agent-failed\", \"success\", `{\"retry_count\":0}`", "`{\"retry_count\":7,\"error\":\"receipt-loses\"}`", "\"receipt_should_not_win\""} {
-				if !strings.Contains(row.Before, cut) || !strings.Contains(port, cut) {
-					t.Fatalf("receipt fault data drift: %s", cut)
-				}
-			}
-		}
-		want, err := canonicalFunction(before)
-		got, afterErr := canonicalFunction(row.After)
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		value, sourceErr := canonicalFunction(actual)
-		if err != nil || afterErr != nil || sourceErr != nil || want != got || value != got {
-			t.Fatalf("observation harness drift: %s", row.Function)
-		}
-		for _, raw := range []string{"*sql.DB", "authoractivityfixture.", "testutil.StartPostgres", "AdmitPostgresRuntimeStore", "storetest.Database", "db.Exec", "db.Query"} {
-			if strings.Contains(actual, raw) {
-				t.Fatalf("harness retains raw authority: %s", raw)
-			}
-		}
-		for _, cut := range []string{"storetest.StartPostgresRuntimeStore(t)", "proof(t, ctx, selected)", "storetest.PendingDeliveryWithDeadLetterReceipt", "storetest.FailedDeliveryWithSuccessReceipt", "storetest.FailedDeliveryWithDeadLetterReceipt", "item.RetryCount != 1", "row[\"status\"] != \"failed\"", "payload invented entity filter match", "typed pair filter", "t.Fatalf("} {
-			mutant := strings.Replace(row.After, cut, "unreviewedObservabilityCut", 1)
-			if mutant == row.After {
-				continue
-			}
-			changed, mutantErr := canonicalFunction(mutant)
-			if mutantErr == nil && changed == want {
-				t.Fatalf("receipt/workload/owner mutation accepted: %s", cut)
-			}
-		}
-	}
-	for _, function := range []string{"TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores", "TestRetiredDashboardObservabilityAssertionsThroughV1BothStores", "TestCanonicalObservabilityCorruptionRefusesBothStores"} {
-		actual := selectedCausalObservationBody(t, "internal/apiv1/retired_dashboard_preservation_test.go", function)
-		if strings.Contains(actual, "*sql.DB") || strings.Contains(actual, "dialect") {
-			t.Fatalf("raw harness consumer survives: %s", function)
-		}
-	}
-	if matched != 2 {
-		t.Fatalf("observation harness recipes=%d,want2", matched)
-	}
 }

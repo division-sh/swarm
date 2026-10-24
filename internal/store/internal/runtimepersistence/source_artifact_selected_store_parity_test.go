@@ -199,6 +199,7 @@ func TestSourceArtifactSelectedStoreParity(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			selected, db := fixture.open(t)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 
 			first, err := selected.EnsureSourceArtifact(ctx, artifact)
 			if err != nil || !first.Created || first.Artifact.BundleHash != artifact.BundleHash() {

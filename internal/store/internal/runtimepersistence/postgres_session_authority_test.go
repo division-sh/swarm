@@ -59,6 +59,7 @@ func TestPostgresRuntimeMutationCannotReviveClosedSessionAuthority(t *testing.T)
 	_, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatalf("open session connection: %v", err)
@@ -372,6 +373,7 @@ func TestPostgresPipelineClaimUsesExactSessionAcrossCommitAndRollback(t *testing
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 
 	for _, tc := range []struct {
 		name     string
@@ -519,6 +521,7 @@ func TestPostgresPipelineClaimReleasesRetainedReferenceBeforeTransactionComplete
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	eventID := uuid.NewString()
 
 	if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
@@ -654,6 +657,7 @@ func TestPostgresAmbiguousAdvisoryAcquireDiscardsBorrowedSessionAfterTransaction
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	lockKey := "test:ambiguous-advisory-acquire:" + uuid.NewString()
 	injected := errors.New("injected result scan failure after server acquisition")
 	var discarded *postgresbackend.SessionAuthority

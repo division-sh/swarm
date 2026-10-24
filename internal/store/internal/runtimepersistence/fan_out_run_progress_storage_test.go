@@ -17,7 +17,7 @@ func TestFanOutRunProgressStoragePreservesAllIntentsAndOutcomeHistoryBothStores(
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.originalContext(testAuthorActivityContext())
 			active, sibling := seedDeliveryRecoveryClaim(t, fixture, ctx), seedDeliveryRecoveryClaim(t, fixture, ctx)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, active, 2)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, sibling, 1)
@@ -118,7 +118,7 @@ func TestFanOutRunProgressStorageRejectsInvalidOwnersAndPartialEvidenceBothStore
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.originalContext(testAuthorActivityContext())
 			active := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, active, 2)
 			for _, invalid := range []string{"", "bad", uuid.Nil.String(), "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"} {

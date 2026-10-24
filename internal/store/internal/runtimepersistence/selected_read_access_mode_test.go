@@ -137,11 +137,13 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 			if postgres {
 				_, db, _ = testutil.StartPostgres(t)
 				selected := admitTestPostgresStore(t, db)
+				ctx := storeTestOriginalProcessContext(t, ctx, selected)
 				store = selected
 				requireDefaultSourceArtifactForTest(t, ctx, selected)
 				createSelectedReadProofRun(t, ctx, selected, runID, source)
 			} else {
 				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				ctx := storeTestOriginalProcessContext(t, ctx, selected)
 				store = selected
 				db = selected.backend.ConstructionHandle()
 				requireDefaultSourceArtifactForTest(t, ctx, selected)

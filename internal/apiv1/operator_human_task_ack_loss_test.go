@@ -31,6 +31,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			fact := sourceArtifactFactForTestBundle(t, bundle)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			cardStore, humanStore, idempotency, mailbox, workflowStore := newHumanTaskAckLossOwners(t, ctx, backend)
+			ctx = apiTestOriginalProcessContext(t, ctx, cardStore)
 			principal, err := cardStore.(interface {
 				EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 			}).EnsureOperatorPrincipal(ctx, time.Now())
@@ -39,7 +40,6 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			}
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
-			ctx = apiTestOriginalProcessContext(t, ctx, cardStore)
 			storetest.RequireRun(t, ctx, cardStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 			card, continuation := newAPIHumanTaskAckLossCard(t, runID, fact.BundleHash(), now)
 			if err := humanStore.CreateHumanTaskCard(ctx, card, continuation); err != nil {
@@ -61,6 +61,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 				}),
 			})
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"ack-loss"}}`, card.CardID, card.CardContentHash)
+			bindAPITestHandlerOriginalProcess(t, handler, ctx)
 			first := rpcCall(t, handler, body)
 			if first.Error == nil {
 				t.Fatal("planted post-commit acknowledgment loss was not surfaced")

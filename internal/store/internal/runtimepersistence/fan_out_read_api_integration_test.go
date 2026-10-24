@@ -22,6 +22,7 @@ func TestFanOutReadAPILiveSelectedStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 64, time.Now().UTC())
 			process, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
 			executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 8), done: make(chan struct{})}

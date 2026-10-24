@@ -457,6 +457,7 @@ func TestManagedBlockedProviderGrantReplacementIsEvidenceOnlyBothStores(t *testi
 					}
 					defer func() { _ = work.Done() }()
 					ctx := worklifetime.WithProcess(testAuthorActivityContext(), process)
+					ctx = storeTestOriginalProcessContext(t, ctx, store)
 					ctx = worklifetime.WithOccurrence(ctx, root)
 					ctx = runtimeeffects.WithController(ctx, controller)
 					ctx = runtimedelivery.WithClaim(ctx, fixture.origin)

@@ -144,6 +144,7 @@ func TestFanOutGrantedStoreAdmissionBothStores(t *testing.T) {
 				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 				defer cancel()
 				raw, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx = storeTestOriginalProcessContext(t, ctx, raw)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, raw, postgres, 64, time.Now().UTC())
 				ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fixture.bundleHash))
 				owner, capability, grant, plan := grantedFanOutOwnerForTest(t, ctx, raw, fixture)

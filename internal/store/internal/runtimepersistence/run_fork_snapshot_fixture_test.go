@@ -21,7 +21,7 @@ func TestRunForkSnapshotFixtureUsesOriginalCoordinatorBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.originalContext(testAuthorActivityContext())
 			event := runForkSnapshotFixtureEvent(t, ctx, fixture.store)
 			before, err := ReadSemanticEventFixtureEvidenceForTest(ctx, fixture.store, event.RunID(), event.ID())
 			if err != nil {

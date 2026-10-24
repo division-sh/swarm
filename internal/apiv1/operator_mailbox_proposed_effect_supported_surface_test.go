@@ -79,6 +79,7 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			cards := persistence.(decisioncard.Store)
 			card, continuation := proposedEffectAPICard(t, runID, entityID, fact, source.WorkflowVersion())
 			fixtureCtx := testAuthorActivityContextForSource(context.Background(), fact)
+			fixtureCtx = apiTestOriginalProcessContext(t, fixtureCtx, persistence)
 			storetest.RequireRun(t, fixtureCtx, persistence.(storetest.RunFixtureStore), storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact,
 			})

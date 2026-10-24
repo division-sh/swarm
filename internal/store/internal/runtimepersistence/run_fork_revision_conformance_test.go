@@ -729,6 +729,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	agentID := "revision-session-agent"
@@ -809,6 +810,7 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	store := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	command := testAgentGenericScheduleCommand(
 		t, runID, "revision-agent", "revision-flow/instance", uuid.NewString(), "revision-task",
 		runtimegenericschedule.AbsoluteDue(time.Now().Add(time.Hour)),
