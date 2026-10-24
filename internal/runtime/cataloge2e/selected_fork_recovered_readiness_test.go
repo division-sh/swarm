@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -87,7 +88,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 					}
 					loader = sourceCleanup
 					defer func() {
-						sourceCleanup.repaired = true
+						sourceCleanup.repaired.Store(true)
 						if err := executionOwner.RetireSelectedContexts(context.Background()); err != nil {
 							t.Error(err)
 						}
@@ -125,7 +126,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 								t.Fatalf("retirement attempt %d lost source failure: %v", attempt, err)
 							}
 						}
-						sourceCleanup.repaired = true
+						sourceCleanup.repaired.Store(true)
 						if err := executionOwner.RetireSelectedContexts(context.Background()); err != nil {
 							t.Fatal(err)
 						}
@@ -173,7 +174,7 @@ type selectedRecoverySourceCleanup struct {
 	forkexecution.SelectedContractSourceLoader
 	faultAt, loads int
 	failure        error
-	repaired       bool
+	repaired       atomic.Bool
 	roots          [2]string
 }
 
@@ -187,7 +188,7 @@ func (p *selectedRecoverySourceCleanup) LoadRunForkSelectedContractSourceForRequ
 	p.roots[i] = filepath.Dir(loaded.RuntimeProjection.PrivateRoot())
 	release := loaded.Cleanup
 	loaded.Cleanup = func() error {
-		if i == p.faultAt && !p.repaired {
+		if i == p.faultAt && !p.repaired.Load() {
 			return p.failure
 		}
 		return release()
