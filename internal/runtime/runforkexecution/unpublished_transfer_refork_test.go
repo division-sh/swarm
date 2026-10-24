@@ -100,6 +100,12 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: ancestor, At: cut,
 					AllowSourceFreeze: true, Owner: parentOwner, SourceLoader: loader, ContractSelection: selection,
 					AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
+				if err == nil && result.Activation.Activated {
+					select {
+					case <-release:
+					case <-ctx.Done():
+					}
+				}
 				parentDone <- completed{result: result, err: err}
 			}()
 			var parentRun string
