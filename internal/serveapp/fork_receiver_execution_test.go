@@ -132,9 +132,6 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
 					t.Fatal(err)
 				}
-				if err := rt.Runtime.Bus.WaitForQuiescence(ctx); err != nil {
-					t.Fatal(err)
-				}
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "source-fixture-stop"})
 				sourceBefore := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
 				family, ok := selected.RunFork()
