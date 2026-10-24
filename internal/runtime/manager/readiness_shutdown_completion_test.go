@@ -19,8 +19,20 @@ import (
 	"github.com/google/uuid"
 )
 
+type readinessVerificationReadStore struct {
+	*flowActivationTestStore
+	beforeRead func(context.Context) error
+}
+
+func (s *readinessVerificationReadStore) LoadAgents(ctx context.Context) ([]PersistedAgent, error) {
+	if err := s.beforeRead(ctx); err != nil {
+		return nil, err
+	}
+	return s.flowActivationTestStore.LoadAgents(ctx)
+}
+
 func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t *testing.T) {
-	for _, mode := range []string{"after_readiness", "during_verification", "already_emitted", "cleanup_failure", "live_fenced"} {
+	for _, mode := range []string{"after_readiness", "during_verification", "already_emitted", "cleanup_failure", "live_fenced", "before_verification_read", "before_verification_read_failure"} {
 		t.Run(mode, func(t *testing.T) {
 			shutdown := mode != "after_readiness" && mode != "live_fenced"
 			autoEmit := ""
@@ -77,8 +89,24 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 			revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
-			am.testBeforeDynamicFlowAgentReadiness = func() {
-				once.Do(func() { close(entered); <-release })
+			fault := errors.New("independent durable abandonment failure")
+			if strings.HasPrefix(mode, "before_verification_read") {
+				var reads atomic.Int32
+				am.store = &readinessVerificationReadStore{flowActivationTestStore: agents, beforeRead: func(ctx context.Context) error {
+					if reads.Add(1) != 2 {
+						return nil
+					}
+					close(entered)
+					<-release
+					if mode == "before_verification_read_failure" {
+						return errors.Join(ctx.Err(), fault)
+					}
+					return ctx.Err()
+				}}
+			} else {
+				am.testBeforeDynamicFlowAgentReadiness = func() {
+					once.Do(func() { close(entered); <-release })
+				}
 			}
 			if err := am.ReconcileDynamicFlowRuntimeReadinessPlansForRun(revisedCtx, time.Now().UTC()); !errors.Is(err, errDynamicFlowRuntimeReadinessRetiring) {
 				t.Fatalf("dependent caller did not return captured predecessor retirement: %v", err)
@@ -104,7 +132,6 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 			case <-time.After(5 * time.Second):
 				t.Fatal("verification did not reach its boundary")
 			}
-			fault := errors.New("independent durable abandonment failure")
 			if mode == "cleanup_failure" {
 				var calls atomic.Int32
 				instances.retireAttempt = func() error {
@@ -140,13 +167,18 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 				shutdownErr = am.ShutdownWithOptions(ShutdownOptions{Grace: 5 * time.Second})
 			}
 			switch mode {
-			case "cleanup_failure":
+			case "cleanup_failure", "before_verification_read_failure":
 				if !errors.Is(attempt.err, fault) || !errors.Is(shutdownErr, fault) || isReadinessShutdownRefusal(attempt.err) {
 					t.Fatalf("independent failure lost: attempt=%v shutdown=%v", attempt.err, shutdownErr)
 				}
 			case "live_fenced":
 				if attempt.err == nil || shutdownErr == nil || isReadinessShutdownRefusal(attempt.err) {
 					t.Fatalf("live corruption was treated as shutdown: attempt=%v shutdown=%v", attempt.err, shutdownErr)
+				}
+			case "before_verification_read":
+				key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.InstancePath}
+				if shutdownErr != nil || !errors.Is(attempt.err, context.Canceled) || !isReadinessShutdownCompletion(attempt.err, key, attempt) {
+					t.Fatalf("owned read cancellation became terminal: attempt=%v shutdown=%v", attempt.err, shutdownErr)
 				}
 			default:
 				if shutdownErr != nil {
@@ -163,7 +195,7 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 			if err != nil || !found || !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
 				t.Fatalf("shutdown changed creation evidence: found=%t err=%v before=%+v after=%+v", found, err, before, after)
 			}
-			if mode == "cleanup_failure" || mode == "live_fenced" {
+			if mode == "cleanup_failure" || mode == "before_verification_read_failure" || mode == "live_fenced" {
 				return
 			}
 			restartBus := &flowActivationTestBus{}

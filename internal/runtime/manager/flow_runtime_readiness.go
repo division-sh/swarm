@@ -267,6 +267,15 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		}
 	}
 	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority); err != nil {
+		if am.cleanReadinessShutdownReadCancellation(ctx, err) {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+			defer cancel()
+			if cleanupErr := am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement); cleanupErr != nil {
+				return errors.Join(err, cleanupErr)
+			}
+			activationAccepted = true
+			return &readinessShutdownCancellation{cause: err, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
+		}
 		return fmt.Errorf("verify dynamic flow agents for %s: %w", readiness.InstancePath, err)
 	}
 	if eligible, err := advancePending(runtimepipeline.FlowAttachmentPlanned); err != nil {
