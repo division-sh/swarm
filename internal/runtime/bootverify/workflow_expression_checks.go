@@ -350,7 +350,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						c.entityRefFindings = append(c.entityRefFindings, Finding{
 							CheckID:  "expression_field_reference_validation",
 							Severity: SeverityHardInvalidity,
-							Message:  fmt.Sprintf("%s handler %s references entity.%s in %s but %v", nodeLabel, eventType, ref, expr.Kind, err),
+							Message:  fmt.Sprintf("%s handler %s references state.%s in %s but %v", nodeLabel, eventType, ref, expr.Kind, err),
 							Location: nodeID,
 						})
 						continue
@@ -364,7 +364,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						c.entityRefFindings = append(c.entityRefFindings, Finding{
 							CheckID:  "expression_field_reference_validation",
 							Severity: SeverityHardInvalidity,
-							Message:  fmt.Sprintf("%s handler %s query filter path entity.%s must resolve to scalar or enum leaf, got %s", nodeLabel, eventType, ref, leaf.Type),
+							Message:  fmt.Sprintf("%s handler %s query filter path state.%s must resolve to scalar or enum leaf, got %s", nodeLabel, eventType, ref, leaf.Type),
 							Location: nodeID,
 						})
 					}
@@ -376,7 +376,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 					}
 					leaf, err := wave1ResolvePlatformEntityPath(ref)
 					if err != nil {
-						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, "_entity." + ref}, "|")
+						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, "instance." + ref}, "|")
 						if _, ok := seen[key]; ok {
 							continue
 						}
@@ -384,13 +384,13 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						c.entityRefFindings = append(c.entityRefFindings, Finding{
 							CheckID:  "expression_field_reference_validation",
 							Severity: SeverityHardInvalidity,
-							Message:  fmt.Sprintf("flow %s node %s handler %s references _entity.%s in %s but %v", defaultFlowLabel(flowID), nodeID, eventType, ref, expr.Kind, err),
+							Message:  fmt.Sprintf("flow %s node %s handler %s references instance.%s in %s but %v", defaultFlowLabel(flowID), nodeID, eventType, ref, expr.Kind, err),
 							Location: nodeID,
 						})
 						continue
 					}
 					if expr.RequireScalarEntityLeaf && leaf.Kind != "scalar" && leaf.Kind != "enum" {
-						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, "_entity." + ref, leaf.Kind}, "|")
+						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, "instance." + ref, leaf.Kind}, "|")
 						if _, ok := seen[key]; ok {
 							continue
 						}
@@ -398,7 +398,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						c.entityRefFindings = append(c.entityRefFindings, Finding{
 							CheckID:  "expression_field_reference_validation",
 							Severity: SeverityHardInvalidity,
-							Message:  fmt.Sprintf("flow %s node %s handler %s query filter path _entity.%s must resolve to scalar or enum leaf, got %s", defaultFlowLabel(flowID), nodeID, eventType, ref, leaf.Type),
+							Message:  fmt.Sprintf("flow %s node %s handler %s query filter path instance.%s must resolve to scalar or enum leaf, got %s", defaultFlowLabel(flowID), nodeID, eventType, ref, leaf.Type),
 							Location: nodeID,
 						})
 					}

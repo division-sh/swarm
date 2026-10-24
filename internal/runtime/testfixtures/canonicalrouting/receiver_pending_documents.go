@@ -7,11 +7,11 @@ import "testing"
 func ActivityTerminalReplayDocuments(t testing.TB) map[string]string {
 	t.Helper()
 	return map[string]string{
-		"schema.yaml":            "name: activity-journal-proof\nstages: []\ninputs: [activity.source]\nconnect:\n  - event: activity.source\n    from: .\n    to: research\n    resolution: create\n",
-		"events.yaml":            "activity.source:\n  marker: text\n",
-		"research/schema.yaml":   "name: research\ninstance: marker\nstages: []\ninputs: [activity.source]\n",
-		"research/entities.yaml": "activity_entity:\n  marker: text\n",
-		"research/nodes.yaml":    "scanner:\n  activity.source: {}\n",
+		"schema.yaml":          "name: activity-journal-proof\nstages: []\ninputs: [activity.source]\nconnect:\n  - event: activity.source\n    from: .\n    to: research\n    resolution: create\n",
+		"events.yaml":          "activity.source:\n  marker: text\n",
+		"research/schema.yaml": "name: research\ninstance: marker\nstages: []\ninputs: [activity.source]\n",
+		"research/state.yaml":  "marker: text\n",
+		"research/nodes.yaml":  "scanner:\n  activity.source: {}\n",
 	}
 }
 
@@ -26,7 +26,7 @@ func DynamicTopologyStartupDocuments(t testing.TB, label string) map[string]stri
 		"nodes.yaml":           "orchestrator:\n  spawn.requested:\n    emit:\n      event: worker.requested\n      fields:\n        worker_id: payload.worker_id\n",
 		"worker/schema.yaml":   "name: worker\ninstance: worker_id\nstages:\n  idle: {}\ninputs: [worker.requested]\n",
 		"worker/manifest.yaml": "name: worker\nversion: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"worker/entities.yaml": "worker:\n  worker_id: text\n",
+		"worker/state.yaml":    "worker_id: text\n",
 		"worker/nodes.yaml":    "task-handler:\n  worker.requested: {}\n",
 	}
 }

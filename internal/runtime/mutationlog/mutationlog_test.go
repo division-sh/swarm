@@ -85,7 +85,7 @@ func TestReconstructEntityStateProjection_DomainNeverComesFromAuthoredPath(t *te
 	got, err := ReconstructEntityStateProjection([]ProjectionMutation{
 		{Domain: DomainLifecycleState, NewValue: "running"},
 		{Domain: DomainAuthoredField, Path: "current_state", NewValue: "business-state"},
-		{Domain: DomainAuthoredField, Path: "gates.review", NewValue: "business-gate"},
+		{Domain: DomainAuthoredField, Path: "state.review", NewValue: "business-gate"},
 		{Domain: DomainAuthoredField, Path: "accumulator.total", NewValue: 4},
 		{Domain: DomainAuthoredField, Path: "bookkeeping.activation", NewValue: "business-activation"},
 		{Domain: DomainBookkeeping, Path: "activation", NewValue: "platform-activation"},

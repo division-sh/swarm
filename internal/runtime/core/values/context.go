@@ -9,7 +9,6 @@ type Context struct {
 	Event          Bucket
 	Policy         Bucket
 	Metadata       Bucket
-	Gates          Bucket
 	Payload        Bucket
 	Accumulated    Bucket
 	FanOut         Bucket
@@ -26,7 +25,6 @@ func NewContext() Context {
 		Event:          Wrap(map[string]any{}),
 		Policy:         Wrap(map[string]any{}),
 		Metadata:       Wrap(map[string]any{}),
-		Gates:          Wrap(map[string]any{}),
 		Payload:        Wrap(map[string]any{}),
 		Accumulated:    Wrap(map[string]any{}),
 		FanOut:         Wrap(map[string]any{}),
@@ -44,7 +42,6 @@ func (c Context) Clone() Context {
 		Event:          c.Event.Clone(),
 		Policy:         c.Policy.Clone(),
 		Metadata:       c.Metadata.Clone(),
-		Gates:          c.Gates.Clone(),
 		Payload:        c.Payload.Clone(),
 		Accumulated:    c.Accumulated.Clone(),
 		FanOut:         c.FanOut.Clone(),
@@ -81,8 +78,6 @@ func (c Context) Bucket(root paths.PathRoot) Bucket {
 		return c.Policy
 	case paths.RootMetadata:
 		return c.Metadata
-	case paths.RootGates:
-		return c.Gates
 	case paths.RootPayload:
 		return c.Payload
 	case paths.RootAccumulated:

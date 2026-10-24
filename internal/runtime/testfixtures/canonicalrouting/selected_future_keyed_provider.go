@@ -31,9 +31,8 @@ connect:
 `
 	workSchema := "name: work\ninstance: work_id\nstages:\n  pending: {}\n  done: {final: true}\ninputs: [work.assigned]\noutputs: [work.finished]\n"
 
-	workEntity := `job:
-  work_id: text
-  result: text
+	workEntity := `work_id: text
+result: text
 `
 	if minted {
 		schema = `name: selected-future-minted-provider
@@ -56,8 +55,7 @@ connect:
 	}
 	for path, body := range map[string]string{
 		"schema.yaml": schema,
-		"entities.yaml": `run:
-  counter: {type: integer, initial: 0}
+		"state.yaml": `counter: 0
 `,
 		"events.yaml": `start.requested:
   work_id: text
@@ -74,10 +72,10 @@ work.assigned:
     data_accumulation:
       source_event: work.finished
       writes:
-        - {target_field: counter, value: entity.counter + 1}
+        - {target_field: counter, value: state.counter + 1}
 `,
-		"work/schema.yaml":   workSchema,
-		"work/entities.yaml": workEntity,
+		"work/schema.yaml": workSchema,
+		"work/state.yaml":  workEntity,
 		"work/events.yaml": `work.finished:
   work_id: text
   result: text

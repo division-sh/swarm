@@ -157,8 +157,8 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 		t.Fatal(err)
 	}
 	fieldSource := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, Field: strings.TrimPrefix(frozenSource.ItemsFrom, "payload.")}
-	if strings.HasPrefix(frozenSource.ItemsFrom, "entity.") {
-		fieldSource.Kind, fieldSource.Field = fanoutobligation.SourceEntityField, strings.TrimPrefix(frozenSource.ItemsFrom, "entity.")
+	if strings.HasPrefix(frozenSource.ItemsFrom, "state.") {
+		fieldSource.Kind, fieldSource.Field = fanoutobligation.SourceEntityField, strings.TrimPrefix(frozenSource.ItemsFrom, "state.")
 	}
 	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{
 		selectedFanOutHistoryFixture(t, selectedPlan, sourceRef, fieldSource, frozenSource),

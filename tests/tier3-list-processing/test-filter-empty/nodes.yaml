@@ -3,7 +3,7 @@ filter-node:
     filter:
       items_from: payload.items
       condition: item.score > 50
-      store_as: entity.filtered
+      store_as: state.filtered
     emit:
       event: items.filtered
     advances_to: done

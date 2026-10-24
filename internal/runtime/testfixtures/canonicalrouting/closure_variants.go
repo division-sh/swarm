@@ -23,10 +23,10 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 		t.Fatalf("unsupported runtime agent-memory variant %d", variant)
 	}
 
-	writeClosedVariantFile(t, root, "entities.yaml", "item:\n  item_id:\n    type: string\n    initial: ''\n    _unused_reason: startup scope fixture field\n")
+	writeClosedVariantFile(t, root, "state.yaml", "item_id: \"\"\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "name: session-scope-validation\n")
 	removeClosedVariantFiles(t, root, "events.yaml")
-	writeClosedVariantFile(t, root, "support/entities.yaml", "support_item:\n  entity_id:\n    type: string\n    initial: ''\n    _unused_reason: startup scope fixture field\n")
+	writeClosedVariantFile(t, root, "support/state.yaml", "entity_id: \"\"\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "item.created:\n  entity_id: string?\n")
 	agentBody := "backend:\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n    - item.created\n  emit_events:\n    - item.created\n"
 	if variant == RuntimeAgentMemoryDirectFlow {
@@ -193,7 +193,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 
-	writeClosedVariantFile(t, root, "entities.yaml", "ticket:\n  ticket_id: string\n")
+	writeClosedVariantFile(t, root, "state.yaml", "ticket_id: string\n")
 	inputs := "[ticket.opened]"
 	connections := "  - {event: ticket.opened, from: ., to: support}\n"
 	rootEvents := "ticket.opened:\n  entity_id: string\n"
@@ -296,8 +296,8 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 
-	removeClosedVariantFiles(t, root, "entities.yaml")
-	writeClosedVariantFile(t, root, "support/entities.yaml", "ticket: {}\n")
+	removeClosedVariantFiles(t, root, "state.yaml")
+	writeClosedVariantFile(t, root, "support/state.yaml", "")
 	inputs := []string{"ticket.opened"}
 	if settings.includeClosePath {
 		inputs = append(inputs, "ticket.closed")
@@ -347,33 +347,6 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	return root
 }
 
-func CopyVerifyStateSchemaFloat(t testing.TB) string {
-	t.Helper()
-	root := CopyExample(t, RootIngress)
-	removeInheritedScenarios(t, root)
-
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-state-schema-float\ninputs:\n  - task.assigned\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
-	removeClosedVariantFiles(t, root, "entities.yaml", "nodes.yaml", "events.yaml")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n")
-	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
-	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
-	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  task.assigned:\n    advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
-	return root
-}
-
-func CopyVerifyAccumulatorEntityProjection(t testing.TB) string {
-	t.Helper()
-	root := CopyExample(t, RootIngress)
-	removeInheritedScenarios(t, root)
-
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\nstages:\n  collecting: {}\n  complete: {final: true}\ninputs:\n  - score.dimension_complete\noutputs:\n  - score.completed\n")
-	writeClosedVariantFile(t, root, "types.yaml", "DimensionScore:\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: \"[DimensionScore]\"\n    materialize_from: scorer.dimensions_received\n")
-	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed:\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "scorer:\n  score.dimension_complete:\n    accumulate:\n      into: dimensions_received\n      from: payload\n    emit:\n      event: score.completed\n    advances_to: complete\n  state_schema:\n    fields:\n      dimensions_received: [DimensionScore]\n")
-	return root
-}
-
 type VerifyModelAliasVariant uint8
 
 const (
@@ -396,9 +369,9 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 	removeInheritedScenarios(t, root)
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-model-alias\ninputs:\n  - task.assigned\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
-	removeClosedVariantFiles(t, root, "entities.yaml", "nodes.yaml", "events.yaml")
+	removeClosedVariantFiles(t, root, "state.yaml", "nodes.yaml", "events.yaml")
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n")
-	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
+	writeClosedVariantFile(t, root, "child/state.yaml", "")
 	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  subscriptions: [task.assigned]\n", model))
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", "closer:\n  task.assigned:\n    advances_to: done\n")

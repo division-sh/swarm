@@ -24,7 +24,7 @@ func TestRetiredDataFanOutSourceRejectedAtDecodeAndCompilation(t *testing.T) {
 				}
 			}
 			_, err := bundle.ResolveFanOutEffectiveSemantics(node, "batch.ready", FanOutSpec{ItemsFrom: source, As: "row"})
-			if err == nil || !strings.Contains(err.Error(), "payload.* or entity.*") {
+			if err == nil || !strings.Contains(err.Error(), "payload.* or state.*") {
 				t.Fatalf("retired source compile error = %v", err)
 			}
 		})
@@ -59,7 +59,7 @@ func TestResolveHandlerCollectionItemTypeOwnsDirectAndIntermediateSources(t *tes
 		wantOrigin string
 	}{
 		{name: "payload", source: "payload.items", wantOrigin: "payload.items"},
-		{name: "entity", source: "entity.items", wantOrigin: "entity.items"},
+		{name: "entity", source: "state.items", wantOrigin: "state.items"},
 		{name: "query intermediate", source: "computed.queried", wantOrigin: "payload.items"},
 		{name: "filter chain", source: "computed.filtered", wantOrigin: "payload.items"},
 	}
@@ -211,7 +211,7 @@ func TestResolveHandlerCollectionPlanRejectsDuplicateAndOverlappingOutputs(t *te
 		{
 			name: "unrooted entity alias collision",
 			handler: SystemNodeEventHandler{
-				Query: &QuerySpec{Source: "payload.items", StoreAs: "entity.rows"},
+				Query: &QuerySpec{Source: "payload.items", StoreAs: "state.rows"},
 				Count: &CountSpec{ItemsFrom: "payload.items", StoreAs: "rows"},
 			},
 		},
@@ -413,19 +413,19 @@ func Test2293Q1FanOutPlansCarryOnlyPrecedingHandlerWrites(t *testing.T) {
 		name  string
 		write WorkflowDataWrite
 	}{
-		{name: "explicit direct", write: WorkflowDataWrite{TargetRef: "entity.items", Value: LiteralExpression([]any{"next"})}},
+		{name: "explicit direct", write: WorkflowDataWrite{TargetRef: "state.items", Value: LiteralExpression([]any{"next"})}},
 		{name: "implicit direct", write: WorkflowDataWrite{TargetField: "items", Value: LiteralExpression([]any{"next"})}},
-		{name: "mapped path", write: WorkflowDataWrite{TargetPathRef: "entity.items", SourceField: "replacement"}},
-		{name: "computed value", write: WorkflowDataWrite{TargetRef: "entity.items", Value: CELExpression("payload.replacement")}},
-		{name: "contained append", write: WorkflowDataWrite{Operation: WorkflowDataOperationAppend, TargetRef: "entity.items", Value: LiteralExpression("next")}},
-		{name: "nested source field", write: WorkflowDataWrite{TargetRef: "entity.items.0", Value: LiteralExpression("next")}},
-		{name: "different field", write: WorkflowDataWrite{TargetRef: "entity.other", Value: LiteralExpression([]any{"next"})}},
+		{name: "mapped path", write: WorkflowDataWrite{TargetPathRef: "state.items", SourceField: "replacement"}},
+		{name: "computed value", write: WorkflowDataWrite{TargetRef: "state.items", Value: CELExpression("payload.replacement")}},
+		{name: "contained append", write: WorkflowDataWrite{Operation: WorkflowDataOperationAppend, TargetRef: "state.items", Value: LiteralExpression("next")}},
+		{name: "nested source field", write: WorkflowDataWrite{TargetRef: "state.items.0", Value: LiteralExpression("next")}},
+		{name: "different field", write: WorkflowDataWrite{TargetRef: "state.other", Value: LiteralExpression([]any{"next"})}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fanOut := func() *FanOutSpec {
-				return &FanOutSpec{ItemsFrom: "entity.items", As: "item", Identity: "item", Emit: EmitSpec{Event: "item.requested"}}
+				return &FanOutSpec{ItemsFrom: "state.items", As: "item", Identity: "item", Emit: EmitSpec{Event: "item.requested"}}
 			}
 			selectedWrites := WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetField: "later", Value: CELExpression("fan_out.count")}}}
 			handler := SystemNodeEventHandler{

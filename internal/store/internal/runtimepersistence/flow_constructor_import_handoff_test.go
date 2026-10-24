@@ -30,15 +30,15 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			for _, empty := range []bool{false, true} {
 				t.Run(fmt.Sprintf("empty=%t", empty), func(t *testing.T) {
 					authoredFields := map[string]any{"marker": "recorded"}
-					entitySchema := "record:\n  marker: text\n"
+					entitySchema := "marker: text\n"
 					if empty {
 						authoredFields = map[string]any{}
 						entitySchema = "record:\n  marker: text?\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-						"schema.yaml":   "name: imported-history\nstages:\n  pending: {}\n",
-						"events.yaml":   "checkpoint:\n",
-						"entities.yaml": entitySchema,
+						"schema.yaml": "name: imported-history\nstages:\n  pending: {}\n",
+						"events.yaml": "checkpoint:\n",
+						"state.yaml":  entitySchema,
 					}, nil)
 					owner := f.store.(interface {
 						SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)

@@ -34,7 +34,7 @@ stages:
 inputs:
   - check.requested
 `)
-	writeClosedVariantFile(t, root, "guarded/entities.yaml", "test_entity: {}\n")
+	writeClosedVariantFile(t, root, "guarded/state.yaml", "")
 	writeClosedVariantFile(t, root, "guarded/nodes.yaml", `test-node:
   check.requested:
     rules:

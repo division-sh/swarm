@@ -45,7 +45,7 @@ func TestEntityToolLiteralMutationRetainsCollectionInputs(t *testing.T) {
 			}
 			_, hasKey := tc.input["key"]
 			_, hasIndex := tc.input["index"]
-			if mutation.Operation != tc.operation || mutation.Target != "entity."+tc.field || mutation.HasKey != hasKey || mutation.HasIndex != hasIndex ||
+			if mutation.Operation != tc.operation || mutation.Target != "state."+tc.field || mutation.HasKey != hasKey || mutation.HasIndex != hasIndex ||
 				!reflect.DeepEqual(mutation.Value, tc.input["value"]) || !reflect.DeepEqual(mutation.Key, tc.input["key"]) || !reflect.DeepEqual(mutation.Index, tc.input["index"]) {
 				t.Fatalf("literal mutation = %#v, input = %#v", mutation, tc.input)
 			}

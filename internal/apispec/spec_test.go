@@ -488,16 +488,16 @@ func TestEntityFullAccumulatedSchemaPublishesRuntimeAccumulatorState(t *testing.
 	if _, ok := accumulated["items"]; ok {
 		t.Fatalf("EntityFull.accumulated must not use array items at the map boundary: %#v", accumulated)
 	}
-	method := api.MethodCatalog["entity.get"]
+	method := api.MethodCatalog["state.get"]
 	if method.Result == nil {
-		t.Fatal("entity.get missing result descriptor")
+		t.Fatal("state.get missing result descriptor")
 	}
 	resultSchema, ok := method.Result.Schema.(map[string]any)
 	if !ok {
-		t.Fatalf("entity.get result schema = %#v, want object", method.Result.Schema)
+		t.Fatalf("state.get result schema = %#v, want object", method.Result.Schema)
 	}
 	if got, want := resultSchema["$ref"], "#/components/schemas/EntityFull"; got != want {
-		t.Fatalf("entity.get result ref = %#v, want %q", got, want)
+		t.Fatalf("state.get result ref = %#v, want %q", got, want)
 	}
 
 	generated, err := GenerateOpenRPC(api)

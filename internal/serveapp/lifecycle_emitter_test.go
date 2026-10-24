@@ -73,7 +73,7 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 				t.Fatal("connected consumer reused producer entity")
 			}
 			var received operatorread.OperatorEntityFull
-			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": started.RunID, "entity_id": receipt}, &received)
+			requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": started.RunID, "entity_id": receipt}, &received)
 			if received.Fields["revision_id"] != closed.RevisionID {
 				t.Fatalf("escape result=%#v, loop=%#v", received, closed)
 			}
@@ -90,7 +90,7 @@ func readLifecycleLoop(t *testing.T, rt servedControlProofRuntime, runID, entity
 func readLifecycleLoopFromEndpoint(t *testing.T, endpoint, runID, entityID string) loopruntime.PublicActivation {
 	t.Helper()
 	var result operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &result)
+	requireServedJSONRPCResult(t, endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": entityID}, &result)
 	if len(result.Loops) != 1 {
 		t.Fatalf("expected one public loop: %#v", result)
 	}
@@ -141,7 +141,7 @@ func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 						t.Fatal(err)
 					}
 					var entity operatorread.OperatorEntityFull
-					requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"entity_id": entityID, "run_id": started.RunID}, &entity)
+					requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"entity_id": entityID, "run_id": started.RunID}, &entity)
 					if entity.Fields["result"] != tc.result {
 						t.Fatalf("public fields=%#v, stored=%s", entity.Fields, fields)
 					}

@@ -1,7 +1,7 @@
 router:
   validate.requested:
-    guard: _entity.id != ""
+    guard: instance.id != ""
     emit: child/validate.start
   validation.done:
-    guard: _entity.gates['child/g_validated'] == true
+    guard: instance.gates['child/g_validated'] == true
     advances_to: done

@@ -32,9 +32,9 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml":           "name: q10-readback\nstages:\n  unknown: {}\n  done:\n    final: true\n",
-				"entities.yaml":         "record:\n  marker: text?\n  current_state: text?\n",
+				"state.yaml":            "marker: text?\ncurrent_state: text?\n",
 				"nostage/schema.yaml":   "name: nostage\n",
-				"nostage/entities.yaml": "record:\n  marker: text?\n  current_state: text?\n  score: integer?\n",
+				"nostage/state.yaml":    "marker: text?\ncurrent_state: text?\nscore: integer?\n",
 				"fieldless/schema.yaml": "name: fieldless\n",
 			}, nil)
 			runID, importID := uuid.NewString(), uuid.NewString()
@@ -186,7 +186,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				}
 				return response.Result
 			}
-			importWire := readRPC("entity.get", map[string]any{"run_id": runID, "entity_id": importID})
+			importWire := readRPC("state.get", map[string]any{"run_id": runID, "entity_id": importID})
 			var summaryWire map[string]json.RawMessage
 			if err := json.Unmarshal(importWire["entity"], &summaryWire); err != nil {
 				t.Fatal(err)
@@ -201,7 +201,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 					t.Fatalf("public imported %s must be an explicit null: %s", key, importWire[key])
 				}
 			}
-			aggregateWire := readRPC("entity.aggregate", map[string]any{"run_id": runID, "group_by": "current_state"})
+			aggregateWire := readRPC("state.aggregate", map[string]any{"run_id": runID, "group_by": "current_state"})
 			if string(aggregateWire["absent_count"]) != "2" || string(aggregateWire["counts"]) != `{"unknown":1}` {
 				t.Fatalf("public stage aggregate fabricated an absence bucket: %v", aggregateWire)
 			}
@@ -245,7 +245,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 			}{
 				{"real stage does not select absent metadata", entityquery.Predicate{Field: "current_state", Op: "==", Value: "unknown"}, 0},
 				{"absent stage differs from real stage", entityquery.Predicate{Field: "workflow_state", Op: "!=", Value: "unknown"}, 2},
-				{"declared same-name field is not metadata", entityquery.Predicate{Field: "entity.current_state", Op: "==", Value: "business-import"}, 1},
+				{"declared same-name field is not metadata", entityquery.Predicate{Field: "state.current_state", Op: "==", Value: "business-import"}, 1},
 				{"numeric fields retain numeric comparison", entityquery.Predicate{Field: "score", Op: ">", Value: int64(2)}, 1},
 			} {
 				t.Run(tc.name, func(t *testing.T) {

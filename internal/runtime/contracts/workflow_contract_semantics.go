@@ -187,8 +187,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 				Guard:            handler.Guard,
 				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 				Terminate:        handler.Terminate,
-				SetsGate:         handler.SetsGate,
-				ClearGates:       handler.ClearGates,
 				DataAccumulation: handler.DataAccumulation,
 				Emit:             cloneEmitSpec(handler.Emit),
 				OnSuccess:        HandlerOnSuccessSpec{Emit: cloneEmitSpec(handler.OnSuccess.Emit)},

@@ -42,10 +42,10 @@ func entityExpressionAccessesAtStage(expression string, initialFacts workflowPre
 			return
 		}
 		if !shadowed {
-			if expr.Kind() == celast.IdentKind && expr.AsIdent() == "entity" {
+			if expr.Kind() == celast.IdentKind && expr.AsIdent() == "state" {
 				accesses = append(accesses, entityExpressionAccess{})
 			}
-			if path, ok := workflowSelectionPath(expr); ok && strings.HasPrefix(path, "entity.") {
+			if path, ok := workflowSelectionPath(expr); ok && strings.HasPrefix(path, "state.") {
 				required := true
 				if expr.Kind() == celast.SelectKind && expr.AsSelect().IsTestOnly() {
 					required = false
@@ -56,7 +56,7 @@ func entityExpressionAccessesAtStage(expression string, initialFacts workflowPre
 				if _, present := facts[path]; present {
 					required = false
 				}
-				accesses = append(accesses, entityExpressionAccess{strings.TrimPrefix(path, "entity."), required})
+				accesses = append(accesses, entityExpressionAccess{strings.TrimPrefix(path, "state."), required})
 			}
 		}
 		a := workflowOptionalReadAnalyzer{}
@@ -99,10 +99,10 @@ func entityExpressionAccessesAtStage(expression string, initialFacts workflowPre
 			visit(c.IterRange(), facts, shadowed)
 			visit(c.AccuInit(), facts, shadowed)
 			bodyFacts := withoutWorkflowShadowedFacts(facts, c.IterVar(), c.IterVar2(), c.AccuVar())
-			bodyShadow := shadowed || c.IterVar() == "entity" || c.IterVar2() == "entity" || c.AccuVar() == "entity"
+			bodyShadow := shadowed || c.IterVar() == "state" || c.IterVar2() == "state" || c.AccuVar() == "state"
 			visit(c.LoopCondition(), bodyFacts, bodyShadow)
 			visit(c.LoopStep(), bodyFacts, bodyShadow)
-			visit(c.Result(), withoutWorkflowShadowedFacts(facts, c.AccuVar()), shadowed || c.AccuVar() == "entity")
+			visit(c.Result(), withoutWorkflowShadowedFacts(facts, c.AccuVar()), shadowed || c.AccuVar() == "state")
 		case celast.ListKind:
 			for _, e := range expr.AsList().Elements() {
 				visit(e, facts, shadowed)
@@ -204,7 +204,7 @@ func missingEntityReferencesForAccesses(accesses []entityExpressionAccess, entit
 			continue
 		}
 		if _, ok := lookupPath(entity, access.path); !ok {
-			missing["entity."+access.path] = struct{}{}
+			missing["state."+access.path] = struct{}{}
 		}
 	}
 	out := make([]string, 0, len(missing))

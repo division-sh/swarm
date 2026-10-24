@@ -82,7 +82,7 @@ func conversationForkProjectionStatements(fixture ConversationForkSourceFixture,
 		keptAt, removedAt := fixture.Turn1At.Add(-20*time.Second), fixture.Turn1At.Add(-25*time.Second)
 		mutations = append(mutations,
 			mutation{mutationlog.DomainAuthoredField, "current_state", nil, `"business-draft"`, keptAt},
-			mutation{mutationlog.DomainAuthoredField, "gates.review", nil, `"authored-review"`, keptAt},
+			mutation{mutationlog.DomainAuthoredField, "state.review", nil, `"authored-review"`, keptAt},
 			mutation{mutationlog.DomainAuthoredField, "accumulator.total", nil, `"authored-total"`, keptAt},
 			mutation{mutationlog.DomainAuthoredField, "bookkeeping.activation", nil, `"manual"`, keptAt},
 			mutation{mutationlog.DomainAuthoredField, "removed", nil, `"temporary"`, removedAt},

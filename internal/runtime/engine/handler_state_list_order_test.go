@@ -24,7 +24,7 @@ func Test2293Q1HandlerSelectionSeesUnconditionalWrites(t *testing.T) {
 				}, runtimecontracts.EventCatalogEntry{}),
 				StateRepo: sparseSnapshotRepo{snapshot: state}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{},
 			}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
-				`entity.branch_target == "handler"`: func(base BaseContext) (bool, error) {
+				`state.branch_target == "handler"`: func(base BaseContext) (bool, error) {
 					return base.Entity.Raw()["branch_target"] == "handler", nil
 				},
 			}})
@@ -37,7 +37,7 @@ func Test2293Q1HandlerSelectionSeesUnconditionalWrites(t *testing.T) {
 				}},
 			}
 			rules := []runtimecontracts.HandlerRuleEntry{{
-				Condition: `entity.branch_target == "handler"`,
+				Condition: `state.branch_target == "handler"`,
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 					{TargetField: "selected", Value: runtimecontracts.LiteralExpression(true)},
 				}},
@@ -128,14 +128,14 @@ func Test2293Q1AssignmentFollowsHandlerOrder(t *testing.T) {
 	analysis := &EntityAssignmentAnalysis{source: source, entity: *entity}
 	node := testRootExecutableNode(t, "node-1")
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Query: &runtimecontracts.QuerySpec{StoreAs: "entity.derived"},
+		Query: &runtimecontracts.QuerySpec{StoreAs: "state.derived"},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 			{TargetField: "written", Value: runtimecontracts.LiteralExpression(true)},
 		}},
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: "entity.written",
+			Condition: "state.written",
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "selected", Value: runtimecontracts.RefExpression("entity.written")},
+				{TargetField: "selected", Value: runtimecontracts.RefExpression("state.written")},
 			}},
 		}},
 	}

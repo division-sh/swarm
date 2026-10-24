@@ -197,8 +197,6 @@ func ValidateJoinHandlerIsolation(handler SystemNodeEventHandler) error {
 	add("on_complete", len(handler.OnComplete) > 0)
 	add("accumulate", handler.Accumulate != nil)
 	add("advances_to", strings.TrimSpace(handler.AdvancesTo) != "")
-	add("sets_gate", handler.SetsGate != nil)
-	add("clear_gates", len(handler.ClearGates) > 0)
 	add("data_accumulation", handler.DataAccumulation.HasWrites())
 	add("emit", !handler.Emit.Empty())
 	add("on_success", !handler.OnSuccess.Empty())

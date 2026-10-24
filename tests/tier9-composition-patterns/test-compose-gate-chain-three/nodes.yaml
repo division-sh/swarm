@@ -7,11 +7,11 @@ pipeline:
     sets_gate: g_a
     advances_to: stage_a
   step.b_done:
-    guard: _entity.gates.g_a == true
+    guard: state.g_a == true
     sets_gate: g_b
     advances_to: stage_b
   step.c_done:
-    guard: _entity.gates.g_b == true
+    guard: state.g_b == true
     sets_gate: g_c
     advances_to: released
     emit:

@@ -112,10 +112,10 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 			tailAccounted = true
 			return nil
 		})
-		if err == nil && !inspection.Fresh && len(inspection.MissingStateTables) != 0 {
+		if err == nil && !inspection.Fresh && len(inspection.MissingDeploymentTables) != 0 {
 			result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
 				ID: "store_schema_preparation", Owner: "internal/store.SchemaBootstrapper.BootstrapSchema", Subject: subject,
-				Reason: "boot must prepare missing generated state tables: " + strings.Join(inspection.MissingStateTables, ", ") + "; verification never creates tables",
+				Reason: "boot must prepare missing deployment registration tables: " + strings.Join(inspection.MissingDeploymentTables, ", ") + "; verification never creates tables",
 			})
 		}
 		return err
@@ -174,7 +174,7 @@ func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, path
 	if err != nil {
 		return request, store.SchemaBootstrapRequest{}, err
 	}
-	schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+	schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform)
 	return request, schema, err
 }
 

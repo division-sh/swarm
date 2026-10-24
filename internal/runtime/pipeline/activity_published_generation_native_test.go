@@ -36,9 +36,9 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 			}))
 			defer server.Close()
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: published-read-accounting\nstages:\n  review: {}\n  drafting: {}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n",
-				"entities.yaml": "work: {}\n",
-				"events.yaml":   "read.requested:\n  revision_id: text\n",
+				"schema.yaml": "name: published-read-accounting\nstages:\n  review: {}\n  drafting: {}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n",
+
+				"events.yaml": "read.requested:\n  revision_id: text\n",
 				"nodes.yaml": `reader:
   read.requested:
     loop: {admit: revision, from: review}

@@ -27,7 +27,7 @@ func (e *Executor) validateSourceStage(flowID, stage string) error {
 // lifecycle projections before the selected-store mutation acquires effects.
 func (m EngineMutation) ValidateTransitionEvidence() error {
 	if preserved := m.PreserveConstructedState; preserved != nil {
-		if m.State.Transition != nil || m.State.NextState != "" || m.State.SetGate != "" || len(m.State.ClearGates) != 0 ||
+		if m.State.Transition != nil || m.State.NextState != "" ||
 			m.State.DataAccumulation.HasWrites() || m.State.DataAccumulation.SourceEvent != "" ||
 			len(m.EmitIntents) != 0 || len(m.ActivityIntents) != 0 || len(m.EmitPrerequisites.Fields) != 0 ||
 			len(m.FanOutIntents) != 0 || m.FanOutBarrier != nil || m.FanOutBarrierCompletion != nil {

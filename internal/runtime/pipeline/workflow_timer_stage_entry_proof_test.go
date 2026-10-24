@@ -56,8 +56,8 @@ stages:
     timers:
       - {after: %s, %s}
 `, delay, left, delay, right),
-		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "enter.s1:\nenter.s2:\nnote:\nobserved:\n",
+		"state.yaml":  "marker: text\n",
+		"events.yaml": "enter.s1:\nenter.s2:\nnote:\nobserved:\n",
 		"nodes.yaml": `router:
   enter.s1: {advances_to: s1}
   enter.s2: {advances_to: s2}
@@ -84,7 +84,7 @@ stages:
 		files["events.yaml"] = "enter.s1:\nnote:\nobserved:\n"
 		files["producer/schema.yaml"] = "name: producer\npins:\n  outputs: [" + event + "]\n"
 		files["producer/events.yaml"] = event + ":\n"
-		files["producer/entities.yaml"] = "test_entity: {}\n"
+		files["producer/state.yaml"] = "test_entity: {}\n"
 	}
 	bundle := loadWorkflowTempBundle(t, files)
 	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)

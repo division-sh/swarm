@@ -17,7 +17,7 @@ func a2DeadlineHandler(t *testing.T) (identity.ExecutableNode, c.SystemNodeEvent
 		Stage: "waiting", Members: c.JoinMembersSpec{Count: &count, By: "payload.member"}, Output: "payload.result",
 		Deadline:        &c.JoinDeadlineSpec{After: "1h", From: c.JoinDeadlineFromStageEntry},
 		OnCompleteFound: true, OnComplete: c.HandlerRuleEntry{AdvancesTo: "completed"},
-		OnDeadlineFound: true, OnDeadline: c.HandlerRuleEntry{AdvancesTo: "expired", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetRef: "entity.expired", Value: c.LiteralExpression(true)}}}},
+		OnDeadlineFound: true, OnDeadline: c.HandlerRuleEntry{AdvancesTo: "expired", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetRef: "state.expired", Value: c.LiteralExpression(true)}}}},
 	}})
 	if err != nil {
 		t.Fatal(err)

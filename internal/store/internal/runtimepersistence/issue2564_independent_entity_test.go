@@ -77,7 +77,7 @@ func TestIssue2564M28OneEntityFenceDoesNotBlockIndependentEntityBothStores(t *te
 			firstDone := make(chan outcome, 1)
 			joined := false
 			go func() {
-				result, err := writer.ApplyEntityFieldMutation(ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "first"}))
+				result, err := writer.ApplyEntityFieldMutation(ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "first"}))
 				firstDone <- outcome{result, err}
 			}()
 			defer func() {
@@ -95,7 +95,7 @@ func TestIssue2564M28OneEntityFenceDoesNotBlockIndependentEntityBothStores(t *te
 			case <-ctx.Done():
 				t.Fatal("first entity did not reach its locked evaluation")
 			}
-			command := f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "second"})
+			command := f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "second"})
 			command.Owner, command.EntityID = second.State.Identity, second.State.EntityID
 			result, err := writer.ApplyEntityFieldMutation(ctx, command)
 			if err != nil || !result.Acknowledged || result.Revision != 2 {

@@ -158,7 +158,7 @@ func TestA9KeyedIngressCommitResponseRecoveryBothStores(t *testing.T) {
 					t.Fatalf("recovery replaced original construction: %+v -> %+v", initial, current)
 				}
 				var entity operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, restarted.Endpoint, "entity.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
+				requireServedJSONRPCResult(t, restarted.Endpoint, "state.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
 				if entity.Fields["processed_count"] != float64(1) || entity.Fields["creation_count"] != float64(1) {
 					t.Fatalf("recovery did not settle exactly once: %+v", entity)
 				}

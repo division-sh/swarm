@@ -141,7 +141,7 @@ func (c *DeploymentChannelControl) bootstrapRegistrationSchema(ctx context.Conte
 	if err != nil {
 		return err
 	}
-	schema, err := SchemaBootstrapRequest(spec, plans, nil)
+	schema, err := SchemaBootstrapRequest(spec, plans)
 	if err != nil {
 		return err
 	}

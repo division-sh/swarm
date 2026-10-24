@@ -47,7 +47,7 @@ func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryCont
 	handler, err := rc.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", rc.SystemNodeEventHandler{FanOut: &rc.FanOutSpec{
 		ItemsFrom: "payload.items", As: "row", Identity: "string(row)",
 		Emit: rc.EmitSpec{Event: "item.ready", Fields: map[string]rc.ExpressionValue{
-			"value": rc.CELExpression("row + entity.offset"), "index": rc.CELExpression("fan_out.index"), "count": rc.CELExpression("fan_out.count"),
+			"value": rc.CELExpression("row + state.offset"), "index": rc.CELExpression("fan_out.index"), "count": rc.CELExpression("fan_out.count"),
 		}},
 	}})
 	if err != nil {

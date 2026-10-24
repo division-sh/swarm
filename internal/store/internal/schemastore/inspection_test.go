@@ -24,9 +24,7 @@ func TestSchemaInspectionSharesBootDecisionWithoutPreparation(t *testing.T) {
 			}
 			request := SchemaBootstrapRequest{PlatformPlans: plans, Origin: RuntimeStoreOrigin{
 				SwarmVersion: "inspection-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC(),
-			}, StatePlans: []SchemaTableDDL{{TableName: "inspection_state", SchemaKind: "state_schema", Statements: []string{
-				`CREATE TABLE IF NOT EXISTS inspection_state (id TEXT PRIMARY KEY, value BIGINT NOT NULL)`,
-			}}}}
+			}}
 			var db *sql.DB
 			var inspect func(context.Context, SchemaBootstrapRequest) (SchemaInspection, error)
 			var bootstrap func(context.Context, SchemaBootstrapRequest) error
@@ -55,7 +53,7 @@ func TestSchemaInspectionSharesBootDecisionWithoutPreparation(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err := inspect(ctx, request)
-			if err != nil || !result.Fresh || !reflect.DeepEqual(result.MissingStateTables, []string{"deployment_channel_operations", "inspection_state"}) {
+			if err != nil || !result.Fresh || !reflect.DeepEqual(result.MissingDeploymentTables, []string{"deployment_channel_operations"}) {
 				t.Fatalf("fresh preparation decision = %+v, %v", result, err)
 			}
 			after, err := listTables(ctx, db)
@@ -63,7 +61,7 @@ func TestSchemaInspectionSharesBootDecisionWithoutPreparation(t *testing.T) {
 				t.Fatalf("fresh inspection changed tables: before=%v after=%v err=%v", before, after, err)
 			}
 			platformOnly := request
-			platformOnly.StatePlans = nil
+
 			platformOnly.PlatformPlans = nil
 			for _, plan := range plans {
 				if plan.TableName != "deployment_channel_operations" {
@@ -74,20 +72,20 @@ func TestSchemaInspectionSharesBootDecisionWithoutPreparation(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err = inspect(ctx, request)
-			if err != nil || result.Fresh || result.Origin == nil || !reflect.DeepEqual(result.MissingStateTables, []string{"deployment_channel_operations", "inspection_state"}) {
+			if err != nil || result.Fresh || result.Origin == nil || !reflect.DeepEqual(result.MissingDeploymentTables, []string{"deployment_channel_operations"}) {
 				t.Fatalf("compatible platform with missing generated table = %+v, %v", result, err)
 			}
 			originalOrigin := *result.Origin
 			if tables, err := listTables(ctx, db); err != nil {
 				t.Fatal(err)
-			} else if _, exists := tables["inspection_state"]; exists {
-				t.Fatal("inspection created a generated state table")
+			} else if _, exists := tables["deployment_channel_operations"]; exists {
+				t.Fatal("inspection created the deployment registration table")
 			}
 			if err := bootstrap(ctx, request); err != nil {
 				t.Fatal(err)
 			}
 			result, err = inspect(ctx, request)
-			if err != nil || result.Fresh || len(result.MissingStateTables) != 0 {
+			if err != nil || result.Fresh || len(result.MissingDeploymentTables) != 0 {
 				t.Fatalf("prepared schema = %+v, %v", result, err)
 			}
 			if result.Origin == nil || *result.Origin != originalOrigin {
@@ -99,12 +97,6 @@ func TestSchemaInspectionSharesBootDecisionWithoutPreparation(t *testing.T) {
 			var registrationDrift *SchemaCompatibilityError
 			if err := bootstrap(ctx, request); !errors.As(err, &registrationDrift) {
 				t.Fatalf("existing registration-table drift was not refused: %v", err)
-			}
-			if _, err := db.ExecContext(ctx, `ALTER TABLE deployment_channel_operations DROP COLUMN unexpected`); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.ExecContext(ctx, `ALTER TABLE inspection_state ADD COLUMN unexpected TEXT`); err != nil {
-				t.Fatal(err)
 			}
 			_, inspectionErr := inspect(ctx, request)
 			bootErr := bootstrap(ctx, request)

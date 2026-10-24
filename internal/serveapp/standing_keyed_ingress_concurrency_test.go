@@ -211,7 +211,7 @@ func TestA9ConcurrentKeyedIngressElectionBothStores(t *testing.T) {
 							continue
 						}
 						var entity operatorread.OperatorEntityFull
-						requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": instance.EntityID}, &entity)
+						requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": instance.EntityID}, &entity)
 						want := float64(2)
 						if distinct && instance.WorkflowName == "parent/middle/leaf" {
 							want = 1
@@ -225,7 +225,7 @@ func TestA9ConcurrentKeyedIngressElectionBothStores(t *testing.T) {
 								t.Fatalf("elected parent creation publication repeated or missing: %+v entity=%+v", created, entity)
 							}
 							a9RequireIngressDeliveries(t, served.Endpoint, created[0].EventID, 1)
-							requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": instance.EntityID}, &entity)
+							requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": instance.EntityID}, &entity)
 							if entity.Fields["creation_count"] != float64(1) {
 								t.Fatalf("creation handler repeated or missing: %+v", entity)
 							}
@@ -460,7 +460,7 @@ func TestA9ConcurrentKeyedRootPreservesCreationBothStores(t *testing.T) {
 				}
 				a9RequireRootIngressSettlement(t, served.Endpoint, runID, created[0].EventID)
 				var entity operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &entity)
+				requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": runID}, &entity)
 				if entity.Fields["processed_count"] != float64(2) || entity.Fields["creation_count"] != float64(1) {
 					t.Fatalf("root work repeated or lost=%+v", entity)
 				}

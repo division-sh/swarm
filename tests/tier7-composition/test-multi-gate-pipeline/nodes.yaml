@@ -24,7 +24,7 @@ gate-setter-3:
 
 approval-node:
   approval.requested:
-    guard: _entity.gates.g1 == true && _entity.gates.g2 == true && _entity.gates.g3 == true
+    guard: state.g1 == true && state.g2 == true && state.g3 == true
     advances_to: approved
     emit:
       event: approval.granted

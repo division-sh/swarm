@@ -96,7 +96,7 @@ VALUES ('mailbox.decide','old-token','key','hash','card','{"original":true}','20
 						t.Fatal(err)
 					}
 				}
-				current.StatePlans = generatedProbeStatePlans()
+
 				var incompatible *SchemaCompatibilityError
 				if err := bootstrap(ctx, current); !errors.As(err, &incompatible) {
 					t.Fatalf("old actor schema admission = %v", err)

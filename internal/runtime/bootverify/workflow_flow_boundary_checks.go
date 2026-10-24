@@ -303,9 +303,7 @@ func bootverifyHandlerUsesCanonicalEntity(source semanticview.Source, node runti
 }
 
 func bootverifyHandlerMutatesEntityLifecycle(handler runtimecontracts.SystemNodeEventHandler) bool {
-	if strings.TrimSpace(handler.AdvancesTo) != "" ||
-		gateNameLocal(handler.SetsGate) != "" ||
-		len(handler.ClearGates) > 0 {
+	if strings.TrimSpace(handler.AdvancesTo) != "" {
 		return true
 	}
 	for _, rule := range handler.Rules {
@@ -406,8 +404,8 @@ func bootverifyAccumulateReferencesEntity(spec *runtimecontracts.AccumulateSpec)
 	if spec == nil {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(spec.From), "entity.") ||
-		strings.HasPrefix(strings.TrimSpace(spec.Key), "entity.")
+	return strings.HasPrefix(strings.TrimSpace(spec.From), "state.") ||
+		strings.HasPrefix(strings.TrimSpace(spec.Key), "state.")
 }
 
 func bootverifyNormalizeEntityWriteTarget(target string) string {

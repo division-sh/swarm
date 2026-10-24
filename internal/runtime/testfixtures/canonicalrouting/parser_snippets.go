@@ -140,13 +140,13 @@ inputs:
     - event: check.requested
       source: harness
   reads:
-    - entity.score
+    - state.score
 outputs:
   events:
     - event: check.passed
       sink: harness
   writes:
-    - entity.status
+    - state.status
 `)
 }
 
@@ -271,7 +271,7 @@ func RetiredReceiverRoutingParserSnippet(t testing.TB, id RetiredReceiverRouting
 	case RetiredInputAddressMalformed:
 		source = "name: retired-address\ninputs: [{event: work.requested, address: unsupported}]\n"
 	case RetiredInputAddressPopulated:
-		source = "name: retired-address\ninputs: [{event: work.requested, address: {by: work_id, source: payload.work_id, target: entity.work_id}}]\n"
+		source = "name: retired-address\ninputs: [{event: work.requested, address: {by: work_id, source: payload.work_id, target: state.work_id}}]\n"
 	case RetiredInputAddressMixed:
 		source = "name: retired-address\ninputs: [{event: work.requested, address: {by: work_id, resolution: {mode: select}}}]\n"
 	case RetiredInputAddressUnsupportedNested:
@@ -281,7 +281,7 @@ func RetiredReceiverRoutingParserSnippet(t testing.TB, id RetiredReceiverRouting
 	case RetiredConnectMapMalformed:
 		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: unsupported}]\n"
 	case RetiredConnectMapPopulated:
-		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id, target: entity.work_id}}}]\n"
+		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id, target: state.work_id}}}]\n"
 	case RetiredConnectMapMixed:
 		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id}, resolution: {mode: select}}}]\n"
 	case RetiredConnectUsingEmpty:

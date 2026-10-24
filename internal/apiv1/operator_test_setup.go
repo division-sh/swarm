@@ -260,7 +260,7 @@ func testSetupGatesParam(entity map[string]any, i int) (map[string]bool, error) 
 	for name, rawValue := range gates {
 		value, ok := rawValue.(bool)
 		if !ok {
-			return nil, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].gates.%s", i, name), "reason": "must be boolean"})
+			return nil, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].state.%s", i, name), "reason": "must be boolean"})
 		}
 		out[name] = value
 	}
@@ -344,6 +344,13 @@ func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContr
 	return nil
 }
 
+func validateTestSetupGatesAgainstBundle(_ *runtimecontracts.WorkflowContractBundle, _ string, gates map[string]bool, fieldPrefix string) error {
+	if len(gates) != 0 {
+		return NewInvalidParamsError(map[string]any{"field": fieldPrefix + ".gates", "reason": "gates is retired; set declared boolean state in fields"})
+	}
+	return nil
+}
+
 func validateTestSetupFieldsAgainstBundle(flowID string, primary runtimecontracts.PrimaryEntityContract, fields map[string]any, fieldPrefix string) error {
 	contract := entityruntime.Contract{
 		FlowID:     strings.Trim(strings.TrimSpace(flowID), "/"),
@@ -363,51 +370,4 @@ func validateTestSetupFieldsAgainstBundle(flowID string, primary runtimecontract
 		fields[field] = normalized
 	}
 	return nil
-}
-
-func validateTestSetupGatesAgainstBundle(bundle *runtimecontracts.WorkflowContractBundle, flowID string, gates map[string]bool, fieldPrefix string) error {
-	declared := declaredTestSetupGateNames(bundle, flowID)
-	for gate := range gates {
-		if _, ok := declared[gate]; !ok {
-			return NewInvalidParamsError(map[string]any{
-				"field":         fieldPrefix + ".gates." + gate,
-				"reason":        "is not declared for the selected flow",
-				"flow_instance": flowID,
-			})
-		}
-	}
-	return nil
-}
-
-func declaredTestSetupGateNames(bundle *runtimecontracts.WorkflowContractBundle, flowID string) map[string]struct{} {
-	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
-	out := map[string]struct{}{}
-	for _, record := range bundle.ScopedNodeRecords() {
-		node, err := record.Identity()
-		if err != nil || strings.Trim(node.FlowPath(), "/") != flowID {
-			continue
-		}
-		for _, gate := range record.Entry.GateState.Gates {
-			if name := strings.TrimSpace(gate.Name); name != "" {
-				out[name] = struct{}{}
-			}
-		}
-	}
-	for _, transition := range bundle.DerivedHandlerTransitions() {
-		if strings.Trim(transition.Node.FlowPath(), "/") != flowID {
-			continue
-		}
-		if transition.SetsGate != nil {
-			if name := strings.TrimSpace(transition.SetsGate.Name); name != "" {
-				out[name] = struct{}{}
-			}
-		}
-		for _, gate := range transition.ClearGates {
-			gate = strings.TrimSpace(gate)
-			if gate != "" && gate != "*" {
-				out[gate] = struct{}{}
-			}
-		}
-	}
-	return out
 }

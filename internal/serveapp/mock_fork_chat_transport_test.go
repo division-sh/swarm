@@ -499,7 +499,7 @@ func installOversizedForkChatSnapshotFixture(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	entities := "conversation:\n  context_blob: {type: text, initial: " + string(padding) + ", _unused_reason: oversized immutable fork snapshot proof}\n"
-	if err := os.WriteFile(filepath.Join(root, "fork-source", "entities.yaml"), []byte(entities), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "fork-source", "state.yaml"), []byte(entities), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -1,5 +1,5 @@
 validator:
   check.requested:
     rules:
-      - when: (payload.score >= policy.min_score) && (payload.confidence >= policy.min_confidence) && (has(entity.depth) && entity.depth <= policy.max_depth) && (has(entity.flag_count) && entity.flag_count == 0) && (has(entity.item_count) && entity.item_count < policy.max_items)
+      - when: (payload.score >= policy.min_score) && (payload.confidence >= policy.min_confidence) && (has(state.depth) && state.depth <= policy.max_depth) && (has(state.flag_count) && state.flag_count == 0) && (has(state.item_count) && state.item_count < policy.max_items)
         advances_to: accepted

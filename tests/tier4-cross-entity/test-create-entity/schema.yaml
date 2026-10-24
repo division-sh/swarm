@@ -3,6 +3,6 @@ stages:
   creating: {}
   done: {final: true}
 inputs:
-  - entity.create_requested
+  - state.create_requested
 outputs:
-  - entity.created
+  - state.created

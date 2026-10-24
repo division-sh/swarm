@@ -862,7 +862,7 @@ stages:
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
+		"operating/state.yaml": "instance_id: string\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string?
 opco.ceo_ready:

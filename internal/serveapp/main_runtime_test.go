@@ -1725,7 +1725,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 
 	for method, params := range map[string]map[string]any{
 		"run.get":           {"run_id": fork.ForkRunID},
-		"entity.list":       {"run_id": fork.ForkRunID, "limit": 500},
+		"state.list":        {"run_id": fork.ForkRunID, "limit": 500},
 		"event.list":        {"filter": map[string]any{"run_id": fork.ForkRunID}, "limit": 500},
 		"conversation.list": {"run_id": fork.ForkRunID, "limit": 500},
 	} {
@@ -5538,9 +5538,9 @@ func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantSt
 			CurrentState *string `json:"current_state"`
 		} `json:"entity"`
 	}
-	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"entity_id": entityID, "run_id": runID}, &result)
+	requireServedJSONRPCResult(t, endpoint, "state.get", map[string]any{"entity_id": entityID, "run_id": runID}, &result)
 	if result.Entity.EntityID != entityID || result.Entity.RunID != runID || result.Entity.CurrentState == nil || *result.Entity.CurrentState != wantState {
-		t.Fatalf("entity.get result = %#v, want %s/%s state %s", result.Entity, runID, entityID, wantState)
+		t.Fatalf("state.get result = %#v, want %s/%s state %s", result.Entity, runID, entityID, wantState)
 	}
 }
 

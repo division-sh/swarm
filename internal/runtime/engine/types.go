@@ -193,7 +193,7 @@ func (s StateSnapshot) EntityContext() map[string]any {
 }
 
 func (s StateSnapshot) PlatformEntityContext(flowInstance string) map[string]any {
-	return platformcontext.EntityMetadata(s.EntityID.String(), s.CurrentState, flowInstance, s.StateCarrier.Gates)
+	return platformcontext.EntityMetadata(s.EntityID.String(), s.CurrentState, flowInstance)
 }
 
 func (s *StateSnapshot) SetGate(name string, value bool) {
@@ -406,8 +406,6 @@ type StateMutation struct {
 	TriggerEventType string
 	TriggeredAt      time.Time
 	StateCarrier
-	ClearGates       []string
-	SetGate          string
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 }
 
@@ -451,8 +449,6 @@ type ExecutionResult struct {
 	NextState               string
 	GuardsEvaluated         []string
 	ActionsExecuted         []string
-	ClearGates              []string
-	SetsGate                string
 	HandlerRuleSelection    handlerselection.Observation
 	FanOutCount             int
 	FanOutIntents           []fanoutobligation.IntentRequest

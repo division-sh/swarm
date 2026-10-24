@@ -15,7 +15,6 @@ type nodePresenceShape struct {
 // Admission outcomes are field-specific. Semantic requiredness that depends on
 // the enclosing stage/operation is exercised by the supported branch tests.
 var nodeScalarFieldAdmission = map[string][8]bool{
-	"node.state_table":     {true, false, true, true, false, false, false, false},
 	"timer.stage":          {true, false, true, true, false, false, false, false},
 	"timer.event":          {false, false, false, true, false, false, false, false},
 	"timer.owner":          {true, false, true, true, false, false, false, false},
@@ -61,10 +60,8 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 		newTarget  func() any
 		fields     map[string]string
 	}{
-		{"node", "task.ready: {}\n", func() any { return new(SystemNodeContract) }, map[string]string{"state_table": "StateTable"}},
 		{"timer", "event: timer.tick\n", func() any { return new(WorkflowTimerContract) }, map[string]string{"stage": "Stage", "event": "Event", "owner": "Owner", "action": "Action", "cancellation": "Cancellation", "delay": "Delay", "start_on": "StartOn", "cancel_on": "CancelOn"}},
 		{"handler", "emit: ready\n", func() any { return new(SystemNodeEventHandler) }, map[string]string{"description": "Description", "advances_to": "AdvancesTo"}},
-		{"state", "fields: {}\n", func() any { return new(NodeStateSchema) }, map[string]string{"description": "Description"}},
 		{"activity", "id: presence\ninput: {}\n", func() any { return new(ActivitySpec) }, map[string]string{"id": "ID", "tool": "Tool"}},
 		{"query", "count: false\n", func() any { return new(QuerySpec) }, map[string]string{"source": "Source", "entities": "Entities", "filter": "Filter", "group_by": "GroupBy", "store_as": "StoreAs"}},
 		{"group_by", "", func() any { return new(GroupBySpec) }, map[string]string{"items_from": "ItemsFrom", "key": "Key", "store_as": "StoreAs"}},
@@ -221,8 +218,8 @@ func TestW4HandlerContainerPresence(t *testing.T) {
 				t.Fatalf("count=%#v", h.Count)
 			}
 		}},
-		{"clear", "rows", "[rows]", "{targets: [entity.rows]}", [8]bool{true, false, false, false, false, false, true, true}, func(t *testing.T, h SystemNodeEventHandler) {
-			if h.Clear == nil || !reflect.DeepEqual(h.Clear.Targets, []string{"entity.rows"}) {
+		{"clear", "rows", "[rows]", "{targets: [state.rows]}", [8]bool{true, false, false, false, false, false, true, true}, func(t *testing.T, h SystemNodeEventHandler) {
+			if h.Clear == nil || !reflect.DeepEqual(h.Clear.Targets, []string{"state.rows"}) {
 				t.Fatalf("clear=%#v", h.Clear)
 			}
 		}},
@@ -293,25 +290,6 @@ func TestW4HandlerFieldPresence(t *testing.T) {
 		}, decodeNodeTestYAML, nil)
 }
 
-func TestW4SetsGatePresence(t *testing.T) {
-	proveNodePresence(t, nodePresenceShapes("ready", "[ready]", "{name: ready}"),
-		[8]bool{true, true, true, true, false, false, true, true},
-		func(shape nodePresenceShape) string {
-			if shape.name == "missing" {
-				return "description: ready\n"
-			}
-			return "sets_gate: " + shape.value + "\n"
-		}, decodeNodeTestYAML, func(t *testing.T, name string, out SystemNodeEventHandler) {
-			wantGate := name == "scalar" || name == "mapping"
-			if (out.SetsGate != nil) != wantGate {
-				t.Fatalf("sets_gate=%#v", out.SetsGate)
-			}
-			if wantGate && (out.SetsGate.Name != "ready" || out.SetsGate.Value != true) {
-				t.Fatalf("gate proof=%#v", out.SetsGate)
-			}
-		})
-}
-
 func TestW4NodeTimerPresence(t *testing.T) {
 	proveNodePresence(t, nodePresenceShapes("true", "[true]", "{value: true}"),
 		[8]bool{true, false, false, true, false, false, false, false},
@@ -324,44 +302,6 @@ func TestW4NodeTimerPresence(t *testing.T) {
 		}, decodeNodeTestYAML, func(t *testing.T, name string, out WorkflowTimerContract) {
 			if out.Event != "timer.reminder" || out.Recurring != (name == "scalar") {
 				t.Fatalf("timer=%#v", out)
-			}
-		})
-}
-
-func TestW4NodeStateFieldPresence(t *testing.T) {
-	proveNodePresence(t, nodePresenceShapes("seen", "[{name: seen, type: boolean}]", "{seen: boolean}"),
-		[8]bool{true, false, false, false, true, true, true, true},
-		func(shape nodePresenceShape) string {
-			if shape.name == "missing" {
-				return "description: state\n"
-			}
-			return "fields: " + shape.value + "\n"
-		}, decodeNodeTestYAML, func(t *testing.T, name string, out NodeStateSchema) {
-			wantField := name == "sequence" || name == "mapping"
-			if (len(out.Fields) == 1) != wantField {
-				t.Fatalf("fields=%#v", out.Fields)
-			}
-			if wantField && (out.Fields[0].Name != "seen" || out.Fields[0].Type != "boolean") {
-				t.Fatalf("typed field=%#v", out.Fields[0])
-			}
-		})
-}
-
-func TestW4NodeGateFieldPresence(t *testing.T) {
-	proveNodePresence(t, nodePresenceShapes("ready", "[ready]", "{ready: complete}"),
-		[8]bool{true, false, false, false, true, true, true, true},
-		func(shape nodePresenceShape) string {
-			if shape.name == "missing" {
-				return "description: gates\n"
-			}
-			return "gates: " + shape.value + "\n"
-		}, decodeNodeTestYAML, func(t *testing.T, name string, out NodeGateStateSchema) {
-			wantGate := name == "sequence" || name == "mapping"
-			if (len(out.Gates) == 1) != wantGate {
-				t.Fatalf("gates=%#v", out.Gates)
-			}
-			if wantGate && out.Gates[0].Name != "ready" {
-				t.Fatalf("typed gate=%#v", out.Gates[0])
 			}
 		})
 }
@@ -394,7 +334,8 @@ func TestW4RetiredNodeFieldPresence(t *testing.T) {
 	}{
 		{"handler.from", "description: ready\n", "from", func(body []byte) error { var out SystemNodeEventHandler; return decodeNodeTestYAML(body, &out) }},
 		{"handler.dedup_by", "description: ready\n", "dedup_by", func(body []byte) error { var out SystemNodeEventHandler; return decodeNodeTestYAML(body, &out) }},
-		{"sets_gate.value", "name: ready\n", "value", func(body []byte) error { var out GateSpec; return decodeNodeTestYAML(body, &out) }},
+		{"handler.sets_gate", "emit: work.ready\n", "sets_gate", func(body []byte) error { var out SystemNodeEventHandler; return decodeNodeTestYAML(body, &out) }},
+		{"handler.clear_gates", "emit: work.ready\n", "clear_gates", func(body []byte) error { var out SystemNodeEventHandler; return decodeNodeTestYAML(body, &out) }},
 		{"compute.params", "operation: pick_or_average\n", "params", func(body []byte) error { var out ComputeSpec; return decodeNodeTestYAML(body, &out) }},
 		{"query.operation", "source: payload.items\nstore_as: computed.items\n", "operation", func(body []byte) error { var out QuerySpec; return decodeNodeTestYAML(body, &out) }},
 		{"filter.predicate", "items_from: payload.items\ncondition: item.ready\n", "predicate", func(body []byte) error { var out FilterSpec; return decodeNodeTestYAML(body, &out) }},

@@ -48,7 +48,7 @@ func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
           - {target_field: processed_value, value: payload.value}
 `
 	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+consumer)
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  processed_value: text\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "processed_value: text\naccount_id: \"preserved\"\nhandled: false\n")
 	return root
 }
 
@@ -118,7 +118,7 @@ inputs:
     advances_to: done
 `
 	}
-	for path, body := range map[string]string{"schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes, "entities.yaml": "root: {}\n"} {
+	for path, body := range map[string]string{"schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes} {
 		writeClosedVariantFile(t, root, path, body)
 	}
 	return root
@@ -129,7 +129,7 @@ inputs:
 func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
 	t.Helper()
 	root := CopyForkFanOutCarrier(t, false, false)
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  integer: {type: integer, initial: 0}\n  decimal: {type: numeric, initial: 0.0}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "integer: 0\ndecimal: 0\n")
 	if resourceRows {
 		writeClosedVariantFile(t, root, "types.yaml", "ResourceRow:\n  slug: text\n  score: integer\n")
 		writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: [ResourceRow]\nitems.child:\n  value: text\n  integer_result: integer\n  double_result: numeric\n")
@@ -143,8 +143,8 @@ func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
         event: items.child
         fields:
           value: entry.slug
-          integer_result: entry.score + entity.integer + 1
-          double_result: double(entry.score) + double(entity.decimal)
+          integer_result: entry.score + state.integer + 1
+          double_result: double(entry.score) + double(state.decimal)
 `)
 	}
 	return root

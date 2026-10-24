@@ -104,11 +104,11 @@ func VerifyNativeWorkflowInstanceStoreReplaysContainedStateMapListProjectionForT
 func nativeMutationLoggingFixtureForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) (*PipelineDeliveryNativeFixtureForTest, *PipelineCoordinator, context.Context) {
 	t.Helper()
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: native-mutation-log\nstages:\n  queued: {}\n  done: {}\n",
-		"entities.yaml": "test_entity:\n  status: text\n  business_status: text\n  verticals: map[text]Vertical\n  tags: [text]\n",
-		"types.yaml":    "Job:\n  id: text\n  title: text\nVertical:\n  status: text\n  active_jobs: [Job]\n",
-		"events.yaml":   "flow.transitioned:\n",
-		"nodes.yaml":    "lifecycle-owner:\n  flow.transitioned: {advances_to: done}\n",
+		"schema.yaml": "name: native-mutation-log\nstages:\n  queued: {}\n  done: {}\n",
+		"state.yaml":  "status: text\nbusiness_status: text\nverticals: map[text]Vertical\ntags: [text]\n",
+		"types.yaml":  "Job:\n  id: text\n  title: text\nVertical:\n  status: text\n  active_jobs: [Job]\n",
+		"events.yaml": "flow.transitioned:\n",
+		"nodes.yaml":  "lifecycle-owner:\n  flow.transitioned: {advances_to: done}\n",
 	})
 	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, ".")); err != nil {

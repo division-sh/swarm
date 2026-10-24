@@ -40,9 +40,9 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 						initialStage = "ready"
 					}
 					files := map[string]string{
-						"schema.yaml":   "name: timer-cause-proof\nstages:\n  waiting: {}\n",
-						"entities.yaml": "test_entity: {}\n", "events.yaml": "timer.arm:\ntimer.elapsed:\n",
-						"nodes.yaml": "observer:\n  timer.arm: {}\n",
+						"schema.yaml": "name: timer-cause-proof\nstages:\n  waiting: {}\n",
+						"events.yaml": "timer.arm:\ntimer.elapsed:\n",
+						"nodes.yaml":  "observer:\n  timer.arm: {}\n",
 					}
 					if kind == workflowTimerCauseEvent {
 						files["nodes.yaml"] += "  timers:\n    - {event: timer.elapsed, start_on: 'event:timer.arm', delay: 1h}\n"

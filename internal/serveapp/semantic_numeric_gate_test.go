@@ -23,7 +23,7 @@ stages:
     gate:
       decision: numeric_review
       context:
-        label: "entity.name"
+        label: "state.name"
         count: 7
         absent: null
       outcomes:
@@ -78,7 +78,7 @@ inputs:
 			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &card)
 			context := card.DecisionCard.Snapshot.Context
-			if context["label"] != "entity.name" || context["count"] != float64(7) {
+			if context["label"] != "state.name" || context["count"] != float64(7) {
 				t.Fatalf("gate context literals changed in frozen card: %#v", context)
 			}
 			if absent, ok := context["absent"]; !ok || absent != nil {

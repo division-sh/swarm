@@ -2,8 +2,8 @@ test-node:
   state.reset_requested:
     data_accumulation:
       writes:
-        - {op: clear, target: entity.accumulated_count}
-        - {op: clear, target: entity.dedup_key}
+        - {op: clear, target: state.accumulated_count}
+        - {op: clear, target: state.dedup_key}
     emit:
       event: state.reset_completed
     advances_to: cleared

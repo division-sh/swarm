@@ -132,7 +132,7 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 				t.Fatalf("constructor did not create its exact root/keyless child tree: %+v err=%v", instances, err)
 			}
 			var entity operatorread.OperatorEntityFull
-			requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
+			requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
 			if entity.Fields["provider_event_id"] != "first" || entity.Fields["processed_count"] != float64(1) {
 				t.Fatalf("creating event was not supplied and delivered once: %+v", entity)
 			}
@@ -143,7 +143,7 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 			if code != http.StatusOK || !reflect.DeepEqual(a9AliasReceipt(t, accepted), a9AliasReceipt(t, duplicate)) {
 				t.Fatalf("exact retry changed receipt: %s -> %s status=%d", accepted, duplicate, code)
 			}
-			requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
+			requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
 			if entity.Fields["processed_count"] != float64(1) {
 				t.Fatalf("receipt retry redelivered the constructor event: %+v", entity)
 			}
@@ -161,7 +161,7 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 			if err != nil || len(instances) != 2 {
 				t.Fatalf("root-key conflict changed construction: %+v err=%v", instances, err)
 			}
-			requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
+			requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
 			if entity.Fields["provider_event_id"] != "first" || entity.Fields["processed_count"] != float64(1) {
 				t.Fatalf("root-key conflict mutated initial or business state: %+v", entity)
 			}

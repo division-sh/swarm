@@ -183,7 +183,7 @@ func entityToolLiteralMutation(contract entityruntime.Contract, field string, pa
 	}
 	key, hasKey := payload["key"]
 	index, hasIndex := payload["index"]
-	mutation := entityruntime.Mutation{Operation: op, Target: "entity." + field, Value: value, Key: key, HasKey: hasKey, Index: index, HasIndex: hasIndex}
+	mutation := entityruntime.Mutation{Operation: op, Target: "state." + field, Value: value, Key: key, HasKey: hasKey, Index: index, HasIndex: hasIndex}
 	if op == "" || (op == entityruntime.ContainedOperationSet && !hasKey) {
 		if hasKey || hasIndex {
 			return entityruntime.Mutation{}, fmt.Errorf("whole-value set must not declare key or index")

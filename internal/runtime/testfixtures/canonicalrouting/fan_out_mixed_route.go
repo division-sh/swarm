@@ -28,7 +28,7 @@ stages:
 inputs:
   - mixed.one
 `,
-		"one/entities.yaml": "test_entity: {}\n",
+
 		"one/nodes.yaml": `one-node:
   mixed.one: {}
 `,
@@ -38,7 +38,7 @@ stages:
 inputs:
   - mixed.multi
 `,
-		"multi-a/entities.yaml": "test_entity: {}\n",
+
 		"multi-a/nodes.yaml": `multi-a-node:
   mixed.multi: {}
 `,
@@ -48,7 +48,7 @@ stages:
 inputs:
   - mixed.multi
 `,
-		"multi-b/entities.yaml": "test_entity: {}\n",
+
 		"multi-b/nodes.yaml": `multi-b-node:
   mixed.multi: {}
 `,
@@ -58,7 +58,7 @@ stages:
 inputs:
   - mixed.multi
 `,
-		"child/entities.yaml": "test_entity: {}\n",
+
 		"child/nodes.yaml": `child-node:
   mixed.multi: {}
 `,

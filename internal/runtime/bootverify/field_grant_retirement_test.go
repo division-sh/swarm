@@ -14,9 +14,9 @@ func TestEntityContractResolutionCannotBorrowParentState(t *testing.T) {
 	repo := repoRootForBootverifyTest(t)
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: local-state\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "Root:\n  parent_only: text\n  shared: text\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "parent_only: text\nshared: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "Child:\n  local: text\n  shared: integer\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "local: text\nshared: integer\n")
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	source := semanticview.Wrap(bundle)
 	for _, tc := range []struct {
@@ -27,7 +27,7 @@ func TestEntityContractResolutionCannotBorrowParentState(t *testing.T) {
 		{"child", "local", "text"},
 	} {
 		t.Run(tc.flow+"/"+tc.field, func(t *testing.T) {
-			read, owner, err := wave1ResolveEntityPathWithOwner(source, tc.flow, "entity."+tc.field)
+			read, owner, err := wave1ResolveEntityPathWithOwner(source, tc.flow, "state."+tc.field)
 			if err != nil || owner != tc.flow || read.Type != tc.typ {
 				t.Fatalf("local read = %#v, owner %q, error %v", read, owner, err)
 			}
@@ -35,7 +35,7 @@ func TestEntityContractResolutionCannotBorrowParentState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			target := wave1WriteTarget{Node: node, Entity: true, Target: "entity." + tc.field, Field: tc.field}
+			target := wave1WriteTarget{Node: node, Entity: true, Target: "state." + tc.field, Field: tc.field}
 			write, ok := wave1WriteTargetContract(source, target)
 			if !ok || write.FlowID != tc.flow || write.Contract.Fields[tc.field].Type != tc.typ {
 				t.Fatalf("local write = %#v, found %v", write, ok)
@@ -46,14 +46,14 @@ func TestEntityContractResolutionCannotBorrowParentState(t *testing.T) {
 			}
 		})
 	}
-	if _, owner, err := wave1ResolveEntityPathWithOwner(source, "child", "entity.parent_only"); err == nil || owner == "." {
+	if _, owner, err := wave1ResolveEntityPathWithOwner(source, "child", "state.parent_only"); err == nil || owner == "." {
 		t.Fatalf("child borrowed parent read: owner %q, error %v", owner, err)
 	}
 	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("child", "worker")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := wave1WriteTarget{Node: node, Entity: true, Target: "entity.parent_only", Field: "parent_only"}
+	target := wave1WriteTarget{Node: node, Entity: true, Target: "state.parent_only", Field: "parent_only"}
 	write, _ := wave1WriteTargetContract(source, target)
 	if write.FlowID == "." {
 		t.Fatalf("child borrowed parent write: %#v", write)
@@ -74,8 +74,8 @@ writer:
   entity_writes:
     case:
       save: all
-`, "case:\n  local_status: text\n", "Use `save_entity_field` for `priority`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "root_case:\n  priority: integer\n")
+`, "local_status: text\n", "Use `save_entity_field` for `priority`.\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "priority: integer\n")
 	repo := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

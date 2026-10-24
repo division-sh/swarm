@@ -86,7 +86,7 @@ func TestA2CollectionProjectionCatalogAndDigestWitness(t *testing.T) {
 	}
 	for _, change := range []func(*FanOutPlanSemantics){
 		func(s *FanOutPlanSemantics) { s.CollectionProjection.Kind = CollectionListItems },
-		func(s *FanOutPlanSemantics) { s.ItemsFrom = "entity.items" },
+		func(s *FanOutPlanSemantics) { s.ItemsFrom = "state.items" },
 		func(s *FanOutPlanSemantics) { s.MaxItems++ },
 		func(s *FanOutPlanSemantics) { s.IdentityDerived = false },
 		func(s *FanOutPlanSemantics) { s.ItemAlias = "other" },

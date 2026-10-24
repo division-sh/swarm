@@ -55,7 +55,7 @@ func assertRetiredPlatformTableRejectedUnchanged(t *testing.T, backend SchemaDia
 	t.Helper()
 	ctx := context.Background()
 	request := canonicalSchemaBootstrapTestRequest(t)
-	request.StatePlans = generatedProbeStatePlans()
+
 	var db *sql.DB
 	var bootstrap func(context.Context, SchemaBootstrapRequest) error
 	var runtimeProbe func() error
@@ -999,56 +999,6 @@ func TestSchemaBootstrapRollsBackFailedFreshCreation(t *testing.T) {
 	}
 }
 
-func TestSQLiteSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
-	request := canonicalSchemaBootstrapTestRequest(t)
-	request.StatePlans = generatedProbeStatePlans()
-	store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
-		t.Fatalf("create generated state: %v", err)
-	}
-	storedOrigin, err := readRuntimeStoreOrigin(testAuthorActivityContext(), store.backend.ConstructionHandle())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.backend.Exec(`ALTER TABLE generated_probe_state ADD COLUMN drift_probe TEXT`); err != nil {
-		t.Fatal(err)
-	}
-	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), request), SchemaDialectSQLite, store.Path(), request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
-	if !sqliteColumnSet(t, testAuthorActivityContext(), store.backend.ConstructionHandle(), "generated_probe_state")["drift_probe"] {
-		t.Fatal("rejected SQLite generated-state bootstrap mutated the incompatible table")
-	}
-}
-
-func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
-	request := canonicalSchemaBootstrapTestRequest(t)
-	request.StatePlans = generatedProbeStatePlans()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	store := newPostgresStoreWithBackend(mustPostgresBackend(db))
-	var target string
-	if err := db.QueryRow(`SELECT current_database()`).Scan(&target); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
-		t.Fatalf("create generated state: %v", err)
-	}
-	storedOrigin, err := readRuntimeStoreOrigin(testAuthorActivityContext(), db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`ALTER TABLE generated_probe_state ADD COLUMN drift_probe TEXT`); err != nil {
-		t.Fatal(err)
-	}
-	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), request), SchemaDialectPostgres, target, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
-	if !postgresColumnExists(t, testAuthorActivityContext(), db, "generated_probe_state", "drift_probe") {
-		t.Fatal("rejected PostgreSQL generated-state bootstrap mutated the incompatible table")
-	}
-}
-
 func assertSchemaCompatibilityDiagnostic(t *testing.T, err error, backend SchemaDialect, target string, current RuntimeStoreOrigin, wantOrigin *RuntimeStoreOrigin, wantDrift ...string) {
 	t.Helper()
 	current = current.Canonical()
@@ -1086,20 +1036,6 @@ func assertSchemaCompatibilityDiagnostic(t *testing.T, err error, backend Schema
 	if !strings.Contains(err.Error(), "remediation: "+wantRemediation) {
 		t.Fatalf("diagnostic = %v, want remediation %q", err, wantRemediation)
 	}
-}
-
-func generatedProbeStatePlans() []SchemaTableDDL {
-	return []SchemaTableDDL{{
-		TableName:  "generated_probe_state",
-		SchemaKind: "state_schema",
-		Statements: []string{`CREATE TABLE IF NOT EXISTS generated_probe_state (
-    "entity_id" UUID NOT NULL,
-    "node_id" TEXT NOT NULL,
-    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "value" TEXT,
-    PRIMARY KEY ("entity_id", "node_id")
-)`},
-	}}
 }
 
 func canonicalSchemaBootstrapTestRequest(t testing.TB) SchemaBootstrapRequest {

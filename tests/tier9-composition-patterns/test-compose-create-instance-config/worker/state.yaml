@@ -1,0 +1,4 @@
+worker_id: text
+name: text
+priority: integer
+owner: text

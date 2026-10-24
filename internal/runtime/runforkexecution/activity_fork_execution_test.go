@@ -501,8 +501,8 @@ func selectedContractActivityDeclaredSourceWithResultConsumer(t *testing.T, serv
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
-		"entities.yaml": "root: {}\n",
+		"schema.yaml": "name: activity-fork-proof\nstages:\n  pending: {}\n",
+
 		"flow_a/schema.yaml": `name: flow_a
 stages:
   pending: {}
@@ -515,8 +515,8 @@ loops:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `,
-		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
-		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
+		"flow_a/state.yaml":  "name: text\n",
+		"flow_a/events.yaml": "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/nodes.yaml": `test-node:
   review.start:
     loop: {start: revision, from: pending}

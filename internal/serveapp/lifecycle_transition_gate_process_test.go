@@ -69,7 +69,7 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 				t.Fatalf("restart changed gate cause or replayed route: before=%#v after=%#v", before, after)
 			}
 			var entity operatorread.OperatorEntityFull
-			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
+			requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 			if entity.Fields["result"] != "approved" {
 				t.Fatalf("recovered gate consumer=%#v", entity)
 			}

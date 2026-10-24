@@ -3414,11 +3414,7 @@ stages:
   waiting: {}
   done: {final: true}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-ticket:
-  ticket_id:
-    type: string
-    initial: ""
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), `ticket_id: ""
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 timer.reminder:
@@ -3516,14 +3512,8 @@ stages:
   idle: {}
   done: {final: true}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
-case:
-  business_brief:
-    type: text
-    _unused_reason: verify prompt writer proof field
-  research_context:
-    type: text
-    _unused_reason: verify prompt writer proof field
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "state.yaml"), `business_brief: text
+research_context: text
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
 writer:
@@ -3565,56 +3555,6 @@ Use save_entity_field for `+"`business_brief`"+`.
 		if !strings.Contains(errText, want) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
 		}
-	}
-}
-
-func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
-	root := t.TempDir()
-
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-accumulator:
-  state_schema:
-    fields:
-      dimensions_received: dimension score receipts keyed by dimension name
-`)
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &buf)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
-	}
-	if out := buf.String(); !strings.Contains(out, "state_schema field type") {
-		t.Fatalf("unexpected output = %q", out)
-	}
-}
-
-func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
-	root := canonicalrouting.CopyVerifyStateSchemaFloat(t)
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &buf)
-	if code != 0 {
-		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
-	}
-	if out := buf.String(); !strings.Contains(out, "verify ok: source=") {
-		t.Fatalf("verify output missing success marker:\n%s", out)
-	}
-}
-
-func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
-
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
-
-	root := canonicalrouting.CopyVerifyAccumulatorEntityProjection(t)
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &buf)
-	if code != 0 {
-		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
-	}
-	if out := buf.String(); !strings.Contains(out, "verify ok: source=") {
-		t.Fatalf("verify output missing success marker:\n%s", out)
 	}
 }
 
@@ -3683,7 +3623,7 @@ stages:
 item.arrived:
   expected_count: integer
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item: {}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), "")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   item.arrived:
@@ -3740,7 +3680,7 @@ func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 
 func isOptionalWorkflowDeclarationFixture(path string) bool {
 	switch filepath.Base(path) {
-	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+	case "agents.yaml", "state.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
 		return true
 	default:
 		return false
@@ -4223,7 +4163,7 @@ func TestExecutionValidation_CreateEntityAccumulatePreemptsDynamicComputeWarning
 	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "entity.composite_score",
+		StoreAs:   "state.composite_score",
 	}
 	node.EventHandlers[eventType] = handler
 	bundle.Nodes[nodeID] = node

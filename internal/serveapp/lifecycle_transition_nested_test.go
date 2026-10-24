@@ -175,7 +175,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				gateEntity := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "review")
 				gateEntities = append(gateEntities, gateEntity)
 				var entity operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": gateEntity}, &entity)
+				requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": gateEntity}, &entity)
 				if entity.Fields["revision_id"] != closed.RevisionID {
 					t.Fatalf("sibling gate consumed wrong revision: %#v loop=%#v", entity, closed)
 				}
@@ -226,7 +226,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "approved")
 				final := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/final/", "done")
 				var entity operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": final}, &entity)
+				requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": final}, &entity)
 				if entity.Fields["result"] != side {
 					t.Fatalf("sibling verdict reached wrong third flow=%#v", entity)
 				}

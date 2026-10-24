@@ -1,68 +1,8 @@
 package contracts
 
 import (
-	"reflect"
 	"testing"
 )
-
-func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
-	t.Parallel()
-
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Guard", reflect.TypeOf((*GuardSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Accumulate", reflect.TypeOf((*AccumulateSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Compute", reflect.TypeOf((*ComputeSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "FanOut", reflect.TypeOf((*FanOutSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "GroupBy", reflect.TypeOf((*GroupBySpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "OnComplete", reflect.TypeOf([]HandlerRuleEntry{}))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Rules", reflect.TypeOf([]HandlerRuleEntry{}))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Filter", reflect.TypeOf((*FilterSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Reduce", reflect.TypeOf((*ReduceSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Count", reflect.TypeOf((*CountSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Clear", reflect.TypeOf((*ClearSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Emit", reflect.TypeOf(EmitSpec{}))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "SetsGate", reflect.TypeOf((*GateSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "ClearGates", reflect.TypeOf([]string{}))
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Query", reflect.TypeOf((*QuerySpec)(nil)))
-	expectMissingField(t, reflect.TypeOf(SystemNodeEventHandler{}), "Action")
-	expectMissingField(t, reflect.TypeOf(SystemNodeEventHandler{}), "EvidenceTarget")
-	expectMissingField(t, reflect.TypeOf(HandlerRuleEntry{}), "Action")
-	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "CreateEntity", reflect.TypeOf(true))
-	expectFieldType(t, reflect.TypeOf(HandlerRuleEntry{}), "Compute", reflect.TypeOf((*ComputeSpec)(nil)))
-	expectFieldType(t, reflect.TypeOf(HandlerRuleEntry{}), "Emit", reflect.TypeOf(EmitSpec{}))
-	expectMissingField(t, reflect.TypeOf(HandlerTransitionSemantic{}), "Action")
-	expectFieldType(t, reflect.TypeOf(HandlerTransitionSemantic{}), "Emit", reflect.TypeOf(EmitSpec{}))
-	expectMissingField(t, reflect.TypeOf(SystemNodeEventHandler{}), "Template")
-	expectMissingField(t, reflect.TypeOf(SystemNodeEventHandler{}), "InstanceIDFrom")
-	expectMissingField(t, reflect.TypeOf(SystemNodeEventHandler{}), "ConfigFrom")
-	expectMissingField(t, reflect.TypeOf(SystemNodeEventHandler{}), "Branch")
-	expectMissingField(t, reflect.TypeOf(HandlerTransitionSemantic{}), "Template")
-	expectMissingField(t, reflect.TypeOf(HandlerTransitionSemantic{}), "InstanceIDFrom")
-	expectMissingField(t, reflect.TypeOf(HandlerTransitionSemantic{}), "ConfigFrom")
-	expectMissingField(t, reflect.TypeOf(HandlerTransitionSemantic{}), "Branch")
-
-	for _, typ := range []reflect.Type{reflect.TypeOf(ReduceSpec{}), reflect.TypeOf(ComputeSpec{})} {
-		if _, present := typ.FieldByName("Params"); present {
-			t.Fatalf("retired params carrier restored on %s", typ)
-		}
-	}
-	expectFieldType(t, reflect.TypeOf(WorkflowStageTopologyEdge{}), "From", reflect.TypeOf(""))
-	expectFieldType(t, reflect.TypeOf(WorkflowDataWrite{}), "Value", reflect.TypeOf(ExpressionValue{}))
-	expectMissingField(t, reflect.TypeOf(FlowSchemaDocument{}), "InstanceVariables")
-	expectMissingField(t, reflect.TypeOf(FlowInputEventPin{}), "Initialize")
-	expectMissingField(t, reflect.TypeOf(ToolInputSchema{}), "Type")
-	expectMissingField(t, reflect.TypeOf(ToolInputSchema{}), "Properties")
-	expectMissingField(t, reflect.TypeOf(ToolSchemaEntry{}), "InputSchema")
-	expectMissingField(t, reflect.TypeOf(ToolSchemaEntry{}), "HandlerType")
-	expectFieldType(t, reflect.TypeOf(SystemNodeContract{}), "StateSchema", reflect.TypeOf(NodeStateSchema{}))
-	expectFieldType(t, reflect.TypeOf(SystemNodeContract{}), "GateState", reflect.TypeOf(NodeGateStateSchema{}))
-	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Swarm")
-	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Emitter")
-	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Producer")
-	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Consumer")
-	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "ConsumerType")
-	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "DeliveryChannel")
-	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Payload", reflect.TypeOf(EventPayloadSpec{}))
-}
 
 func TestPhase1SchemaRegistryUsesMASContractsSource(t *testing.T) {
 	t.Parallel()
@@ -84,25 +24,5 @@ func TestPhase1SchemaRegistryUsesMASContractsSource(t *testing.T) {
 		if props == nil {
 			t.Fatalf("schema for %s has no properties", eventType)
 		}
-	}
-}
-
-func expectFieldType(t *testing.T, typ reflect.Type, fieldName string, want reflect.Type) {
-	t.Helper()
-
-	field, ok := typ.FieldByName(fieldName)
-	if !ok {
-		t.Fatalf("%s missing field %s", typ.Name(), fieldName)
-	}
-	if field.Type != want {
-		t.Fatalf("%s.%s type mismatch: got %s want %s", typ.Name(), fieldName, field.Type, want)
-	}
-}
-
-func expectMissingField(t *testing.T, typ reflect.Type, fieldName string) {
-	t.Helper()
-
-	if _, ok := typ.FieldByName(fieldName); ok {
-		t.Fatalf("%s unexpectedly still has field %s", typ.Name(), fieldName)
 	}
 }

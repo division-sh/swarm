@@ -82,10 +82,10 @@ func TestCatalogAdmissionScopedSourcesRejectInvalidPresence(t *testing.T) {
 		{"unused_self", "types.yaml", "Cycle:\n  child: Cycle\n"},
 		{"unused_mutual", "child/types.yaml", "Left:\n  right: [Right]\nRight:\n  left: map[text]Left\n"},
 		{"unused_missing", "types.yaml", "Unused:\n  child: Missing\n"},
-		{"unused_entity", "child/entities.yaml", "person:\n  child: Missing\n"},
+		{"unused_entity", "child/state.yaml", "person:\n  child: Missing\n"},
 		{"unused_event", "child/events.yaml", "test.ready:\n  child: Missing\n"},
 		{"suffix", "types.yaml", "Unused:\n  child: text[]\n"},
-		{"prefix", "entities.yaml", "person:\n  child: {type: '[]text'}\n"},
+		{"prefix", "state.yaml", "person:\n  child: {type: '[]text'}\n"},
 		{"integer_key", "events.yaml", "test.ready:\n  child: map[integer]text\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -174,12 +174,12 @@ func TestCatalogAdmissionComparableDomainsRequireResolvedEvidence(t *testing.T) 
 func TestCatalogAdmissionSharedDAGAndAuthoredAliasPolicy(t *testing.T) {
 	root := t.TempDir()
 	for name, source := range map[string]string{
-		"schema.yaml":         "name: dag\nstages: {done: {final: true}}\n",
-		"types.yaml":          "Status: [\"open\", \"closed\"]\nLeaf:\n  value: text\nPair:\n  first: Leaf\n  second: Leaf?\nNested:\n  pairs: [Pair]\n  lookup: map[text]Pair\n",
-		"entities.yaml":       "person:\n  state: Nested\n",
-		"child/schema.yaml":   "name: child\ninstance: id\nstages: {done: {final: true}}\n",
-		"child/entities.yaml": "person:\n  id: text\n  items: map[text]Pair\n",
-		"child/events.yaml":   "test.ready:\n  items: [Pair]\n  keys: map[Status]uuid\n  stamp: timestamp\n",
+		"schema.yaml":       "name: dag\nstages: {done: {final: true}}\n",
+		"types.yaml":        "Status: [\"open\", \"closed\"]\nLeaf:\n  value: text\nPair:\n  first: Leaf\n  second: Leaf?\nNested:\n  pairs: [Pair]\n  lookup: map[text]Pair\n",
+		"state.yaml":        "state: Nested\n",
+		"child/schema.yaml": "name: child\ninstance: id\nstages: {done: {final: true}}\n",
+		"child/state.yaml":  "id: text\nitems: map[text]Pair\n",
+		"child/events.yaml": "test.ready:\n  items: [Pair]\n  keys: map[Status]uuid\n  stamp: timestamp\n",
 	} {
 		writeFixtureFile(t, filepath.Join(root, name), source)
 	}

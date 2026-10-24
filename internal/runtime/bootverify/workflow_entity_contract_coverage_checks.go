@@ -699,7 +699,7 @@ func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTa
 		}
 		return wave1ResolvedType{}, strings.TrimSpace(target.flowID()), strings.TrimSpace(rootField), nil
 	}
-	leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, target.flowID(), "entity."+path)
+	leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, target.flowID(), "state."+path)
 	if err != nil {
 		return wave1ResolvedType{}, "", "", err
 	}

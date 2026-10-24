@@ -136,9 +136,9 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			name: "stale api method",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "entity_read_api")
-				row.APIMethods = []string{"entity.missing"}
+				row.APIMethods = []string{"state.missing"}
 			},
-			want: "entity_read_api api_method entity.missing missing from platform method_catalog",
+			want: "entity_read_api api_method state.missing missing from platform method_catalog",
 		},
 		{
 			name: "stale cli command",
@@ -1208,11 +1208,11 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 		},
 		"TestOperatorEntityHandlersServeContractEntityTypesFromSQLite": {
 			Backends: []string{"default_sqlite"},
-			Methods:  []string{"entity.aggregate", "entity.get", "entity.list"},
+			Methods:  []string{"state.aggregate", "state.get", "state.list"},
 		},
 		"TestOperatorEntityHandlersServeContractEntityTypesFromPostgres": {
 			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"entity.aggregate", "entity.get", "entity.list"},
+			Methods:  []string{"state.aggregate", "state.get", "state.list"},
 		},
 		"TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock": {
 			Backends: []string{"default_sqlite"},

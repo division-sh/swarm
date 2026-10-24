@@ -117,11 +117,7 @@ func TestDerivePromptEntityWriteEvidence_IncludesScopedDuplicateAgentIDs(t *test
 
 	for _, flowPath := range []string{"alpha", "beta"} {
 		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "schema.yaml"), "name: "+flowPath+"\n")
-		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "entities.yaml"), `
-case:
-  business_brief:
-    type: text
-    _unused_reason: scoped duplicate prompt proof
+		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "state.yaml"), `business_brief: text
 `)
 		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "agents.yaml"), `
 writer:

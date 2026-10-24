@@ -17,6 +17,6 @@ inputs:
 outputs:
   - work.ready
 `)
-	writeClosedVariantFile(t, root, "producer/entities.yaml", "test_entity: {}\n")
+	writeClosedVariantFile(t, root, "producer/state.yaml", "")
 	return root
 }

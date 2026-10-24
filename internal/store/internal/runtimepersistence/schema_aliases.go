@@ -23,9 +23,7 @@ const (
 
 var (
 	FlattenSchemaTableDDLs     = storeschema.FlattenSchemaTableDDLs
-	GenerateNodeStateTableDDLs = storeschema.GenerateNodeStateTableDDLs
 	GeneratePlatformTableDDLs  = storeschema.GeneratePlatformTableDDLs
-	NodeStateFieldTypeToDDL    = storeschema.NodeStateFieldTypeToDDL
 	QuoteIdent                 = storeschema.QuoteIdent
 	SchemaFieldTypeToDDL       = storeschema.SchemaFieldTypeToDDL
 	shellQuote                 = storeschema.ShellQuote

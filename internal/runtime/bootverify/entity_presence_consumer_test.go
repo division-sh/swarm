@@ -12,10 +12,10 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 	for _, consumer := range []string{"guard", "rule", "write", "emit", "filter", "activity"} {
 		for _, safe := range []bool{false, true} {
 			name := consumer + "/unsafe"
-			value := `entity.profile.note`
+			value := `state.profile.note`
 			if safe {
 				name = consumer + "/decision"
-				value = `entity.profile.?note.orValue("fallback")`
+				value = `state.profile.?note.orValue("fallback")`
 			}
 			t.Run(name, func(t *testing.T) {
 				handler := rc.SystemNodeEventHandler{}
@@ -83,9 +83,9 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 
 func TestStageGateContextPreservesNestedEntityPresence(t *testing.T) {
 	for _, safe := range []bool{false, true} {
-		expression := `entity.profile.note`
+		expression := `state.profile.note`
 		if safe {
-			expression = `entity.profile.?note.orValue("fallback")`
+			expression = `state.profile.?note.orValue("fallback")`
 		}
 		plan := rc.WorkflowGatePlan{FlowID: ".", Stage: "awaiting_review", Decision: "review", Context: map[string]rc.ExpressionValue{"note": rc.CELExpression(expression)}, Outcomes: map[string]rc.WorkflowGateOutcomePlan{"accept": {AdvancesTo: "complete"}}}
 		bundle := stageGateValidationBundle(plan, nil, nil)

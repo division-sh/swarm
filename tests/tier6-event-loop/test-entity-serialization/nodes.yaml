@@ -4,7 +4,7 @@ test-node:
     emit:
       event: step.first_done
   step.second:
-    guard: _entity.current_state == 'processing'
+    guard: instance.stage == 'processing'
     advances_to: complete
     emit:
       event: step.second_done

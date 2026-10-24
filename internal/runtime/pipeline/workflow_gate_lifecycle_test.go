@@ -491,8 +491,8 @@ stages:
   drafting: {}
   operating: {}
 `,
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "launch.approved:\ndraft.ready:\nordinary.transition:\nreview.expired:\n",
+
+		"events.yaml": "launch.approved:\ndraft.ready:\nordinary.transition:\nreview.expired:\n",
 		"nodes.yaml": `reviewer:
   draft.ready: {advances_to: awaiting_review}
   ordinary.transition: {advances_to: operating}

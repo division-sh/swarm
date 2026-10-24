@@ -166,7 +166,7 @@ func (d *lifecycleTimerContenderDiagnostic) dump(t *testing.T, rt servedControlP
 		}()
 	}
 	if rt.Endpoint != "" && d.entityID != "" {
-		result := lifecycleContenderRPC(rt.Endpoint, "entity.get", map[string]any{"run_id": d.runID, "entity_id": d.entityID})
+		result := lifecycleContenderRPC(rt.Endpoint, "state.get", map[string]any{"run_id": d.runID, "entity_id": d.entityID})
 		raw, err := json.Marshal(result.reply)
 		t.Logf("diagnostic public entity response=%s transport=%v encoding=%v", raw, result.err, err)
 	}

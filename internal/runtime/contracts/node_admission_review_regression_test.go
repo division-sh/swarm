@@ -13,8 +13,8 @@ func TestReviewer2492ClosedNodeAdmission(t *testing.T) {
 	for name, body := range map[string]string{
 		"compute_value_field":        "compute: {operation: pick_or_average, value_field: amount}",
 		"compute_weight_field":       "compute: {operation: pick_or_average, weight_field: mass}",
-		"clear_empty_source":         "data_accumulation: {writes: [{op: clear, target: entity.items, source_field: ''}]}",
-		"clear_empty_field":          "data_accumulation: {writes: [{op: clear, target: entity.items, field: ''}]}",
+		"clear_empty_source":         "data_accumulation: {writes: [{op: clear, target: state.items, source_field: ''}]}",
+		"clear_empty_field":          "data_accumulation: {writes: [{op: clear, target: state.items, field: ''}]}",
 		"mapped_empty_op":            "data_accumulation: {writes: [{source_field: items, target_field: items, op: ''}]}",
 		"mapped_empty_second_target": "data_accumulation: {writes: [{source_field: items, target_field: items, target_path: ''}]}",
 		"ordinary_empty_source":      "data_accumulation: {writes: [{target_field: items, value: 1, source_field: ''}]}",
@@ -39,7 +39,7 @@ func TestReviewer2492ClosedNodeAdmission(t *testing.T) {
 func TestReviewer2492ValidControls(t *testing.T) {
 	for _, body := range []string{
 		"compute: {operation: pick_or_average}",
-		"data_accumulation: {writes: [{op: clear, target: entity.items}]}",
+		"data_accumulation: {writes: [{op: clear, target: state.items}]}",
 		"data_accumulation: {writes: [{source_field: items, target_field: items}]}",
 		"fan_out: {items_from: payload.rows, as: row, max_items: 2, emit: {event: task.done, fields: {id: row}}}",
 		"reduce: {operation: sum, items_from: payload.rows}",
@@ -73,13 +73,13 @@ func TestNodeWriteBranchPresenceContract(t *testing.T) {
 		forbidden   []string
 	}{
 		{"mapped", "source_field: items, target_field: items", []string{"field", "target", "op", "key", "index", "value", "expression"}},
-		{"ordinary", "target_path: entity.items, value: 1", []string{"field", "source_field", "target", "op", "key", "index", "expression"}},
-		{"clear", "op: clear, target: entity.items", []string{"field", "source_field", "target_field", "target_path", "key", "index", "value", "expression"}},
-		{"set", "op: set, target: entity.items, key: x, value: 1", []string{"field", "source_field", "target_field", "target_path", "index", "expression"}},
-		{"merge", "op: merge, target: entity.items, key: x, value: {}", []string{"field", "source_field", "target_field", "target_path", "index", "expression"}},
-		{"delete", "op: delete, target: entity.items, key: x", []string{"field", "source_field", "target_field", "target_path", "index", "value", "expression"}},
-		{"append", "op: append, target: entity.items, value: 1", []string{"field", "source_field", "target_field", "target_path", "index", "expression"}},
-		{"update", "op: update, target: entity.items, index: 0, value: 1", []string{"field", "source_field", "target_field", "target_path", "expression"}},
+		{"ordinary", "target_path: state.items, value: 1", []string{"field", "source_field", "target", "op", "key", "index", "expression"}},
+		{"clear", "op: clear, target: state.items", []string{"field", "source_field", "target_field", "target_path", "key", "index", "value", "expression"}},
+		{"set", "op: set, target: state.items, key: x, value: 1", []string{"field", "source_field", "target_field", "target_path", "index", "expression"}},
+		{"merge", "op: merge, target: state.items, key: x, value: {}", []string{"field", "source_field", "target_field", "target_path", "index", "expression"}},
+		{"delete", "op: delete, target: state.items, key: x", []string{"field", "source_field", "target_field", "target_path", "index", "value", "expression"}},
+		{"append", "op: append, target: state.items, value: 1", []string{"field", "source_field", "target_field", "target_path", "index", "expression"}},
+		{"update", "op: update, target: state.items, index: 0, value: 1", []string{"field", "source_field", "target_field", "target_path", "expression"}},
 	} {
 		t.Run(branch.name, func(t *testing.T) {
 			if _, err := admitReviewNode(t, "data_accumulation: {writes: [{"+branch.valid+"}]}"); err != nil {
@@ -99,9 +99,9 @@ func TestNodeWriteBranchPresenceContract(t *testing.T) {
 	}
 	for _, write := range []string{
 		"items", "{target_field: items, value: ''}", "{target_field: items, value: null}",
-		"{source_field: items, target_path: entity.items}",
-		"{op: append, target: entity.items, key: group, value: null}",
-		"{op: update, target: entity.items, key: group, index: 0, value: ''}",
+		"{source_field: items, target_path: state.items}",
+		"{op: append, target: state.items, key: group, value: null}",
+		"{op: update, target: state.items, key: group, index: 0, value: ''}",
 	} {
 		if _, err := admitReviewNode(t, "data_accumulation: {writes: ["+write+"]}"); err != nil {
 			t.Fatalf("valid literal/mapped/map-held-list admission %s: %v", write, err)
@@ -116,7 +116,7 @@ func TestNodeWriteRequiredTextAndExclusiveTargets(t *testing.T) {
 			"{source_field: items, target_field: " + state + "}",
 			"{target_path: " + state + ", value: 1}",
 			"{op: clear, target: " + state + "}",
-			"{op: " + state + ", target: entity.items}",
+			"{op: " + state + ", target: state.items}",
 			"{target_field: items, target_path: " + state + ", value: 1}",
 		} {
 			if _, err := admitReviewNode(t, "data_accumulation: {writes: ["+write+"]}"); err == nil {
@@ -124,7 +124,7 @@ func TestNodeWriteRequiredTextAndExclusiveTargets(t *testing.T) {
 			}
 		}
 	}
-	for _, write := range []string{"''", "{field: items}", "{value: 1}", "{source_field: items}", "{target_field: items}", "{op: append, target: entity.items}", "{op: set, target: entity.items, value: 1}"} {
+	for _, write := range []string{"''", "{field: items}", "{value: 1}", "{source_field: items}", "{target_field: items}", "{op: append, target: state.items}", "{op: set, target: state.items, value: 1}"} {
 		if _, err := admitReviewNode(t, "data_accumulation: {writes: ["+write+"]}"); err == nil {
 			t.Fatalf("required field/bare direct form admitted: %s", write)
 		}
@@ -201,7 +201,7 @@ func TestNodeAliasMergePresenceAndSemanticDiagnostics(t *testing.T) {
 	for _, row := range []string{
 		"_note: &bad ''\nfan_out: {items_from: payload.rows, as: row, identity: *bad}",
 		"_note: &bad 1.5\nfan_out: {items_from: payload.rows, as: row, max_items: *bad}",
-		"_note: &bad {source_field: ''}\ndata_accumulation: {writes: [{op: clear, target: entity.items, <<: *bad}]}",
+		"_note: &bad {source_field: ''}\ndata_accumulation: {writes: [{op: clear, target: state.items, <<: *bad}]}",
 		"_note: &bad {activity: null}\non_complete: [{<<: *bad}]",
 		"_note: &bad {value_field: ''}\ncompute: {operation: pick_or_average, <<: *bad}",
 		"_note: &bad ''\nreduce: {items_from: payload.rows, source: *bad}",

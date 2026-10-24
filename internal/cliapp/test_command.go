@@ -743,7 +743,7 @@ func scenarioSetupEntityID(seed, runID string, entity evaluatedScenarioSetupEnti
 	if flowID == "" || flowID == "." {
 		return runtimeflowidentity.EntityID(runID)
 	}
-	return scenarioUUID(seed, "setup.entity."+entity.Alias)
+	return scenarioUUID(seed, "setup.state."+entity.Alias)
 }
 
 func (r scenarioRunner) runInvalidVariants(file scenarioTestFile, doc scenarioDocument, evaluator *scenarioExpressionEvaluator) error {
@@ -964,64 +964,11 @@ func (r scenarioRunner) evaluateScenarioSetupFields(evaluator *scenarioExpressio
 	return fields, nil
 }
 
-func (r scenarioRunner) evaluateScenarioSetupGates(evaluator *scenarioExpressionEvaluator, flowID string, entity scenarioSetupEntity) (map[string]bool, error) {
-	if !entity.GatesSet {
-		return map[string]bool{}, nil
+func (r scenarioRunner) evaluateScenarioSetupGates(_ *scenarioExpressionEvaluator, _ string, entity scenarioSetupEntity) (map[string]bool, error) {
+	if entity.GatesSet {
+		return nil, fmt.Errorf("setup.entities[%s].gates is retired; set declared boolean state in fields", entity.Alias)
 	}
-	value, err := evaluator.Evaluate(entity.Gates)
-	if err != nil {
-		return nil, fmt.Errorf("setup.entities[%s].gates: %w", entity.Alias, err)
-	}
-	raw, ok := value.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("setup.entities[%s].gates must evaluate to a mapping", entity.Alias)
-	}
-	declared := r.declaredScenarioGateNames(flowID)
-	out := make(map[string]bool, len(raw))
-	for gate, rawValue := range raw {
-		boolValue, ok := rawValue.(bool)
-		if !ok {
-			return nil, fmt.Errorf("setup.entities[%s].gates.%s must evaluate to boolean", entity.Alias, gate)
-		}
-		if _, ok := declared[gate]; !ok {
-			return nil, fmt.Errorf("setup.entities[%s].gates.%s is not declared for flow %s", entity.Alias, gate, scenarioFlowLabel(flowID))
-		}
-		out[gate] = boolValue
-	}
-	return out, nil
-}
-
-func (r scenarioRunner) declaredScenarioGateNames(flowID string) map[string]struct{} {
-	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
-	out := map[string]struct{}{}
-	for _, record := range r.bundle.ScopedNodeRecords() {
-		node, err := record.Identity()
-		if err != nil || strings.Trim(node.FlowPath(), "/") != flowID {
-			continue
-		}
-		for _, gate := range record.Entry.GateState.Gates {
-			if name := strings.TrimSpace(gate.Name); name != "" {
-				out[name] = struct{}{}
-			}
-		}
-	}
-	for _, transition := range r.bundle.DerivedHandlerTransitions() {
-		if strings.Trim(transition.Node.FlowPath(), "/") != flowID {
-			continue
-		}
-		if transition.SetsGate != nil {
-			if name := strings.TrimSpace(transition.SetsGate.Name); name != "" {
-				out[name] = struct{}{}
-			}
-		}
-		for _, gate := range transition.ClearGates {
-			gate = strings.TrimSpace(gate)
-			if gate != "" && gate != "*" {
-				out[gate] = struct{}{}
-			}
-		}
-	}
-	return out
+	return map[string]bool{}, nil
 }
 
 func scenarioFlowLabel(flowID string) string {
@@ -1940,7 +1887,7 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scen
 			break
 		}
 		if _, ok := seen[cursor]; ok {
-			return fmt.Errorf("malformed entity.list result: repeated next_cursor %q", cursor)
+			return fmt.Errorf("malformed state.list result: repeated next_cursor %q", cursor)
 		}
 		seen[cursor] = struct{}{}
 		params["cursor"] = cursor
@@ -1967,17 +1914,17 @@ func (r scenarioRunner) assertEntityDetailExpectation(ctx context.Context, runID
 	if err := r.client.call(ctx, entityGetMethod, map[string]any{"entity_id": entityID, "run_id": runID}, &full); err != nil {
 		return err
 	}
-	if err := validateEntityFullResult("entity.get result", full); err != nil {
+	if err := validateEntityFullResult("state.get result", full); err != nil {
 		return err
 	}
 	if full.Entity.EntityID != entityID {
-		return fmt.Errorf("malformed entity.get result: entity.entity_id = %q, want %q", full.Entity.EntityID, entityID)
+		return fmt.Errorf("malformed state.get result: state.entity_id = %q, want %q", full.Entity.EntityID, entityID)
 	}
 	if full.Entity.RunID != runID {
-		return fmt.Errorf("malformed entity.get result: entity.run_id = %q, want %q", full.Entity.RunID, runID)
+		return fmt.Errorf("malformed state.get result: state.run_id = %q, want %q", full.Entity.RunID, runID)
 	}
 	if full.Entity.EntityType != entityType {
-		return fmt.Errorf("malformed entity.get result: entity.entity_type = %q, want %q", full.Entity.EntityType, entityType)
+		return fmt.Errorf("malformed state.get result: state.entity_type = %q, want %q", full.Entity.EntityType, entityType)
 	}
 	if detail.State != nil && (full.Entity.CurrentState == nil || *full.Entity.CurrentState != *detail.State) {
 		return fmt.Errorf("entity %s current_state = %s, want %q", entityID, entityLifecycleStageText(full.Entity), *detail.State)
@@ -2045,7 +1992,7 @@ func evaluateScenarioEntityDetail(e scenarioEntityExpect, evaluator *scenarioExp
 		for gate, raw := range gates {
 			value, ok := raw.(bool)
 			if !ok {
-				return out, fmt.Errorf("expect.entities.gates.%s must evaluate to boolean", gate)
+				return out, fmt.Errorf("expect.entities.state.%s must evaluate to boolean", gate)
 			}
 			out.Gates[gate] = value
 		}

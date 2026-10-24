@@ -18,7 +18,7 @@ func Test2293Q1AccumulateStateListBundleAdmission(t *testing.T) {
 			root := t.TempDir()
 			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-list\nstages: {done: {final: true}}\n")
 			writeFixtureFile(t, filepath.Join(root, "types.yaml"), "Review: {reviewer_id: text, message: text}\n")
-			writeFixtureFile(t, filepath.Join(root, "entities.yaml"), "State:\n  reviews: [Review]\n")
+			writeFixtureFile(t, filepath.Join(root, "state.yaml"), "reviews: [Review]\n")
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), "review.received: {reviewer_id: text, message: text}\nreview.recorded:\n")
 			node := "collector:\n  review.received:\n    emit: review.recorded\n"
 			if collect {

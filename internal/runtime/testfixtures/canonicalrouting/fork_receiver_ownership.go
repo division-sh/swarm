@@ -27,7 +27,7 @@ type ForkReceiver struct {
 func CopyForkReceiverBusinessMutationOwnership(t testing.TB, entitylessProducer bool) string {
 	t.Helper()
 	root := CopyForkReceiverOwnership(t, []ForkReceiver{{Path: "consumer", Policy: ForkReceiverRequiredExisting}}, entitylessProducer)
-	applyClosedReplacement(t, filepath.Join(root, "consumer/entities.yaml"), "  marker: text\n", "  marker: text\n  processed_token: text\n")
+	applyClosedReplacement(t, filepath.Join(root, "consumer/state.yaml"), "  marker: text\n", "  marker: text\n  processed_token: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer/nodes.yaml"),
 		"        - target_field: marker\n          value: \"consumer-owned\"\n",
 		"        - target_field: marker\n          value: \"consumer-owned\"\n        - {target_field: processed_token, value: 'seeded'}\n")
@@ -101,7 +101,7 @@ func CopyReceiverMaterializationGeometry(t testing.TB, nested bool) string {
 func CopyReceiverMaterializationSourceLocalObserver(t testing.TB) string {
 	t.Helper()
 	root := CopyForkReceiverBusinessMutationOwnership(t, false)
-	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the source input without acquiring a receiver entity.\n")
+	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the source input without acquiring a receiver state.\n")
 	writeClosedVariantFile(t, root, "agents.yaml", `observer:
   role: observer
   model: regular
@@ -131,7 +131,7 @@ connect:
   - {event: child.ready, from: child, to: .}
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "work.closed:\nwork.requested:\n  token: text\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "receipt:\n  token: text\n")
+	writeClosedVariantFile(t, root, "state.yaml", "token: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `collector:
   work.closed:
     advances_to: done
@@ -147,7 +147,7 @@ connect:
   subscriptions: [child.ready]
   emit_events: []
 `)
-	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the receiving root entity.\n")
+	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the receiving root state.\n")
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\ninputs:\n  - work.requested\noutputs:\n  - child.ready\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "child.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `producer:
@@ -213,7 +213,7 @@ connect:
   - {event: receiver.closed, from: ., to: branch, rename: receiver.close.requested}
   - {event: start.closed, from: ., to: branch}
 `)
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  marker: text\n")
+	writeClosedVariantFile(t, root, "state.yaml", "marker: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "outer.seeded:\n  token: text\nouter.requested:\n  token: text\nouter.closed:\nstart.closed:\nreceiver.closed:\nstart.seeded:\n  token: text\nstart.requested:\n  token: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   outer.seeded:
@@ -274,7 +274,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 `, receiver.Path)
 		}
 		stages := ""
-		entities := "receipt: {}\n"
+		entities := ""
 		if receiver.Policy != ForkReceiverOptionalAbsent {
 			closeEdges += fmt.Sprintf("  - {event: receiver.closed, from: ., to: %s}\n", receiver.Path)
 			stages = "stages:\n  waiting: {}\n  active: {}\n  done: {final: true}\n"
@@ -286,7 +286,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		switch receiver.Policy {
 		case ForkReceiverOptionalAbsent, ForkReceiverOptionalExisting:
 		case ForkReceiverRequiredExisting, ForkReceiverRequiredMissing:
-			body = fmt.Sprintf("    guard: has(entity.marker) && entity.marker == '%s-owned'\n", receiver.Path)
+			body = fmt.Sprintf("    guard: has(state.marker) && state.marker == '%s-owned'\n", receiver.Path)
 		case ForkReceiverConstructorOwned:
 			body += fmt.Sprintf("    advances_to: active\n    data_accumulation:\n      writes:\n        - target_field: marker\n          value: \"%s-created\"\n", receiver.Path)
 		default:
@@ -304,7 +304,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 %s  outputs:
     - receiver.finished
 `, receiver.Path, stages, pinInputs))
-		writeClosedVariantFile(t, root, receiver.Path+"/entities.yaml", entities)
+		writeClosedVariantFile(t, root, receiver.Path+"/state.yaml", entities)
 		writeClosedVariantFile(t, root, receiver.Path+"/events.yaml", "receiver.finished:\n  owner: text\n  token: text\n")
 		writeClosedVariantFile(t, root, receiver.Path+"/nodes.yaml", fmt.Sprintf("collector:\n%s  work.ready:\n%s", seedHandler, body))
 	}
@@ -335,7 +335,7 @@ inputs:
 `+receiptPins+closeInput+`  outputs: [`+outputs+`]
 connect:
 `+rootEdges+seedEdges+closeEdges)
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  marker: text\n")
+	writeClosedVariantFile(t, root, "state.yaml", "marker: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n"+closeEvent+seedEvent+"work.requested:\n  token: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   start.seeded:
@@ -356,7 +356,7 @@ connect:
 	if !entitylessProducer {
 		producerStages = "stages:\n  waiting: {}\n  active: {final: true}\n"
 		producerBody = "    advances_to: active\n    data_accumulation:\n      writes:\n        - target_field: marker\n          value: \"producer-owned\"\n"
-		writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  marker: text\n")
+		writeClosedVariantFile(t, root, "producer/state.yaml", "marker: text\n")
 	}
 	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\n"+producerStages+"inputs: [work.requested]\noutputs: [work.ready]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  token: text\n")

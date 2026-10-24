@@ -158,10 +158,10 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":          "name: constructed-target-transition\n",
-		"review/schema.yaml":   "name: review\ninstance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\ninputs: [review.created]\n",
-		"review/entities.yaml": "review_item:\n  account_id: text\n  handled: {type: boolean, initial: false}\n",
-		"review/events.yaml":   "review.created:\n  account_id: text\nfinish.requested:\nsettle.requested:\n",
+		"schema.yaml":        "name: constructed-target-transition\n",
+		"review/schema.yaml": "name: review\ninstance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\ninputs: [review.created]\n",
+		"review/state.yaml":  "account_id: text\nhandled: false\n",
+		"review/events.yaml": "review.created:\n  account_id: text\nfinish.requested:\nsettle.requested:\n",
 		"review/nodes.yaml": `progress:
   finish.requested:
     advances_to: done

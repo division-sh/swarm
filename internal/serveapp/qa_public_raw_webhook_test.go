@@ -244,7 +244,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			var entity struct {
 				Fields map[string]any `json:"fields"`
 			}
-			requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": receipt.RunID, "entity_id": receipt.RunID}, &entity)
+			requireServedJSONRPCResult(t, served.Endpoint, "state.get", map[string]any{"run_id": receipt.RunID, "entity_id": receipt.RunID}, &entity)
 			if entity.Fields["processed_count"] != float64(1) || entity.Fields["provider_event_id"] != "public-route-proof" {
 				t.Fatalf("cross-listener retries changed receiver effects: %+v", entity.Fields)
 			}

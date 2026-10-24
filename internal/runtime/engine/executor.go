@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
@@ -45,7 +44,6 @@ type Step string
 const (
 	StepLoop       Step = "loop"
 	StepQuery      Step = "query"
-	StepClearGates Step = "clear_gates"
 	StepGuard      Step = "guard"
 	StepJoin       Step = "join"
 	StepAccumulate Step = "accumulate"
@@ -58,9 +56,7 @@ const (
 	StepOnComplete Step = "on_complete"
 	StepRules      Step = "rules"
 	StepAdvancesTo Step = "advances_to"
-	StepSetsGate   Step = "sets_gate"
 	StepDataWrites Step = "data_writes"
-	StepProjection Step = "projection"
 	StepTransform  Step = "transform"
 	StepEmits      Step = "emits"
 	StepActivity   Step = "activity"
@@ -69,7 +65,6 @@ const (
 
 var OrderedSteps = []Step{
 	StepLoop,
-	StepClearGates,
 	StepGuard,
 	StepJoin,
 	StepAccumulate,
@@ -84,8 +79,6 @@ var OrderedSteps = []Step{
 	StepOnComplete,
 	StepRules,
 	StepAdvancesTo,
-	StepSetsGate,
-	StepProjection,
 	StepTransform,
 	StepEmits,
 	StepActivity,
@@ -117,7 +110,6 @@ type executionFrame struct {
 	topLevelDataWritesApplied bool
 	ruleDataWritesApplied     bool
 	ruleEffectsApplied        bool
-	projectionApplied         bool
 	transitionApplied         bool
 	lastEmitCreatedAt         time.Time
 	joinResultType            runtimecontracts.CatalogTypeReference
@@ -729,8 +721,6 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 		return false, e.stepLoop(frame)
 	case StepQuery:
 		return false, e.stepQuery(frame)
-	case StepClearGates:
-		return false, e.stepClearGates(frame)
 	case StepGuard:
 		return e.stepGuard(frame)
 	case StepJoin:
@@ -756,12 +746,8 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 	case StepAdvancesTo:
 		frame.resolveNonRuleObservation()
 		return false, e.stepAdvancesTo(frame)
-	case StepSetsGate:
-		return false, e.stepSetsGate(frame)
 	case StepDataWrites:
 		return false, e.stepDataWrites(frame)
-	case StepProjection:
-		return false, e.stepProjection(frame)
 	case StepTransform:
 		return false, e.stepTransform(frame)
 	case StepEmits:
@@ -1111,21 +1097,6 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	return nil
 }
 
-func (e *Executor) stepClearGates(frame *executionFrame) error {
-	if len(frame.req.Handler.ClearGates) == 0 {
-		return nil
-	}
-	frame.result.ClearGates = normalizeStrings(e.resolveClearGates(frame))
-	frame.result.StateMutation.ClearGates = append([]string{}, frame.result.ClearGates...)
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	for _, gate := range frame.result.ClearGates {
-		frame.state.State.SetGate(gate, false)
-		frame.result.StateMutation.SetGateValue(gate, false)
-	}
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	return nil
-}
-
 func (e *Executor) stepGuard(frame *executionFrame) (bool, error) {
 	spec := frame.req.Handler.Guard
 	if spec == nil {
@@ -1175,7 +1146,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	for index, item := range acc.Items {
 		items[index] = item
 	}
-	if err := e.appendEntityMutation(frame, entityruntime.Mutation{Target: "entity." + spec.Target, Value: items}); err != nil {
+	if err := e.appendEntityMutation(frame, entityruntime.Mutation{Target: "state." + spec.Target, Value: items}); err != nil {
 		return false, err
 	}
 	return false, nil
@@ -2149,32 +2120,6 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 	return nil
 }
 
-func (e *Executor) stepSetsGate(frame *executionFrame) error {
-	if frame.req.Handler.SetsGate == nil {
-		if frame.rule == nil || strings.TrimSpace(frame.rule.AdvancesTo) == "" {
-			return nil
-		}
-	}
-	spec := frame.req.Handler.SetsGate
-	if frame.rule != nil && strings.TrimSpace(frame.rule.AdvancesTo) == "" {
-		// rule-level gates are not modeled yet
-	}
-	if spec == nil {
-		return nil
-	}
-	name := strings.TrimSpace(spec.Name)
-	if name == "" {
-		return nil
-	}
-	frame.result.SetsGate = name
-	frame.result.StateMutation.SetGate = name
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	frame.state.State.SetGate(name, true)
-	frame.result.StateMutation.SetGateValue(name, true)
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	return nil
-}
-
 func (e *Executor) stepDataWrites(frame *executionFrame) error {
 	if (frame.topLevelDataAccumulation.HasWrites() || strings.TrimSpace(frame.topLevelDataAccumulation.SourceEvent) != "") && !frame.topLevelDataWritesApplied {
 		if err := e.applyDataAccumulation(frame, frame.topLevelDataAccumulation); err != nil {
@@ -2346,69 +2291,6 @@ func (e *Executor) joinPlan(req ExecutionRequest) (runtimecontracts.WorkflowJoin
 	return semanticview.WorkflowJoinPlanForRef(e.deps.Source, req.JoinDeclaration)
 }
 
-func (e *Executor) stepProjection(frame *executionFrame) error {
-	if frame.projectionApplied {
-		return nil
-	}
-	if !accumulatorProjectionEligible(frame) {
-		return nil
-	}
-	handlerEventType := handlerAccumulatorEventType(frame.req)
-	result := accprojection.ForExecutableHandlerWithAccumulator(e.deps.Source, frame.req.Node, string(handlerEventType), activeAccumulatorName(frame.req.Handler))
-	if len(result.Issues) > 0 {
-		return fmt.Errorf("accumulator projection declarations are invalid: %s", result.Issues[0].Message)
-	}
-	if len(result.Bindings) == 0 {
-		if result.ExpectedBindingCount > 0 {
-			return fmt.Errorf("runtime_invariant_violation: materialize_from binding declared for node %s accumulator %s but no accumulator buffer resolved at runtime for event %s; likely event identity drift between verify-time declaration and execution-time lookup", frame.req.Node.Key(), result.ActiveAccumulatorName, string(frame.req.Event.Type()))
-		}
-		return nil
-	}
-	accumulateSpec, effectiveErr := e.effectiveAccumulatorSpec(frame, frame.req.Handler.Accumulate)
-	if effectiveErr != nil {
-		return effectiveErr
-	}
-	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, accumulateSpec)
-	if bucketErr != nil {
-		return bucketErr
-	}
-	if !matched {
-		return nil
-	}
-	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
-	if !ok {
-		return fmt.Errorf("accumulator projection source missing for node %s event %s", frame.req.Node.Key(), string(handlerEventType))
-	}
-	if err := acc.Err(); err != nil {
-		return err
-	}
-	for _, binding := range result.Bindings {
-		projected, err := e.projectAccumulatorItems(frame, binding, acc.Items)
-		if err != nil {
-			return err
-		}
-		if err := e.appendEntityMutation(frame, entityruntime.Mutation{Target: "entity." + binding.TargetField, Value: projected, ProjectionSource: binding.TargetDecl.MaterializeFrom}); err != nil {
-			return fmt.Errorf("materialize_from %s.%s: %w", binding.SourceNode.Key(), binding.AccumulatorName, err)
-		}
-	}
-	if err := e.validateEntityMutationList(frame); err != nil {
-		return err
-	}
-	frame.projectionApplied = true
-	return nil
-}
-
-func activeAccumulatorName(handler runtimecontracts.SystemNodeEventHandler) string {
-	if handler.Accumulate == nil {
-		return ""
-	}
-	return strings.TrimSpace(handler.Accumulate.Into)
-}
-
-func accumulatorProjectionEligible(frame *executionFrame) bool {
-	return frame != nil && frame.req.Handler.Accumulate != nil
-}
-
 func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, bool, error) {
 	if frame == nil {
 		return timeridentity.AccumulatorBucketRef{}, false, nil
@@ -2449,135 +2331,6 @@ func (e *Executor) effectiveAccumulatorSpec(frame *executionFrame, spec *runtime
 		return nil, failures.Wrap(failures.ClassSchemaInvalid, "accumulator_key_schema_invalid", "accumulator", "admit", nil, err)
 	}
 	return spec, err
-}
-
-func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accprojection.Binding, items []map[string]any) ([]any, error) {
-	out := make([]any, 0, len(items))
-	for idx, item := range items {
-		typedView, err := accumulatorTypedView(binding, item)
-		if err != nil {
-			return nil, fmt.Errorf("materialize_from %s.%s item %d: %w", binding.SourceNode.Key(), binding.AccumulatorName, idx, err)
-		}
-		if len(binding.Project) == 0 {
-			out = append(out, typedView)
-			continue
-		}
-		projected, err := e.projectAccumulatorItem(frame, binding, typedView)
-		if err != nil {
-			return nil, fmt.Errorf("materialize_from %s.%s item %d: %w", binding.SourceNode.Key(), binding.AccumulatorName, idx, err)
-		}
-		out = append(out, projected)
-	}
-	return out, nil
-}
-
-func accumulatorTypedView(binding accprojection.Binding, item map[string]any) (map[string]any, error) {
-	out := make(map[string]any, len(binding.SourceType.Fields))
-	for _, spec := range binding.SourceType.Fields {
-		fieldName := strings.TrimSpace(spec.Name)
-		if fieldName == "" {
-			continue
-		}
-		value, ok := item[fieldName]
-		if !ok {
-			if spec.IsOptional {
-				continue
-			}
-			return nil, fmt.Errorf("source item missing required typed-view field %q", fieldName)
-		}
-		out[fieldName] = cloneProjectionValue(value)
-	}
-	return out, nil
-}
-
-func (e *Executor) projectAccumulatorItem(frame *executionFrame, binding accprojection.Binding, source map[string]any) (map[string]any, error) {
-	out := make(map[string]any, len(binding.TargetType.Fields))
-	for _, spec := range binding.TargetType.Fields {
-		fieldName := spec.Name
-		rawExpr, ok := binding.Project[fieldName]
-		if !ok {
-			if spec.IsOptional {
-				continue
-			}
-			return nil, fmt.Errorf("project missing target field %q", fieldName)
-		}
-		if sourceExpr, isSource := rawExpr.(string); isSource {
-			if sourceField, isSourceField := strings.CutPrefix(strings.TrimSpace(sourceExpr), "source."); isSourceField {
-				if _, present := source[strings.TrimSpace(sourceField)]; !present && spec.IsOptional {
-					continue
-				}
-			}
-		}
-		value, err := e.evaluateProjectionExpression(frame, rawExpr, source)
-		if err != nil {
-			return nil, fmt.Errorf("project.%s: %w", fieldName, err)
-		}
-		out[fieldName] = value
-	}
-	return out, nil
-}
-
-func (e *Executor) evaluateProjectionExpression(frame *executionFrame, raw any, source map[string]any) (any, error) {
-	expr, ok := raw.(string)
-	if !ok {
-		return cloneProjectionValue(raw), nil
-	}
-	expr = strings.TrimSpace(expr)
-	if fieldName, ok := strings.CutPrefix(expr, "source."); ok {
-		fieldName = strings.TrimSpace(fieldName)
-		value, ok := source[fieldName]
-		if !ok {
-			return nil, fmt.Errorf("unknown source field %q", fieldName)
-		}
-		return cloneProjectionValue(value), nil
-	}
-	if policyPath, ok := strings.CutPrefix(expr, "policy."); ok {
-		value, ok := lookupProjectionPath(e.currentContext(frame).Policy.Raw(), policyPath)
-		if !ok {
-			return nil, fmt.Errorf("unknown policy field %q", policyPath)
-		}
-		return cloneProjectionValue(value), nil
-	}
-	for _, forbidden := range []string{"entity.", "payload.", "event.", "fan_out.", "accumulated."} {
-		if strings.HasPrefix(expr, forbidden) {
-			return nil, fmt.Errorf("forbidden projection binding %q", expr)
-		}
-	}
-	return expr, nil
-}
-
-func cloneProjectionValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneStringAnyMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			out[i] = cloneProjectionValue(item)
-		}
-		return out
-	default:
-		return value
-	}
-}
-
-func lookupProjectionPath(raw map[string]any, path string) (any, bool) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil, false
-	}
-	current := any(raw)
-	for _, segment := range strings.Split(path, ".") {
-		object, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		current, ok = object[strings.TrimSpace(segment)]
-		if !ok {
-			return nil, false
-		}
-	}
-	return current, true
 }
 
 func (e *Executor) stepTransform(frame *executionFrame) error {
@@ -2758,9 +2511,6 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 				if bucket, ok := frame.state.State.StateBucket(frame.req.Node.Key()); ok {
 					delete(bucket.Raw(), handlerAccumulatorBucketKey)
 				}
-			}
-			if err := e.resetNodeEntityProjections(frame); err != nil {
-				return err
 			}
 		case "pending_dedup":
 			return fmt.Errorf("clear target pending_dedup is unsupported")
@@ -2971,7 +2721,6 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx = WithJoin(ctx, frame.state.Join)
 	ctx = WithLoop(ctx, frame.state.Loop)
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Fields))
-	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
 	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.ExecutionFlowID.String())))
 	ctx.FlowID = firstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), frame.req.ExecutionFlowID.String())
@@ -3002,7 +2751,7 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.ExecutionFlowID.String(), target); err != nil {
 		return err
 	} else if entityTarget {
-		return e.appendEntityMutation(frame, entityruntime.Mutation{Target: "entity." + resolved.Path, Value: value})
+		return e.appendEntityMutation(frame, entityruntime.Mutation{Target: "state." + resolved.Path, Value: value})
 	}
 	return fmt.Errorf("unsupported write target %s; use an entity field or an explicit evaluation-private scope", target)
 }
@@ -3167,7 +2916,7 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			return fmt.Errorf("data_accumulation target is required")
 		}
 		switch parsed := paths.Parse(target); parsed.Root {
-		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootJoin, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
+		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootJoin, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
 			return fmt.Errorf("data_accumulation target %s: unsupported target scope", target)
 		}
 		if !write.Value.IsZero() {
@@ -3515,33 +3264,12 @@ func (e *Executor) queueEmitIntentForSpec(frame *executionFrame, spec runtimecon
 	return true, nil
 }
 
-func (e *Executor) resolveClearGates(frame *executionFrame) []string {
-	if !slices.Contains(frame.req.Handler.ClearGates, "*") {
-		return frame.req.Handler.ClearGates
-	}
-	if len(frame.state.State.StateCarrier.Gates) == 0 {
-		return nil
-	}
-	return normalizeStrings(stringSliceFromAny(mapsKeys(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))))
-}
-
 func (e *Executor) applyGuardFailure(frame *executionFrame, _ *runtimecontracts.GuardSpec) error {
 	frame.req.Handler.AdvancesTo = ""
-	frame.req.Handler.SetsGate = nil
 	frame.req.Handler.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
 	frame.topLevelDataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
 	frame.req.Handler.Emit = runtimecontracts.EmitSpec{}
 	frame.result.Status = OutcomeRejected
 	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "reject")
 	return nil
-}
-func mapsKeys(values map[string]any) []any {
-	if len(values) == 0 {
-		return nil
-	}
-	keys := make([]any, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	return keys
 }

@@ -61,9 +61,8 @@ func runStatusSubscriptionSource(t *testing.T, withAgent bool) semanticview.Sour
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: run-status\nrequired_agents: []\nstages:\n  ready: {}\ninputs: [scan.requested]\noutputs: [scan.completed]\n",
-		"events.yaml":   "scan.requested:\n  topic: text\nscan.completed:\n",
-		"entities.yaml": "default: {}\n",
+		"schema.yaml": "name: run-status\nrequired_agents: []\nstages:\n  ready: {}\ninputs: [scan.requested]\noutputs: [scan.completed]\n",
+		"events.yaml": "scan.requested:\n  topic: text\nscan.completed:\n",
 	}
 	if withAgent {
 		files["agents.yaml"] = "agent-1:\n  role: worker\n  intent: {inline: Complete the scan.}\n  model: regular\n  subscriptions: [scan.requested]\n"

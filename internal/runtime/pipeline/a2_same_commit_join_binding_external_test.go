@@ -325,9 +325,9 @@ inputs:
 outputs:
   - item.completed
 `,
-		"entities.yaml": "join_state:\n  expected: [text]\n",
-		"types.yaml":    "JoinResult:\n  value: text\n",
-		"events.yaml":   "dispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\n",
+		"state.yaml":  "expected: [text]\n",
+		"types.yaml":  "JoinResult:\n  value: text\n",
+		"events.yaml": "dispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\n",
 		"nodes.yaml": `dispatcher:
   dispatch.completed:
     advances_to: awaiting

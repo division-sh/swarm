@@ -178,7 +178,7 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema, err := cliapp.SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+	schema, err := cliapp.SchemaBootstrapRequest(bundle.Platform, plans.Platform)
 	if err != nil {
 		t.Fatal(err)
 	}

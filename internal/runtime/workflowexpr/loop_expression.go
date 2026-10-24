@@ -9,6 +9,11 @@ import (
 )
 
 func validateAuthoredContextRoots(expression string, opts ValueExpressionOptions) error {
+	for _, root := range []string{"entity", "_entity", "gates"} {
+		if ExpressionReferencesRoot(expression, root) {
+			return fmt.Errorf("%s is retired; use state.<declared field> or instance.id, instance.stage, instance.path", root)
+		}
+	}
 	if ExpressionReferencesRoot(expression, "_loop") {
 		return fmt.Errorf("_loop is internal; use the authored loop.* members")
 	}

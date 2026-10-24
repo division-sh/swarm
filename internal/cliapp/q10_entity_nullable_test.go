@@ -39,7 +39,7 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 				if err := json.Unmarshal(raw, &out); err != nil {
 					return out, err
 				}
-				return out, validateEntityFullResult("entity.get result", out)
+				return out, validateEntityFullResult("state.get result", out)
 			}
 			out, err := decode(full)
 			if err != nil || entityLifecycleStageText(out.Entity) != want {

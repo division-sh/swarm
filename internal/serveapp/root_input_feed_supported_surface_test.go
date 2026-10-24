@@ -84,7 +84,7 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 						}
 					}
 					var entities operatorread.OperatorEntityListResult
-					requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID}, &entities)
+					requireServedJSONRPCResult(t, rt.Endpoint, "state.list", map[string]any{"run_id": runID}, &entities)
 					if len(entities.Entities) != tc.wantEntities {
 						t.Fatalf("feed fabricated a producer or lost a receiver: %+v", entities)
 					}

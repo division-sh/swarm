@@ -19,16 +19,16 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
 		for _, outcome := range []string{"accepted", "rejected", "outbox_failure"} {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				source := loadWorkflowTempSource(t, map[string]string{
-					"schema.yaml":   "name: findings\nstages:\n  active: {}\n  done: {final: true}\n",
-					"types.yaml":    "Finding:\n  summary: text\n",
-					"entities.yaml": "work:\n  findings: {type: '[Finding]', initial: []}\n  status: {type: text, initial: pending}\n",
-					"events.yaml":   "finding.received:\n  summary: text\n  status: text\nfinding.recorded:\n  status: text\n",
+					"schema.yaml": "name: findings\nstages:\n  active: {}\n  done: {final: true}\n",
+					"types.yaml":  "Finding:\n  summary: text\n",
+					"state.yaml":  "findings: [Finding]\nstatus: \"pending\"\n",
+					"events.yaml": "finding.received:\n  summary: text\n  status: text\nfinding.recorded:\n  status: text\n",
 					"nodes.yaml": `writer:
   finding.received:
     data_accumulation:
       writes:
         - op: append
-          target: entity.findings
+          target: state.findings
           value:
             summary: payload.summary
         - source_field: status
@@ -36,7 +36,7 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
     emit:
       event: finding.recorded
       fields:
-        status: entity.status
+        status: state.status
 `,
 				})
 				bundle, ok := semanticview.Bundle(source)

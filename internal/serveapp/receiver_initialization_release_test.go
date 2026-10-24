@@ -114,7 +114,7 @@ func requireR7ReleaseReceiverResult(t *testing.T, endpoint string, seed servedEv
 	target := event.Deliveries[0].Target
 	r7RequireObserverDelivery(t, event, "account", "collector", target.FlowInstance, target.EntityID)
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": target.EntityID}, &entity)
+	requireServedJSONRPCResult(t, endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": target.EntityID}, &entity)
 	want := map[string]any{"account_id": "preserved-account", "processed_count": float64(executions), "values": map[string]any{"active": true, "label": "original", "attributes": map[string]any{"nested": []any{float64(1), 2.5}}}}
 	if event.RunID != seed.RunID || event.SourceEventID != seed.EventID || target.EntityID == seed.RunID || target.FlowInstance == seed.RunID || entity.Entity.EntityID != target.EntityID || entity.Entity.RunID != seed.RunID || entity.Entity.FlowInstance != target.FlowInstance || !reflect.DeepEqual(entity.Fields, want) {
 		t.Fatalf("release connected receiver lost identity, original fields or exact execution count: event=%+v entity=%+v", event, entity)

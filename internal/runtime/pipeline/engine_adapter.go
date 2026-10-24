@@ -1143,7 +1143,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		return fmt.Errorf("workflow mutation final entity candidate: %w", err)
 	}
 	existingGates := cloneWorkflowGates(instance.Gates)
-	if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
+	if len(mutation.StateCarrier.Gates) > 0 {
 		if mutation.StateCarrier.Fields == nil {
 			mutation.StateCarrier.Fields = cloneStringAnyMap(instance.Fields)
 		}
@@ -1153,15 +1153,6 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 			if key != "" {
 				gates[key] = value
 			}
-		}
-		for _, gate := range mutation.ClearGates {
-			gate = workflowScopedGateKey(source, flowID, gate)
-			if gate != "" {
-				gates[gate] = false
-			}
-		}
-		if gate := workflowScopedGateKey(source, flowID, mutation.SetGate); gate != "" {
-			gates[gate] = true
 		}
 		mutation.StateCarrier.Gates = gates
 	}

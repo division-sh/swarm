@@ -1,0 +1,2 @@
+accumulated_count: integer?
+dedup_key: text?

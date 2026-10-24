@@ -109,7 +109,7 @@ func writePrimaryEntityConformanceFixture(t *testing.T, flowSchema, flowEntities
 	writePrimaryEntityConformanceFile(t, filepath.Join(root, "schema.yaml"), "name: primary-entity-conformance\n")
 	writePrimaryEntityConformanceFile(t, filepath.Join(root, "scoring", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	if strings.TrimSpace(flowEntities) != "" {
-		writePrimaryEntityConformanceFile(t, filepath.Join(root, "scoring", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
+		writePrimaryEntityConformanceFile(t, filepath.Join(root, "scoring", "state.yaml"), strings.TrimSpace(flowEntities)+"\n")
 	}
 	return root
 }

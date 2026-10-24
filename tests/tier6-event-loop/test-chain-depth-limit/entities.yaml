@@ -1,4 +1,0 @@
-chain:
-  chain_marker:
-    type: text
-    _unused_reason: downstream handlers require the materialized chain owner

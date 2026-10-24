@@ -12,7 +12,7 @@ worker:
   arrived:
     accumulate: {into: reports, from: payload, key: payload.id}
     data_accumulation:
-      writes: [{op: set, target: entity.window, value: payload.aggregation}]
+      writes: [{op: set, target: state.window, value: payload.aggregation}]
     emit: {event: forwarded, fields: {window: payload.window, dedup_by: payload.dedup_by, aggregation: payload.aggregation}}
   batch:
     join: {members: {from_fan_out: true}, on_complete: {emit: done}}

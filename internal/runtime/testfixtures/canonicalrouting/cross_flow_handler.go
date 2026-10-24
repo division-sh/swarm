@@ -17,7 +17,7 @@ func CopyCrossFlowNodeHandler(t testing.TB, withOnSuccess bool) string {
 	}
 	for name, body := range map[string]string{
 		"schema.yaml":            "name: cross-flow-handler\nconnect:\n  - {event: vertical.shortlisted, from: scoring, to: validation}\n",
-		"entities.yaml":          "item:\n  item_id: string\n",
+		"state.yaml":             "item_id: string\n",
 		"scoring/schema.yaml":    "name: scoring\nstages: {discovered: {}, done: {final: true}}\noutputs: [vertical.shortlisted]\n",
 		"scoring/events.yaml":    "score.ready:\nvertical.shortlisted:\n  entity_id: string\n",
 		"scoring/nodes.yaml":     "scoring-node:\n  score.ready:\n    emit: vertical.shortlisted\n",

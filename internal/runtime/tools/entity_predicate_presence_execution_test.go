@@ -48,8 +48,8 @@ accounts:
 				{`optional.of(metadata).value().region != ""`, true, 0},
 				{`optional.of(metadata.notes).value()[0].?note.orValue("") == ""`, true, 0},
 				{`optional.of(metadata.by_name).value()["x"].?note.orValue("") == ""`, true, 0},
-				{`entity.metadata.region != ""`, true, 0},
-				{`entity.?metadata.hasValue()`, true, 0},
+				{`state.metadata.region != ""`, true, 0},
+				{`state.?metadata.hasValue()`, true, 0},
 				{`fields["metadata"]["region"] != ""`, true, 0},
 				{`fields.?metadata.value().region != ""`, true, 0},
 				{`metadata.notes.all(n, n.note == "")`, true, 0},
@@ -65,7 +65,7 @@ accounts:
 				{`fields.?metadata.value().?region.orValue("") == ""`, false, 1},
 				{`status == "open" && current_state != "missing"`, false, 2},
 				{`metadata.notes.all(n, n.?note.orValue("") == "")`, false, 2},
-				{`metadata.notes.all(entity, entity.?note.orValue("") == "")`, false, 2},
+				{`metadata.notes.all(state, state.?note.orValue("") == "")`, false, 2},
 				{`metadata.by_name[?"x"].value().?note.orValue("") == ""`, false, 2},
 			} {
 				t.Run(fmt.Sprintf("%s/populated=%t/%s", tool, populated, tc.expression), func(t *testing.T) {

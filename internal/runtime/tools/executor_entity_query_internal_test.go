@@ -43,11 +43,11 @@ func TestValidateEntityFilterExpression_RejectsEntityScopedSelectors(t *testing.
 	if err != nil {
 		t.Fatalf("newEntityFilterEnv: %v", err)
 	}
-	err = validateEntityFilterExpression(env, `entity.metadata.region == "us"`, schema)
+	err = validateEntityFilterExpression(env, `state.metadata.region == "us"`, schema)
 	if err == nil {
 		t.Fatal("expected entity-scoped selector to fail")
 	}
-	if !strings.Contains(err.Error(), "must not use entity.metadata.region") {
+	if !strings.Contains(err.Error(), "must not use state.metadata.region") {
 		t.Fatalf("expected entity-scoped selector rejection, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "use metadata.region instead") {

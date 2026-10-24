@@ -29,7 +29,7 @@ rows:
   proof: TestCatalogReplayClean_SelectedStores1/test-advances-to
 - id: B005
   path: tests/tier1-primitives/test-clear-gates/nodes.yaml
-  event: gates.cleared
+  event: state.cleared
   disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-clear-gates
 - id: B006
@@ -530,7 +530,7 @@ rows:
   proof: TestProducerRoutingRetirementExcludedDeadOutputs/B099
 - id: B100
   path: tests/tier4-cross-entity/test-create-entity/nodes.yaml
-  event: entity.created
+  event: state.created
   disposition: retired_handler_action
   proof: TestRetiredActionHistoricalFixtureFailsClosed
   action_retirement: "#2307 Gate A 5754202888: historical action fixture is rejected, not a passing canonical-output runtime cell; supported creation is independently proved by tier11 dynamic-flow-instance."

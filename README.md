@@ -68,7 +68,7 @@ ticket-orchestrator:
   event_handlers:
     ticket.validated:
       guard:
-        check: "entity.priority in ['high', 'urgent']"
+        check: "state.priority in ['high', 'urgent']"
         on_fail: discard
       data_accumulation:
         writes: [order_summary, validation_context]

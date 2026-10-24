@@ -1797,14 +1797,14 @@ func TestEntityTools_QueryEntitiesFilterRejectsEntityScopedSelectors(t *testing.
 	ctx, exec := newEntityToolTestExecutor(t)
 
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"filter": `entity.metadata.region == "us"`,
+		"filter": `state.metadata.region == "us"`,
 		"limit":  10,
 	})
 	re, ok := runtimefailures.As(err)
 	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected invalid_tool_input, got %v", err)
 	}
-	if re.Failure.Detail.Attributes["expression"] != `entity.metadata.region == "us"` {
+	if re.Failure.Detail.Attributes["expression"] != `state.metadata.region == "us"` {
 		t.Fatalf("filter failure attributes = %#v", re.Failure.Detail.Attributes)
 	}
 }
@@ -1935,10 +1935,8 @@ func TestEntityTools_RootActorImplicitReadToolsDoNotReadChildFlowRows(t *testing
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 
 	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-read-bundle\n")
-	writeEntityToolFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-root_subject:
-  status: text
-  score: integer
+	writeEntityToolFixtureFile(t, filepath.Join(root, "state.yaml"), `status: text
+score: integer
 `)
 	writeEntityToolFixtureFile(t, filepath.Join(root, "agents.yaml"), entityToolAgentYAML(actor))
 	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
@@ -1946,10 +1944,8 @@ stages:
   active: {}
   done: {final: true}
 `)
-	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
-child_subject:
-  status: text
-  score: integer
+	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "state.yaml"), `status: text
+score: integer
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
 	if err != nil {
@@ -3021,7 +3017,7 @@ stages:
 		t.Fatalf("unsupported entity-tool fixture initial stage %q; want queued or marginal_review", initial)
 	}
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)
-	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
+	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  entity_writes:\n    "+entityType+": {save: all}\n")
 	if len(reviewedTransition) > 0 && reviewedTransition[0] {
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), "advance:\n")
@@ -3202,7 +3198,7 @@ stages:
 			if strings.Contains(schemaYAML, "instance: fixture_key") {
 				entities = entityToolKeyedFixtureYAML(entities)
 			}
-			writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entities)
+			writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), entities)
 		}
 		if strings.TrimSpace(fixture.AgentsYAML) != "" {
 			agents := fixture.AgentsYAML

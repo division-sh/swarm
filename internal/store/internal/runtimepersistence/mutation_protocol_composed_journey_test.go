@@ -169,8 +169,8 @@ func (f mutationProtocolJourneyFixture) start(t *testing.T, bootstrap bool) *mut
 		t.Fatal(err)
 	}
 	if err := selected.Schema().BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
-		PlatformPlans: plans.Platform, StatePlans: plans.State,
-		Origin: store.RuntimeStoreOrigin{SwarmVersion: "mutation-protocol-journey", PlatformVersion: bundle.Platform.Platform.Version, CreatedAt: time.Now().UTC()},
+		PlatformPlans: plans.Platform,
+		Origin:        store.RuntimeStoreOrigin{SwarmVersion: "mutation-protocol-journey", PlatformVersion: bundle.Platform.Platform.Version, CreatedAt: time.Now().UTC()},
 	}); err != nil {
 		t.Fatal(err)
 	}

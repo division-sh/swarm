@@ -66,10 +66,10 @@ func TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores(t *tes
 				owner := &flowConstructorFaultOwner{fault: fault, reject: !acknowledged}
 				lifecycle := &flowConstructorLifecycleRecorder{}
 				files := map[string]string{
-					"schema.yaml":          "name: constructor-ack-proof\n",
-					"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
-					"review/entities.yaml": "review_item:\n  request_id: text\n",
-					"review/events.yaml":   "task.started:\n",
+					"schema.yaml":        "name: constructor-ack-proof\n",
+					"review/schema.yaml": "name: review\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
+					"review/state.yaml":  "request_id: text\n",
+					"review/events.yaml": "task.started:\n",
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, func(base manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter {
 					owner.owner = base
@@ -158,13 +158,13 @@ func TestFlowConstructorActivationConsumesExactInputBothStores(t *testing.T) {
 		} {
 			t.Run(backend+"/"+test.name, func(t *testing.T) {
 				files := map[string]string{
-					"schema.yaml":          "name: constructor-input\n",
-					"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
-					"review/entities.yaml": "review_item:\n  request_id: text\n  brief: text\n  note: text?\n  count: {type: integer, initial: 0}\n" + test.fields,
-					"review/events.yaml":   "task.started:\n  request_id: text\n  brief: text\n  note: text?\n  message: text?\n" + test.eventFields,
+					"schema.yaml":        "name: constructor-input\n",
+					"review/schema.yaml": "name: review\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
+					"review/state.yaml":  "request_id: text\nbrief: text\nnote: text?\ncount: 0\n" + test.fields,
+					"review/events.yaml": "task.started:\n  request_id: text\n  brief: text\n  note: text?\n  message: text?\n" + test.eventFields,
 				}
 				if test.name == "ineligible input" {
-					files["review/nodes.yaml"] = "inspect:\n  task.started:\n    guard: entity.missing != ''\n"
+					files["review/nodes.yaml"] = "inspect:\n  task.started:\n    guard: state.missing != ''\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 				f.constructKeylessRoot(t)

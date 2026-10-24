@@ -41,7 +41,7 @@ stages:
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state:\n  instance_id: string\n  product_id: text\n",
+		"operating/state.yaml": "instance_id: string\nproduct_id: text\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   instance_id: string
   product_id: string
@@ -101,7 +101,7 @@ stages:
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state:\n  instance_id: string\n  product_id: text\n",
+		"operating/state.yaml": "instance_id: string\nproduct_id: text\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   instance_id: string?
   template_id: string?

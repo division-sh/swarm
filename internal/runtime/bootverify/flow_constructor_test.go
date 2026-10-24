@@ -77,12 +77,12 @@ func TestFlowConstructorEligibilityUsesAssignmentChecker(t *testing.T) {
 		name, payload, handler string
 		eligible               bool
 	}{
-		{"supplied initial read", "  brief: text\n", "      guard: entity.brief != ''\n", true},
-		{"optional is not guaranteed", "  brief: text?\n", "      guard: entity.brief != ''\n", false},
-		{"missing initial read", "", "      guard: entity.brief != ''\n", false},
-		{"guard cannot borrow later write", "", "      guard: entity.brief != ''\n      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}]\n", false},
-		{"read after definite write", "", "      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}, {target_field: copy, value: entity.brief}]\n", true},
-		{"explicit optional presence", "  brief: text?\n", "      guard: >-\n        !has(entity.brief) || entity.brief != \"\"\n", true},
+		{"supplied initial read", "  brief: text\n", "      guard: state.brief != ''\n", true},
+		{"optional is not guaranteed", "  brief: text?\n", "      guard: state.brief != ''\n", false},
+		{"missing initial read", "", "      guard: state.brief != ''\n", false},
+		{"guard cannot borrow later write", "", "      guard: state.brief != ''\n      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}]\n", false},
+		{"read after definite write", "", "      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}, {target_field: copy, value: state.brief}]\n", true},
+		{"explicit optional presence", "  brief: text?\n", "      guard: >-\n        !has(state.brief) || state.brief != \"\"\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := constructorReaderFixture(t, "  brief: text\n  copy: text\n", tc.payload, tc.handler)
@@ -199,8 +199,8 @@ func TestFlowConstructorVerificationConsumesContract(t *testing.T) {
 		name, fields, payload, handler string
 		valid                          bool
 	}{
-		{"supplied initial read", "  brief: text\n", "  brief: text\n", "      guard: entity.brief != ''\n", true},
-		{"no eligible input", "  brief: text\n", "", "      guard: entity.brief != ''\n", false},
+		{"supplied initial read", "  brief: text\n", "  brief: text\n", "      guard: state.brief != ''\n", true},
+		{"no eligible input", "  brief: text\n", "", "      guard: state.brief != ''\n", false},
 		{"internal collision", "  count: {type: integer, initial: 0}\n", "  count: integer\n", "", false},
 		{"incompatible supply", "  brief: text\n", "  brief: integer\n", "", false},
 	} {
@@ -315,9 +315,9 @@ func TestFlowConstructorNestedPresence(t *testing.T) {
 		name, member, read string
 		eligible           bool
 	}{
-		{"required member", "text", "entity.brief.detail != ''", true},
-		{"optional member", "text?", "entity.brief.detail != ''", false},
-		{"presence guarded", "text?", "!has(entity.brief.detail) || entity.brief.detail != ''", true},
+		{"required member", "text", "state.brief.detail != ''", true},
+		{"optional member", "text?", "state.brief.detail != ''", false},
+		{"presence guarded", "text?", "!has(state.brief.detail) || state.brief.detail != ''", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := canonicalrouting.CopyFlowConstructorNestedPresence(t, tc.member, tc.read)
@@ -336,7 +336,7 @@ func TestFlowConstructorNestedPresence(t *testing.T) {
 
 func TestKeylessConstructorHasNoSuppliedClass(t *testing.T) {
 	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{})
-	writeBootverifyFixtureFile(t, filepath.Join(root, "producer/entities.yaml"), "producer_state:\n  count: {type: integer, initial: 0}\n  note: text?\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "producer/state.yaml"), "count: 0\nnote: text?\n")
 	repo := repoRootForBootverifyTest(t)
 	source := semanticview.Wrap(loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo)))
 	constructor, err := pipeline.CompileFlowConstructor(source, "producer", "")

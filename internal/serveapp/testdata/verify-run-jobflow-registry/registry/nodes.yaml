@@ -12,22 +12,22 @@ registry-intake:
     emit:
       event: company.evaluation.requested
       fields:
-        slug: entity.slug
+        slug: state.slug
 registry-evaluate:
   company.evaluation.requested:
     data_accumulation:
       writes:
         - target_field: verdict
           value: |
-            entity.eng_roles >= 7 ? 'qualified' : 'watchlist'
+            state.eng_roles >= 7 ? 'qualified' : 'watchlist'
     advances_to: assessed
     emit:
       event: company.status
       fields:
-        slug: entity.slug
-        name: entity.name
-        eng_roles: entity.eng_roles
-        verdict: entity.verdict
+        slug: state.slug
+        name: state.name
+        eng_roles: state.eng_roles
+        verdict: state.verdict
 registry-finalize:
   company.status:
     advances_to: done

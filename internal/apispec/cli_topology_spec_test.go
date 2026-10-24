@@ -354,7 +354,7 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 		"agent":            {candidateSource: "/v1/rpc agent.list", scopeMode: "global_bounded", normalizationMode: "trim_case_sensitive"},
 		"bundle":           {candidateSource: "none; exact admitted bundle_hash required", scopeMode: "full_only", normalizationMode: "none"},
 		"run":              {candidateSource: "/v1/rpc run.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
-		"entity":           {candidateSource: "/v1/rpc entity.list", scopeMode: "full_run_required", normalizationMode: "trim_case_sensitive"},
+		"entity":           {candidateSource: "/v1/rpc state.list", scopeMode: "full_run_required", normalizationMode: "trim_case_sensitive"},
 		"event":            {candidateSource: "/v1/rpc event.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
 		"session":          {candidateSource: "/v1/rpc conversation.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
 		"turn":             {candidateSource: "/v1/rpc conversation.list_turns", scopeMode: "full_session_required", normalizationMode: "trim_case_sensitive"},

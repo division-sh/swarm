@@ -297,10 +297,10 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 
 func a2CountJoinFiles(count int) map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: a2-count-join\nstages:\n  awaiting: {}\n  ready: {final: true}\ninputs:\n  - item.completed\n  - halt.requested\n",
-		"entities.yaml": "count_state:\n  final_expected: integer\n  final_completed: integer\n  final_results: [JoinResult]\n  final_reason: text\n",
-		"types.yaml":    "JoinResult:\n  value: text\n",
-		"events.yaml":   "item.completed:\n  member_id: text\n  result: JoinResult\nhalt.requested:\n",
+		"schema.yaml": "name: a2-count-join\nstages:\n  awaiting: {}\n  ready: {final: true}\ninputs:\n  - item.completed\n  - halt.requested\n",
+		"state.yaml":  "final_expected: integer\nfinal_completed: integer\nfinal_results: [JoinResult]\nfinal_reason: text\n",
+		"types.yaml":  "JoinResult:\n  value: text\n",
+		"events.yaml": "item.completed:\n  member_id: text\n  result: JoinResult\nhalt.requested:\n",
 		"nodes.yaml": fmt.Sprintf(`collector:
   item.completed:
     join:

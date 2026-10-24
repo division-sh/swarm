@@ -29,19 +29,21 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 	}
 
 	if got := base.PlatformEntity.Raw()["id"]; got != "entity-1" {
-		t.Fatalf("_entity.id = %#v", got)
+		t.Fatalf("instance.id = %#v", got)
 	}
 	if got := base.Entity.Raw()["k"]; got != "v" {
 		t.Fatalf("entity metadata not reflected into entity context: %#v", got)
 	}
-	if got := base.PlatformEntity.Raw()["current_state"]; got != "researching" {
-		t.Fatalf("_entity.current_state = %#v", got)
+	if got := base.PlatformEntity.Raw()["stage"]; got != "researching" {
+		t.Fatalf("instance.stage = %#v", got)
 	}
 	if _, ok := base.Entity.Raw()["current_state"]; ok {
 		t.Fatalf("platform current_state leaked into entity context: %#v", base.Entity.Raw())
 	}
-	if got := base.Gates.Bool("review"); !got {
-		t.Fatalf("gates bucket missing review: %#v", base.Gates.Raw())
+	for _, retired := range []string{"entity.k", "_entity.current_state", "gates.review"} {
+		if _, present := base.Lookup(paths.Parse(retired)); present {
+			t.Fatalf("retired root %s survived in execution context", retired)
+		}
 	}
 	input.Payload["p"] = "changed"
 	input.State.StateCarrier.Fields["k"] = "changed"
@@ -74,8 +76,8 @@ func TestBuildBaseContext_UsesConcreteFlowInstanceForPlatformEntity(t *testing.T
 		t.Fatalf("BuildBaseContext: %v", err)
 	}
 
-	if got := base.PlatformEntity.Raw()["flow_instance"]; got != "child/inst-1" {
-		t.Fatalf("_entity.flow_instance = %#v, want concrete flow path", got)
+	if got := base.PlatformEntity.Raw()["path"]; got != "child/inst-1" {
+		t.Fatalf("instance.path = %#v, want concrete flow path", got)
 	}
 	if got := base.FlowID; got != "child" {
 		t.Fatalf("base FlowID = %q, want executing flow id", got)

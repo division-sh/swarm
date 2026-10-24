@@ -2,14 +2,14 @@ worker:
   worker.requested:
     guard: payload.instance_id != ''
     rules:
-      - when: _entity.current_state == 'awaiting_requested'
+      - when: instance.stage == 'awaiting_requested'
         advances_to: done
-      - when: _entity.current_state == 'started'
+      - when: instance.stage == 'started'
         advances_to: requested_started
       - advances_to: requested
   auto.started:
     rules:
-      - when: _entity.current_state == 'requested'
+      - when: instance.stage == 'requested'
         advances_to: requested_started
         emit:
           event: auto.processed
@@ -20,6 +20,6 @@ worker:
 observer:
   auto.processed:
     rules:
-      - when: _entity.current_state == 'requested_started'
+      - when: instance.stage == 'requested_started'
         advances_to: done
       - advances_to: awaiting_requested

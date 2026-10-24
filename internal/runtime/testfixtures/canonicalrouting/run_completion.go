@@ -5,9 +5,7 @@ import "testing"
 func CopyRunCompletionSystemNode(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "entities.yaml", `
-run:
-  topic: string
+	writeClosedVariantFile(t, root, "state.yaml", `topic: string
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   active: {}
@@ -33,9 +31,7 @@ stages:
 inputs:
   - flow.started
 `)
-	writeClosedVariantFile(t, root, "discovery/entities.yaml", `
-discovery: {}
-`)
+	writeClosedVariantFile(t, root, "discovery/state.yaml", ``)
 	writeClosedVariantFile(t, root, "events.yaml", `
 flow.started:
   entity_id:

@@ -61,7 +61,6 @@ func (o RuntimeStoreOrigin) validateStored() error {
 
 type SchemaBootstrapRequest struct {
 	PlatformPlans   []SchemaTableDDL
-	StatePlans      []SchemaTableDDL
 	Origin          RuntimeStoreOrigin
 	deploymentPlans []SchemaTableDDL
 }
@@ -93,11 +92,6 @@ func (r SchemaBootstrapRequest) validate() error {
 	for _, plan := range r.PlatformPlans {
 		if strings.TrimSpace(plan.SchemaKind) != "platform_spec" {
 			return fmt.Errorf("platform schema request contains %s table %s", strings.TrimSpace(plan.SchemaKind), strings.TrimSpace(plan.TableName))
-		}
-	}
-	for _, plan := range r.StatePlans {
-		if strings.TrimSpace(plan.SchemaKind) != "state_schema" {
-			return fmt.Errorf("generated state schema request contains %s table %s", strings.TrimSpace(plan.SchemaKind), strings.TrimSpace(plan.TableName))
 		}
 	}
 	if len(r.deploymentPlans) > 1 {

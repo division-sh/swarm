@@ -29,7 +29,7 @@ portfolio-coordinator:
           target_field: account_ids
   portfolio.notify.requested:
     fan_out:
-      items_from: entity.account_ids
+      items_from: state.account_ids
       as: account_id
       max_items: 100
       emit:

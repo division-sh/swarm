@@ -202,11 +202,7 @@ stages:
 inputs:
   - item.received
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "entities.yaml"), `
-state:
-  expected:
-    type: '[text]'
-    initial: []
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "state.yaml"), `expected: [text]
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "events.yaml"), `
 item.received:

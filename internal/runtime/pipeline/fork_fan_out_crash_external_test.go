@@ -108,8 +108,8 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := selected.Schema().BootstrapSchema(t.Context(), store.SchemaBootstrapRequest{
-					PlatformPlans: plans.Platform, StatePlans: plans.State,
-					Origin: store.RuntimeStoreOrigin{SwarmVersion: "fork-engine-test", PlatformVersion: bundle.Platform.Platform.Version, CreatedAt: time.Now().UTC()},
+					PlatformPlans: plans.Platform,
+					Origin:        store.RuntimeStoreOrigin{SwarmVersion: "fork-engine-test", PlatformVersion: bundle.Platform.Platform.Version, CreatedAt: time.Now().UTC()},
 				}); err != nil {
 					t.Fatal(err)
 				}

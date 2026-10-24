@@ -26,7 +26,7 @@ connect:
 		"events.yaml": "branch.start:\n  key: branch_id\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
   branch.done:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `,
 		"branch/schema.yaml": `name: branch
 instance: branch_id
@@ -43,11 +43,11 @@ connect:
     from: .
     to: worker/result
 `,
-		"branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
-		"branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
+		"branch/state.yaml":  "branch_id: string\n",
+		"branch/events.yaml": "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
 		"branch/nodes.yaml": `branch-worker:
   branch.start:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `,
 
 		"branch/worker/result-static/schema.yaml": `name: static-result
@@ -56,7 +56,7 @@ inputs:
 `,
 		"branch/worker/result-static/nodes.yaml": `static-result-node:
   work.ready:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `,
 		"branch/worker/result/schema.yaml": `name: singleton-result
 inputs:
@@ -77,7 +77,7 @@ inputs:
 		"unrelated/worker/result/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/nodes.yaml": `hostile-node:
   work.ready:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `,
 	}
 	for name, body := range files {

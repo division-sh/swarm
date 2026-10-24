@@ -180,7 +180,7 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			edit: func(entity map[string]any) {
 				entity["gates"] = map[string]any{"missing_gate": true}
 			},
-			wantField:  "entities[0].gates.missing_gate",
+			wantField:  "entities[0].state.missing_gate",
 			wantReason: "is not declared for the selected flow",
 		},
 		{
@@ -189,7 +189,7 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			edit: func(entity map[string]any) {
 				entity["gates"] = map[string]any{"review_ready": "yes"}
 			},
-			wantField:  "entities[0].gates.review_ready",
+			wantField:  "entities[0].state.review_ready",
 			wantReason: "must be boolean",
 		},
 		{

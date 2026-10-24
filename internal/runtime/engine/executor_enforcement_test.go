@@ -272,7 +272,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
-	}, stubEvaluator{bools: map[string]bool{"_entity.current_state != 'done'": false}})
+	}, stubEvaluator{bools: map[string]bool{"instance.stage != 'done'": false}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard:      &runtimecontracts.GuardSpec{Check: "_entity.current_state != 'done'"},
+			Guard:      &runtimecontracts.GuardSpec{Check: "instance.stage != 'done'"},
 			AdvancesTo: "reopened",
 		},
 	})
@@ -304,7 +304,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 			MutationOwner: stubMutationOwner{},
 			Locker:        stubLocker{},
 		}, stubEvaluator{bools: map[string]bool{
-			"entity.score >= 75": allowed,
+			"state.score >= 75": allowed,
 		}})
 		if err != nil {
 			t.Fatalf("NewExecutor error: %v", err)
@@ -317,7 +317,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard:      &runtimecontracts.GuardSpec{Check: "entity.score >= 75"},
+			Guard:      &runtimecontracts.GuardSpec{Check: "state.score >= 75"},
 			AdvancesTo: "approved",
 		},
 	})
@@ -333,7 +333,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-2", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard:      &runtimecontracts.GuardSpec{Check: "entity.score >= 75"},
+			Guard:      &runtimecontracts.GuardSpec{Check: "state.score >= 75"},
 			AdvancesTo: "approved",
 		},
 	})
@@ -392,7 +392,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 				AdvancesTo: "passed",
 				Compute: &runtimecontracts.ComputeSpec{
 					Operation:   runtimecontracts.ComputeOpWeightedAverage,
-					StoreAs:     "entity.composite",
+					StoreAs:     "state.composite",
 					ValueField:  "score",
 					WeightField: "weight",
 				},

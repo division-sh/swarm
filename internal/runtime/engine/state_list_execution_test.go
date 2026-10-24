@@ -33,7 +33,7 @@ func stateListExecutor2293(t *testing.T) (*Executor, *persistentStateRepo, *[]st
 		Source: sourceWithFixtureStages(source, ".", "pending", "pending"), StateRepo: repo,
 		MutationOwner: composedMutationOwner{state: repo, order: commits}, Locker: stubLocker{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
-		"entity.reviews.size() == 1": func(base BaseContext) (bool, error) {
+		"state.reviews.size() == 1": func(base BaseContext) (bool, error) {
 			items, _ := base.Entity.Raw()["reviews"].([]any)
 			return len(items) == 1, nil
 		},
@@ -55,7 +55,7 @@ func stateListRequest2293(t *testing.T, eventID, payload string) ExecutionReques
 				{TargetField: "marker", Value: runtimecontracts.LiteralExpression("handler")},
 			}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				Condition: "entity.reviews.size() == 1",
+				Condition: "state.reviews.size() == 1",
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 					{TargetField: "marker", Value: runtimecontracts.LiteralExpression("rule")},
 				}},

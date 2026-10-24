@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -100,7 +99,7 @@ func TestVerifyPublicListenerSetMatchesBootAndReleasesBindings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+			schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,31 +174,25 @@ func TestVerifyPublicExistingStoreReportsGeneratedPreparationBothStores(t *testi
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-			path := filepath.Join(root, "nodes.yaml")
-			body, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			edited := strings.Replace(string(body), "item-handler:\n", "item-handler:\n  state_table: composition_item_state\n  state_schema:\n    fields:\n      item_id: string\n", 1)
-			if edited == string(body) {
-				t.Fatal("generated-state fixture mutation missed its node")
-			}
-			if err := os.WriteFile(path, []byte(edited), 0600); err != nil {
-				t.Fatal(err)
-			}
 			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(RepoRoot(), root, filepath.Join(RepoRoot(), "platform-spec.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			plans, err := StateStoreSchemaPlans(bundle)
-			if err != nil || len(plans.State) != 1 {
-				t.Fatalf("generated plans=%+v err=%v", plans.State, err)
-			}
-			platformOnly, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			complete, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+			platformOnly, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform)
+			if err != nil {
+				t.Fatal(err)
+			}
+			platformOnly.PlatformPlans = nil
+			for _, plan := range plans.Platform {
+				if plan.TableName != "deployment_channel_operations" {
+					platformOnly.PlatformPlans = append(platformOnly.PlatformPlans, plan)
+				}
+			}
+			complete, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -209,7 +202,7 @@ func TestVerifyPublicExistingStoreReportsGeneratedPreparationBothStores(t *testi
 			ctx := context.Background()
 			for _, prepared := range []bool{false, true} {
 				before, err := owner.InspectSchema(ctx, complete)
-				if err != nil || before.Fresh || (len(before.MissingStateTables) == 0) != prepared {
+				if err != nil || before.Fresh || (len(before.MissingDeploymentTables) == 0) != prepared {
 					t.Fatalf("boot inspection: %+v %v", before, err)
 				}
 				var out, diagnostic bytes.Buffer
@@ -222,7 +215,7 @@ func TestVerifyPublicExistingStoreReportsGeneratedPreparationBothStores(t *testi
 				for _, obligation := range result.ExecutionObligations {
 					if obligation.ID == "store_schema_preparation" {
 						found = true
-						if obligation.Owner != "internal/store.SchemaBootstrapper.BootstrapSchema" || !strings.Contains(obligation.Reason, "composition_item_state") {
+						if obligation.Owner != "internal/store.SchemaBootstrapper.BootstrapSchema" || !strings.Contains(obligation.Reason, "deployment_channel_operations") {
 							t.Fatalf("missing exact boot preparation: %+v", obligation)
 						}
 					}

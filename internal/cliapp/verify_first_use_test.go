@@ -18,8 +18,8 @@ func issue2567VerifySource(t *testing.T) string {
 	root := t.TempDir()
 	for name, body := range map[string]string{
 		"schema.yaml": "name: first-verify\nstages: {waiting: {}, done: {final: true}}\ninputs: [work.requested]\n",
-		"events.yaml": "work.requested:\n", "entities.yaml": "work: {}\n",
-		"nodes.yaml": "worker:\n  work.requested: {advances_to: done}\n",
+		"events.yaml": "work.requested:\n",
+		"nodes.yaml":  "worker:\n  work.requested: {advances_to: done}\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
 			t.Fatal(err)

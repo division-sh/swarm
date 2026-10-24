@@ -138,7 +138,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	var runReadback map[string]any
 	requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": fork.ForkRunID}, &runReadback)
 	for method, params := range map[string]map[string]any{
-		"entity.list":       {"run_id": fork.ForkRunID, "limit": 500},
+		"state.list":        {"run_id": fork.ForkRunID, "limit": 500},
 		"event.list":        {"filter": map[string]any{"run_id": fork.ForkRunID}, "limit": 500},
 		"conversation.list": {"run_id": fork.ForkRunID, "limit": 500},
 	} {
@@ -248,7 +248,7 @@ ingress:
 	if err := os.WriteFile(schemaPath, []byte(updatedSchema), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sourceRoot, "fulfillment", "entities.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "fulfillment", "state.yaml"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

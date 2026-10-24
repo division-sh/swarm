@@ -9,14 +9,14 @@ intake:
       fields: {foreign_id: payload.foreign_id}
 root-completion:
   read.completed:
-    guard: _entity.current_state == 'reading'
+    guard: instance.stage == 'reading'
     advances_to: child_reading
     data_accumulation:
       writes:
         - {source_field: content, target_field: content}
     emit:
       event: child.requested
-      fields: {request_key: entity.request_key}
+      fields: {request_key: state.request_key}
 child-completion:
   child.completed:
     advances_to: complete

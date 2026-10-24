@@ -29,7 +29,7 @@ func TestEntityMutationHandlerReadsOrderedDraft(t *testing.T) {
 	exec, frame := sparseMutationFrame()
 	err := exec.applyDataAccumulation(frame, rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{
 		{TargetField: "left", Value: rc.LiteralExpression(int64(7))},
-		{TargetField: "right", Value: rc.RefExpression("entity.left")},
+		{TargetField: "right", Value: rc.RefExpression("state.left")},
 	}})
 	if err != nil {
 		t.Fatal(err)

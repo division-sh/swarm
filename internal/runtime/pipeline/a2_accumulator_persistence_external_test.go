@@ -62,7 +62,7 @@ inputs:
 outputs:
   - item.recorded
 `,
-		"entities.yaml": "work:\n  marker: text?\n",
+		"state.yaml": "marker: text?\n",
 		"types.yaml": `AuthoredNested:
   id: text
   marker: text

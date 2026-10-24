@@ -161,7 +161,7 @@ func assertEntityCatalogSchemaRuntimeParity(t *testing.T, contract entityruntime
 	if _, err := entityToolLiteralMutation(contract, "field", input); (err == nil) != valid {
 		t.Fatalf("tool operand valid=%v: %v", valid, err)
 	}
-	mutation := entityruntime.Mutation{Target: "entity.field", Value: input["value"]}
+	mutation := entityruntime.Mutation{Target: "state.field", Value: input["value"]}
 	if key, present := input["key"]; present {
 		mutation.Key, mutation.HasKey = key, true
 	}

@@ -42,7 +42,7 @@ func TestW4DeliveryJoinForbiddenFieldPresence(t *testing.T) {
 	const base = "members: {from_fan_out: true}\non_complete: {emit: batch.completed}\n"
 	for _, field := range []string{"id", "stage", "window", "output", "complete_when", "remaining", "timeout", "deadline", "on_deadline", "until", "members.from", "members.by", "members.count"} {
 		t.Run(field, func(t *testing.T) {
-			for _, shape := range nodePresenceShapes("waiting", "[waiting]", "{from: entity.batch, by: payload.batch}") {
+			for _, shape := range nodePresenceShapes("waiting", "[waiting]", "{from: state.batch, by: payload.batch}") {
 				t.Run(shape.name, func(t *testing.T) {
 					body := base
 					if shape.name != "missing" {

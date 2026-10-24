@@ -50,7 +50,7 @@ func (d SingletonCoordinatorDemand) Detail() string {
 	if d.Target != "" {
 		parts = append(parts, "target "+d.Target)
 	} else if d.Field != "" {
-		parts = append(parts, "field entity."+d.Field)
+		parts = append(parts, "field state."+d.Field)
 	}
 	return strings.Join(parts, " ")
 }
@@ -154,7 +154,7 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 					add(SingletonCoordinatorDemand{
 						FlowID: ref.OwnerFlowID, SourceFile: record.Source.File, Location: nodeID,
 						Node: node, EventType: eventType, Kind: "entity_read." + expr.Kind,
-						Field: ref.Field, Target: "entity." + ref.Ref,
+						Field: ref.Field, Target: "state." + ref.Ref,
 					}, true)
 				}
 			}
@@ -167,7 +167,7 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 		for key, expression := range plan.Context {
 			expr := expressionReference{Kind: "gate context " + strings.TrimSpace(key), Expression: stageGateExpressionText(expression), Phase: runtimepipeline.WorkflowEntityFieldLifecycleGate}
 			for _, ref := range singletonDemandEntityRefs(source, flows, flowID, expr.Expression) {
-				add(SingletonCoordinatorDemand{FlowID: ref.OwnerFlowID, SourceFile: sourceFile, Location: flowID, Kind: "entity_read." + expr.Kind, Field: ref.Field, Target: "entity." + ref.Ref}, true)
+				add(SingletonCoordinatorDemand{FlowID: ref.OwnerFlowID, SourceFile: sourceFile, Location: flowID, Kind: "entity_read." + expr.Kind, Field: ref.Field, Target: "state." + ref.Ref}, true)
 			}
 		}
 	}

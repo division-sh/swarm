@@ -111,7 +111,6 @@ func (e *Executor) PrepareFanOutEvaluation(ctx context.Context, intent fanoutobl
 	base.Join = values.Wrap(cloneStringAnyMap(capsule.Join))
 	base.Loop = values.Wrap(cloneStringAnyMap(capsule.Loop))
 	base.Metadata = values.Wrap(cloneStringAnyMap(capsule.StateFields))
-	base.Gates = values.Wrap(boolMapToAnyMap(capsule.StateGates))
 
 	frame := &executionFrame{
 		ctx: ctx,

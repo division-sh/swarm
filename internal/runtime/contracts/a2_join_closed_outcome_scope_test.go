@@ -21,7 +21,7 @@ func TestA2JoinClosedOutcomeFreeContextScope(t *testing.T) {
 		})
 	}
 	for _, expression := range []string{
-		"join.results", "entity.total", "loop.attempt", "state.total", `entity.payload`,
+		"join.results", "state.total", "loop.attempt", "state.total", `state.payload`,
 		`"payload.result"`, `{"payload": "event.id"}`, `join.results.exists(payload, payload > 0)`,
 		`join.results.map(event, event)`, `join.results.exists(r, r.payload > 0)`,
 		`loop.attempt > 0 // payload.secret`,
@@ -42,9 +42,9 @@ func TestA2JoinCompilerRejectsTransportInBothClosedOutcomes(t *testing.T) {
 			"until event":           {Emit: EmitSpec{Event: "closed", Fields: map[string]ExpressionValue{"value": CELExpression("event.id")}}},
 			"payload sugar":         {Emit: EmitSpec{Event: "closed", From: EmitFromPayload}},
 			"implicit write source": {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetField: "result", SourceField: "result"}}}},
-			"write value":           {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "entity.result", Value: RefExpression("payload.result")}}}},
-			"write key":             {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "entity.result", Value: LiteralExpression(1), Key: CELExpression("event.id")}}}},
-			"write index":           {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "entity.result", Value: LiteralExpression(1), Index: CELExpression("payload.index")}}}},
+			"write value":           {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "state.result", Value: RefExpression("payload.result")}}}},
+			"write key":             {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "state.result", Value: LiteralExpression(1), Key: CELExpression("event.id")}}}},
+			"write index":           {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "state.result", Value: LiteralExpression(1), Index: CELExpression("payload.index")}}}},
 		} {
 			t.Run(outcome+"/"+name, func(t *testing.T) {
 				bundle, handler := a2JoinCompilerFixture(t, "[text]")
@@ -62,7 +62,7 @@ func TestA2JoinCompilerRejectsTransportInBothClosedOutcomes(t *testing.T) {
 			})
 		}
 	}
-	for _, value := range []ExpressionValue{LiteralExpression("payload.result"), CELExpression("join.results"), RefExpression("entity.members"), CELExpression("loop.attempt")} {
+	for _, value := range []ExpressionValue{LiteralExpression("payload.result"), CELExpression("join.results"), RefExpression("state.members"), CELExpression("loop.attempt")} {
 		bundle, handler := a2JoinCompilerFixture(t, "[text]")
 		handler.Join.OnComplete.Emit = EmitSpec{Event: "closed", Fields: map[string]ExpressionValue{"value": value}}
 		if plan, err := bundle.CompileWorkflowJoinPlan(identitytest.RootNode(t, "collector"), "arrived", handler); err != nil || plan.Spec.Output != "payload.result" {

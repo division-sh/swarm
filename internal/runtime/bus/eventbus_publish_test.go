@@ -4021,7 +4021,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	stages := runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active"}}}
-	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`}}
+	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `instance.id != ""`}}
 	child := runtimecontracts.FlowContractView{
 		Path:  "child",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
@@ -4100,10 +4100,9 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	}
 	admitted := loadEventBusTempBundle(t, map[string]string{
 
-		"schema.yaml":         "name: mixed-route\nstages:\n  active: {}\n",
-		"entities.yaml":       "test_entity: {}\n",
-		"child/schema.yaml":   "name: child\nstages:\n  active: {}\n",
-		"child/entities.yaml": "test_entity: {}\n",
+		"schema.yaml": "name: mixed-route\nstages:\n  active: {}\n",
+
+		"child/schema.yaml": "name: child\nstages:\n  active: {}\n",
 	})
 	admitted.Nodes = bundle.Nodes
 	admitted.Semantics = bundle.Semantics

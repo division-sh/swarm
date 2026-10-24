@@ -49,7 +49,7 @@ inputs:
   - state.seeded
   - state.closed
 `)
-		writeClosedVariantFile(t, root, owner.path+"/entities.yaml", owner.entity+":\n  name: text\n")
+		writeClosedVariantFile(t, root, owner.path+"/state.yaml", owner.entity+":\n  name: text\n")
 		writeClosedVariantFile(t, root, owner.path+"/nodes.yaml", `state-owner:
   state.seeded:
     advances_to: pending

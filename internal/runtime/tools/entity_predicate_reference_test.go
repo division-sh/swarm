@@ -33,7 +33,7 @@ func TestEntityPredicateUsesResolvedFunctionReferences(t *testing.T) {
 			t.Fatalf("field diagnostic %s: %v", expression, err)
 		}
 	}
-	for _, expression := range []string{`business.unknown("ok") == "ok"`, `optional.ofNonZero("").hasValue()`, `entity.metadata.region == "us"`} {
+	for _, expression := range []string{`business.unknown("ok") == "ok"`, `optional.ofNonZero("").hasValue()`, `state.metadata.region == "us"`} {
 		if _, err := compileEntityFilterExpression(env, expression, schema); err == nil {
 			t.Fatalf("invalid reference accepted: %s", expression)
 		}

@@ -54,9 +54,8 @@ inputs:
 outputs:
   - join.observed
 `,
-		"entities.yaml": `work:
-  members: {type: "[text]"}
-  window: text
+		"state.yaml": `members: [text]
+window: text
 `,
 		"events.yaml": `work.requested:
   token: text

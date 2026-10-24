@@ -58,7 +58,7 @@ func TestA2JoinClosedGrammarM01M04(t *testing.T) {
 	}
 	for _, retired := range []string{"window", "complete_when", "remaining", "timeout"} {
 		t.Run("retired "+retired, func(t *testing.T) {
-			for _, shape := range nodePresenceShapes("join.completed >= 1", "[legacy]", "{from: entity.batch, by: payload.batch}") {
+			for _, shape := range nodePresenceShapes("join.completed >= 1", "[legacy]", "{from: state.batch, by: payload.batch}") {
 				t.Run(shape.name, func(t *testing.T) {
 					source := explicit
 					if shape.name != "missing" {
@@ -79,7 +79,7 @@ func TestA2JoinClosedGrammarM01M04(t *testing.T) {
 	}
 	// Retire the former custom-completion positives; they do not acquire until
 	// semantics or permission to ignore missing members under the new grammar.
-	for _, source := range []string{"complete_when: join.completed >= 1\n", "remaining: ignore\n", "timeout: {after: 1h, advances_to: expired}\n", "window: {from: entity.batch, by: payload.batch}\n"} {
+	for _, source := range []string{"complete_when: join.completed >= 1\n", "remaining: ignore\n", "timeout: {after: 1h, advances_to: expired}\n", "window: {from: state.batch, by: payload.batch}\n"} {
 		field, _, _ := strings.Cut(source, ":")
 		t.Run("legacy positive "+field, func(t *testing.T) {
 			var spec JoinSpec

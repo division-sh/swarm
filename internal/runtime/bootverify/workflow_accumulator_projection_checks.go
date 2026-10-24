@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	"github.com/division-sh/swarm/internal/runtime/accumulator"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -20,17 +20,29 @@ func (c *checkerContext) accumulatorEntityProjection() []Finding {
 	c.accumulatorProjectionLoaded = true
 	c.accumulatorProjectionFindings = accumulatorTargetBindingFindings(c.source)
 
-	resolved := accprojection.Resolve(c.source)
-	for _, issue := range resolved.Issues {
-		c.accumulatorProjectionFindings = append(c.accumulatorProjectionFindings, Finding{
-			CheckID:  "accumulator_entity_projection",
-			Severity: SeverityHardInvalidity,
-			Message:  issue.Message,
-			Location: issue.Location,
-		})
-	}
-	for _, binding := range resolved.Bindings {
-		c.accumulatorProjectionFindings = append(c.accumulatorProjectionFindings, accumulatorProjectionWriterConflictFindings(c, binding)...)
+	owners := map[string]string{}
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		for _, event := range sortedSetKeysLocal(c.source.ExecutableNodeEventHandlers(node)) {
+			handler, _ := c.source.ExecutableNodeEventHandler(node, event)
+			if handler.Accumulate == nil {
+				continue
+			}
+			field := strings.TrimSpace(handler.Accumulate.Target)
+			key := node.FlowPath() + "\x00" + field
+			owner := node.Key() + ":" + event
+			if previous, exists := owners[key]; exists {
+				c.accumulatorProjectionFindings = append(c.accumulatorProjectionFindings, Finding{
+					CheckID: "accumulator_entity_projection", Severity: SeverityHardInvalidity,
+					Message: fmt.Sprintf("accumulate target %q has multiple writers: %s and %s", field, previous, owner), Location: owner,
+				})
+			}
+			owners[key] = owner
+			c.accumulatorProjectionFindings = append(c.accumulatorProjectionFindings, accumulatorTargetWriterConflictFindings(c, node, field)...)
+		}
 	}
 	return c.accumulatorProjectionFindings
 }
@@ -65,7 +77,7 @@ func accumulatorTargetBindingFindings(source semanticview.Source) []Finding {
 	return findings
 }
 
-func accumulatorProjectionWriterConflictFindings(c *checkerContext, binding accprojection.Binding) []Finding {
+func accumulatorTargetWriterConflictFindings(c *checkerContext, node runtimeidentity.ExecutableNode, field string) []Finding {
 	out := make([]Finding, 0)
 	for _, target := range wave1AllEntityWriteTargets(c.source) {
 		if !target.Entity || wave1SpecialClearTarget(target.Field) {
@@ -75,29 +87,28 @@ func accumulatorProjectionWriterConflictFindings(c *checkerContext, binding accp
 		if err != nil {
 			continue
 		}
-		if strings.TrimSpace(ownerFlowID) != strings.TrimSpace(binding.FlowID) ||
-			strings.TrimSpace(rootField) != strings.TrimSpace(binding.TargetField) {
+		if strings.TrimSpace(ownerFlowID) != node.FlowPath() || strings.TrimSpace(rootField) != field {
 			continue
 		}
 		out = append(out, Finding{
 			CheckID:  "accumulator_entity_projection",
 			Severity: SeverityHardInvalidity,
-			Message:  fmt.Sprintf("field %q declares materialize_from but also has authored writer at %s on node %s handler %s; remove the authored writer", binding.TargetField, target.Kind, target.nodeID(), target.EventType),
+			Message:  fmt.Sprintf("accumulate target %q also has an ordinary writer at %s on node %s handler %s; one accumulator owns the field", field, target.Kind, target.nodeID(), target.EventType),
 			Location: target.nodeID(),
 		})
 	}
 	for flowID, fields := range wave1AgentExplicitEntityWriteCoverageByFlow(c.source) {
-		if strings.TrimSpace(flowID) != strings.TrimSpace(binding.FlowID) {
+		if strings.TrimSpace(flowID) != node.FlowPath() {
 			continue
 		}
-		if _, ok := fields[strings.TrimSpace(binding.TargetField)]; !ok {
+		if _, ok := fields[field]; !ok {
 			continue
 		}
 		out = append(out, Finding{
 			CheckID:  "accumulator_entity_projection",
 			Severity: SeverityHardInvalidity,
-			Message:  fmt.Sprintf("field %q declares materialize_from but also appears in an agent entity_writes declaration; generated/agent write ownership is forbidden", binding.TargetField),
-			Location: defaultFlowLabel(binding.FlowID),
+			Message:  fmt.Sprintf("accumulate target %q also appears in an agent entity_writes declaration; ordinary writes to an accumulate target are forbidden", field),
+			Location: defaultFlowLabel(node.FlowPath()),
 		})
 	}
 	return out

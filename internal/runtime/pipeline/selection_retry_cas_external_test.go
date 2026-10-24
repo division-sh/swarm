@@ -98,7 +98,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			}
 			fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner)}
 			handler, found := source.ExecutableNodeEventHandler(externalPipelineSourceNode(t, source, ".", "select"), "select")
-			if !found || len(handler.Rules) != 2 || handler.Rules[0].Condition != "entity.marker == 'first'" || handler.Rules[1].Condition != "entity.marker == 'second'" || handler.Rules[0].PolicyRow.Kind != contracts.PolicySheetRowKindWhen || handler.Rules[1].PolicyRow.Kind != contracts.PolicySheetRowKindWhen {
+			if !found || len(handler.Rules) != 2 || handler.Rules[0].Condition != "state.marker == 'first'" || handler.Rules[1].Condition != "state.marker == 'second'" || handler.Rules[0].PolicyRow.Kind != contracts.PolicySheetRowKindWhen || handler.Rules[1].PolicyRow.Kind != contracts.PolicySheetRowKindWhen {
 				t.Fatal("CAS proof requires both exact admitted selection predicates without an empty default")
 			}
 			for index := range fault.rules {
@@ -137,7 +137,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			}
 			event := publish("select")
 			failure, typed := failures.EnvelopeFromError(fault.err)
-			if !fault.fired || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || !fault.selection.Ref().Equal(fault.rules[0]) || fault.selection.DisplayLabel() != "rules[0]: when entity.marker == 'first'" {
+			if !fault.fired || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || !fault.selection.Ref().Equal(fault.rules[0]) || fault.selection.DisplayLabel() != "rules[0]: when state.marker == 'first'" {
 				t.Fatalf("did not reach exact selected CAS rejection: fired=%v selection=%#v err=%v diagnostic=%s", fault.fired, fault.selection, fault.err, proposedEffectProofFailure(t, selected, event.ID()))
 			}
 			evidence := storetest.ObserveDeliveryEventEvidence(t, ctx, selected.events, event.ID())
@@ -157,8 +157,8 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			if evidence.DeadLetters != 0 {
 				t.Fatalf("state contention dead letter: %d", evidence.DeadLetters)
 			}
-			assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "rules[1]: when entity.marker == 'second'")
-			assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "rules[1]: when entity.marker == 'second'")
+			assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "rules[1]: when state.marker == 'second'")
+			assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "rules[1]: when state.marker == 'second'")
 			reader := selected.events.(interface {
 				LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 			})

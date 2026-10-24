@@ -558,7 +558,7 @@ func openStandingRuntimeContextStore(t *testing.T, backend, suffix string) *sele
 		if err != nil {
 			t.Fatalf("generate platform schema for %s SQLite store: %v", suffix, err)
 		}
-		request, err := schemaBootstrapRequest(spec, plans, nil)
+		request, err := schemaBootstrapRequest(spec, plans)
 		if err != nil {
 			t.Fatalf("build schema request for %s SQLite store: %v", suffix, err)
 		}

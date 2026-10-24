@@ -30,7 +30,7 @@ func (r IntentRequest) ValidateSourceProjection() error {
 	case SourceEventPayloadField:
 		path = "payload." + r.Source.Field
 	case SourceEntityField:
-		path = "entity." + r.Source.Field
+		path = "state." + r.Source.Field
 	default:
 		return fmt.Errorf("handler fan-out requires a field source")
 	}
