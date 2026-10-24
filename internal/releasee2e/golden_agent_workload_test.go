@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -374,7 +376,8 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	readyCancel()
 	bundleHash := goldenServedBundleHash(t, process.rpc, "mock_only")
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, goldenSmokeCandidateIDs)
-	waitForGoldenCrashCheckpoint(t, process.rpc, runID, goldenSmokeCandidateIDs, goldenRunDeadline)
+	store.inspectionSQLitePath = filepath.Join(contracts, ".swarm", "stores", "dev-scratch.db")
+	waitForGoldenCrashCheckpoint(t, process, store, runID, goldenSmokeCandidateIDs, goldenRunDeadline)
 	if err := process.killAndWait(5 * time.Second); err != nil {
 		t.Fatalf("force-kill dev release serve: %v\n%s", err, process.output.String())
 	}
@@ -781,7 +784,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	var replayed map[string]goldenEvent
 	completionBudget := runDeadline
 	if restart {
-		log := waitForGoldenCrashCheckpoint(t, process.rpc, runID, options.candidateIDs, runDeadline)
+		log := waitForGoldenCrashCheckpoint(t, process, store, runID, options.candidateIDs, runDeadline)
 		preRestartRuntimeLog = &log
 		if err := process.killAndWait(5 * time.Second); err != nil {
 			t.Fatalf("force-kill release serve: %v\n%s", err, process.output.String())
@@ -1074,14 +1077,27 @@ type goldenDiagnosis struct {
 	TestQuiescence   goldenQuiescence  `json:"test_quiescence"`
 }
 
-func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID string, candidateIDs []string, deadline time.Duration) goldenRuntimeLog {
+func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, store goldenStoreSelection, runID string, candidateIDs []string, deadline time.Duration) goldenRuntimeLog {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
+	db, err := openLifecycleFailureInspection(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// A successful cut stays stopped until SIGKILL; failed inspection must not
+	// leave the ordinary child cleanup trying to stop a suspended process.
+	t.Cleanup(func() {
+		if err := process.cmd.Process.Signal(syscall.SIGCONT); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			t.Errorf("resume crash-cut child before cleanup: %v", err)
+		}
+	})
+	rpc := process.rpc
 	var last goldenDiagnosis
 	var lastLogs []goldenRuntimeLog
 	var selected goldenRuntimeLog
-	err := pollReleaseCondition(ctx, 5*time.Millisecond, func() (bool, error) {
+	err = pollReleaseCondition(ctx, 5*time.Millisecond, func() (bool, error) {
 		events, err := listGoldenEvents(ctx, rpc, runID)
 		if err != nil {
 			return false, err
@@ -1110,6 +1126,9 @@ func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID str
 				log.stringField("parent_event_id") == "" || log.stringField("source") == "" || log.stringField("agent_id") == "" {
 				continue
 			}
+			if ready, err := stopAtGoldenLaunchedCrashCut(ctx, process, db, runID); err != nil || !ready {
+				return false, err
+			}
 			selected = log
 			return true, nil
 		}
@@ -1122,6 +1141,29 @@ func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID str
 		t.Fatalf("pre-restart runtime log source = %q, want exact agent source %q", selected.stringField("source"), selected.stringField("agent_id"))
 	}
 	return selected
+}
+
+func stopAtGoldenLaunchedCrashCut(ctx context.Context, process *releaseServeProcess, db *sql.DB, runID string) (bool, error) {
+	if err := process.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
+		return false, err
+	}
+	var active, launched int
+	readErr := db.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(CASE
+			WHEN a.state IN ('launched', 'response_observed')
+				AND e.event_name LIKE '%/candidate.work.requested'
+			THEN 1 ELSE 0 END), 0)
+		FROM runtime_external_effect_operations o
+		JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
+		LEFT JOIN event_deliveries d ON d.delivery_id = a.origin_delivery_id
+		LEFT JOIN events e ON e.event_id = d.event_id AND e.run_id = o.agent_run_id
+		WHERE o.agent_run_id = $1 AND o.effect_kind = 'provider_turn'
+			AND a.state IN ('authorized', 'launched', 'response_observed')`, runID).Scan(&active, &launched)
+	if readErr == nil && active > 0 && launched == active {
+		return true, nil
+	}
+	resumeErr := process.cmd.Process.Signal(syscall.SIGCONT)
+	return false, errors.Join(readErr, resumeErr)
 }
 
 func goldenActiveWork(quiescence goldenQuiescence) int {

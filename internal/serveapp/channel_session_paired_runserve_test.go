@@ -786,6 +786,36 @@ func requireServedNativeQuotedRetirement(t *testing.T, endpoint string, peer *se
 	if !strings.Contains(selected.Body.GetConversation(), "\nReference: "+cardID+"\n") || !retirementChoice {
 		t.Fatal("served peer did not receive the actual retirement choice", selected.Body.GetConversation())
 	}
+	// Receiving ciphertext at the peer precedes the sender's durable ACK
+	// receipt. A quoted control requires that exact issued-message identity.
+	receiptDeadline := time.Now().Add(5 * time.Second)
+	for {
+		plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		issued := false
+		for _, plan := range plans {
+			if plan.SourceKind != "card" || plan.SourceID != cardID || plan.State != "sent" {
+				continue
+			}
+			receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plan.DeliveryID, plan.CurrentReceiptID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found && receipt.DeliveryReference == selected.ID && receipt.RenderID == plan.CurrentRenderID {
+				issued = true
+				break
+			}
+		}
+		if issued {
+			break
+		}
+		if time.Now().After(receiptDeadline) {
+			t.Fatal("actual retirement card has no exact settled native receipt", selected.ID, cardID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	var detail struct {
 		Card struct {
 			ID      string `json:"card_id"`
