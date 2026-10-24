@@ -197,6 +197,7 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 			outputID, outputAt = candidates[0].EventID, candidates[0].CreatedAt
 		}
 		if phase != "proposal_only" && phase != "no_proposal" {
+			registerTestAuthorActivityCatalogForContext(t, selected.selected.(testAuthorActivityCatalogRegistrar), ctx)
 			publisherStore := selected.selected.(storeTestDurableEventBusStore)
 			feedbackErr := errors.New("feedback read unavailable after publication")
 			publicationErr := errors.New("publication refused before native commit")

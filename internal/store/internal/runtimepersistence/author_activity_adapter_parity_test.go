@@ -12,7 +12,6 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -94,13 +93,11 @@ type authorActivityAdapterFixture struct {
 
 func authorActivityAdapterFixtures(t *testing.T) []authorActivityAdapterFixture {
 	t.Helper()
-	sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	_, postgres, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := admitTestPostgresStore(t, postgres)
+	sqlite := openSQLiteAuthorActivityReceiptFixture(t)
+	postgres := openPostgresAuthorActivityReceiptFixture(t)
 	return []authorActivityAdapterFixture{
-		{name: "sqlite", store: sqlite, db: sqlite.backend.ConstructionHandle(), dialect: authoractivityfixture.DialectSQLite, readDialect: authoractivityadapter.DialectSQLite, runtimeID: uuid.NewString()},
-		{name: "postgres", store: pg, db: postgres, dialect: authoractivityfixture.DialectPostgres, readDialect: authoractivityadapter.DialectPostgres, runtimeID: uuid.NewString()},
+		{name: "sqlite", store: sqlite.store, db: sqlite.db, dialect: sqlite.dialect, readDialect: authoractivityadapter.DialectSQLite, runtimeID: uuid.NewString()},
+		{name: "postgres", store: postgres.store, db: postgres.db, dialect: postgres.dialect, readDialect: authoractivityadapter.DialectPostgres, runtimeID: uuid.NewString()},
 	}
 }
 
