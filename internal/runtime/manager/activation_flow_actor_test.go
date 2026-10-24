@@ -3,9 +3,11 @@ package manager
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -74,12 +76,24 @@ func (s *flowActorObservationStore) LoadDynamicFlowRuntimeReadiness(ctx context.
 func TestWorkspaceGatewayConstructedActorUsesCurrentNativeAttempt(t *testing.T) {
 	instances := &flowActorObservationStore{&flowActivationTestInstanceStore{}}
 	bus := &flowActivationTestBus{creationStore: instances.flowActivationTestInstanceStore}
-	am := newFlowActivationManager(t, bus, instances)
+	root := filepath.Join(t.TempDir(), "activation")
+	for _, flow := range []string{".", "review"} {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	}
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "schema.yaml"), "instance: instance_key\npins:\n  inputs: [{event: task.started}]\nstages:\n  active: {}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "entities.yaml"), "review_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "events.yaml"), "task.started:\n  instance_key: text\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "agents.yaml"), "reviewer:\n  role: reviewer\n  intent: {inline: Review the declared task.}\n  subscriptions: [task.started]\n")
+	repo := filepath.Clean("../../..")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	am.factory = (&projectionTestFactory{handled: make(chan int, 1)}).Build
-	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer am.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
 	observed := false

@@ -10,8 +10,12 @@ import (
 )
 
 func TestVerifyCommandLoadsFlowRelativeMockModuleStandaloneAndNested(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "project")
 	child := filepath.Join(root, "bot")
+	for _, flow := range []string{root, child} {
+		writeVerifyMockFlowFile(t, filepath.Join(flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeVerifyMockFlowFile(t, filepath.Join(flow, "schema.yaml"), "stages: []\n")
+	}
 
 	writeVerifyMockFlowFile(t, filepath.Join(child, "agents.yaml"), `assistant:
   role: helper

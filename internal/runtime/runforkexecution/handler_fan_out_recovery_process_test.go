@@ -66,7 +66,7 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "items.ready", "source-runtime", "",
-		[]byte(`{"items":["one","two"]}`), 0, sourceRun, events.EventEnvelope{}, events.NoRoutingSource(), time.Now().UTC().Add(-time.Minute), executionmode.Mock)
+		[]byte(`{"items":["one","two"]}`), 0, sourceRun, events.EventEnvelope{}, events.RootRoutingSource(sourceRun), time.Now().UTC().Add(-time.Minute), executionmode.Mock)
 	bundle, found := semanticview.Bundle(loaded.Source)
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("handler fan-out source lacks its admitted artifact")

@@ -30,6 +30,7 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -92,6 +93,11 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 		backend := backend
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
+			rooted, _ := sourceartifactfixture.Rooted(t, "delivery-lifecycle", sourceartifactfixture.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+			if _, err := backend.selected.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			t.Run("exact_route_claim_settlement_and_outcome", func(t *testing.T) {
 				event := deliveryLifecycleEvent("exact-" + backend.name)
 				agent := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "agent-a")

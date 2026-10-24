@@ -3,16 +3,15 @@ package serveapp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
@@ -40,36 +39,16 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			intent, err := runtimeagentintent.Resolve(
-				runtimeagentintent.SourceInline,
-				"inline",
-				"agents.yaml#agents.agent-1.intent",
-				"Exercise the configured runtime tool.",
-			)
+			root := filepath.Join(t.TempDir(), "tool-parity")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins: {inputs: [tool.test_started]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "tool.test_started:\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), fmt.Sprintf("agent-1:\n  role: worker\n  model: regular\n  intent: {inline: Exercise the configured runtime tool.}\n  subscriptions: [tool.test_started]\n  tools: [%s]\n  permissions: [%s]\n", tc.configuredTool, strings.Join(tc.permissions, ", ")))
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(filepath.Clean("../.."), root, runtimecontracts.DefaultPlatformSpecFile(filepath.Clean("../..")))
 			if err != nil {
-				t.Fatalf("resolve test agent intent: %v", err)
-			}
-			bundle := testWorkflowValidationBundle()
-			bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
-				"tool.test_started": {},
-			}
-			bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "tool.test_started"}}}}}
-			bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-				"agent-1": {
-					ID:             "agent-1",
-					Type:           "worker",
-					Role:           "worker",
-					Model:          "regular",
-					ResolvedIntent: intent,
-					Subscriptions:  []string{"tool.test_started"},
-					Tools:          []string{tc.configuredTool},
-					Permissions:    tc.permissions,
-				},
-			}
-			source := semanticviewtest.WrapRootAgents(bundle)
-			if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 				t.Fatal(err)
 			}
+			source := semanticview.Wrap(bundle)
 
 			directReport := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 			assertToolResolutionFinding(t, directReport.Errors(), tc.configuredTool, tc.wantReject)
