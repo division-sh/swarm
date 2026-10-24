@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -64,4 +65,37 @@ func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 			}
 		})
 	}
+	t.Run("retained_flow_binding", func(t *testing.T) {
+		root := t.TempDir()
+		for file, body := range map[string]string{
+			"schema.yaml":           "name: provisional-root\nstages: {done: {final: true}}\n",
+			"types.yaml":            "Profile:\n  name: text\n",
+			"state.yaml":            "profile: Profile\nready: false\n",
+			"child/schema.yaml":     "name: child\nstages: {done: {final: true}}\n",
+			"child/types.yaml":      "Local:\n  count: integer\n",
+			"child/state.yaml":      "profile: Profile\nlocal: Local\n",
+			"stateless/schema.yaml": "name: stateless\nstages: {done: {final: true}}\n",
+		} {
+			writeFixtureFile(t, filepath.Join(root, file), body)
+		}
+		repo := repoRootForContractsTest(t)
+		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		primary, err := bundle.ResolveRootPrimaryEntity()
+		if err != nil || primary.EntityType != stateEntityType || primary.Contract.Fields["ready"].Initial != false {
+			t.Fatalf("root retained state binding: %#v, %v", primary, err)
+		}
+		child, err := bundle.ResolveFlowPrimaryEntity("child")
+		if err != nil || child.EntityType != stateEntityType || child.Contract.Fields["profile"].Type != "Profile" || child.Contract.Fields["local"].Type != "Local" {
+			t.Fatalf("child state/catalog binding: %#v, %v", child, err)
+		}
+		if _, _, present := bundle.FlowPrimaryEntityContract("stateless"); present {
+			t.Fatal("flow without state.yaml acquired a state contract")
+		}
+		if bundle.FlowSources["."].State != "state.yaml" || bundle.FlowSources["child"].State != "child/state.yaml" {
+			t.Fatal("state binding lost the exact retained source labels")
+		}
+	})
 }

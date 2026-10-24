@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -16,8 +17,12 @@ func TestEntityContractResolutionCannotBorrowParentState(t *testing.T) {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "parent_only: text\nshared: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "local: text\nshared: integer\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "local-state", "schema.yaml"), "name: local-state\n")
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	source := semanticview.Wrap(bundle)
+	if _, present := entityruntime.ResolveForFlow(source, "local-state"); present {
+		t.Fatal("flow without state.yaml borrowed the same-named root's state/tool contract")
+	}
 	for _, tc := range []struct {
 		flow, field, typ string
 	}{

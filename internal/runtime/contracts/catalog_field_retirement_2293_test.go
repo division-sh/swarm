@@ -110,11 +110,11 @@ func Test2293Q2CatalogFieldBundleRefusals(t *testing.T) {
 		{"type_description", "types.yaml", "Row: {value: {type: text, description: prose}}\n"},
 		{"type_refinement", "types.yaml", "Row: {value: {type: text, length: {min: 1}}}\n"},
 		{"type_prose", "types.yaml", "Row: {_description: prose, value: text}\n"},
-		{"state_immutable", "state.yaml", "Subject: {value: {type: text, immutable: false}}\n"},
-		{"state_prose", "state.yaml", "Subject: {_description: prose, value: text}\n"},
+		{"state_immutable", "state.yaml", "value: {type: text, immutable: false}\n"},
+		{"state_prose", "state.yaml", "_description: prose\nvalue: text\n"},
 		{"event_prose", "events.yaml", "row.received: {_description: prose, value: text}\n"},
 		{"event_citation", "events.yaml", "row.received: {value: {type: text, citation: null}}\n"},
-		{"state_projection", "state.yaml", "Subject: {value: {type: '[text]', materialize_from: collector.values}}\n"},
+		{"state_projection", "state.yaml", "value: {type: '[text]', materialize_from: collector.values}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -131,7 +131,7 @@ func Test2293Q2CatalogFieldBundleRefusals(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: field-retirement-control\nstages: {done: {final: true}}\n")
 	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "# descriptions are comments\nRow: {description: text, pattern: text, immutable: boolean}\n")
-	writeFixtureFile(t, filepath.Join(root, "state.yaml"), "row: Row\nlabel: {type: text?, indexed: true}\n")
+	writeFixtureFile(t, filepath.Join(root, "state.yaml"), "row: Row\nlabel:\n  type: text?\n  indexed: true\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "row.received: {_embed: [Row]}\n")
 	repo := repoRootForContractsTest(t)
 	if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err != nil {

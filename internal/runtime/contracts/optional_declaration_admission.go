@@ -26,7 +26,7 @@ func (r optionalDeclarationRole) fileName() string {
 	case optionalDeclarationAgents:
 		return "agents.yaml"
 	case optionalDeclarationEntities:
-		return "entities.yaml"
+		return "state.yaml"
 	case optionalDeclarationEvents:
 		return "events.yaml"
 	case optionalDeclarationNodes:
@@ -81,16 +81,16 @@ func loadOptionalAgentDeclarationsFromSource(artifact *sourceartifact.AdmittedSo
 	return entries, admission.RequireLive(len(entries))
 }
 
-func loadOptionalEntityDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (EntityContractsDocument, error) {
+func loadOptionalEntityDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string, types TypeCatalogDocument) (EntityContractsDocument, error) {
 	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationEntities)
 	if err != nil || !present {
 		return EntityContractsDocument{}, err
 	}
-	entries, err := projectEntityContractsDocument(admission.document.Root())
+	entries, err := projectStateDeclarations(admission.document.Root(), types)
 	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, label)
 	}
-	return entries, admission.RequireLive(len(entries))
+	return entries, admission.RequireLive(len(entries[stateEntityType].Fields))
 }
 
 func loadOptionalNodeDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (map[string]SystemNodeContract, error) {
@@ -192,7 +192,7 @@ func loadOptionalEntityDeclarations(path string) (EntityContractsDocument, error
 	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, path)
 	}
-	return entries, admission.RequireLive(len(entries))
+	return entries, admission.RequireLive(len(entries[stateEntityType].Fields))
 }
 
 func loadOptionalNodeDeclarations(path string) (map[string]SystemNodeContract, error) {
