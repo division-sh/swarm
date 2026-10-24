@@ -105,7 +105,14 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 		if _, err := opened.store.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 			t.Fatal(err)
 		}
-		coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+		if err != nil {
+			t.Fatal(err)
+		}
 		current, present, err := process.CurrentSourceSet(ctx)
 		if err != nil {
 			t.Fatal(err)

@@ -120,7 +120,8 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-handler-fan-out", IdempotencyKey: "intent-cut",
 			TransportHash: "retained-handler-fan-out-transport", SourceRunID: sourceRun, ForkEventID: eventID,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		},
 	})
 	if err != nil || !result.Activation.Activated {
 		t.Fatalf("activate handler fan-out: %+v error=%v", result.Activation, err)

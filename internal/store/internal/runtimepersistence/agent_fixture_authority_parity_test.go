@@ -73,7 +73,14 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			if _, err := lifecycle.(runtimemanager.RunExecutionOwner).InspectRunExecutionOwnership(ctx, runID); err == nil {
 				t.Fatal("fixture inspection granted ownership before generation admission")
 			}
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}
+			root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+			if err != nil || !present {
+				t.Fatalf("fixture root: present=%t err=%v", present, err)
+			}
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(root)
+			if err != nil {
+				t.Fatal(err)
+			}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)

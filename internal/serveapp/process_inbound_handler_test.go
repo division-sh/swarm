@@ -6,6 +6,7 @@ import (
 
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,7 +61,7 @@ func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
 }
 
 func TestProcessIngressIndexRequiresSelectedScope(t *testing.T) {
-	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +104,7 @@ func TestProcessIngressIndexRequiresSelectedScope(t *testing.T) {
 }
 
 func TestProcessIngressConstructionObservationRequiresExactOwner(t *testing.T) {
-	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -151,17 +152,6 @@ func TestProcessIngressConstructionObservationRequiresExactOwner(t *testing.T) {
 // conversation work. Full source-loaded delivery is covered by the HTTP matrix.
 func processIngressTransportSource(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, catalog *providertriggers.CatalogSnapshot) semanticview.Source {
 	t.Helper()
-	bundle.Agents = nil
-	for _, flow := range bundle.FlowTree.ByID {
-		if flow != nil {
-			flow.Agents = nil
-			flow.Nodes = nil
-			flow.Schema.Connect = nil
-		}
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
 	source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), catalog)
 	if err != nil {
 		t.Fatal(err)

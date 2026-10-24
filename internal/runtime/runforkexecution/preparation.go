@@ -263,7 +263,11 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if req.ForkOperation != nil && req.ForkOperation.ResolvedPoint != nil {
 		planRequest.ResolvedPoint = req.ForkOperation.ResolvedPoint
 	}
-	plan, err := ports.fork.PlanRunFork(ctx, planRequest)
+	originalPlanContext := runtimecorrelation.WithRootAdmission(
+		runtimecorrelation.WithSourceArtifactFact(ctx, owned.originalSource.SourceArtifactFact),
+		owned.originalSource.RootedSource.Admission(),
+	)
+	plan, err := ports.fork.PlanRunFork(originalPlanContext, planRequest)
 	if err != nil {
 		return nil, fmt.Errorf("plan selected-contract execution: %w", err)
 	}

@@ -17,12 +17,13 @@ func TestOperatorRunForkLateWinnerUsesOriginalActorKey(t *testing.T) {
 	for _, disposition := range []string{"joined_outcome", "independent_execution_failure", "foreign_source"} {
 		t.Run(disposition, func(t *testing.T) {
 			operations := newRecordingRunForkOperations()
+			selectedTarget, _ := sourceartifactfixture.Rooted(t, "review", runForkTestArtifact)
 			availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-				runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
+				runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, selectedTarget.Admission()),
 			}}
 			failure := errors.New("independent losing preparation failure")
 			var winnerID, loserID string
-			executor := &recordingRunForkExecutor{execute: func(_ context.Context, request RunForkExecutionRequest) (RunForkExecutionResult, error) {
+			executor := &recordingRunForkExecutor{selectedSource: selectedTarget, execute: func(_ context.Context, request RunForkExecutionRequest) (RunForkExecutionResult, error) {
 				winner := *request.ForkOperation
 				loserID, winnerID = winner.OperationID, uuid.NewString()
 				winner.OperationID = winnerID
@@ -85,7 +86,7 @@ func TestOperatorRunForkOutcomeRetainsOriginalStartSelector(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				operations := newRecordingRunForkOperations()
 				request := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "start-outcome", TransportHash: "start-outcome-transport",
-					SourceRunID: runForkTestSourceRunID, AtStart: start, TargetBundleHash: runForkTestBundleHash,
+					SourceRunID: runForkTestSourceRunID, AtStart: start, TargetBundleHash: runForkTestBundleHash, TargetRootReference: apiArtifactRoot(t, runForkTestArtifact).Reference(),
 					AllowSourceFreeze: true, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}}
 				if keyed {
 					request.IdempotencyKey = "original-selector"

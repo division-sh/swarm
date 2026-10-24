@@ -100,7 +100,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	for key, value := range map[string]string{
-		"webhook_signing.telegram": "telegram-secret",
+		"telegram.webhook_signing_secret": "telegram-secret",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)

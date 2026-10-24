@@ -212,7 +212,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q is pack-required, but no verified trigger pack provides %q; import or select that pack, or declare admission.kind: raw with an explicit raw policy", alias, provider, provider)
 		}
 	}
-	auth, err := manifestRequestAuthentication(entry.manifest)
+	auth, err := entry.manifest.RequestAuthentication()
 	if err != nil {
 		return InboundAdmissionPlan{}, err
 	}
@@ -288,7 +288,8 @@ func hasRawFields(declaration AdmissionDeclaration) bool {
 		strings.TrimSpace(declaration.Payload) != ""
 }
 
-func manifestRequestAuthentication(manifest Manifest) (RequestAuthentication, error) {
+// RequestAuthentication describes the captured BODY; it grants no request admission.
+func (manifest Manifest) RequestAuthentication() (RequestAuthentication, error) {
 	if err := manifest.Validate(); err != nil {
 		return "", err
 	}

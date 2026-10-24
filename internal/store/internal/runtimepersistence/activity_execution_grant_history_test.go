@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -148,7 +147,7 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 			if err != nil || !found || len(plan.Sources) != 1 {
 				t.Fatalf("exact source plan unavailable: found=%t error=%v", found, err)
 			}
-			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, agenttopology.SourceCoordinate{BundleHash: plan.Sources[0].BundleHash})
+			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
 			if err != nil {
 				t.Fatal(err)
 			}

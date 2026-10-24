@@ -627,8 +627,8 @@ func newStandingRuntimeContextRuntime(
 ) *runtimepkg.Runtime {
 	t.Helper()
 	credentials := processIngressCredentialStore{
-		"telegram_bot_token":       "standing-owner-token",
-		"webhook_signing.telegram": "standing-owner-signing-secret",
+		"telegram.telegram_bot_token":     "standing-owner-token",
+		"telegram.webhook_signing_secret": "standing-owner-signing-secret",
 	}
 	deps := runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
 		WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeInstanceID,

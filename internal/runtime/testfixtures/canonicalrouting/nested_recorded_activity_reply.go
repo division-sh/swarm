@@ -11,7 +11,6 @@ func CopyNestedRecordedActivityReply(t testing.TB, providerURL string) string {
 	t.Helper()
 	root := CopyRecordedActivityReply(t, providerURL)
 	copyTree(t, filepath.Join(root, "provider"), filepath.Join(root, "t"))
-	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "name: provider\n", "name: t\n")
 	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "inputs: [provider.requested]", "inputs: [t.requested]")
 	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "outputs: [provider.replied]", "outputs: [t.replied]")
 	applyClosedReplacement(t, filepath.Join(root, "t/events.yaml"), "provider.replied:", "t.replied:")
@@ -27,11 +26,12 @@ func CopyNestedRecordedActivityReply(t testing.TB, providerURL string) string {
     correlation_key: request_id
 `)
 	removeClosedVariantFiles(t, root, "provider/entities.yaml", "provider/tools.yaml")
-	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
-pins:
+	writeClosedVariantFile(t, root, "provider/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "provider/schema.yaml", `pins:
   inputs: [provider.requested, t.replied]
   outputs: [t.requested, provider.replied]
-`)
+`,
+	)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `t.requested:
   account_id: text
   request_id: text

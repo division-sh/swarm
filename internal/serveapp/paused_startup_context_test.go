@@ -53,6 +53,7 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 			var modules []runtimepipeline.WorkflowModule
 			var artifacts []*sourceartifact.AdmittedSourceArtifact
 			var facts []runtimecorrelation.SourceArtifactFact
+			var admissions []sourceartifact.RootAdmission
 			for _, label := range []string{"a", "b"} {
 				root := writeServedTestSetupFixture(t)
 				path := filepath.Join(root, "schema.yaml")
@@ -73,6 +74,11 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 				modules = append(modules, module)
 				artifacts = append(artifacts, bundle.SourceArtifact)
 				facts = append(facts, sourceartifactfixture.FactFor(bundle.SourceArtifact))
+				rooted, err := bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				admissions = append(admissions, rooted.Admission())
 			}
 			if facts[0].BundleHash() == facts[1].BundleHash() {
 				t.Fatal("mixed startup requires two distinct compiled source artifacts")
@@ -93,7 +99,10 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				runtimes = append(runtimes, rt)
-				coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+				coordinate, err := runtimeagenttopology.NewSourceCoordinate(admissions[index])
+				if err != nil {
+					t.Fatal(err)
+				}
 				agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(modules[index].SemanticSource(), coordinate)
 				if err != nil {
 					t.Fatal(err)

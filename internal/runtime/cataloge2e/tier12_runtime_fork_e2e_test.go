@@ -439,8 +439,10 @@ func installCatalogSelectedSourceTopology(t testing.TB, ctx context.Context, h *
 	if h == nil || h.processTopology == nil || h.rt == nil || h.rt.Manager == nil {
 		t.Fatal("catalog selected source topology requires a live process capability")
 	}
-	bundleHash := loaded.SourceArtifactFact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := h.rt.Manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
 	if err != nil {
 		t.Fatalf("compile selected-contract source topology: %v", err)

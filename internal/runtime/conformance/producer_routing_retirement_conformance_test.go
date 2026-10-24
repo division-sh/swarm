@@ -318,12 +318,12 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			}
 			switch tc.disposition {
 			case "same_flow":
-				consumers := semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(tc.flowID, tc.emitted)
+				consumers := semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, tc.emitted)
 				if len(consumers) == 0 {
 					t.Fatalf("%s has no typed same-flow consumer", tc.emitted)
 				}
-				if runtimepinrouting.PinDeclaredOutput(source, tc.flowID, tc.emitted) {
-					classification := runtimepinrouting.ClassifyOutputConsumer(source, tc.flowID, tc.emitted)
+				if runtimepinrouting.PinDeclaredOutput(source, flowID, tc.emitted) {
+					classification := runtimepinrouting.ClassifyOutputConsumer(source, flowID, tc.emitted)
 					if !classification.Has(runtimepinrouting.OutputConsumerSameFlow) {
 						t.Fatalf("output consumer classification = %#v, want same-flow", classification)
 					}
@@ -331,7 +331,7 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			case "external":
 				// The historical external disposition is now a public root export,
 				// not an authored promise of an external consumer.
-				classification := runtimepinrouting.ClassifyOutputConsumer(source, tc.flowID, tc.emitted)
+				classification := runtimepinrouting.ClassifyOutputConsumer(source, flowID, tc.emitted)
 				if !classification.Has(runtimepinrouting.OutputConsumerRootExport) {
 					t.Fatalf("%s lacks a compiled public root output: %#v", tc.emitted, classification)
 				}

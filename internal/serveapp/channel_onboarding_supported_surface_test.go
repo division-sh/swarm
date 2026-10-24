@@ -1194,18 +1194,16 @@ func disableChannelOnboardingBusinessConsumers(t *testing.T, sourceRoot string) 
 		t.Fatal(err)
 	}
 	connections, ok := schema["connect"].([]any)
-	if !ok || len(connections) != 2 {
-		t.Fatal("onboarding fixture must have exactly the root and provider business-consumer connections")
+	if !ok || len(connections) != 1 {
+		t.Fatal("onboarding fixture must have exactly the root business-consumer connection")
 	}
-	for i, from := range []string{".", "telegram-ingress"} {
+	for i, from := range []string{"."} {
 		connection, ok := connections[i].(map[string]any)
 		if !ok || len(connection) != 4 || connection["from"] != from || connection["to"] != "telegram-chat" || connection["event"] != "inbound.telegram.text_message" || connection["resolution"] != "select-or-create" {
 			t.Fatalf("unexpected onboarding business-consumer connection: %#v", connections[i])
 		}
 	}
 	delete(schema, "connect")
-	delete(schema, "pins")
-	delete(schema, "imports")
 	raw, err = yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)

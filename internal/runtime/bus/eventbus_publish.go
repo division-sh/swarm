@@ -2893,6 +2893,8 @@ func (eb *EventBus) admitEventPayload(ctx context.Context, event events.Event) (
 		flowID = strings.TrimSpace(admission.flowID)
 	} else if admission, ok := apiEventPublicationAdmissionFromContext(ctx); ok {
 		flowID = strings.TrimSpace(admission.flowID)
+	} else if admission, ok := selectedInputValidationFromContext(ctx, event); ok {
+		flowID = admission.flowID
 	}
 	if flowID == "" && event.RoutingSource().Kind() == events.RoutingSourceRoot {
 		flowID = "."

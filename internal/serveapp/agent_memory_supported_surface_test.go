@@ -150,9 +150,9 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	for key, value := range map[string]string{
-		"webhook_signing.telegram": "telegram-secret",
-		"telegram_bot_token":       "bot-token",
-		"ANTHROPIC_API_KEY":        "anthropic-key",
+		"telegram.webhook_signing_secret": "telegram-secret",
+		"telegram.telegram_bot_token":     "bot-token",
+		"ANTHROPIC_API_KEY":               "anthropic-key",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set live graduation credential %s: %v", key, err)
@@ -347,7 +347,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	if err := credentialStore.Set(context.Background(), "webhook_signing.telegram", "telegram-secret"); err != nil {
+	if err := credentialStore.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
 		t.Fatalf("set webhook signing credential: %v", err)
 	}
 

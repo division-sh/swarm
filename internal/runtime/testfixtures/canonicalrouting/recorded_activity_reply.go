@@ -10,15 +10,16 @@ import (
 func CopyRecordedActivityReply(t testing.TB, providerURL string) string {
 	t.Helper()
 	root := CopyRootReplyBoundary(t, true, true)
-	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
-stages:
+	writeClosedVariantFile(t, root, "provider/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "provider/schema.yaml", `stages:
   waiting: {}
   working: {}
   done: {final: true}
 pins:
   inputs: [provider.requested]
   outputs: [provider.replied]
-`)
+`,
+	)
 	writeClosedVariantFile(t, root, "provider/entities.yaml", "work: {}\n")
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
   execution_type: system_node

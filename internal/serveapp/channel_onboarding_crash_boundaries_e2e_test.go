@@ -90,7 +90,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				}
 				t.Cleanup(func() { _ = db.Close() })
 				// Neither crash cut may interrupt the predecessor's provider write.
-				cardMessageID := waitChannelCardMessageID(t, db, driver, "telegram-ingress")
+				cardMessageID := waitChannelCardMessageID(t, db, driver, ".")
 				if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
 					native := waitNativeQualification(t, harness, predecessor.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
 					t.Logf("E2E-13 predecessor settled before credential cut: operation=%s setting=%s generation=%d locale=%s/%d observed=%s card_message_id=%d", predecessor.Operation.OperationID, native.SettingID, native.SettingGeneration, native.ClientLanguage, native.LocaleRevision, native.ObservedAt.Format(time.RFC3339Nano), cardMessageID)

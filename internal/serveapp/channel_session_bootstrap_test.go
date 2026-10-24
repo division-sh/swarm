@@ -100,7 +100,8 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 		selected = storetest.StartPostgresRuntimeStore(t)
 	}
 	ctx, now := context.Background(), time.Now().UTC()
-	source := sourceartifactfixture.Require(t, ctx, selected)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	source := sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
 	catalog, plan := sessionDiscoveryProvider(t)
 	identity, err := plan.InterfaceIdentity()
 	if err != nil {
@@ -167,7 +168,7 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 		t.Fatal(err)
 	}
 	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal}
-	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), op.Coordinate.RuntimeInstanceID, op.Coordinate.BundleHash)
+	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), op.Coordinate.RuntimeInstanceID, rooted.Admission())
 	f.ctx, err = startupownership.WithRuntimeMutationAuthority(f.ctx, grant)
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +191,7 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	return f
 }
 
-func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Store, runtimeID, bundleHash string) startupownership.LiveGenerationGrant {
+func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Store, runtimeID string, root sourceartifact.RootAdmission) startupownership.LiveGenerationGrant {
 	t.Helper()
 	ctx := context.Background()
 	process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
@@ -203,7 +204,11 @@ func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Sto
 			t.Error(err)
 		}
 	})
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +216,7 @@ func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Sto
 		t.Fatal(err)
 	}
 	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
-		BundleHash: bundleHash, RuntimeInstanceID: runtimeID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+		BundleHash: root.BundleHash(), RuntimeInstanceID: runtimeID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
 	if err != nil {
 		t.Fatal(err)
 	}

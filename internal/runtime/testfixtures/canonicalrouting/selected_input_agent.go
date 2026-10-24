@@ -120,5 +120,6 @@ func CopyUnresolvedSelectedForkInput(t testing.TB) string {
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "tests/tier1-primitives/test-emits-multiple"), root)
 	ApplyOverlay(t, root, "events.yaml", "ghost.event:\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs: [ghost.event]\n  outputs: [item.processed]\n")
 	return root
 }

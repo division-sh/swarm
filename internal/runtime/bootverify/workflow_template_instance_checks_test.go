@@ -67,9 +67,9 @@ func TestRun_RejectsInvalidTemplateInstanceDeclarations(t *testing.T) {
 		{
 			name: "undeclared key field",
 			flowSchema: `
-name: scoring
 instance: missing_id
 `,
+
 			flowEntities: `
 account:
   account_id: uuid
@@ -79,9 +79,9 @@ account:
 		{
 			name: "unsupported key field type",
 			flowSchema: `
-name: scoring
 instance: tags
 `,
+
 			flowEntities: `
 account:
   tags: [text]

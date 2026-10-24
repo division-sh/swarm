@@ -243,7 +243,14 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 		}
 	})
 	eventBus.SetCommittedAgentReadinessFinalizer(bus.CommittedAgentReadinessFinalizerFunc(am.FinalizeCommittedAgentReadiness))
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := am.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil || len(desired) != 1 {
 		t.Fatalf("real static agent topology=%+v err=%v", desired, err)

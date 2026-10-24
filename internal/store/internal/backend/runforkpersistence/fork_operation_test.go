@@ -74,7 +74,14 @@ func TestForkOperationDurableReplayAndConflictBothStores(t *testing.T) {
 				}
 				changed := request
 				changed.OperationID = uuid.NewString()
-				other, _ := sourceartifactfixture.Rooted(t, "other-operation", sourceartifactfixture.New("nodes.yaml", []byte("other: {type: procedure}\n")))
+				artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+					"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+					"nodes.yaml":    []byte("other: {type: procedure}\n"),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				other, _ := sourceartifactfixture.Rooted(t, "other-operation", artifact)
 				changed.TargetBundleHash = other.Artifact().BundleHash()
 				changed.TargetRootReference = other.Admission().Reference()
 				if _, _, err := changed.Canonical(); err != nil {

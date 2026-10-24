@@ -130,7 +130,14 @@ func TestReceiverEntitylessPendingAttachmentExecutesBothStores(t *testing.T) {
 				WorkflowInstances: f.workflows, DeliveryStore: f.store, WorkOwner: work, ReceiverExecution: eventreceiver.NormalExecution(),
 				PersistenceRoles: manager.PersistenceRoles{AgentRoutes: publisher, CreationPublisher: publisher, DeliveryRuntime: publisher, LifecycleState: f.store.(manager.AgentLifecycleStateReader)},
 			}, f.store))
-			coordinate := agenttopology.SourceCoordinate{BundleHash: f.bundle.SourceArtifact.BundleHash()}
+			rooted, err := f.bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)

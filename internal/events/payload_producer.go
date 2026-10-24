@@ -78,6 +78,7 @@ func EventPayloadProducer(event Event, authoredFlowID string) PayloadProducer {
 
 func platformPayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
 	return (class == EventAdmissionRuntimeControl && !authoredSchedulePayloadIdentity(class, event, producer)) || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect ||
+		joinOccurrencePayloadIdentity(PayloadProducer{kind: "platform", producer: producer, class: class, event: event}) ||
 		(class == EventAdmissionReplay && event == "event.replayed" && producer.Type() == EventProducerPlatform)
 }
 

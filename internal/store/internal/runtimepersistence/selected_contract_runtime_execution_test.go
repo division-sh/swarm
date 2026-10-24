@@ -1520,7 +1520,8 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	registerTestAuthorActivityCatalog(t, registrar)
 	if len(sourceArtifacts) != 0 {
 		artifact := sourceArtifacts[0]
-		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
+		ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(artifact.BundleHash()), ctx)
+		ctx = requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
 	} else {
 		requireRunningRunForTest(t, ctx, store, sourceRun, now)
 	}
@@ -1554,7 +1555,7 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	if len(sourceArtifacts) != 0 {
 		child.Artifact = sourceArtifacts[0]
 	}
-	requireRunFixtureForTest(t, ctx, store, child)
+	ctx = requireRunFixtureForTest(t, ctx, store, child)
 	target, err := store.(interface {
 		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	}).LoadRunRootedSource(ctx, forkRun)

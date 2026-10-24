@@ -516,7 +516,14 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 			FlowActivation:   sqliteFlowActivationCommitter{store: sqliteStore},
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(semanticview.Wrap(bundle), coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -612,7 +619,14 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			FlowActivation:   sqliteFlowActivationCommitter{store: sqliteStore},
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Template actors are admitted by flow readiness, not as static desired agents.
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {

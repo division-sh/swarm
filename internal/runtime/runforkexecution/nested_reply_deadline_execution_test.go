@@ -115,7 +115,11 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 			t.Error(err)
 		}
 	})
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: loaded.SourceArtifactFact.BundleHash()}}, nil)
+	coordinate, err := agenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,8 +247,8 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 			rt, stopSourceServing := nestedDeadlineSourceRuntime(t, ctx, selected, owner, loaded)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-				Instance: flowidentity.Stored(loaded.Source, ".", runID, runID, "", ""), OccurredAt: at})
+			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
+				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", runID, runID, "", ""), OccurredAt: at})
 			if err != nil || !created {
 				t.Fatalf("construct source requester tree: created=%t error=%v", created, err)
 			}
@@ -359,7 +363,8 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				t.Fatal(err)
 			}
 			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
-				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true}
+				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			}
 			if restartVariant != "context_only" {
 				request.ForkOperation = operation
 			}

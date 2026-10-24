@@ -289,7 +289,7 @@ func requireRunFixtureForTest(
 ) context.Context {
 	t.Helper()
 	if fixture.Artifact == nil && fixture.RootAdmission == (sourceartifact.RootAdmission{}) {
-		_, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash)
+		fixtureContext, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -297,11 +297,14 @@ func requireRunFixtureForTest(
 		if err != nil {
 			t.Fatal(err)
 		}
-		if present {
+		if present && root.BundleHash() == source.BundleHash() {
 			fixture.RootAdmission = root
 		} else if source.BundleHash() == sourceartifactfixture.BundleHash {
 			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 			fixture.Artifact, fixture.RootAdmission = rooted.Artifact(), rooted.Admission()
+		}
+		if fixture.RootAdmission != (sourceartifact.RootAdmission{}) {
+			ctx = runtimecorrelation.WithRootAdmission(fixtureContext, fixture.RootAdmission)
 		}
 	}
 	switch store := selected.(type) {

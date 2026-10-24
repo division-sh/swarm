@@ -145,9 +145,6 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					// Native timer coordinates use microsecond precision: 1ns is
 					// due at construction, without sleeping or editing store rows.
 					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/schema.yaml"), `stages:
   warming:
     timers:
@@ -197,7 +194,7 @@ ingress:
 				if err != nil {
 					t.Fatal(err)
 				}
-				credentials := processIngressCredentialStore{"telegram_bot_token": "timer-test-token", "webhook_signing.telegram": "timer-test-secret"}
+				credentials := processIngressCredentialStore{"telegram.telegram_bot_token": "timer-test-token", "telegram.webhook_signing_secret": "timer-test-secret"}
 				binding, err := createServeToolGatewayBinding(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8081})
 				if err != nil {
 					t.Fatal(err)

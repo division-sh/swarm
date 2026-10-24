@@ -22,10 +22,10 @@ type selectedControlBindingFixture struct {
 
 func TestSelectedForkDecisionControlRequiresOwnExecutionAdmission(t *testing.T) {
 	runID := uuid.NewString()
-	binding := testSelectedContractBinding(runID)
+	binding, loaded := rootedDirectAdmissionFixture(t, runID)
 	binding.BindingID = uuid.NewString()
 	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, uuid.NewString(), 1,
-		runID, "card-control-census", runForkTestBundleHash, nil)
+		runID, "card-control-census", loaded.SourceArtifactFact.BundleHash(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

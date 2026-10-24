@@ -145,9 +145,9 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		t.Fatal(err)
 	}
 	for key, value := range map[string]string{
-		"webhook_signing.telegram": "telegram-secret",
-		"webhook_signing.intercom": "intercom-secret",
-		"webhook_signing.partner":  "partner-secret",
+		"telegram.webhook_signing_secret": "telegram-secret",
+		"webhook_signing.intercom":        "intercom-secret",
+		"webhook_signing.partner":         "partner-secret",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)

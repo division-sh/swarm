@@ -8,8 +8,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -32,6 +35,7 @@ func TestSelectedForkActivationConsumesRuntimeAdmission(t *testing.T) {
 	}
 	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
 	runID, eventID := uuid.NewString(), uuid.NewString()
+	ctx = correlation.WithRunID(ctx, runID)
 	at := time.Unix(1700000330, 0).UTC()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
@@ -39,7 +43,16 @@ func TestSelectedForkActivationConsumesRuntimeAdmission(t *testing.T) {
 	})
 	event := eventtest.ExistingRunRootIngress(eventID, "fork.cli.activate", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
 	storetest.CommitSemanticEvent(t, ctx, selected, event)
-	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
+	planner, _ := q1BranchPointSourceConstructor(t, ctx, owner, loaded)
+	plan, err := planner.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
+		ContractBundle: loaded.Source, Instance: flowidentity.Stored(loaded.Source, ".", runID, runID, runID, ""), OccurredAt: at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed, err := selected.CommitFlowInstanceActivation(ctx, bus.FlowInstanceActivationCommand{Plan: plan}); err != nil || !committed.Created || !committed.Acknowledged {
+		t.Fatalf("source constructor tree: committed=%+v err=%v", committed, err)
+	}
 	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 	forkPointEventID := uuid.NewString()
 	checkpoint := eventtest.ExistingRunRootIngress(forkPointEventID, "fork.cli.checkpoint", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(time.Millisecond))

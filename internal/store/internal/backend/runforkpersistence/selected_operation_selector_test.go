@@ -17,14 +17,16 @@ func TestSelectedRecoveryUsesResolvedEventNotOriginalLatestSelectorBothStores(t 
 			db := forkOperationTestDatabase(t, backend)
 			ctx := context.Background()
 			point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), Revision: 4}
+			root := forkOperationTargetRoot(t)
 			request := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "operator", IdempotencyKey: "original-latest", TransportHash: "original-request",
-				SourceRunID: uuid.NewString(), ResolvedPoint: &point, TargetBundleHash: "sha256:bundle",
+				SourceRunID: uuid.NewString(), ResolvedPoint: &point, TargetBundleHash: root.BundleHash, TargetRootReference: root,
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 			}
 			binding := runfork.RunForkSelectedContractBinding{
 				Owner: runfork.RunForkSelectedContractBindingOwner, BindingID: uuid.NewString(), ForkRunID: uuid.NewString(), SourceRunID: request.SourceRunID,
 				ForkPoint: point, ForkEventID: point.EventID, ContractSelection: request.ContractSelection, CreatedAt: time.Now().UTC(),
+				TargetRootReference: root,
 			}
 			var original runfork.ForkOperationRecord
 			withForkOperationTx(t, db, func(tx *sql.Tx) {

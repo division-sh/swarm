@@ -1111,7 +1111,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	bundle := loadCanonicalSelectedContractStoreSource(t)
 	unrelatedCtx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	unrelatedCtx = startupownership.CarryMutationAuthority(unrelatedCtx, ctx)
-	requireRunFixtureForTest(t, unrelatedCtx, pg, semanticRunFixture{
+	unrelatedCtx = requireRunFixtureForTest(t, unrelatedCtx, pg, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID,
 		Artifact: bundle.SourceArtifact, StartedAt: at.Add(time.Minute),
 	})
@@ -1907,7 +1907,7 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 	ctx = startupownership.CarryMutationAuthority(runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(run.BundleHash), run.RunID), runtimeeffects.ExecutionModeLive), ctx)
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	selected.acceptCurrentSchemaForTest()
-	requireRunFixtureForTest(t, ctx, selected, run)
+	ctx = requireRunFixtureForTest(t, ctx, selected, run)
 	bundle := loadCanonicalSelectedContractStoreSource(t)
 	source := semanticview.Wrap(bundle)
 	root := runtimeflowidentity.Stored(source, ".", run.RunID, run.RunID, run.RunID, "")

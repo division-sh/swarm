@@ -13,18 +13,20 @@ import (
 // and explicit-child readback keep their operation-free setup.
 func catalogStagedForkOperation(t testing.TB, ctx context.Context, selected runforkexecution.SelectedContractForkLifecycle, selection runfork.RunForkContractSelection, sourceRunID, eventID string) runfork.ForkOperationRequest {
 	t.Helper()
-	bundleHash := selection.BundleHash
-	if bundleHash == "" {
-		availability, err := selected.LoadRunBundleAvailability(ctx, sourceRunID)
-		if err != nil || !availability.Available() {
-			t.Fatalf("load exact staged operation source: %+v err=%v", availability, err)
-		}
-		bundleHash = availability.BundleHash
+	store, ok := selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)
+	if !ok {
+		t.Fatal("catalog operation requires its exact selected source owner")
+	}
+	loaded, err := (runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t), Store: store}).InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
+		Responsibility: runforkexecution.FreshSelectedSource(selection.BundleHash), BundleHash: selection.BundleHash, Selection: selection,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	id := uuid.NewString()
 	return runfork.ForkOperationRequest{
 		OperationID: id, Actor: "cataloge2e:" + t.Name(), IdempotencyKey: uuid.NewString(), TransportHash: "catalog-staged:" + id,
-		SourceRunID: sourceRunID, ForkEventID: eventID, TargetBundleHash: bundleHash,
+		SourceRunID: sourceRunID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(),
 		AllowSourceFreeze: true, ContractSelection: selection,
 	}
 }
