@@ -464,20 +464,20 @@ func TestBuildShowsRootPrimaryEntity(t *testing.T) {
 }
 
 func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
-	view := mustBuild(t, loadAuthoringAgentProvenanceSource(t, true), nil)
+	view := mustBuild(t, loadAuthoringAgentProvenanceSource(t, false), nil)
 
-	if view.Root.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceInferred ||
+	if view.Root.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceDeclared ||
 		len(view.Root.RequiredAgents.Agents) != 1 ||
 		view.Root.RequiredAgents.Agents[0].Role != "root-agent" ||
-		view.Root.RequiredAgents.Agents[0].Source != runtimecontracts.RequiredAgentSourceInferred {
+		view.Root.RequiredAgents.Agents[0].Source != runtimecontracts.RequiredAgentSourceDeclared {
 		t.Fatalf("root required_agents view = %#v, want inferred root-agent", view.Root.RequiredAgents)
 	}
 	analysis := flowByID(t, view, "analysis")
-	if analysis.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceExplicit {
-		t.Fatalf("flow required_agents source = %q, want explicit", analysis.RequiredAgents.Source)
+	if analysis.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceDeclared {
+		t.Fatalf("flow required_agents source = %q, want declared", analysis.RequiredAgents.Source)
 	}
-	if len(analysis.RequiredAgents.Agents) != 0 {
-		t.Fatalf("flow required_agents agents = %#v, want explicit empty boundary", analysis.RequiredAgents.Agents)
+	if len(analysis.RequiredAgents.Agents) != 1 || analysis.RequiredAgents.Agents[0].Role != "analyzer" {
+		t.Fatalf("flow required_agents agents = %#v, want declared analyzer", analysis.RequiredAgents.Agents)
 	}
 }
 

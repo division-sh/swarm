@@ -213,7 +213,6 @@ groups:
       - tests/tier8-boot-verification/test-boot-deprecated-field
       - tests/tier8-boot-verification/test-boot-dialect-dual
       - tests/tier8-boot-verification/test-boot-dialect-guard
-      - tests/tier8-boot-verification/test-boot-emit-mismatch
       - tests/tier8-boot-verification/test-boot-event-cycle
       - tests/tier8-boot-verification/test-boot-event-no-producer
       - tests/tier8-boot-verification/test-boot-event-no-schema
@@ -228,7 +227,6 @@ groups:
       - tests/tier8-boot-verification/test-boot-policy-conflict
       - tests/tier8-boot-verification/test-boot-produces-drift
       - tests/tier8-boot-verification/test-boot-prompt-missing
-      - tests/tier8-boot-verification/test-boot-required-agent-missing
       - tests/tier8-boot-verification/test-boot-self-emit
       - tests/tier8-boot-verification/test-boot-state-machine-invalid
       - tests/tier8-boot-verification/test-boot-state-machine-unreachable

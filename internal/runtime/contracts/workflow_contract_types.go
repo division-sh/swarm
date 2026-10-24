@@ -1062,18 +1062,16 @@ func (r ScopedNodeRecord) Identity() (runtimeidentity.ExecutableNode, error) {
 }
 
 type FlowSchemaDocument struct {
-	Name                   string                   `yaml:"name"`
-	Ingress                *ProjectFlowIngress      `yaml:"ingress"`
-	Connect                []FlowConnect            `yaml:"connect"`
-	Imports                FlowSchemaImports        `yaml:"imports"`
-	Instance               TemplateInstanceField    `yaml:"instance"`
-	StageDeclarations      FlowStageDeclarations    `yaml:"stages"`
-	LoopDeclarations       FlowLoopDeclarations     `yaml:"loops"`
-	Schedules              map[string]FlowSchedule  `yaml:"schedules"`
-	Pins                   FlowPins                 `yaml:"-"`
-	RequiredAgents         []FlowRequiredAgent      `yaml:"required_agents"`
-	RequiredAgentsDeclared bool                     `yaml:"-"`
-	AutoEmitOnCreate       AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
+	Name              string                   `yaml:"name"`
+	Ingress           *ProjectFlowIngress      `yaml:"ingress"`
+	Connect           []FlowConnect            `yaml:"connect"`
+	Imports           FlowSchemaImports        `yaml:"imports"`
+	Instance          TemplateInstanceField    `yaml:"instance"`
+	StageDeclarations FlowStageDeclarations    `yaml:"stages"`
+	LoopDeclarations  FlowLoopDeclarations     `yaml:"loops"`
+	Schedules         map[string]FlowSchedule  `yaml:"schedules"`
+	Pins              FlowPins                 `yaml:"-"`
+	AutoEmitOnCreate  AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
 }
 
 // EffectiveMode is derived from the admitted identity declaration, never an

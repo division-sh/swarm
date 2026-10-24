@@ -103,7 +103,6 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "flow.started"}}},
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "flow.completed"}}},
 			},
-			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{Role: "reviewer", SubscribesTo: []string{"review.requested"}, Emits: []string{"review.completed"}}},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {Emit: runtimecontracts.EmitSpec{Event: "work.completed"}}}},
@@ -157,7 +156,7 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 	source := markedToolOverlaySource{Source: base, capabilities: base.SemanticCapabilities().WithProviderTriggerEvents(base, triggergeneration.FromCanonicalBytes([]byte("endpoint-census")), nil).WithProviderIngressEvents(map[string][]string{".": {"external.received"}})}
 	census := BuildAuthoredEventEndpointCensus(source)
 	producerKinds := endpointKindSet(census.Producers())
-	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer, EventEndpointAutoEmit, EventEndpointExternal} {
+	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointTimer, EventEndpointAutoEmit, EventEndpointExternal} {
 		if !producerKinds[kind] {
 			t.Fatalf("producer kinds = %#v, missing %s", producerKinds, kind)
 		}
@@ -166,7 +165,7 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 		t.Fatal("ingress declaration invented a consumer")
 	}
 	consumerKinds := endpointKindSet(census.Consumers())
-	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer} {
+	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointTimer} {
 		if !consumerKinds[kind] {
 			t.Fatalf("consumer kinds = %#v, missing %s", consumerKinds, kind)
 		}

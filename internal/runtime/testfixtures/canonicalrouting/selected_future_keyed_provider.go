@@ -29,16 +29,8 @@ connect:
   - {event: work.assigned, from: ., to: work, resolution: select-or-create}
   - {event: work.finished, from: work, to: .}
 `
-	workSchema := `name: work
-instance: work_id
-stages:
-  pending: {}
-  done: {final: true}
-inputs: [work.assigned]
-outputs: [work.finished]
-required_agents:
-  - {role: worker, subscribes_to: [work.assigned]}
-`
+	workSchema := "name: work\ninstance: work_id\nstages:\n  pending: {}\n  done: {final: true}\ninputs: [work.assigned]\noutputs: [work.finished]\n"
+
 	workEntity := `job:
   work_id: text
   result: text
@@ -54,16 +46,8 @@ connect:
   - {event: work.assigned, from: ., to: work, resolution: create, key_from: generated.uuid}
   - {event: work.finished, from: work, to: .}
 `
-		workSchema = `name: work
-instance: case_id
-stages:
-  pending: {}
-  done: {final: true}
-inputs: [work.assigned]
-outputs: [work.finished]
-required_agents:
-  - {role: worker, subscribes_to: [work.assigned]}
-`
+		workSchema = "name: work\ninstance: case_id\nstages:\n  pending: {}\n  done: {final: true}\ninputs: [work.assigned]\noutputs: [work.finished]\n"
+
 		workEntity = `job:
   case_id: text
   work_id: text

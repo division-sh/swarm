@@ -205,44 +205,15 @@ func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testin
 	}
 
 	rootFacts := bundle.RootRequiredAgentFacts()
-	if len(rootFacts) != 1 || rootFacts[0].Role != "root-agent" || rootFacts[0].Source != RequiredAgentSourceInferred {
+	if len(rootFacts) != 1 || rootFacts[0].Role != "root-agent" || rootFacts[0].Source != RequiredAgentSourceDeclared {
 		t.Fatalf("root required agent facts = %#v, want inferred root-agent", rootFacts)
 	}
 	flowFacts := bundle.FlowRequiredAgentFacts("analysis")
-	if len(flowFacts) != 1 || flowFacts[0].Role != "analyzer" || flowFacts[0].Source != RequiredAgentSourceInferred {
+	if len(flowFacts) != 1 || flowFacts[0].Role != "analyzer" || flowFacts[0].Source != RequiredAgentSourceDeclared {
 		t.Fatalf("flow required agent facts = %#v, want inferred analyzer", flowFacts)
 	}
 	if got := bundle.FlowRequiredAgents("analysis"); len(got) != 1 || got[0].SubscribesTo[0] != "analysis.requested" || got[0].Emits[0] != "analysis.done" {
 		t.Fatalf("effective flow required agents = %#v, want inferred subscriptions/emits", got)
-	}
-}
-
-func TestWorkflowContractBundleEffectiveRequiredAgentsPreserveExplicitEmpty(t *testing.T) {
-	flowView := &FlowContractView{
-		Paths: FlowContractPaths{FlowPath: "analysis", SchemaFile: "analysis/schema.yaml", AgentsFile: "analysis/agents.yaml"},
-		Path:  "analysis",
-		Agents: map[string]AgentRegistryEntry{
-			"analyzer": {Subscriptions: []string{"analysis.requested"}},
-		},
-	}
-	bundle := &WorkflowContractBundle{
-		RootSchema: &FlowSchemaDocument{
-			RequiredAgentsDeclared: true,
-		},
-		Agents: map[string]AgentRegistryEntry{
-			"root-agent": {Subscriptions: []string{"root.requested"}},
-		},
-		FlowSchemas: map[string]FlowSchemaDocument{
-			"analysis": {RequiredAgentsDeclared: true},
-		},
-		FlowTree: FlowTree{Root: flowView, ByPath: map[string]*FlowContractView{"analysis": flowView}, ByID: map[string]*FlowContractView{"analysis": flowView}},
-	}
-
-	if got := bundle.RootRequiredAgents(); len(got) != 0 {
-		t.Fatalf("root required agents = %#v, want explicit empty boundary", got)
-	}
-	if got := bundle.FlowRequiredAgents("analysis"); len(got) != 0 {
-		t.Fatalf("flow required agents = %#v, want explicit empty boundary", got)
 	}
 }
 
@@ -453,11 +424,7 @@ func writeLayer3FlowTreeFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: root-platform
-required_agents:
-  - role: root-agent
-`)
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "\nname: root-platform\n")
 	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), `
 root_policy: root
 shared: root

@@ -845,49 +845,6 @@ func staticAgentDeclarationPreflightBlueprints(source semanticview.Source) ([]st
 	return blueprints, nil
 }
 
-// StaticFlowRequiredAgentMaterializationRecords derives the ordinary runtime
-// required-flow-agent materialization records without mutating runtime state.
-func StaticFlowRequiredAgentMaterializationRecords(runID string, source semanticview.Source) ([]PersistedAgent, error) {
-	blueprints, err := StaticFlowRequiredAgentMaterializationBlueprints(source)
-	if err != nil {
-		return nil, err
-	}
-	return materializeStaticAgentBlueprints(runID, blueprints)
-}
-
-// StaticFlowRequiredAgentMaterializationBlueprints derives required static
-// declarations without assigning a live run.
-func StaticFlowRequiredAgentMaterializationBlueprints(source semanticview.Source) ([]AgentMaterializationBlueprint, error) {
-	blueprints, err := staticRequiredDeclarationPreflightBlueprints(source)
-	return rootAgentBlueprints(blueprints), err
-}
-
-func staticRequiredDeclarationPreflightBlueprints(source semanticview.Source) ([]staticAgentBlueprint, error) {
-	if source == nil {
-		return nil, nil
-	}
-	blueprints := []staticAgentBlueprint{}
-	if required := source.RequiredAgents(); len(required) > 0 {
-		scopeBlueprints, err := staticRequiredAgentBlueprintsForDeclarations(source, ".", "", required)
-		if err != nil {
-			return nil, err
-		}
-		blueprints = append(blueprints, scopeBlueprints...)
-	}
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
-		scopeBlueprints, err := staticRequiredAgentBlueprintsForDeclarations(source, flowID, strings.Trim(scope.Path, "/"), source.FlowRequiredAgents(flowID))
-		if err != nil {
-			return nil, err
-		}
-		blueprints = append(blueprints, scopeBlueprints...)
-	}
-	return blueprints, nil
-}
-
 func materializeStaticAgentBlueprints(runID string, blueprints []staticAgentBlueprint) ([]PersistedAgent, error) {
 	records := make([]PersistedAgent, 0, len(blueprints))
 	for _, blueprint := range blueprints {
@@ -1265,50 +1222,6 @@ func buildFlowAgentConfig(
 	cfg.Identity = identity
 	cfg.NormalizeRuntimeDescriptor()
 	return cfg, nil
-}
-
-func staticRequiredAgentBlueprintsForDeclarations(
-	source semanticview.Source,
-	flowID string,
-	flowPath string,
-	required []runtimecontracts.FlowRequiredAgent,
-) ([]staticAgentBlueprint, error) {
-	flowID = strings.TrimSpace(flowID)
-	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
-	if len(required) == 0 {
-		return nil, nil
-	}
-	declarations := semanticview.AgentDeclarationsForOwner(source, flowID)
-	localEvents := staticFlowLocalEventSetForDeclarations(declarations)
-	blueprints := make([]staticAgentBlueprint, 0, len(required))
-	for _, requiredAgent := range required {
-		logicalID := strings.TrimSpace(requiredAgent.Role)
-		matches := make([]semanticview.AgentDeclaration, 0, 1)
-		for _, declaration := range declarations {
-			if strings.TrimSpace(declaration.LocalID) == logicalID {
-				matches = append(matches, declaration)
-			}
-		}
-		if len(matches) == 0 {
-			return nil, fmt.Errorf("required agent %q missing from scope %q", strings.TrimSpace(requiredAgent.Role), flowID)
-		}
-		if len(matches) > 1 {
-			return nil, fmt.Errorf("required agent declaration %q in scope %q is ambiguous", logicalID, flowID)
-		}
-		declaration := matches[0]
-		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
-		if err != nil {
-			return nil, fmt.Errorf("required agent declaration %q in scope %q: %w", logicalID, flowID, err)
-		}
-		identity, cfg, err := buildStaticFlowAgentBlueprint(source, namePlan, flowID, flowPath, logicalID, declaration.Entry, localEvents)
-		if err != nil {
-			return nil, err
-		}
-		blueprints = append(blueprints, staticAgentBlueprint{
-			Config: cfg, Identity: identity, Status: "active", HiredBy: "static-flow-required-agent",
-		})
-	}
-	return blueprints, nil
 }
 
 func buildStaticFlowAgentConfig(

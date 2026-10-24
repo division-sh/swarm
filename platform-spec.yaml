@@ -2793,21 +2793,11 @@ contract_formats:
         A normal agent MUST NOT regain them by setting agent-authored type/role/config fields; they are not a valid normal-agent
         provider-visible or callable surface.'
     schema_source: entities.yaml + types.yaml
-  required_agents:
-    description: 'schema.yaml required_agents is optional. When omitted, the flow''s effective required-agent facts are
-      inferred from same-scope agents.yaml map keys plus each agent''s subscriptions and emit_events. When present,
-      including an explicit empty list, required_agents is an explicit interface/implementation boundary and no inference
-      from agents.yaml is performed for that scope.'
-    fulfillment_rule: 'The agent YAML map key must match the role field in required_agents. This is the canonical identity:
-      if an explicit schema boundary says role: classifier-agent, agents.yaml must have a top-level key classifier-agent.
-      No separate fulfills: field. Inferred facts use the agents.yaml map key as the role and MUST NOT fall back to
-      agent-authored role or id fields.'
-    note_on_empty: 'required_agents entries with empty subscriptions and emits are valid. They declare that the flow needs
-      this agent role to exist, even if the agent only uses the universal notify_human tool. Common for managerial roles
-      that coordinate through operator notices rather than event subscriptions. An explicit
-      required_agents: [] declares an explicit no-role boundary and MUST NOT infer agents from agents.yaml.'
-    generated_view: The generated/expanded authoring view MUST expose each effective required-agent fact and whether it
-      was explicitly authored or inferred from same-scope agents.yaml. It MUST also expose explicit empty boundaries.
+  declared_agents:
+    description: Every agent declared in agents.yaml is required in its exact scope. Its map key, subscriptions and
+      emit_events are the sole declaration facts. required_agents is not a schema field, including an empty list.
+    generated_view: Readback identifies the declaring agents.yaml source. There is no explicit/inferred boundary or
+      second materialization pass.
   hello_world_example:
     description: Minimal flow that processes one event and advances state.
     package_yaml: 'name: hello
@@ -6587,8 +6577,8 @@ engine:
         name: validate_pins
         action: 'Every required input pin consumes canonical selected-root ingress, declaration-owned provider ingress, explicit compiled connect, platform source or exact local producer evidence. Schemas and addresses never grant delivery. Private outputs require real local consumers or explicit compiled connections; selected-root outputs are committed public N=0 exports. Pins are names-only; source/sink/field grants and option bags are unsupported. Each flow writes only its own state through the existing scoped mutation owner.'
       - step: 8
-        name: validate_required_agents
-        action: Build effective required-agent facts for every scope. If schema.required_agents is omitted, infer facts from same-scope agents.yaml map keys, subscriptions, and emit_events. If schema.required_agents is present, including an empty list, validate that explicit boundary strictly against same-scope agents.yaml by exact map key and required subscription/emit coverage.
+        name: derive_declared_agents
+        action: Read each scope's agents.yaml declarations once. Every declaration is required; readiness and materialization use that same set without a second schema list or duplicate blueprint pass.
       - step: 9
         name: validate_tools
         action: Every tool in every agent's tools must exist in the tool registry.
@@ -8794,7 +8784,7 @@ engine:
         rule: Authored `agent_defaults`, named `profile`, `agent_profiles`, and `runtime_id_template` syntax is not
           accepted by Layer 1. These fields/blocks MUST fail closed or be separately gated before implementation.
       exclusions:
-      - No defaults for logical identity, runtime/display id templates, subscriptions, emit_events, required_agents,
+      - No defaults for logical identity, runtime/display id templates, subscriptions, emit_events,
         pins, events, entities, public interfaces, policy, intent, criteria, credentials, permissions, permissions_bundle, tools,
         native_tools, or flow_data_access.
     subscription_types:
@@ -8804,7 +8794,6 @@ engine:
       tools_tier2: RETIRED — use tools.
       subscriptions_bootstrap: RETIRED — use subscriptions.
       subscribes_to: RETIRED for agents.yaml and nodes.yaml. Agents use subscriptions; nodes receive the events they handle.
-        required_agents[].subscribes_to remains a separate role-fulfillment constraint until its own retirement.
     emit_tool_convention:
       description: The platform auto-generates emit tools from each agent's emit_events list. Agents do NOT need to list emit
         tools in tools.
@@ -10289,13 +10278,6 @@ engine:
         the declaration-order entry is missing from its compiled catalog, or final-stage gate/exit restrictions
         are violated. No-final flows are valid services; finite completion admission belongs to run.start.
         Retired lifecycle fields fail during source admission before boot.
-      when: boot-only
-    - id: required_agents_match
-      severity: error
-      scope: root-and-per-flow
-      trigger: An explicit schema.required_agents boundary declares a role that has no matching agent in that scope's
-        agents.yaml by exact map key; or the matching agent does not cover all required subscribes_to / emits events.
-        Omitted required_agents is not a restatement surface and MUST NOT trigger this check by itself.
       when: boot-only
     - id: handler_field_compliance
       severity: error
@@ -15286,22 +15268,9 @@ flow_model:
       pins. They are implementation details, not part of the flow's public contract. Only events that cross flow boundaries
       or trigger/complete the flow appear in pins.
     routing_authority: Child output/input pins declare the boundary crossed by an exact least-common-ancestor schema.yaml connect. Parent-local receivers require a genuine same-flow consumer or a selected-root output export, alongside compiled local event schemas without artificial parent pins. Schema presence and required-role metadata alone are not consuming relations. Connections own topology, instance selection and paired reply facts; pins never own those policies. Runtime consumers use the compiled edge and its declared-pin or parent-local-schema evidence.
-  required_agents:
-    description: 'Each flow has effective required-agent facts. If schema.required_agents is omitted, the platform derives
-      those facts from same-scope agents.yaml map keys plus subscriptions and emit_events. If schema.required_agents is
-      present, each entry is an explicit agent role socket that the root flow or implementation must fill. Presence,
-      including an empty list, disables inference for that scope.'
-    schema_field: required_agents
-    entry_format:
-      role: Name of the required role
-      subscribes_to: Events the agent must subscribe to
-      emits: Events the agent must emit
-      description: What the agent does in this flow
-    fulfillment: 'For explicit required_agents, an agent fulfills a role if BOTH conditions hold: (1) the agent YAML map
-      key in agents.yaml matches the role name in required_agents (canonical identity binding), AND (2) the agent''s
-      subscriptions include all required subscribes_to events and its emit_events include all required emits. Inferred
-      facts are generated from the same agents.yaml facts and then consumed by bootverify/runtime as the canonical effective
-      required-agent view. Identity binding is by map key; behavioral fulfillment is by subscription/emit coverage.'
+  declared_agents:
+    description: agents.yaml is the only agent set for a scope. Declaration identity is its exact map key; readiness,
+      preflight and materialization consume the declared set once. There is no schema role socket or explicit empty boundary.
   schema_merging:
     description: >-
       Composition compiles event schemas through explicit connections while retaining exact producer and receiver
@@ -23476,8 +23445,8 @@ agent_identity_model:
         typed plan/materialized name rather than reconstructing from wire ID or map keys.
       runtime_role_projection: 'A declaration-derived runtime actor role is the explicit agents.yaml role when present;
         otherwise it is the declaration effective public agent_id. Static activation, template activation, authority,
-        emit-schema, native-tool, and permission projections MUST consume this same value. This does not change
-        required_agents fulfillment: required-agent sockets remain bound to the scoped agents.yaml map key.'
+        emit-schema, native-tool, and permission projections MUST consume this same value. Declaration membership
+        remains bound to the scoped agents.yaml map key.'
     concrete_live_identity:
       source: admitted run_id plus agent name provenance plus explicit present-or-root route
       role: Durable composite primary key, runtime map key, EventBus target key, delivery/session/timer/workspace owner,

@@ -25,19 +25,18 @@ const (
 type EventEndpointKind string
 
 const (
-	EventEndpointNodeHandler       EventEndpointKind = "node_handler"
-	EventEndpointNodeGenerated     EventEndpointKind = "node_generated"
-	EventEndpointAgent             EventEndpointKind = "agent"
-	EventEndpointRequiredAgentRole EventEndpointKind = "required_agent_role"
-	EventEndpointTimer             EventEndpointKind = "timer"
-	EventEndpointClockSchedule     EventEndpointKind = "clock_schedule"
-	EventEndpointAutoEmit          EventEndpointKind = "auto_emit_on_create"
-	EventEndpointGateOutcome       EventEndpointKind = "gate_outcome"
-	EventEndpointLoopEscape        EventEndpointKind = "loop_escape"
-	EventEndpointExternal          EventEndpointKind = "external"
-	EventEndpointPlatform          EventEndpointKind = "platform"
-	EventEndpointFlowInputPin      EventEndpointKind = "flow_input_pin"
-	EventEndpointFlowOutputPin     EventEndpointKind = "flow_output_pin"
+	EventEndpointNodeHandler   EventEndpointKind = "node_handler"
+	EventEndpointNodeGenerated EventEndpointKind = "node_generated"
+	EventEndpointAgent         EventEndpointKind = "agent"
+	EventEndpointTimer         EventEndpointKind = "timer"
+	EventEndpointClockSchedule EventEndpointKind = "clock_schedule"
+	EventEndpointAutoEmit      EventEndpointKind = "auto_emit_on_create"
+	EventEndpointGateOutcome   EventEndpointKind = "gate_outcome"
+	EventEndpointLoopEscape    EventEndpointKind = "loop_escape"
+	EventEndpointExternal      EventEndpointKind = "external"
+	EventEndpointPlatform      EventEndpointKind = "platform"
+	EventEndpointFlowInputPin  EventEndpointKind = "flow_input_pin"
+	EventEndpointFlowOutputPin EventEndpointKind = "flow_output_pin"
 )
 
 type AuthoredEventEndpoint struct {
@@ -113,7 +112,6 @@ func BuildAuthoredEventEndpointCensus(source Source) AuthoredEventEndpointCensus
 	if source != nil {
 		builder.addNodeEndpoints()
 		builder.addAgentEndpoints()
-		builder.addRequiredAgentEndpoints()
 		builder.addTimerEndpoints()
 		builder.addClockScheduleEndpoints()
 		builder.addAutoEmitEndpoints()
@@ -197,11 +195,6 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubConsumerMatches(producer 
 
 	matches := make([]TypedPubSubConsumerMatch, 0)
 	for _, consumer := range c.consumers {
-		if consumer.Kind == EventEndpointRequiredAgentRole {
-			// Required-agent subscriptions prove role fulfillment, not an
-			// executable delivery relation.
-			continue
-		}
 		if admission, classified := endpointSubscriptionAdmission(c.source, consumer); classified && !admission.Admitted() {
 			continue
 		}
@@ -532,35 +525,6 @@ func (b *endpointCensusBuilder) addAgent(plan AgentNamePlan, agent runtimecontra
 		endpoint.SourceLocation = "subscriptions"
 		endpoint.Pattern = strings.Contains(eventType, "*")
 		b.add(endpoint)
-	}
-}
-
-func (b *endpointCensusBuilder) addRequiredAgentEndpoints() {
-	b.addRequiredAgentScope(".", b.source.RequiredAgents())
-	for _, scope := range sortedFlowScopes(b.source.FlowScopes()) {
-		if strings.TrimSpace(scope.ID) == "." {
-			continue
-		}
-		b.addRequiredAgentScope(strings.TrimSpace(scope.ID), b.source.FlowRequiredAgents(scope.ID))
-	}
-}
-
-func (b *endpointCensusBuilder) addRequiredAgentScope(flowID string, required []runtimecontracts.FlowRequiredAgent) {
-	sort.SliceStable(required, func(i, j int) bool { return strings.TrimSpace(required[i].Role) < strings.TrimSpace(required[j].Role) })
-	for _, role := range required {
-		for _, eventType := range normalizedSortedStrings(role.Emits) {
-			endpoint := b.endpoint(EventEndpointProducer, EventEndpointRequiredAgentRole, flowID, eventType)
-			endpoint.Role = strings.TrimSpace(role.Role)
-			endpoint.SourceLocation = "required_agents.emits"
-			b.add(endpoint)
-		}
-		for _, eventType := range normalizedSortedStrings(role.SubscribesTo) {
-			endpoint := b.endpoint(EventEndpointConsumer, EventEndpointRequiredAgentRole, flowID, eventType)
-			endpoint.Role = strings.TrimSpace(role.Role)
-			endpoint.SourceLocation = "required_agents.subscribes_to"
-			endpoint.Pattern = strings.Contains(eventType, "*")
-			b.add(endpoint)
-		}
 	}
 }
 

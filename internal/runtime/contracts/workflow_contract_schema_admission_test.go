@@ -38,7 +38,7 @@ func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if schema.Instance.Empty() || schema.Ingress == nil || len(schema.Imports.ConnectorPacks) != 1 || len(schema.Imports.ProviderTriggerEvents) != 1 || len(schema.Connect) != 1 || len(schema.Pins.Inputs.EventPins) != 1 || !schema.RequiredAgentsDeclared || len(schema.RequiredAgents) != 1 || len(schema.StageDeclarations.Entries) != 2 || len(schema.LoopDeclarations.Entries) != 1 {
+	if schema.Instance.Empty() || schema.Ingress == nil || len(schema.Imports.ConnectorPacks) != 1 || len(schema.Imports.ProviderTriggerEvents) != 1 || len(schema.Connect) != 1 || len(schema.Pins.Inputs.EventPins) != 1 || len(schema.StageDeclarations.Entries) != 2 || len(schema.LoopDeclarations.Entries) != 1 {
 		t.Fatalf("nested family lost: %#v", schema)
 	}
 	gate := schema.StageDeclarations.Entries[0].Gate

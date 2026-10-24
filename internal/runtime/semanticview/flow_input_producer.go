@@ -131,7 +131,7 @@ func appendProviderIngressEvidence(source Source, flowID, eventType string, appe
 
 func appendInternalTopologyEvidence(census AuthoredEventEndpointCensus, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	for _, endpoint := range census.MatchingProducers(flowID, eventType) {
-		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform || endpoint.Kind == EventEndpointRequiredAgentRole {
+		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform {
 			continue
 		}
 		detail := endpoint.ProducerDescription()
@@ -155,8 +155,6 @@ func (endpoint AuthoredEventEndpoint) ProducerDescription() string {
 			return fmt.Sprintf("agent %s turn_timeout.emit", endpoint.AgentID)
 		}
 		return fmt.Sprintf("agent %s emit_events", endpoint.AgentID)
-	case EventEndpointRequiredAgentRole:
-		return fmt.Sprintf("required agent role %s emits", endpoint.Role)
 	case EventEndpointTimer:
 		if endpoint.FlowID == "." {
 			return strings.TrimSpace("root timer " + endpoint.TimerID)

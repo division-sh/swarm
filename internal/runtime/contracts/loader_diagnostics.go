@@ -126,6 +126,9 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	if context == "rule" && (key == "else" || key == "default") {
 		remediation = "DIALECT-RULES-DEFAULT: the handler.rules default branch is the last row written without a predicate."
 	}
+	if context == "schema" && key == "required_agents" {
+		remediation = "DIALECT-REQUIRED-AGENTS: every agent declared in agents.yaml is required in its scope; remove required_agents."
+	}
 	if context == "accumulate" && key == "into" {
 		remediation = "into: is not an accumulate key; write target: <state field>."
 		if len(source) != 0 {

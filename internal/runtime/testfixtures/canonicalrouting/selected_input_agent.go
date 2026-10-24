@@ -73,7 +73,7 @@ func copySelectedNestedConstructedAgentInput(t testing.TB, fields, observer bool
 			for name, body := range map[string]string{
 				"events.yaml": "work.ready:\n  work_id: text\nwork.finish:\n",
 				"nodes.yaml":  "publish:\n  task.assigned:\n    emit:\n      event: work.ready\n      fields:\n        work_id: payload.work_id\nfinish:\n  work.finish:\n    advances_to: done\n",
-				"schema.yaml": "name: descendant\nstages:\n  active: {}\n  done: {final: true}\ninputs:\n  - task.assigned\nrequired_agents:\n  - role: worker\n    subscribes_to: [work.ready]\n",
+				"schema.yaml": "name: descendant\nstages:\n  active: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n",
 				"agents.yaml": "worker:\n  model: regular\n  intent:\n    inline: Consume the exact assigned task.\n  subscriptions: [work.ready]\n  emit_events: [work.finish]\n",
 			} {
 				if name == "agents.yaml" && observer {

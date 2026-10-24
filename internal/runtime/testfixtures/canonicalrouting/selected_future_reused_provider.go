@@ -41,16 +41,8 @@ work.assigned:
       writes:
         - {target_field: counter, value: entity.counter + 1}
 `,
-		"work/schema.yaml": `name: work
-instance: work_id
-stages:
-  pending: {}
-  done: {final: true}
-inputs: [work.assigned]
-outputs: [work.progress, work.finished]
-required_agents:
-  - {role: worker, subscribes_to: [work.assigned]}
-`,
+		"work/schema.yaml": "name: work\ninstance: work_id\nstages:\n  pending: {}\n  done: {final: true}\ninputs: [work.assigned]\noutputs: [work.progress, work.finished]\n",
+
 		"work/events.yaml": `work.progress:
   work_id: text
 work.finished:

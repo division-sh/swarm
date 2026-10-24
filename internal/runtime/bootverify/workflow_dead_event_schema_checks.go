@@ -132,7 +132,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 			if strings.Contains(endpoint.Site, "fan_out") {
 				usage.fanOutEmit++
 			}
-		case semanticview.EventEndpointAgent, semanticview.EventEndpointRequiredAgentRole:
+		case semanticview.EventEndpointAgent:
 			usage.agentEmitEvents++
 		case semanticview.EventEndpointTimer, semanticview.EventEndpointClockSchedule:
 			usage.timerReferences++
@@ -147,7 +147,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 		switch endpoint.Kind {
 		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointNodeGenerated:
 			usage.handlerSubscribes++
-		case semanticview.EventEndpointAgent, semanticview.EventEndpointRequiredAgentRole:
+		case semanticview.EventEndpointAgent:
 			usage.agentSubscriptions++
 		case semanticview.EventEndpointTimer:
 			usage.timerReferences++

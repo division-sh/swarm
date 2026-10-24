@@ -13,7 +13,6 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
@@ -119,9 +118,6 @@ type checkerContext struct {
 	cycleLoaded   bool
 	cycleFindings []Finding
 
-	requiredLoaded   bool
-	requiredFindings []Finding
-
 	stateLoaded   bool
 	stateFindings []Finding
 
@@ -214,7 +210,6 @@ var bootCheckRegistry = []Check{
 	{ID: "accumulator_entity_projection", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorEntityProjection},
 	{ID: "accumulator_handler_isolation", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorHandlerIsolation},
 	{ID: "accumulator_input_producer_path", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorInputProducerPath},
-	{ID: "required_agents_match", Mode: CheckSource, Severity: "error", Run: checkRequiredAgentsMatch},
 	{ID: "handler_field_compliance", Mode: CheckSource, Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: policySheetLookupCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkPolicySheetLookupValueRows},
 	{ID: policySheetValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkPolicySheetValidationValueRows},
@@ -358,7 +353,6 @@ func checkStateMachineCoherence(c *checkerContext) []Finding { return c.stateMac
 func checkNodeStateSchemaTypedCounterpart(c *checkerContext) []Finding {
 	return c.nodeStateSchemaTypedCounterpart()
 }
-func checkRequiredAgentsMatch(c *checkerContext) []Finding        { return c.requiredAgentsMatch() }
 func checkIntentResolution(c *checkerContext) []Finding           { return c.intentResolution() }
 func checkInvalidFieldDetection(c *checkerContext) []Finding      { return c.invalidFieldDetection() }
 func checkPolicyConflictDetection(c *checkerContext) []Finding    { return c.policyConflicts() }
@@ -663,67 +657,6 @@ func appendAgentMemoryFindings(findings []Finding, scopeLabel string, proof sema
 	return findings
 }
 
-func (c *checkerContext) requiredAgentsMatch() []Finding {
-	if c.requiredLoaded {
-		return c.requiredFindings
-	}
-	c.requiredLoaded = true
-	for _, scope := range runtimerequiredagents.AllScopes(c.source) {
-		for _, finding := range runtimerequiredagents.CheckScope(scope) {
-			c.requiredFindings = append(c.requiredFindings, requiredAgentBootFinding(finding))
-		}
-	}
-	return c.requiredFindings
-}
-
-func requiredAgentBootFinding(finding runtimerequiredagents.Finding) Finding {
-	scopeID := strings.TrimSpace(finding.ScopeID)
-	if scopeID == "" {
-		scopeID = "root"
-	}
-	message := ""
-	switch finding.Kind {
-	case runtimerequiredagents.FindingMissingRole:
-		if scopeID == "root" {
-			message = "root schema required_agents entry missing role"
-		} else {
-			message = fmt.Sprintf("flow %s required_agents entry missing role", scopeID)
-		}
-	case runtimerequiredagents.FindingMissingAgent:
-		if scopeID == "root" {
-			message = fmt.Sprintf("root schema required agent role %s missing from agents.yaml", finding.Role)
-		} else {
-			message = fmt.Sprintf("flow %s required agent role %s missing from agents.yaml", scopeID, finding.Role)
-		}
-	case runtimerequiredagents.FindingAmbiguousAgent:
-		if scopeID == "root" {
-			message = fmt.Sprintf("root required agent role %s is ambiguous across declarations %v", finding.Role, finding.Candidates)
-		} else {
-			message = fmt.Sprintf("flow %s required agent role %s is ambiguous across declarations %v", scopeID, finding.Role, finding.Candidates)
-		}
-	case runtimerequiredagents.FindingMissingSubscriptions:
-		if scopeID == "root" {
-			message = fmt.Sprintf("root required agent %s subscriptions mismatch (%s)", finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))
-		} else {
-			message = fmt.Sprintf("flow %s required agent %s subscriptions mismatch (%s)", scopeID, finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))
-		}
-	case runtimerequiredagents.FindingMissingEmits:
-		if scopeID == "root" {
-			message = fmt.Sprintf("root required agent %s emits mismatch (%s)", finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))
-		} else {
-			message = fmt.Sprintf("flow %s required agent %s emits mismatch (%s)", scopeID, finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))
-		}
-	default:
-		message = fmt.Sprintf("%s required_agents mismatch", scopeID)
-	}
-	return Finding{
-		CheckID:  "required_agents_match",
-		Severity: "error",
-		Message:  message,
-		Location: scopeID,
-	}
-}
-
 func (c *checkerContext) stateMachineCoherence() []Finding {
 	if c.stateLoaded {
 		return c.stateFindings
@@ -1021,14 +954,6 @@ func platformProducerEndpointFindings(source semanticview.Source, endpoint seman
 		}
 		reservedMessage = func(eventType string) string {
 			return fmt.Sprintf("node %s produces reserved platform.* namespace event %s", endpoint.NodeID, eventType)
-		}
-	case semanticview.EventEndpointRequiredAgentRole:
-		location = strings.TrimSpace(endpoint.Role)
-		catalogMessage = func(eventType string) string {
-			return fmt.Sprintf("required agent role %s emits platform-emitted event %s; platform owns this event", endpoint.Role, eventType)
-		}
-		reservedMessage = func(eventType string) string {
-			return fmt.Sprintf("required agent role %s emits reserved platform.* namespace event %s", endpoint.Role, eventType)
 		}
 	case semanticview.EventEndpointTimer:
 		location = strings.TrimSpace(endpoint.TimerID)
