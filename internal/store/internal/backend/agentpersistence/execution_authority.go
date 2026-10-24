@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	managedcapabilitystore "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
@@ -48,6 +49,17 @@ func AuthorizeGenerationMutationTx(ctx context.Context, tx *sql.Tx, req manager.
 		return err
 	}
 	if ownership != manager.RunExecutionOwned {
+		if evidence.SelectedFork == nil && req.OperationKind == "self_release" && req.Agent == nil &&
+			req.ExpectedPhase == manager.AgentLifecycleRunning && req.TargetPhase == manager.AgentLifecycleRegistered && req.RunMode == manager.AgentRunModeStopped &&
+			req.TargetEpoch == req.ExpectedEpoch && req.TargetGeneration == req.ExpectedGeneration && req.Subordinate.Action == sessions.LifecycleMutationNone {
+			retained, err := sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, req.Identity.RunID, evidence.BundleHash)
+			if err != nil {
+				return err
+			}
+			if retained {
+				return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, evidence, evidence.BundleHash, sqlite)
+			}
+		}
 		// Complete-source-set reconciliation may terminalize a removed ordinary
 		// declaration across source coordinates, never acquire its execution.
 		// The topology owner below must still prove absence from the current plan.

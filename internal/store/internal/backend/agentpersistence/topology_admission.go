@@ -14,6 +14,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
 func AuthorizePostgresAgentTopologyMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) error {
@@ -156,6 +157,17 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 			err = AuthorizeDynamicFlowTopologyPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
 		} else if takeoverPreparation {
 			err = AuthorizeDynamicFlowTakeoverPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
+		} else if req.OperationKind == "self_release" {
+			// Retained handoff permits exact lifecycle disposition, not execution.
+			retained, readErr := sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, req.Identity.RunID, req.ProcessBinding.BundleHash)
+			if readErr != nil {
+				return readErr
+			}
+			if retained {
+				err = AuthorizeGenerationMutationTx(ctx, tx, req, sqlite)
+			} else {
+				err = AuthorizeDynamicFlowActivationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
+			}
 		} else {
 			err = AuthorizeDynamicFlowActivationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
 		}
