@@ -94,6 +94,11 @@ func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerO
 			}
 		}
 		controller := opts.Controller
+		if action == "continue" && opts.PrepareRunRuntime != nil {
+			if err := opts.PrepareRunRuntime(ctx, runID); err != nil {
+				return apiidempotency.Completion{}, runControlError(runID, err)
+			}
+		}
 		if !selectedStop && runtimeContextManager(opts.RuntimeContexts) != nil {
 			var err error
 			var selected selectedRuntimeContext

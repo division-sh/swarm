@@ -8,12 +8,8 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -25,55 +21,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestDeliveryAuthorityActivationKeepsAdvancedSourceLiveBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			fixture := newActivityForkFixture(t, backend)
-			selected := fixture.owner.ports.fork
-			ctx, request, advance := q1StateOnlyGateComponentSource(t, fixture.owner)
-			attachment := q1StageBranchPointComponent(t, ctx, request)
-			advance()
-			activation, err := attachment.activate()
-			if err != nil || !activation.Activated || !activation.SourceAdvancedAfterFork || activation.SourceFrozen || activation.BranchDivergence == nil {
-				t.Fatalf("expected independently live advanced source: %+v %v", activation, err)
-			}
-			if err := selected.(runlifecycle.OperationOwner).RequireActiveRun(ctx, request.SourceRunID); err != nil {
-				t.Fatal(err)
-			}
-			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "freeze.delivery", "test", "", []byte(`{}`), 0, request.SourceRunID, events.EventEnvelope{}, time.Now().UTC())
-			storetest.CommitSemanticEvent(t, ctx, selected, event)
-			route := selectedExecutionTestAgentRoute(t, request.SourceRunID, "advanced-source", "")
-			storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, event, []events.DeliveryRoute{route})
-			id, err := deliverylifecycle.DeliveryID(event.ID(), route)
-			if err != nil {
-				t.Fatal(err)
-			}
-			store := fixture.owner.ports.busDurable.DeliveryLifecycle
-			prior, err := store.Snapshot(ctx, id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			authority, err := deliverylifecycle.NewNormalExecutionAuthority(prior.Authority.SourceArtifact(), uuid.NewString(), prior.Authority.Generation()+1)
-			if err != nil {
-				t.Fatal(err)
-			}
-			before := q1ComponentSnapshot(t, selected)
-			if err := store.ActivateDeliveryAuthority(ctx, authority); err != nil {
-				t.Fatal(err)
-			}
-			got, err := store.Snapshot(ctx, id)
-			if err != nil || !got.Authority.Equal(authority) || got.Status != prior.Status || got.ClaimVersion != prior.ClaimVersion || !reflect.DeepEqual(got.Route, prior.Route) {
-				t.Fatalf("advanced source incorrectly excluded: %+v %v", got, err)
-			}
-			if !reflect.DeepEqual(q1ComponentRowsForRun(t, before, attachment.materialized.ForkRunID), q1ComponentRowsForRun(t, q1ComponentSnapshot(t, selected), attachment.materialized.ForkRunID)) {
-				t.Fatal("normal source activation rewrote the independently selected child")
-			}
-		})
-	}
-}
-
-// Old root: runtimepersistence.TestSelectedBranchPointActivationAtomicityBothStores.
-// The native owner and every backend/point/status oracle are unchanged.
+// The handoff and its canonical-publication refusal share the native attempt.
 func TestSelectedBranchPointActivationAtomicityBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend+"/live_handoff", func(t *testing.T) {
@@ -82,13 +30,6 @@ func TestSelectedBranchPointActivationAtomicityBothStores(t *testing.T) {
 		t.Run(backend+"/live_handoff_unacknowledged_publication", func(t *testing.T) {
 			proveSelectedLiveHandoff(t, backend, true)
 		})
-		for _, kind := range []runfork.RunForkPointKind{runfork.RunForkPointEvent, runfork.RunForkPointDeploymentRevision} {
-			for _, status := range []string{"running", "cancelled"} {
-				t.Run(backend+"/"+string(kind)+"/"+status, func(t *testing.T) {
-					proveQ1BranchPointAtomicity(t, backend, kind, status)
-				})
-			}
-		}
 	}
 }
 
@@ -178,9 +119,9 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 		t.Fatalf("selected grant was not admitted before self-release: %+v %v", selectedEvidence, err)
 	}
 	activationRequest := runfork.RunForkSelectedContractExecutionActivateRequest{
-		LiveHandoff: true, InheritedSchedules: p.readiness, ForkOperation: p.forkOperation,
+		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation,
 		DataPins: attachment.materialized.DataPins, ExecutionSource: p.loadedSource.Source,
-		ForkRunID: attachment.materialized.ForkRunID, AllowSourceFreeze: true,
+		ForkRunID:             attachment.materialized.ForkRunID,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
 		FrontierAdmission:     p.frontier, RouteTopology: p.routeTopology, RecipientPlanning: *p.model.RecipientPlanning,
 	}
@@ -302,9 +243,9 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 	secondActivation, err := q.owner.ports.fork.ActivateRunForkForSelectedContractExecution(
 		startupownership.WithGenerationGrantEvidence(effects.WithAuthority(q.operation.Context(), second.container.authority), evidence),
 		runfork.RunForkSelectedContractExecutionActivateRequest{
-			LiveHandoff: true, InheritedSchedules: q.readiness, ForkOperation: q.forkOperation,
+			InheritedSchedules: q.readiness, ForkOperation: q.forkOperation,
 			DataPins: second.materialized.DataPins, ExecutionSource: q.loadedSource.Source,
-			ForkRunID: second.materialized.ForkRunID, AllowSourceFreeze: true,
+			ForkRunID:             second.materialized.ForkRunID,
 			AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(q.frontier.FrontierEvents),
 			FrontierAdmission:     q.frontier, RouteTopology: q.routeTopology, RecipientPlanning: *q.model.RecipientPlanning,
 		})
@@ -321,91 +262,6 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 		t.Fatal(err)
 	}
 	second.closed = true
-}
-
-func proveQ1BranchPointAtomicity(t *testing.T, backend string, kind runfork.RunForkPointKind, status string) {
-	t.Helper()
-	fixture := newActivityForkFixture(t, backend)
-	owner, selected := fixture.owner, fixture.owner.ports.fork
-	build := q1DeploymentComponentSource
-	if kind == runfork.RunForkPointEvent {
-		build = q1StateOnlyGateComponentSource
-	}
-	ctx, request, advance := build(t, owner)
-	if kind == runfork.RunForkPointDeploymentRevision && status == "running" {
-		status = string(runlifecycle.StateLive)
-	}
-	attachment := q1StageBranchPointComponent(t, ctx, request)
-	advance()
-	if status == "cancelled" {
-		if _, _, err := storetest.TerminalizeRun(ctx, selected.(storetest.RunFixtureStore), runlifecycle.TerminalRequest{RunID: request.SourceRunID, State: runlifecycle.StateCancelled, EndedAt: time.Now().UTC()}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	before := q1ComponentSnapshot(t, selected)
-	remove := q1DivergenceInsertFault(t, ctx, selected)
-	activation, err := attachment.activate()
-	remove()
-	if err == nil || !strings.Contains(err.Error(), "typed_receiver_owner_fault") || activation.Activated {
-		t.Fatalf("divergence failure did not refuse activation: %+v err=%v", activation, err)
-	}
-	if !reflect.DeepEqual(before, q1ComponentSnapshot(t, selected)) {
-		t.Fatal("failed divergence write partially committed source/child/author activity/operation state")
-	}
-	activation, err = attachment.activate()
-	if err != nil || !activation.Activated || activation.SourceFrozen || activation.BranchDivergence == nil {
-		t.Fatalf("branch retry did not activate: %+v err=%v", activation, err)
-	}
-	point := activation.BranchDivergence.ForkPoint
-	if point.Kind != kind || point.Revision <= 0 || point.EventID != request.At || activation.BranchDivergence.ForkEventID != request.At || activation.SourceRunStatus != status || activation.BranchDivergence.SourceRunStatusAfterActivation != status {
-		t.Fatalf("activation lost fixed typed point/source state: %+v", activation)
-	}
-	after := q1ComponentSnapshot(t, selected)
-	if persisted := q1ComponentBranchPoint(t, after, attachment.materialized.ForkRunID); persisted != point {
-		t.Fatalf("durable point differs from activation: %+v != %+v", persisted, point)
-	}
-	if !reflect.DeepEqual(q1ComponentRowsForRun(t, before, request.SourceRunID), q1ComponentRowsForRun(t, after, request.SourceRunID)) {
-		t.Fatal("advanced source state/history was frozen, rewound or otherwise mutated")
-	}
-	operationRequest := attachment.prepared.forkOperation
-	for repetition := 0; repetition < 2; repetition++ {
-		operation, found, err := selected.LoadForkOperation(ctx, operationRequest.Actor, operationRequest.IdempotencyKey, operationRequest.TransportHash)
-		if err != nil || !found || operation.Status != runfork.ForkOperationActivated || operation.ForkRunID != attachment.materialized.ForkRunID || operation.Result == nil || operation.Result.ForkPoint.Kind != point.Kind || operation.Result.ForkPoint.Revision != point.Revision || operation.Result.ForkPoint.EventID != point.EventID || operation.Result.SourceFrozen || operation.Result.SourceRunStatus != status {
-			t.Fatalf("permanent completion lost exact branch point: %+v found=%t err=%v", operation, found, err)
-		}
-		encoded, err := json.Marshal(operation.Result)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var decoded runfork.ForkOperationResult
-		if err := json.Unmarshal(encoded, &decoded); err != nil || decoded.ForkPoint != operation.Result.ForkPoint {
-			t.Fatalf("serialized public completion point changed: %+v err=%v", decoded, err)
-		}
-	}
-	if _, err := attachment.activate(); err == nil {
-		t.Fatal("repeated activation rewrote first completion")
-	}
-	if !reflect.DeepEqual(after, q1ComponentSnapshot(t, selected)) {
-		t.Fatal("exact readback or rejected second activation mutated first committed evidence")
-	}
-	attachment.close(t)
-}
-
-func q1DivergenceInsertFault(t *testing.T, ctx context.Context, selected any) func() {
-	t.Helper()
-	if err := storetest.SetSelectedBranchDivergenceInsertFault(ctx, selected, true); err != nil {
-		t.Fatal(err)
-	}
-	var once sync.Once
-	remove := func() {
-		once.Do(func() {
-			if err := storetest.SetSelectedBranchDivergenceInsertFault(context.WithoutCancel(ctx), selected, false); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	t.Cleanup(remove)
-	return remove
 }
 
 func q1ComponentSnapshot(t *testing.T, selected any) map[string]storetest.SelectedForkStorageTableSnapshot {

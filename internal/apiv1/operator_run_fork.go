@@ -69,6 +69,7 @@ type SelectedContractRunForkExecutor struct {
 	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
 	RuntimeContexts                *runtimepkg.RuntimeContextManager
 	LiveRuns                       runtimerunlifecycle.LiveRunReader
+	AcquireLiveRuntime             func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)
 }
 
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
@@ -79,7 +80,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract executor")
 	}
 	var liveRuntime *runtimepkg.Runtime
-	if e.RuntimeContexts != nil {
+	if e.RuntimeContexts != nil && e.AcquireLiveRuntime == nil {
 		var selected selectedRuntimeContext
 		var err error
 		ctx, selected, err = runtimeBundleContextByHash(ctx, e.RuntimeContexts, req.BundleHash, req.SourceRunID)
@@ -99,55 +100,16 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		ExpectedBundleHash: strings.TrimSpace(req.BundleHash),
 		AllowSourceFreeze:  req.AllowSourceFreeze,
 		LiveRuntime:        liveRuntime,
+		AcquireLiveRuntime: e.AcquireLiveRuntime,
+		LiveContexts:       e.RuntimeContexts,
+		LiveRuns:           e.LiveRuns,
 		DataPinOverrides:   req.DataPinOverrides,
 		SourceLoader:       e.SourceLoader,
 		ContractSelection:  req.ContractSelection,
 		AgentRuntime:       e.AgentRuntime,
 	}
-	result, err := e.executePreparedFork(ctx, runtimeRequest)
+	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimeRequest)
 	return selectedRunForkResult(req, result, err)
-}
-
-func (e SelectedContractRunForkExecutor) executePreparedFork(ctx context.Context, runtimeRequest runtimerunforkexecution.SelectedContractExecutionRequest) (result runtimerunforkexecution.SelectedContractExecutionResult, err error) {
-	liveRuntime := runtimeRequest.LiveRuntime
-	execute := func() error {
-		result, err = e.ExecuteSelectedContractRunFork(ctx, runtimeRequest)
-		return err
-	}
-	if liveRuntime != nil {
-		if e.LiveRuns == nil {
-			return result, errors.New("live fork requires the durable flow selector")
-		}
-		scope, scopeErr := e.LiveRuns.LoadRunLiveScope(ctx, runtimeRequest.SourceRunID)
-		if scopeErr != nil {
-			return result, scopeErr
-		}
-		if scopeErr := scope.Validate(); scopeErr != nil {
-			return result, scopeErr
-		}
-		live, found, readErr := e.LiveRuns.LoadLiveRun(ctx, scope)
-		if readErr != nil {
-			return result, readErr
-		}
-		if found {
-			parkCtx, parked, _, acquireErr := runtimeBundleContextByRun(ctx, e.RuntimeContexts, live.RunID)
-			if acquireErr != nil {
-				return result, acquireErr
-			}
-			err = parked.Runtime.WithParkedLiveRun(parkCtx, live, execute)
-			if !result.Activation.Activated {
-				err = errors.Join(err, parked.Runtime.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
-			}
-		} else {
-			err = execute()
-		}
-		if result.Activation.Activated {
-			err = errors.Join(err, liveRuntime.ReconcileLiveRun(context.WithoutCancel(ctx), result.Materialization.ForkRunID))
-		}
-	} else {
-		err = execute()
-	}
-	return result, err
 }
 
 func selectedRunForkResult(req RunForkExecutionRequest, result runtimerunforkexecution.SelectedContractExecutionResult, err error) (RunForkExecutionResult, error) {
