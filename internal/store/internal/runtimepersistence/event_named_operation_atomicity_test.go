@@ -157,7 +157,7 @@ func TestSelectedForkPublicationLineagePhasesRollbackBothStores(t *testing.T) {
 		for _, phase := range []string{"after_lineage", "after_side_effects"} {
 			t.Run(backend.name+"/"+phase, func(t *testing.T) {
 				fixture := backend.open(t)
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				foreignRunID, foreignEventID := uuid.NewString(), uuid.NewString()
 				if phase == "after_side_effects" {
 					foreign := eventtest.RunCreatingRootIngress(foreignEventID, "atomic.source", "gateway", "foreign-task", []byte(`{"source":true}`), 0, foreignRunID, "", events.EventEnvelope{}, time.Date(2026, 7, 18, 18, 0, 0, 0, time.UTC))
@@ -212,7 +212,7 @@ func TestSelectedForkPublicationRejectsCrossedLineageBothStores(t *testing.T) {
 		for _, coordinate := range []string{"source", "destination", "event", "selection"} {
 			t.Run(backend.name+"/"+coordinate, func(t *testing.T) {
 				fixture := backend.open(t)
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 				switch coordinate {
 				case "source":
@@ -245,7 +245,7 @@ func TestSelectedForkDuplicateNeverBackfillsLineageBothStores(t *testing.T) {
 		for _, fault := range []string{"missing", "contradictory"} {
 			t.Run(backend.name+"/"+fault, func(t *testing.T) {
 				fixture := backend.open(t)
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				store := fixture.store.(eventRecordContractStore)
 				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 				if _, err := store.CommitSelectedForkEvent(ctx, req); err != nil {

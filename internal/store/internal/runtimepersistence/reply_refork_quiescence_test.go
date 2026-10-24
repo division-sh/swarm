@@ -17,6 +17,7 @@ func TestReplyReforkQuiescenceIncludesZeroRecipientPublicationBothStores(t *test
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			selected := fixture.store.(interface {
 				semanticEventFixtureStore
 				PipelineObligations() pipelineobligation.Store

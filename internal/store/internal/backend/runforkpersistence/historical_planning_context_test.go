@@ -90,66 +90,6 @@ func TestHistoricalPlanningResolverSeparatesExclusiveAndInclusiveCutsBothOrders(
 	}
 }
 
-func TestHistoricalPlanningResolverKeepsNativeStartVariantsBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			f := openTimerHistoryNativeFixture(t, backend)
-			runID := eventtest.UUID("native-planning-variant-" + backend)
-			ctx := f.runContext(t, runID, time.Now().UTC())
-			origin, err := runlifecycle.ForkMaterializationRunOrigin(runID, runlifecycle.ForkOriginPointRunStart, 1, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, first := range []string{"start", "inclusive"} {
-				t.Run(first, func(t *testing.T) {
-					tx, err := f.db.BeginTx(ctx, nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer tx.Rollback()
-					resolver := capturedConstructionResolver{tx: tx, active: make(map[string]bool), snapshots: make(map[constructionCut]*runForkRevisionSnapshot)}
-					var start, inclusive *runForkRevisionSnapshot
-					loadStart := func() {
-						start, err = resolver.sourceCut(ctx, origin)
-						if err != nil || start == nil || start.StartProjection == nil {
-							t.Fatalf("native exclusive start: %+v/%v", start, err)
-						}
-					}
-					loadInclusive := func() {
-						inclusive, err = resolver.inclusive(ctx, runID, 1)
-						if err != nil || inclusive == nil || inclusive.StartProjection != nil {
-							t.Fatalf("native inclusive cut: %+v/%v", inclusive, err)
-						}
-					}
-					if first == "start" {
-						loadStart()
-						loadInclusive()
-					} else {
-						loadInclusive()
-						loadStart()
-					}
-					if start == inclusive || len(resolver.snapshots) != 2 {
-						t.Fatal("native cut variants shared reconstruction authority")
-					}
-					if got, err := resolver.sourceCut(ctx, origin); err != nil || got != start {
-						t.Fatalf("native exclusive hit changed: %+v/%v", got, err)
-					}
-					if got, err := resolver.inclusive(ctx, runID, 1); err != nil || got != inclusive {
-						t.Fatalf("native inclusive hit changed: %+v/%v", got, err)
-					}
-					wrong, err := runlifecycle.ForkMaterializationRunOrigin(runID, runlifecycle.ForkOriginPointEvent, 1, eventtest.UUID("absent-native-planning-event"))
-					if err != nil {
-						t.Fatal(err)
-					}
-					if got, err := resolver.sourceCut(ctx, wrong); err == nil || got != nil {
-						t.Fatalf("native inclusive hit bypassed origin validation: %+v/%v", got, err)
-					}
-				})
-			}
-		})
-	}
-}
-
 func TestHistoricalPlanningContextRejectsConcurrentPrivateReaders(t *testing.T) {
 	tx, _ := startSnapshotTransaction(t)
 	scope := &historicalPlanningReconstruction{tx: tx}

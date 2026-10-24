@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
@@ -38,6 +39,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	sourceartifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/platformschema"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -58,6 +61,7 @@ type forkJoinNativeScheduleOwner interface {
 }
 
 type forkJoinNativeFixture struct {
+	original  context.Context
 	db        *sql.DB
 	postgres  *postgresbackend.Backend
 	sqlite    *sqlitebackend.Backend
@@ -161,8 +165,9 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 		SwarmVersion: "fork-join-native-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC(),
 	}}
 	f := &forkJoinNativeFixture{}
+	var location string
 	if dialect == "postgres" {
-		_, f.db, _ = testutil.StartPostgres(t)
+		location, f.db, _ = testutil.StartPostgres(t)
 		f.postgres, err = postgresbackend.New(f.db)
 		if err != nil {
 			t.Fatal(err)
@@ -190,6 +195,7 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 		f.pipeline = &pipelinepersistence.PipelinePostgresOwner{RunLifecyclePostgresOwner: lifecycle}
 	} else {
 		dbPath := filepath.Join(t.TempDir(), "fork-join.db")
+		location = dbPath
 		dsn := url.URL{Scheme: "file", Opaque: dbPath}
 		query := dsn.Query()
 		query.Add("_pragma", "foreign_keys(ON)")
@@ -230,6 +236,21 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 	if err != nil {
 		t.Fatal(err)
 	}
+	var selected agentfixture.Store
+	if dialect == "postgres" {
+		selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+	} else {
+		selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, t.Context(), location)
+	}
+	setup := authoractivity.WithScope(t.Context(), authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", sourceartifactfixture.Fact().BundleHash()))
+	process, err := agentfixture.ProcessCapability(t, setup, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.original, err = startupownership.WithProcessMutationAuthority(setup, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return f
 }
 
@@ -238,6 +259,7 @@ func forkJoinNativeRunContext(t *testing.T, f *forkJoinNativeFixture, runID stri
 	fact := sourceartifactfixture.Fact()
 	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
+	ctx = startupownership.CarryMutationAuthority(ctx, f.original)
 	if _, err := f.artifact.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
 		t.Fatal(err)
 	}

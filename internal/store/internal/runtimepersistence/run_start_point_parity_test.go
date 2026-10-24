@@ -20,7 +20,7 @@ func TestRunStartOriginalPointPreservesCreatingInputBothStores(t *testing.T) {
 			planner := fixture.store.(interface {
 				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 			})
-			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash), fixture.store)
 			runID := uuid.NewString()
 			at := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 			initial := eventtest.RunCreatingRootIngress(uuid.NewString(), "origin.trigger", "ingress", "", json.RawMessage(`{}`), 0,
@@ -85,7 +85,7 @@ func TestEventlessRunHasOriginalStartWithoutInventedIntakeBothStores(t *testing.
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			runID := uuid.NewString()
-			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash), fixture.store)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC))
 			c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 			planner := fixture.store.(interface {

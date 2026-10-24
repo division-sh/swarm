@@ -186,6 +186,7 @@ func newIssue642ReplyCleanupFixture(t *testing.T, postgres bool) *issue642ReplyC
 		original: uuid.NewString(), middle: uuid.NewString(), child: uuid.NewString(), preserved: uuid.NewString(),
 		events: make(map[string]string),
 	}
+	f.ctx = originalStoreFixtureContext(t, f.ctx, store)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	for _, runID := range []string{f.original, f.middle, f.child, f.preserved} {
 		requirePausedRunForTest(t, f.ctx, store, runID, now)

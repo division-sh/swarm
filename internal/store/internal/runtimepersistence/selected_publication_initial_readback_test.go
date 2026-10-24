@@ -16,6 +16,7 @@ func proveSelectedForkInitialReadbackGeometries(t *testing.T) {
 			t.Run(backend.name+"/"+geometry, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 				event := req.Commit.Event.Event()
 				agent := testAgentDeliveryRoute(t, event.RunID(), "worker", "")

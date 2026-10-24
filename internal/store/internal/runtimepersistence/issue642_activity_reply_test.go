@@ -24,7 +24,7 @@ func TestIssue642RecordedActivityRetainsChildReplyBothStores(t *testing.T) {
 				for _, status := range []string{"succeeded", "failed"} {
 					t.Run(policy+"/"+status, func(t *testing.T) {
 						child, event, original := seedActivityEvidenceForForkWithReply(t, fixture, backend.name == "postgres", approved, status, 0, false, false, true)
-						ctx := testAuthorActivityContext()
+						ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 						owner := fixture.store.(selectedActivityProjectionStore)
 						journal := fixture.store.(activityTimestampJournal)
 						replies := fixture.store.(replycontext.Store)
@@ -86,7 +86,7 @@ func TestIssue642OrdinaryActivityReplayRetainsChildReplyBothStores(t *testing.T)
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			child, event, original := seedActivityEvidenceForForkWithReply(t, fixture, backend.name == "postgres", false, "succeeded", 0, true, false, true)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			rows, err := ReadReplyContextRecordsForTest(ctx, fixture.store, child.ForkRunID)
 			if err != nil || len(rows) != 1 || rows[0].ID == original.ReplyContextID || rows[0].SourceRunID != event.RunID() {
 				t.Fatalf("ordinary materialization lost exact own context: %+v error=%v", rows, err)

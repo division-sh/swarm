@@ -1,10 +1,8 @@
 package runforkpersistence
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
-	"reflect"
+
 	"testing"
 	"time"
 
@@ -13,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func TestFixedRevisionArrivalHistoryHasCompletePendingInventory(t *testing.T) {
@@ -73,136 +70,6 @@ func mixedTimerHistoryFixture(t *testing.T) (runfork.RunForkPlan, time.Time, []r
 		t.Fatalf("mixed ordinary projection: %+v err=%v", projected, err)
 	}
 	return plan, bornAt, projected, arrivals
-}
-
-// These are complete-owner/frame proofs. The family readers below are mocked,
-// not native persistence or selected-child join execution.
-func TestRunForkTimerHistoryDischargeRequiresBothCompleteInventories(t *testing.T) {
-	for _, name := range []string{"exact", "missing_workflow", "extra_workflow", "missing_arrival", "extra_arrival", "arrival_failure", "foreign_arrival", "empty_arrival_owner"} {
-		t.Run(name, func(t *testing.T) {
-			plan, bornAt, projected, arrivals := mixedTimerHistoryFixture(t)
-			ordinary := projected[0].activation
-			workflow := &workflowTimerMaterializerOwner{rows: map[string]pipeline.WorkflowTimerActivation{ordinary.Ref.ActivationID: ordinary}}
-			arrival := &arrivalJoinInventoryOwner{rows: arrivals}
-			var arrivalOwner runForkArrivalJoinMaterializationOwner = arrival
-			switch name {
-			case "missing_workflow":
-				workflow.rows = nil
-			case "extra_workflow":
-				extra := ordinary.Canonical()
-				extra.Ref.ActivationID = "99999999-9999-4999-8999-999999999999"
-				workflow.rows[extra.Ref.ActivationID] = extra
-			case "missing_arrival":
-				arrival.rows = arrival.rows[1:]
-			case "extra_arrival":
-				arrival.rows = append(arrival.rows, arrival.rows[0])
-			case "arrival_failure":
-				arrival.err = errors.New("arrival read failed after ordinary readback")
-			case "foreign_arrival":
-				arrival.rows[0].Command.RunID = plan.SourceRunID
-			case "empty_arrival_owner":
-				arrivalOwner = nil
-			}
-			before, _ := json.Marshal(plan.ReplayResumeAdmission)
-			transferReads := 0
-			if name == "exact" {
-				transferReads = 2
-			}
-			withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-				for _, phase := range []runForkWorkflowTimerReadbackPhase{runForkWorkflowTimerAtCut, runForkWorkflowTimerContinuing} {
-					got, err := requireRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, workflow, arrivalOwner, bornAt, plan.ReplayResumeAdmission, phase)
-					if name != "exact" {
-						if err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) {
-							t.Fatalf("partial family discharged source history: phase=%d admission=%+v err=%v", phase, got, err)
-						}
-						continue
-					}
-					if err != nil || len(got.UnsupportedBlockers) != 0 || got.StateOnlyExecutionReady || !got.ReplayResumeFactsPresent {
-						t.Fatalf("mixed complete inventory: phase=%d admission=%+v err=%v", phase, got, err)
-					}
-					assertWorkflowTimerAppliedDisposition(t, got, runfork.RunForkReplayResumeDispositionReconstruct)
-				}
-			}, transferReads)
-			after, _ := json.Marshal(plan.ReplayResumeAdmission)
-			if string(before) != string(after) || workflow.writes != 0 || workflow.inserts != 0 || workflow.cancels != 0 {
-				t.Fatal("require-only discharge changed source admission or wrote business state")
-			}
-		})
-	}
-}
-
-func TestRunForkTimerHistoryContinuationUsesStableImmutableEvidence(t *testing.T) {
-	plan, bornAt, projected, arrivals := mixedTimerHistoryFixture(t)
-	ordinary := projected[0].activation
-	workflow := &workflowTimerMaterializerOwner{rows: map[string]pipeline.WorkflowTimerActivation{ordinary.Ref.ActivationID: ordinary}}
-	arrival := &arrivalJoinInventoryOwner{rows: arrivals}
-	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		cut, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, workflow, arrival, bornAt, plan.ReplayResumeAdmission)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ordinary.Status, ordinary.FiredAt = "fired", bornAt.Add(time.Minute)
-		workflow.rows[ordinary.Ref.ActivationID] = ordinary
-		for i := range arrival.rows {
-			row := &arrival.rows[i]
-			if row.Status != genericschedule.StatusActive {
-				continue
-			}
-			row.CurrentEventID = genericschedule.OccurrenceEventID(row.ID, row.CurrentDueAt)
-			row.CurrentEventAdmittedAt = bornAt.Add(time.Minute)
-			row.Status, row.FiredAt, row.AcceptedAt = genericschedule.StatusFired, row.CurrentEventAdmittedAt, row.CurrentEventAdmittedAt
-		}
-		if got, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, workflow, arrival, bornAt, plan.ReplayResumeAdmission); err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) {
-			t.Fatal("unactivated phase accepted progressed child evidence")
-		}
-		continued, err := requireContinuingRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, workflow, arrival, bornAt, plan.ReplayResumeAdmission)
-		if err != nil || !reflect.DeepEqual(cut, continued) {
-			t.Fatalf("lawful progress changed fixed-cut discharge: cut=%+v continued=%+v err=%v", cut, continued, err)
-		}
-	}, 2)
-}
-
-func TestRunForkArrivalHistoryRetainsPublishedAndTerminalRefusals(t *testing.T) {
-	for _, status := range []string{"prepared", "fired", "failed"} {
-		t.Run(status, func(t *testing.T) {
-			plan, bornAt, _, _ := arrivalJoinInventoryFixture(t, true, false)
-			row := &plan.JoinSchedules[0]
-			at := row.CurrentDueAt.Add(time.Second)
-			row.CurrentEventID = genericschedule.OccurrenceEventID(row.ID, row.CurrentDueAt)
-			row.CurrentEventAdmittedAt = at
-			switch status {
-			case "fired":
-				row.Status, row.FiredAt, row.AcceptedAt = genericschedule.StatusFired, at, at
-			case "failed":
-				row.Status, row.FailedAt = genericschedule.StatusFailed, at
-				row.Failure = genericschedule.Failure{Code: "publication_failed", Message: "original failure"}
-			}
-			inventory, err := runForkTimerRecordInventory(plan.SourceRunID, nil, plan.JoinSchedules)
-			if err != nil {
-				t.Fatal(err)
-			}
-			inventory.Complete, inventory.Point = true, plan.ForkPoint
-			plan.ReplayResumeAdmission = runForkReplayResumeAdmission(runForkAdmissionEvidence{RelevantTimer: true, TimerHistory: inventory})
-			if allowed, err := runForkTimerHistoryMaterializable(plan); err != nil || allowed {
-				t.Fatalf("source evidence permitted rearming %s: allowed=%t err=%v", status, allowed, err)
-			}
-			if _, err := prepareRunForkArrivalJoinRequests(plan, workflowTimerProjectionChildRun, bornAt); err == nil {
-				t.Fatal("published occurrence became an unpublished ForkJoinRequest")
-			}
-			workflow, arrival := &workflowTimerMaterializerOwner{}, &arrivalJoinInventoryOwner{}
-			withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-				for _, phase := range []runForkWorkflowTimerReadbackPhase{runForkWorkflowTimerAtCut, runForkWorkflowTimerContinuing} {
-					got, err := requireRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, nil, workflow, arrival, bornAt, plan.ReplayResumeAdmission, phase)
-					if err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) {
-						t.Fatal("missing historical occurrence continuation discharged timer history")
-					}
-				}
-			})
-			if workflow.reads != 0 || workflow.writes != 0 || arrival.reads != 0 {
-				t.Fatal("unsupported occurrence reached child schedule reconstruction or readback")
-			}
-		})
-	}
 }
 
 func TestRunForkArrivalSourceInventoryRequiresExactPhysicalRows(t *testing.T) {

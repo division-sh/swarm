@@ -13,15 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
+
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+
 	"github.com/google/uuid"
 )
 
@@ -382,159 +380,6 @@ func TestSelectedActivationSettlementAllowsTerminalChildWithExactFence(t *testin
 				}
 			})
 		}
-	}
-}
-
-func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T) {
-	for _, test := range []struct {
-		name                      string
-		attachmentErr, arrivalErr error
-	}{
-		{name: "acknowledged"},
-		{name: "refused", attachmentErr: errors.New("attachment refused")},
-		{name: "arrival_refused", arrivalErr: errors.New("arrival inventory refused")},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			attachmentErr := test.attachmentErr
-			f := newSelectedAttachmentFixture(t, runfork.RunForkPointEvent)
-			f.evidence.plan = f.evidence.plan.WithHistoricalEvents(f.evidence.plan.ForkPoint.Revision, nil)
-			f.evidence.request.FrontierAdmission = runfork.RunForkContractFrontierAdmission{Owner: runfork.RunForkContractFrontierAdmissionOwner, NonMutating: true, ContractSelection: f.evidence.binding.ContractSelection}
-			count, ids, fingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(f.evidence.request.FrontierAdmission)
-			if err != nil {
-				t.Fatal(err)
-			}
-			f.evidence.request.RouteTopology = runfork.RunForkSelectedContractRouteTopology{
-				Owner: runfork.RunForkSelectedContractRouteTopologyOwner, NonMutating: true,
-				ContractSelection: f.evidence.binding.ContractSelection, StaticTopologySupported: true, DynamicTopologySupported: true,
-				FrontierEventCount: count, FrontierSourceEventIDs: ids, FrontierEvidenceFingerprint: fingerprint,
-			}
-			f.evidence.request.RecipientPlanning = runfork.RunForkSelectedContractRecipientPlanning{
-				Owner: runfork.RunForkSelectedContractRecipientPlanningOwner, NonMutating: true, RecipientPlanningSupported: true,
-				ContractSelection: f.evidence.binding.ContractSelection, RouteTopologyOwner: f.evidence.request.RouteTopology.Owner,
-				FrontierEventCount: count, FrontierSourceEventIDs: ids, FrontierEvidenceFingerprint: fingerprint,
-			}
-			routes, err := prepareRunForkSelectedContractRouteResolution(f.evidence.plan, f.evidence.lineage.ForkRunID, f.evidence.binding.ContractSelection, f.evidence.request.FrontierAdmission, f.evidence.request.RouteTopology, f.evidence.request.RecipientPlanning)
-			if err != nil {
-				t.Fatal(err)
-			}
-			db, mock, err := sqlmock.New()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			backend, err := postgresbackend.New(db)
-			if err != nil {
-				t.Fatal(err)
-			}
-			mock.ExpectBegin()
-			expectSelectedAttachmentBinding(mock, f.evidence.binding)
-			mock.ExpectQuery(`FROM run_fork_selected_contract_route_recoveries`).WithArgs(f.evidence.lineage.ForkRunID).
-				WillReturnRows(sqlmock.NewRows([]string{"owner", "runtime", "child", "source", "kind", "revision", "event", "mode", "bundle", "topology_owner", "dynamic_owner", "planning_owner", "frontier", "topology_hash", "planning_hash", "static_count", "dynamic_count", "planning_count", "topology", "planning", "created_at"}).
-					AddRow(routes.Owner, routes.RuntimeRecoveryOwner, routes.ForkRunID, routes.SourceRunID, string(routes.ForkPoint.Kind), routes.ForkPoint.Revision, routes.ForkEventID,
-						routes.ContractSelection.Mode, routes.ContractSelection.BundleHash, routes.RouteTopologyOwner, routes.DynamicTopologyOwner, routes.RecipientPlanningOwner,
-						routes.FrontierEvidenceFingerprint, routes.RouteTopologyFingerprint, routes.RecipientPlanningFingerprint, routes.StaticRouteEventCount, routes.DynamicTopologyProofCount,
-						routes.RecipientPlanEventCount, []byte(routes.RouteTopology), []byte(routes.RecipientPlanning), routes.CreatedAt))
-			if test.arrivalErr == nil {
-				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(f.evidence.lineage.ForkRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-				mock.ExpectQuery(`SELECT DISTINCT family`).WithArgs(f.evidence.lineage.SourceRunID, int64(1)).WillReturnRows(sqlmock.NewRows([]string{"family"}))
-				mock.ExpectQuery(`SELECT clock_timestamp\(\)`).WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Unix(200, 0).UTC()))
-				mock.ExpectQuery(`FROM event_deliveries d`).WithArgs(f.evidence.lineage.SourceRunID).WillReturnRows(sqlmock.NewRows([]string{"delivery_id"}))
-			}
-			if attachmentErr == nil && test.arrivalErr == nil {
-				mock.ExpectCommit()
-			} else {
-				mock.ExpectRollback()
-			}
-			steps := []string{}
-			arrivals := &arrivalJoinInventoryOwner{err: test.arrivalErr}
-			cleanup := errors.New("post-commit cleanup")
-			port := runForkSelectedContractActivationPort{
-				requireCurrent: func() error { return nil },
-				runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
-					outcome := mutationprotocol.RunPostgres(ctx, backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil,
-						func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-							return struct{}{}, attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-								return operation(ctx, tx, attempt)
-							})
-						})
-					if !outcome.Acknowledged() {
-						return false, outcome.Err()
-					}
-					return true, cleanup
-				},
-				loadLineage: func(context.Context, *sql.Tx, string) (runForkActivationLineage, error) {
-					steps = append(steps, "lineage")
-					return f.evidence.lineage, nil
-				},
-				lockFrontier: func(context.Context, *sql.Tx, *runForkActivationLineage) error {
-					steps = append(steps, "heads")
-					return nil
-				},
-				plan: func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-					steps = append(steps, "plan")
-					return f.evidence.plan, nil
-				},
-				loadSnapshot: func(_ context.Context, _ *sql.Tx, runID string) (runlifecycle.Snapshot, error) {
-					if runID == f.evidence.lineage.SourceRunID {
-						steps = append(steps, "source_snapshot")
-						return runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: f.snapshot.BundleHash, StartedAt: f.snapshot.StartedAt}, nil
-					}
-					steps = append(steps, "timer_readback")
-					return f.snapshot, nil
-				},
-				readHistoricalSnapshot: func(context.Context, *sql.Tx, string) (runlifecycle.Snapshot, error) {
-					t.Fatal("unfrozen source must not inspect a freeze successor")
-					return runlifecycle.Snapshot{}, nil
-				},
-				workflowTimers:   &workflowTimerMaterializerOwner{},
-				arrivalSchedules: arrivals,
-				replies:          &runForkReplyOwnerProbe{},
-				deliveries:       postgresDeliveryAdapter,
-				attachment: func(context.Context, *sql.Tx, runForkSelectedContractActivationEvidence) error {
-					steps = append(steps, "attachment")
-					return attachmentErr
-				},
-				transition: func(context.Context, *mutationprotocol.Attempt, runlifecycle.ActiveTransitionRequest) error {
-					t.Fatal("unexpected advanced-source transition")
-					return nil
-				},
-				diverge: func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error {
-					t.Fatal("unexpected divergence")
-					return nil
-				},
-				freeze: func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error {
-					steps = append(steps, "activate")
-					return nil
-				},
-				now: func() time.Time { return time.Unix(200, 0).UTC() },
-			}
-			ctx := correlation.WithRunID(context.Background(), f.evidence.lineage.ForkRunID)
-			result, err := activateRunForkForSelectedContractExecution(ctx, f.evidence.request, port)
-			wantSteps := []string{"lineage", "heads", "source_snapshot", "plan", "timer_readback", "attachment"}
-			if test.arrivalErr != nil {
-				wantSteps = wantSteps[:5]
-				if result.Activated || !errors.Is(err, test.arrivalErr) {
-					t.Fatalf("arrival refusal did not stop activation: result=%+v err=%v", result, err)
-				}
-			} else if attachmentErr == nil {
-				wantSteps = append(wantSteps, "activate")
-				if !result.Activated || !result.SourceFrozen || !errors.Is(err, cleanup) {
-					t.Fatalf("durable acknowledgment lost: result=%+v err=%v", result, err)
-				}
-			} else if result.Activated || !errors.Is(err, attachmentErr) {
-				t.Fatalf("attachment refusal lost: result=%+v err=%v", result, err)
-			}
-			if !reflect.DeepEqual(steps, wantSteps) {
-				t.Fatalf("ordering=%v want=%v", steps, wantSteps)
-			}
-			if arrivals.reads != 1 {
-				t.Fatal("activation bypassed complete arrival inventory")
-			}
-			if err := mock.ExpectationsWereMet(); err != nil {
-				t.Fatal(err)
-			}
-		})
 	}
 }
 

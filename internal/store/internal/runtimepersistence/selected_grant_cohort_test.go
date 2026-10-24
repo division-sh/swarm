@@ -112,6 +112,10 @@ func (r *selectedGrantCohortRows) Next(values []driver.Value) error {
 func proveRetiredSelectedGrantHistory(t *testing.T, fixture completionSettlementFixture, process runtimeownership.ProcessCapability, control *activityGrantHistoryConnector) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	ctx, err := runtimeownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	store, ok := fixture.store.(selectedCompletionAuthorityStore)
 	if !ok {
 		t.Fatal("grant history fixture has no original selected execution owner")

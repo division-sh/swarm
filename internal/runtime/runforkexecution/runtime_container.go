@@ -654,14 +654,6 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if err := continuations.Start(runCtx); err != nil {
 		return fmt.Errorf("start selected delivery continuations: %w", err)
 	}
-	agentRuntimeStopped := false
-	if agentRuntime != nil {
-		defer func() {
-			if !agentRuntimeStopped {
-				finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
-			}
-		}()
-	}
 	defer func() {
 		finalErr = errors.Join(finalErr, continuations.Retire(context.WithoutCancel(runCtx)))
 	}()
