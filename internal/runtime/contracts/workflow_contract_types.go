@@ -1216,7 +1216,7 @@ func (w WorkflowDataWrite) Target() string {
 		return strings.TrimSpace(w.TargetPathRef)
 	case strings.TrimSpace(w.TargetField) != "":
 		field := strings.TrimSpace(w.TargetField)
-		if paths.Parse(field).HasExplicitRoot() {
+		if !strings.Contains(field, ".") && paths.Parse(field).HasExplicitRoot() {
 			return "state." + field
 		}
 		return field

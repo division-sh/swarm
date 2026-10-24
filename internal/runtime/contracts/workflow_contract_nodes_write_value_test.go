@@ -47,6 +47,9 @@ func TestProjectNodeDataAccumulationValue(t *testing.T) {
 			t.Fatalf("literal field %s resolved as a root: %#v", field, write)
 		}
 	}
+	if got := (WorkflowDataWrite{TargetField: "state.result"}).Target(); got != "state.result" {
+		t.Fatalf("existing explicit target changed: %s", got)
+	}
 }
 
 func TestProjectNodeDataAccumulationValueRejectsRetiredExpression(t *testing.T) {
