@@ -95,7 +95,7 @@ func TestSourceInvocationCommandsShareSelectedRoot(t *testing.T) {
 	}
 	for _, command := range [][]string{
 		{"verify", "--portable"}, {"describe"}, {"describe", "--graph"}, {"describe", "routes"},
-		{"packs", "list"}, {"packs", "show", "provider.telegram"},
+		{"packs", "list"}, {"packs", "show", "telegram"},
 	} {
 		t.Run(strings.Join(command, " "), func(t *testing.T) {
 			var baseline string
@@ -153,14 +153,14 @@ func TestSourceInvocationCommandsShareSelectedRoot(t *testing.T) {
 		}
 	})
 	t.Run("import writes selected root", func(t *testing.T) {
-		code, out, stderr := runPacksCommand(t, base, "import", "provider.telegram", alias, "--config", config, "--json")
+		code, out, stderr := runPacksCommand(t, base, "import", "telegram", alias, "--config", config, "--json")
 		if code != 0 {
 			t.Fatalf("import: %d %s %s", code, out, stderr)
 		}
-		if _, err := os.Stat(filepath.Join(root, "packs/manifest.yaml")); err != nil {
+		if _, err := os.Stat(filepath.Join(root, "telegram/manifest.yaml")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(filepath.Join(base, "packs")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(base, "telegram")); !os.IsNotExist(err) {
 			t.Fatalf("import wrote invocation root: %v", err)
 		}
 	})

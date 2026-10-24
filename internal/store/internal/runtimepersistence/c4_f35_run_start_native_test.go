@@ -950,6 +950,10 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				ctx, command := c4DeploymentStartCommand(t, selected, false)
+				root, present, err := correlation.RootAdmissionFromContext(ctx)
+				if err != nil || !present {
+					t.Fatalf("deployment creation requires its captured root: present=%t err=%v", present, err)
+				}
 				owner := selected.(bus.DeploymentRunCreationCommitOwner)
 				runID := command.RunCreation.RunID
 				fault := errors.New("C4 deployment physical commit boundary")
@@ -994,7 +998,7 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
-				ctx = testAuthorActivityContextForBundle(command.RunCreation.BundleHash)
+				ctx = correlation.WithRootAdmission(testAuthorActivityContextForBundle(command.RunCreation.BundleHash), root)
 				owner = selected.(bus.DeploymentRunCreationCommitOwner)
 				if !committed {
 					c4RequireAbsentCreation(t, ctx, selected, runID)
@@ -1181,7 +1185,8 @@ func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (conte
 		files["schema.yaml"] += "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n"
 		files["events.yaml"] += "timer.elapsed:\n"
 	} else {
-		files["nested/schema.yaml"] = "name: nested\n"
+		files["nested/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files["nested/schema.yaml"] = "stages: []\n"
 	}
 	f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 	data := selected.(interface {

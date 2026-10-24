@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
@@ -143,6 +144,11 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 				t.Run(backend+"/"+name+operation, func(t *testing.T) {
 					ctx := testAuthorActivityContext()
 					cards, runID := decisionCardTestStore(t, backend)
+					rooted, err := cards.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(rooted.Artifact().BundleHash())), rooted.Admission())
 					card, continuation := newRootProposedEffectTestCard(t, runID, time.Now().UTC())
 					if linked {
 						if err := cards.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(ctx, card, continuation); err != nil {

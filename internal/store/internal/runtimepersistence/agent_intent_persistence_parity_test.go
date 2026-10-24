@@ -90,15 +90,18 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t *testing.T, ctx 
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourceCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())), rooted.Admission())
+	fact := mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())
+	sourceCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
 	providerCalls := 0
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		providerCalls++
 		return selectedIntentRecoveryAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
-		SemanticSource:    source,
-		ReceiverExecution: eventreceiver.NormalExecution(),
-		ExecutionPosture:  executionposture.Live,
+		SemanticSource:     source,
+		BaseContext:        sourceCtx,
+		SourceArtifactFact: fact,
+		ReceiverExecution:  eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
 	}, store)
 	capability, err := agentfixture.ProcessCapability(t, ctx, store)
 	if err != nil {

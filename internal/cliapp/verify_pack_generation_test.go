@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -59,12 +60,20 @@ func (r verifyPackGenerationArtifactReader) ResolveUnboundRootedSource(_ context
 func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	embedded := packfixture.EmbeddedBase(t)
-	entry, ok := embedded.Lookup("provider.telegram")
+	entry, ok := embedded.Lookup("telegram")
 	if !ok {
 		t.Fatal("missing Telegram pack")
 	}
+	body, ok := entry.Provider().Body(packmodel.BodyTrigger)
+	if !ok {
+		t.Fatal("missing Telegram trigger BODY")
+	}
+	replacement := strings.Replace(string(body.Bytes()), "telegram update object is required", "frozen configured telegram object is required", 1)
+	if replacement == string(body.Bytes()) {
+		t.Fatal("configured trigger revision must change its captured BODY")
+	}
 	configured, dirs := packfixture.DevelopmentBase(t, map[string][]byte{
-		"provider.telegram": []byte(strings.Replace(string(entry.ManifestBody()), "telegram update object is required", "frozen configured telegram object is required", 1)),
+		"telegram/trigger.yaml": []byte(replacement),
 	})
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	configPath := filepath.Join(t.TempDir(), "runtime.yaml")

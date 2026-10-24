@@ -11,6 +11,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -108,7 +109,14 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 	if err != nil {
 		t.Fatalf("FlowReadinessAdmission: %v", err)
 	}
-	otherRoot, _ := sourceartifactfixture.Rooted(t, "other", sourceartifactfixture.New("events.yaml", []byte("other.input:\n")))
+	otherArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"events.yaml":   []byte("other.input:\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRoot, _ := sourceartifactfixture.Rooted(t, "other", otherArtifact)
 	otherCoordinate, err := runtimeagenttopology.NewSourceCoordinate(otherRoot.Admission())
 	if err != nil {
 		t.Fatal(err)

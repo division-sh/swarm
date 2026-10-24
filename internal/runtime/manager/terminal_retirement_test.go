@@ -872,11 +872,9 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 func TestTerminalReadinessReplacementReleasesDependentCaller(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatal(err)
 	}
@@ -904,12 +902,11 @@ func TestTerminalReadinessReplacementReleasesDependentCaller(t *testing.T) {
 	}
 	defer accepted.Release()
 	revisedSource := semanticview.Wrap(testFlowBundleWithTwoAgents(t, ""))
-	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("e", 64))
+	revisedCtx, err := setFlowActivationManagerSemanticSource(am, ctx, revisedSource)
 	if err != nil {
 		t.Fatal(err)
 	}
-	setFlowActivationManagerSemanticSource(am, revisedSource, fact)
-	revisedCtx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, fact), req.TriggerEvent.RunID())
+	revisedCtx = runtimecorrelation.WithRunID(revisedCtx, req.TriggerEvent.RunID())
 	revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
 	// The caller cannot release accepted until reconciliation returns. The
 	// owned attempt must retain replacement without waiting on this caller.

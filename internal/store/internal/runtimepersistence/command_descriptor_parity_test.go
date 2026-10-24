@@ -20,7 +20,7 @@ func TestCommandDescriptorBothStoresPreserveSelectionAndRefuseCorruption(t *test
 	for _, purpose := range []executionposture.Posture{executionposture.Live, executionposture.MockOnly} {
 		t.Run(string(purpose), func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
-				ctx := testAuthorActivityContext()
+				ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), backend.store)
 				profile, err := selection.ResolveLiveBackend(selection.BackendAnthropic)
 				if err != nil {
 					t.Fatal(err)
