@@ -121,6 +121,10 @@ does not isolate ambient environment credentials or managed/OAuth stores:
 tool credentials retain their environment-over-file precedence, while
 provider/channel consumers retain their file-only policy. At boot, `serve`
 names each required credential's effective source without printing its value.
+Inventory presence is not provider/channel admission: a tool's environment
+source and a provider's file-only requirement remain separate observations.
+Provider session material lives under `--swarm-dir` by connection ID; use a
+different `--swarm-dir` for each serve instance that needs session isolation.
 
 For local webhook development, `swarm serve --dev --expose` owns a temporary
 public callback URL and reconciles registration declared by a configured channel

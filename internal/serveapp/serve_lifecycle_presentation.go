@@ -330,7 +330,7 @@ func (p *serveLifecyclePresenter) recordIneligibleIngress(bindings []runtime.Sta
 			commands = append(commands, fmt.Sprintf("swarm secrets set %q", key))
 		}
 		p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
-			"DORMANT ingress %s/%s (%s): missing credential keys %s; no ingress route or retention. Run %s then restart, or use the declared channel connect flow.",
+			"DORMANT ingress %s/%s (%s): missing credential keys %s in the file tier; environment/tool inventory does not satisfy provider/channel admission; no ingress route or retention. Run %s then restart, or use the declared channel connect flow.",
 			binding.FlowPath, binding.Provider, binding.SourcePath, strings.Join(binding.MissingCredentials, ", "), strings.Join(commands, "; ")))
 	}
 }
