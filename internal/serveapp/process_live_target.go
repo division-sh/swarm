@@ -51,17 +51,10 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 			retErr = errors.Join(retErr, loaded.cleanup())
 		}
 	}()
-	if err := validateServeMultiContextToolGatewayAdmission(request.Config, []serveRuntimeBundle{loaded}); err != nil {
-		return nil, err
-	}
-	packs, err := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: request.Config}, loaded.bundle, request.ProviderCredentials, request.ManagedCredentials)
+	request, err = prepareLiveTargetRequest(ctx, request, loaded)
 	if err != nil {
 		return nil, err
 	}
-	request.Loaded, request.StateStoreSummary = loaded, ""
-	request.ProviderTriggerCatalog = packs.ProviderTriggers.Catalog
-	request.ChannelPlans, request.ChannelBindings = packs.Channels.Plans, packs.Channels.Bindings
-	request.BootStartedAt, request.BootProgress = time.Now().UTC(), nil
 	candidate, err := buildServeRuntimeBundleContext(request)
 	if err != nil {
 		return nil, fmt.Errorf("construct live target %s: %w", bundleHash, err)
@@ -128,6 +121,21 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 		err = fmt.Errorf("admitted live target is not loaded: %s", lookup.Cause)
 	}
 	return use, err
+}
+
+func prepareLiveTargetRequest(ctx context.Context, request serveRuntimeBundleContextRequest, loaded serveRuntimeBundle) (serveRuntimeBundleContextRequest, error) {
+	if err := validateServeMultiContextToolGatewayAdmission(request.Config, []serveRuntimeBundle{loaded}); err != nil {
+		return request, err
+	}
+	packs, err := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: request.Config}, loaded.bundle, request.ProviderCredentials, request.ManagedCredentials)
+	if err != nil {
+		return request, err
+	}
+	request.Loaded, request.StateStoreSummary = loaded, ""
+	request.ProviderTriggerCatalog = packs.ProviderTriggers.Catalog
+	request.ChannelPlans, request.ChannelBindings = packs.Channels.Plans, packs.Channels.Bindings
+	request.BootStartedAt, request.BootProgress = time.Now().UTC(), nil
+	return request, nil
 }
 
 func (s *processLifecycleSupervisor) discardLiveTarget(ctx context.Context, manager *runtime.RuntimeContextManager, bundleHash string, candidate serveRuntimeBundleContext, registered bool) (err error) {
