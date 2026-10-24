@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -20,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -1097,19 +1097,6 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
-	location := store.inspectionSQLitePath
-	if store.name == "postgres" {
-		location = store.inspectionPostgresDSN
-	}
-	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(store.name, location)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := inspection.Close(); err != nil {
-			t.Errorf("close crash-cut inspection: %v", err)
-		}
-	}()
 	// A successful cut stays stopped until SIGKILL; failed inspection must not
 	// leave the ordinary child cleanup trying to stop a suspended process.
 	t.Cleanup(func() {
@@ -1121,7 +1108,7 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 	var last goldenDiagnosis
 	var lastLogs []goldenRuntimeLog
 	var selected goldenRuntimeLog
-	err = pollReleaseCondition(ctx, 5*time.Millisecond, func() (bool, error) {
+	err := pollReleaseCondition(ctx, 5*time.Millisecond, func() (bool, error) {
 		events, err := listGoldenEvents(ctx, rpc, runID)
 		if err != nil {
 			return false, err
@@ -1150,7 +1137,7 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 				log.stringField("parent_event_id") == "" || log.stringField("source") == "" || log.stringField("agent_id") == "" {
 				continue
 			}
-			if ready, err := stopAtGoldenLaunchedCrashCut(ctx, process, inspection, runID); err != nil || !ready {
+			if ready, err := stopAtGoldenLaunchedCrashCut(ctx, process, store, runID); err != nil || !ready {
 				return false, err
 			}
 			selected = log
@@ -1167,16 +1154,27 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 	return selected
 }
 
-func stopAtGoldenLaunchedCrashCut(ctx context.Context, process *releaseServeProcess, inspection storetest.ReleaseProcessReadOnlyInspection, runID string) (bool, error) {
+func stopAtGoldenLaunchedCrashCut(ctx context.Context, process *releaseServeProcess, store goldenStoreSelection, runID string) (bool, error) {
 	if err := process.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		return false, err
 	}
-	var observed storetest.ManagedTurnEffectStorage
-	readErr := inspection.InspectSnapshot(ctx, func(ctx context.Context) (err error) {
-		observed, err = storetest.ReadManagedTurnEffectStorage(ctx, inspection, runID, "")
-		return err
-	})
-	if readErr == nil && observed.ActiveProviderAttempts > 0 && observed.LaunchedCandidateWorkAttempts == observed.ActiveProviderAttempts {
+	location := store.inspectionSQLitePath
+	if store.name == "postgres" {
+		location = store.inspectionPostgresDSN
+	}
+	request, readErr := json.Marshal(struct{ Backend, Location, RunID string }{store.name, location, runID})
+	var observed struct{ Active, Launched int }
+	if readErr == nil {
+		command := exec.CommandContext(ctx, process.cmd.Path, "-test.run=^TestOwnedMockLifecycleProcessEntry$")
+		command.Dir = process.cmd.Dir
+		command.Env = append(append([]string(nil), process.cmd.Env...), "SWARM_TEST_INTERNAL_GOLDEN_CRASH_OBSERVATION="+string(request))
+		var output []byte
+		output, readErr = command.Output()
+		if readErr == nil {
+			readErr = json.Unmarshal(output, &observed)
+		}
+	}
+	if readErr == nil && observed.Active > 0 && observed.Launched == observed.Active {
 		return true, nil
 	}
 	resumeErr := process.cmd.Process.Signal(syscall.SIGCONT)
