@@ -66,7 +66,7 @@ func runLifecycleRootForkPolicy(t *testing.T) {
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
 
-			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 || !reflect.DeepEqual(fork, duplicate) {
+			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 || fork.ForkRunStatus != "live" || fork.SourceRunStatus != "paused" || fork.SourceFrozen || !reflect.DeepEqual(fork, duplicate) {
 				t.Fatalf("fork=%#v duplicate=%#v", fork, duplicate)
 			}
 			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier.EventID)

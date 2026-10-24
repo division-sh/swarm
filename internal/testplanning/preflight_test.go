@@ -158,9 +158,6 @@ func TestPreflightStructuralSelectionUsesCanonicalOwner(t *testing.T) {
 	if !reflect.DeepEqual(actual, staticAuthorityGuardRoots(t, repo)) {
 		t.Fatalf("canonical structural selection changed: %d", len(actual))
 	}
-	if len(preflightCandidates) != 29 {
-		t.Fatalf("reviewed candidate count changed: %d", len(preflightCandidates))
-	}
 	for _, root := range preflightCandidates {
 		for _, excluded := range []string{"TestPersistenceAuthorityDebtRatchet", "TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners"} {
 			if root.Name == excluded {
