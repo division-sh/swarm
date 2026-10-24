@@ -1665,16 +1665,6 @@ seam_families:
       The source boundary guard names the canonical lowered-connect owner only
       to prevent singleton validation from acquiring route authority. It does
       not produce, infer, consume, or replace a route plan.
-  - id: compiled_transition_ownership_source_guard
-    layer: conformance_guardrails
-    classification: separate_semantic_concept
-    paths:
-      - internal/runtime/contracts/workflow_transition_ownership_guard_test.go
-    search_dimensions: [descriptor_evidence, direct_delivery_path]
-    notes: >
-      The compiler-resolved guard names descriptor and delivery consumers to
-      reject their reconstruction of transition authority. It does not create
-      or resolve delivery routes.
   - id: receiver_ownership_constructor_guard
     layer: conformance_guardrails
     classification: separate_semantic_concept
