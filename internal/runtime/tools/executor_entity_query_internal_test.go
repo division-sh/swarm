@@ -101,6 +101,21 @@ func TestEntityFilterFieldsEnvelopeAndBusinessShadowing(t *testing.T) {
 	if _, err := filterEntityStateRowsCEL(`has(fields.score)`, rows, schema); err == nil {
 		t.Fatal("business fields record was reinterpreted as an envelope")
 	}
+	for _, item := range []struct {
+		decl       runtimecontracts.EntityFieldDecl
+		value      any
+		expression string
+	}{
+		{runtimecontracts.EntityFieldDecl{Type: "text"}, "open", `state == "open"`},
+		{runtimecontracts.EntityFieldDecl{Type: "Metadata"}, map[string]any{"region": "us"}, `state.region == "us"`},
+	} {
+		schema.Contract.Entity.Fields["state"] = item.decl
+		rows = []map[string]any{{"fields": map[string]any{"state": item.value}}}
+		got, err := filterEntityStateRowsCEL(item.expression, rows, schema)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("business state %s: rows=%v err=%v", item.expression, got, err)
+		}
+	}
 }
 
 func TestEntityFilterNumericFamilyExecutesIntAndDoubleCarriers(t *testing.T) {

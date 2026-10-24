@@ -3738,27 +3738,32 @@ func TestRun_DoesNotAttributePrivateReaderToParentContract(t *testing.T) {
 }
 
 func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesList(t *testing.T) {
-	root := writePromptWriterCoverageFixture(t, `
+	for _, grant := range []string{"[business_brief]", "all"} {
+		t.Run(grant, func(t *testing.T) {
+			root := writePromptWriterCoverageFixture(t, `
 writer:
-  role: writer
+  model: regular
   intent: prompts/writer.md
-  workspace_class: factory
-  manager_fallback: ops
-  writes: [business_brief]
-`, `
-case:
-  business_brief:
-    type: text
-  untouched:
-    type: text
-    _unused_reason: prompt coverage proof
+  subscriptions: []
+  writes: `+grant+`
+`, `business_brief: text
+untouched: text
 `, "")
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "foreign: text\n")
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "entity_writer_coverage", "business_brief") {
-		t.Fatalf("unexpected entity_writer_coverage error, got %#v", report.Errors())
+			if reportContains(report.Errors(), "entity_writer_coverage", "business_brief") {
+				t.Fatalf("unexpected entity_writer_coverage error, got %#v", report.Errors())
+			}
+			if missing := reportContains(report.Errors(), "entity_writer_coverage", "untouched"); missing != (grant != "all") {
+				t.Fatalf("grant %s coverage of untouched: %#v", grant, report.Errors())
+			}
+			if !reportContains(report.Errors(), "entity_writer_coverage", "foreign") {
+				t.Fatalf("grant %s escaped its own flow: %#v", grant, report.Errors())
+			}
+		})
 	}
 }
 
