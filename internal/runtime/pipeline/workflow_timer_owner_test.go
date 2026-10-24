@@ -129,7 +129,7 @@ func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRes
 					files[flow+"/schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting: {}\n", flow)
 					files[flow+"/entities.yaml"] = "test_entity: {}\n"
 					files[flow+"/events.yaml"] = fmt.Sprintf("timer.arm:\ntimer.%s:\n", flow)
-					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  execution_type: system_node\n  timers:\n    - {id: same, event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", flow, flow)
+					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  timers:\n    - {id: same, event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  timer.arm: {}\n", flow, flow)
 				}
 				bundle := loadWorkflowTempBundle(t, files)
 				if len(bundle.Semantics.Timers) != 2 {
@@ -2397,12 +2397,10 @@ func workflowTimerOwnerSourceFiles() map[string]string {
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.timeout:\nwork.completed:\nwork.reopened:\nreview.reopened:\ntest.workflow_progressed:\n",
 		"nodes.yaml": `timer-owner:
-  execution_type: system_node
-  event_handlers:
-    work.completed: {advances_to: done}
-    work.reopened: {advances_to: waiting}
-    review.reopened: {advances_to: waiting}
-    test.workflow_progressed: {advances_to: done}
+  work.completed: {advances_to: done}
+  work.reopened: {advances_to: waiting}
+  review.reopened: {advances_to: waiting}
+  test.workflow_progressed: {advances_to: done}
 `,
 	}
 }
@@ -2455,7 +2453,7 @@ func workflowTimerInitialAndEventBundle(t *testing.T) *runtimecontracts.Workflow
 		"schema.yaml":   "name: workflow-timer-initial-event\nstages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.arm:\ntimer.initial:\ntimer.event:\n",
-		"nodes.yaml":    "timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n",
+		"nodes.yaml":    "timer-owner:\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  timer.arm: {}\n",
 	})
 }
 
@@ -2472,7 +2470,7 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 		files[path+"schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", name, prefix)
 		files[path+"entities.yaml"] = "test_entity: {}\n"
 		files[path+"events.yaml"] = fmt.Sprintf("timer.arm:\n%s.initial:\n%s.event:\n", prefix, prefix)
-		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", prefix, armEvent)
+		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  timer.arm: {}\n", prefix, armEvent)
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -2483,7 +2481,7 @@ func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.Wo
 		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.arm:\nwork.noted:\ntimer.state_entry:\ntimer.event_armed:\n",
-		"nodes.yaml":    "observer:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  event_handlers:\n    timer.arm: {}\n    work.noted: {}\n",
+		"nodes.yaml":    "observer:\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  timer.arm: {}\n  work.noted: {}\n",
 	})
 }
 
@@ -2494,18 +2492,16 @@ func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContra
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "loop.start:\nloop.repeat:\n  revision_id: text\ntimer.arm:\n  revision_id: text\ntimer.event_armed:\n",
 		"nodes.yaml": `observer:
-  execution_type: system_node
   timers:
     - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', delay: 1h}
-  event_handlers:
-    loop.start:
-      loop: {start: revision, from: ready}
-      advances_to: waiting
-    timer.arm:
-      loop: {admit: revision, from: waiting}
-    loop.repeat:
-      loop: {repeat: revision, from: waiting}
-      advances_to: waiting
+  loop.start:
+    loop: {start: revision, from: ready}
+    advances_to: waiting
+  timer.arm:
+    loop: {admit: revision, from: waiting}
+  loop.repeat:
+    loop: {repeat: revision, from: waiting}
+    advances_to: waiting
 `,
 	})
 }
@@ -2517,7 +2513,6 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
-  execution_type: system_node
   timers:
     - {id: accepted, event: timer.accepted, start_on: 'event:accepted.start', cancel_on: 'event:accepted.cancel', delay: 1h}
     - {id: reject.start, event: timer.reject.start, start_on: 'event:guard.reject', delay: 1h}
@@ -2526,23 +2521,19 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
     - {id: discard.target, event: timer.discard.target, start_on: 'event:discard.target', cancel_on: 'event:guard.discard', delay: 1h}
     - {id: dedup.start, event: timer.dedup.start, start_on: 'event:dedup.event', cancel_on: 'event:dedup.reset', delay: 1h}
     - {id: dedup.target, event: timer.dedup.target, start_on: 'event:dedup.target', cancel_on: 'event:dedup.event', delay: 1h}
-  event_handlers:
-    accepted.start: {}
-    accepted.cancel: {}
-    reject.target: {}
-    guard.reject:
-      guard:
-        check: false
-        on_fail: reject
-    discard.target: {}
-    guard.discard:
-      guard:
-        check: false
-        on_fail: discard
-    dedup.event:
-      accumulate: {into: items, from: payload, key: payload.item_id}
-    dedup.reset: {}
-    dedup.target: {}
+  accepted.start: {}
+  accepted.cancel: {}
+  reject.target: {}
+  guard.reject:
+    guard: false
+  discard.target: {}
+  guard.discard:
+    rules:
+      - when: false
+  dedup.event:
+    accumulate: {into: items, from: payload, key: payload.item_id}
+  dedup.reset: {}
+  dedup.target: {}
 `,
 	})
 }

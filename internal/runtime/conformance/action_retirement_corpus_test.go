@@ -218,7 +218,7 @@ func TestActionRetirementCorpusScannerPreservesHomonymsAndRejectsAliases(t *test
 
 func TestActionRetirementCorpusScannerRejectsTruncatedFragments(t *testing.T) {
 	for _, raw := range []string{
-		"    previous.event:\n      emit: done\nworker:\n  event_handlers:\n    request:\n      action: create_flow_instance\n",
+		"    previous.event:\n      emit: done\nworker:\n  request:\n    action: create_flow_instance\n",
 		"worker: {}\n---\nworker: {event_handlers: {request: {action: unknown}}}\n",
 	} {
 		if _, err := actionRetirementAuthoredFields([]byte(raw)); err == nil {

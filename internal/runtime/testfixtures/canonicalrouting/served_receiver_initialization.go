@@ -34,16 +34,12 @@ work.ready:
   values: InitializationValues
 `,
 		"nodes.yaml": `producer:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  produces: [work.ready]
-  event_handlers:
-    work.requested:
-      emit:
-        event: work.ready
-        fields:
-          account_id: payload.account_id
-          values: payload.values
+  work.requested:
+    emit:
+      event: work.ready
+      fields:
+        account_id: payload.account_id
+        values: payload.values
 `,
 		"account/schema.yaml": `name: account
 instance: account_id
@@ -57,16 +53,12 @@ pins:
   processed_count: {type: integer, initial: 0}
 `,
 		"account/nodes.yaml": `collector:
-  execution_type: system_node
-  subscribes_to:
-    - work.ready
-  event_handlers:
-    work.ready:
-      data_accumulation:
-        writes:
-          - target_field: processed_count
-            value: |-
-              has(entity.processed_count) ? entity.processed_count + 1 : 1
+  work.ready:
+    data_accumulation:
+      writes:
+        - target_field: processed_count
+          value: |-
+            has(entity.processed_count) ? entity.processed_count + 1 : 1
 `,
 	} {
 		writeClosedVariantFile(t, root, path, contents)

@@ -23,22 +23,16 @@ connect:
 	for _, path := range []string{"templ/child", "templ/audit"} {
 		writeClosedVariantFile(t, root, path+"/schema.yaml", "name: descendant\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [construction.started]\n  outputs: [work.ready]\nconnect:\n  - {event: work.ready, from: ., to: leaf}\nrequired_agents:\n  - {role: worker, subscribes_to: [work.ready]}\n")
 		writeClosedVariantFile(t, root, path+"/events.yaml", "work.ready:\n  work_id: text\nwork.finish:\n")
-		writeClosedVariantFile(t, root, path+"/nodes.yaml", "publish:\n  execution_type: system_node\n  subscribes_to: [construction.started]\n  event_handlers:\n    construction.started:\n      emit:\n        event: work.ready\n        fields: {work_id: payload.work_id}\nfinish:\n  execution_type: system_node\n  subscribes_to: [work.finish]\n  event_handlers:\n    work.finish:\n      advances_to: done\n")
+		writeClosedVariantFile(t, root, path+"/nodes.yaml", "publish:\n  construction.started:\n    emit:\n      event: work.ready\n      fields: {work_id: payload.work_id}\nfinish:\n  work.finish:\n    advances_to: done\n")
 		writeClosedVariantFile(t, root, path+"/leaf/schema.yaml", "name: leaf\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [work.ready]\nrequired_agents:\n  - {role: worker, subscribes_to: [work.ready]}\n")
 		writeClosedVariantFile(t, root, path+"/leaf/events.yaml", "work.finish:\n")
-		writeClosedVariantFile(t, root, path+"/leaf/nodes.yaml", "finish:\n  execution_type: system_node\n  subscribes_to: [work.finish]\n  event_handlers:\n    work.finish:\n      advances_to: done\n")
+		writeClosedVariantFile(t, root, path+"/leaf/nodes.yaml", "finish:\n  work.finish:\n    advances_to: done\n")
 	}
 	writeClosedVariantFile(t, root, "nodes.yaml", `anchor:
-  execution_type: system_node
-  subscribes_to: [construction.started]
-  event_handlers:
-    construction.started: {}
+  construction.started: {}
 finish-root:
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      advances_to: done
+  task.assigned:
+    advances_to: done
 `)
 	for _, path := range []string{"templ/child", "templ/child/leaf", "templ/audit", "templ/audit/leaf"} {
 		writeClosedVariantFile(t, root, path+"/agents.yaml", `worker:

@@ -125,18 +125,15 @@ pins:
     - job.received
 `, singletonCoordinatorEntitiesYAML(), "", `
 coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
-      data_accumulation:
-        writes:
-          - op: set
-            target: entity.verticals[payload.vertical_id]
-            key: payload.vertical_id
-            value:
-              status: "active"
-              active_jobs: []
+  job.received:
+    data_accumulation:
+      writes:
+        - op: set
+          target: entity.verticals[payload.vertical_id]
+          key: payload.vertical_id
+          value:
+            status: "active"
+            active_jobs: []
 `)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -192,14 +189,11 @@ coordinator_state:
 `,
 			nodes: `
 coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
-      group_by:
-        items_from: entity.verticals
-        key: status
-        store_as: metadata.grouped
+  job.received:
+    group_by:
+      items_from: entity.verticals
+      key: status
+      store_as: metadata.grouped
 `,
 			wantKind:   "entity_read.group_by.items_from",
 			wantTarget: "entity.verticals",
@@ -214,15 +208,12 @@ coordinator_state:
 `,
 			nodes: `
 coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
-      join:
-        stage: active
-        members: {from: state.members, by: payload.vertical_id}
-        output: payload.job
-        on_complete: {advances_to: done}
+  job.received:
+    join:
+      stage: active
+      members: {from: state.members, by: payload.vertical_id}
+      output: payload.job
+      on_complete: {advances_to: done}
 `,
 			wantKind:   "entity_read.join.members.from",
 			wantTarget: "entity.members",
@@ -292,14 +283,11 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
-      query:
-        source: payload.job
-        select: [entity.verticals]
-        store_as: metadata.selected
+  job.received:
+    query:
+      source: payload.job
+      select: [entity.verticals]
+      store_as: metadata.selected
 `)
 
 	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
@@ -366,6 +354,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         checks:
           - id: ready
             check: payload.job != null`,
+			rejection: "expression slot guard requires a scalar",
 		},
 		{
 			name: "nested query row",
@@ -377,6 +366,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 		{
 			name: "activity approval decision",
 			operator: `activity:
+        id: coordinator_node_job_received_review
         tool: review
         approval:
           decision: entity.release`,
@@ -420,10 +410,7 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
+  job.received:
       `+tc.operator+`
 `)
 
@@ -459,12 +446,9 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
-      loop: {start: revision, from: entity.verticals}
-      advances_to: review
+  job.received:
+    loop: {start: revision, from: entity.verticals}
+    advances_to: review
 `)
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if findingContainsAll(report.Errors(), "expression_field_reference_validation", "loop.from", "entity.verticals") {
@@ -490,17 +474,14 @@ pins:
 `
 	const nodes = `
 coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
-      join:
-        stage: active
-        members: {count: 1, by: payload.vertical_id}
-        output: payload.job
-        on_complete: {advances_to: done}
-        deadline: {after: 1h, from: stage_entry}
-        on_deadline: {advances_to: failed}
+  job.received:
+    join:
+      stage: active
+      members: {count: 1, by: payload.vertical_id}
+      output: payload.job
+      on_complete: {advances_to: done}
+      deadline: {after: 1h, from: stage_entry}
+      on_deadline: {advances_to: failed}
 `
 	tests := []struct {
 		name     string

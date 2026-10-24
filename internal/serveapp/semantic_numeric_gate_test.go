@@ -61,11 +61,8 @@ pins:
 			nodes = strings.ReplaceAll(nodes, "payload.nested.numbers[?0].value()", "payload.value")
 			nodes = strings.ReplaceAll(nodes, "payload.nested.fraction", "7.5")
 			nodes += `requester:
-  execution_type: system_node
-  subscribes_to: [numeric.requested]
-  event_handlers:
-    numeric.requested:
-      advances_to: review
+  numeric.requested:
+    advances_to: review
 `
 			if err := os.WriteFile(nodesPath, []byte(nodes), 0600); err != nil {
 				t.Fatal(err)

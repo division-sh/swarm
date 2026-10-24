@@ -162,6 +162,15 @@ func TestCompiledLifecycleEmitterInvalidSourcePlans(t *testing.T) {
 		{"reserved_platform_escape", "platform_namespace_violation", "platform.stage_timer", canonicalrouting.LifecycleStaticLoopReserved},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.variant == canonicalrouting.LifecycleStaticLoopWrongFlow {
+				root := canonicalrouting.CopyLifecycleEmitterStatic(t, tc.variant)
+				repo := canonicalrouting.RepoRoot(t)
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+				if bundle != nil || err == nil || !strings.Contains(err.Error(), `handler "loop.escaped"`) || !strings.Contains(err.Error(), "undeclared event") {
+					t.Fatalf("foreign event acquired receiver admission: %v, %v", bundle != nil, err)
+				}
+				return
+			}
 			source := loadLifecycleStaticDiagnosticSource(t, tc.variant)
 			report := Run(context.Background(), source, Options{})
 			if !reportContains(report.HardInvalidities(), tc.check, tc.detail) {
@@ -248,14 +257,6 @@ func TestCompiledLifecycleEmitterRetiredExternalMetadataRejected(t *testing.T) {
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err == nil || !strings.Contains(err.Error(), "event field name \"swarm\"") {
 		t.Fatalf("retired external source metadata accepted: %v", err)
-	}
-}
-
-func TestCompiledLifecycleEmitterCannotSatisfyNodeAssertion(t *testing.T) {
-	source := loadLifecycleStaticDiagnosticSource(t, canonicalrouting.LifecycleStaticHandlerAssertion)
-	report := Run(context.Background(), source, Options{})
-	if !reportContains(report.Findings, "phantom_produces", "work.completed") {
-		t.Fatalf("gate satisfied unrelated node produces assertion: %#v", report.Findings)
 	}
 }
 

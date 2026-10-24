@@ -1,13 +1,9 @@
 reduce-node:
-  execution_type: system_node
-  subscribes_to: [scores.submitted]
-  produces: [scores.resolved]
-  event_handlers:
-    scores.submitted:
-      reduce:
-        items_from: payload.scores
-        operation: pick_or_average
-        store_as: entity.result
-      emit:
-        event: scores.resolved
-      advances_to: done
+  scores.submitted:
+    reduce:
+      items_from: payload.scores
+      operation: pick_or_average
+      store_as: entity.result
+    emit:
+      event: scores.resolved
+    advances_to: done

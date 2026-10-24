@@ -82,9 +82,7 @@ func TestValidateInputEventsRejectsDeclaredUnroutableRootInput(t *testing.T) {
 	flow := &bundle.FlowTree.Root.Children[0]
 	flow.Schema.Pins.Inputs.EventPins = nil
 	flow.Events = map[string]runtimecontracts.EventCatalogEntry{"scan.other_requested": {}}
-	flow.Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
-		SubscribesTo: []string{"scan.other_requested"},
-	}
+	flow.Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{}
 	bundle.FlowTree.ByID["discovery"] = flow
 	bundle.FlowSchemas["discovery"] = flow.Schema
 	bundle.FlowTree.Root.Nodes = nil
@@ -165,9 +163,7 @@ func rootInputTestBundle(t testing.TB, eventName string) *runtimecontracts.Workf
 			},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": {
-				SubscribesTo: []string{eventName},
-			},
+			"scan-orchestrator": {},
 		},
 	}
 	root := runtimecontracts.FlowContractView{

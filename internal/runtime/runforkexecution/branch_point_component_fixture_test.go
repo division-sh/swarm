@@ -163,7 +163,7 @@ func q1BranchPointSourceConstructor(t *testing.T, ctx context.Context, owner Sel
 		t.Fatal(err)
 	}
 	coordinator := pipeline.NewPipelineCoordinatorWithOptions(sourceBus, pipeline.PipelineCoordinatorOptions{
-		Module:      selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)},
+		Module:      selectedContractWorkflowModule{source: loaded.Source, nodes: nodes},
 		Persistence: p.workflow, SourceArtifactFact: loaded.SourceArtifactFact, ExecutionPosture: executionposture.Live,
 		ReceiverExecution: eventreceiver.NormalExecution(), RunLifecycle: p.busDurable.RunLifecycle, PipelineObligations: p.pipelineObligations,
 		DeliveryStore: p.busDurable.DeliveryLifecycle, DeadLetters: p.busDurable.TargetFailureRecorder,

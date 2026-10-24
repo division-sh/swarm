@@ -1,9 +1,5 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [task.started]
-  produces: [task.progressed]
-  event_handlers:
-    task.started:
-      advances_to: processing
-      emit:
-        event: task.progressed
+  task.started:
+    advances_to: processing
+    emit:
+      event: task.progressed

@@ -1,9 +1,5 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [task.completed]
-  produces: [task.acknowledged]
-  event_handlers:
-    task.completed:
-      advances_to: done
-      emit:
-        event: task.acknowledged
+  task.completed:
+    advances_to: done
+    emit:
+      event: task.acknowledged

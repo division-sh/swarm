@@ -1,9 +1,5 @@
 intake-handler:
-  execution_type: system_node
-  subscribes_to: [work.assigned]
-  produces: [item.processed]
-  event_handlers:
-    work.assigned:
-      advances_to: processed
-      emit:
-        event: item.processed
+  work.assigned:
+    advances_to: processed
+    emit:
+      event: item.processed

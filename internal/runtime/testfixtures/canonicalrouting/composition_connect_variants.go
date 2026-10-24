@@ -70,10 +70,7 @@ func writeCompositionConnectFixture(t testing.TB, opts compositionConnectFixture
 	}
 	if opts.rootReceiver {
 		writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
-  execution_type: system_node
-  subscribes_to: [deploy.completed]
-  event_handlers:
-    deploy.completed: {}
+  deploy.completed: {}
 `)
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
@@ -87,14 +84,11 @@ deploy.done:
   key: vertical_id
   vertical_id: string
 `, "", `producer-node:
-  execution_type: system_node
-  subscribes_to: [deploy.requested]
-  event_handlers:
-    deploy.requested:
-      emit:
-        event: deploy.done
-        fields:
-          vertical_id: payload.vertical_id
+  deploy.requested:
+    emit:
+      event: deploy.done
+      fields:
+        vertical_id: payload.vertical_id
 `)
 	instance := ""
 	input := "    - deploy.completed\n"
@@ -110,12 +104,12 @@ deploy.done:
 pins:
   inputs:
 `+input, "", entities, `consumer-node:
-  execution_type: system_node
-  subscribes_to: [deploy.completed]
-  event_handlers:
-    deploy.completed:
-      advances_to: done
+  deploy.completed:
+    advances_to: done
 `)
+	if opts.rootReceiver {
+		removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/entities.yaml", "consumer/schema.yaml", "consumer")
+	}
 	return root
 }
 
@@ -172,10 +166,7 @@ connect:
 
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-node:
-  execution_type: system_node
-  subscribes_to: [work.ready]
-  event_handlers:
-    work.ready: {}
+  work.ready: {}
 `)
 	writeClosedVariantFile(t, root, "agents.yaml", `root-agent:
   model: regular
@@ -186,17 +177,11 @@ connect:
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.requested:\n  work_id: text?\nwork.ready:\n  key: work_id\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\npins:\n  outputs:\n    - work.ready\n")
 	writeLegacyInstanceFlow(t, root, "consumer", "name: consumer\npins:\n  inputs:\n    - consumer.work.ready\n", "", "", `consumer-node:
-  execution_type: system_node
-  subscribes_to: [consumer.work.ready]
-  event_handlers:
-    consumer.work.ready: {}
+  consumer.work.ready: {}
 `)
 	if includeDynamic {
 		writeLegacyInstanceFlow(t, root, "dynamic", "name: dynamic\ninstance: work_id\npins:\n  inputs:\n    - dynamic.work.ready\n", "", "dynamic_state:\n  work_id: string\n", `dynamic-node:
-  execution_type: system_node
-  subscribes_to: [dynamic.work.ready]
-  event_handlers:
-    dynamic.work.ready: {}
+  dynamic.work.ready: {}
 `)
 	}
 	return root

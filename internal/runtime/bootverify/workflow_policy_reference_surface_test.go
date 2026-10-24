@@ -202,24 +202,11 @@ func TestR3PolicyCompiledFanOutEmitReference(t *testing.T) {
 }
 
 func TestR3PolicySelectorsAndGateContext(t *testing.T) {
-	for _, kind := range []string{"active builtin", "inert guard annotation", "timer", "gate"} {
+	for _, kind := range []string{"timer", "gate"} {
 		t.Run(kind, func(t *testing.T) {
 			bundle := loadTier8FixtureBundle(t, "test-boot-success")
-			node, event, handler, ok := firstBundleHandler(bundle)
-			if !ok {
-				t.Fatal("missing handler")
-			}
 			want := 1
 			switch kind {
-			case "active builtin", "inert guard annotation":
-				handler.Guard = &c.GuardSpec{PolicyRef: "missing"}
-				if kind == "active builtin" {
-					handler.Guard.ID = "state_in_phase"
-					handler.Guard.Check = "state_in_phase"
-				} else {
-					want = 0
-				}
-				writeBundleHandler(t, bundle, node, event, handler)
 			case "timer":
 				bundle.Semantics.Timers = []c.WorkflowTimerContract{{ID: "timer", Node: identitytest.RootNode(t, "timer-owner"), Delay: "{{missing}}s"}}
 			case "gate":

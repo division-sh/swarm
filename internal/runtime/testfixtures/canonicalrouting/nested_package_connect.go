@@ -22,10 +22,7 @@ connect:
     to: .
 `,
 		"child/nodes.yaml": `child-aggregator:
-  execution_type: system_node
-  subscribes_to: [micro.done]
-  event_handlers:
-    micro.done: {}
+  micro.done: {}
 `,
 
 		"child/grandchild/schema.yaml": `name: grandchild

@@ -828,14 +828,10 @@ func (s conformanceSemanticOnlyWorkflowRuntime) SemanticSource() runtimesemantic
 func (conformanceSemanticOnlyWorkflowRuntime) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return nil
 }
-func (conformanceSemanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.GuardRegistry {
-	return nil
-}
 
 type conformanceLoadedWorkflowModule struct {
 	source runtimesemanticview.Source
 	nodes  []runtimepipeline.WorkflowNode
-	guards runtimepipeline.GuardRegistry
 }
 
 func (m conformanceLoadedWorkflowModule) SemanticSource() runtimesemanticview.Source {
@@ -844,10 +840,6 @@ func (m conformanceLoadedWorkflowModule) SemanticSource() runtimesemanticview.So
 
 func (m conformanceLoadedWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
-}
-
-func (m conformanceLoadedWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
 }
 
 type conformanceNoopLLMRuntime struct{ runtimellm.NoopRuntime }
@@ -982,7 +974,6 @@ func loadConformanceWorkflowFixtureModule(t *testing.T, fixtureRoot string) conf
 	return conformanceLoadedWorkflowModule{
 		source: source,
 		nodes:  nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 }
 

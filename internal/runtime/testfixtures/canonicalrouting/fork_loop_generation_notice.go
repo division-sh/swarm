@@ -11,10 +11,10 @@ func CopyForkLoopAccumulator(t testing.TB, clearOnAdmit bool) string {
 	t.Helper()
 	root := CopyForkLoopGenerationState(t)
 	nodes := filepath.Join(root, "review", "nodes.yaml")
-	applyClosedReplacement(t, nodes, "    review.requested:\n      loop:", "    review.requested:\n      accumulate:\n        into: reviews\n        from: payload\n        key: payload.token\n      loop:")
-	applyClosedReplacement(t, nodes, "  execution_type: system_node\n", "  execution_type: system_node\n  state_schema:\n    fields:\n      reviews: [Review]\n")
+	applyClosedReplacement(t, nodes, "  review.requested:\n    loop:", "  review.requested:\n    accumulate:\n      into: reviews\n      from: payload\n      key: payload.token\n    loop:")
+	applyClosedReplacement(t, nodes, "  review.requested:\n", "  state_schema:\n    fields:\n      reviews: [Review]\n  review.requested:\n")
 	if clearOnAdmit {
-		applyClosedReplacement(t, nodes, "    review.requested:\n      accumulate:", "    review.requested:\n      clear: {targets: [accumulator_state]}\n      accumulate:")
+		applyClosedReplacement(t, nodes, "  review.requested:\n    accumulate:", "  review.requested:\n    clear: {targets: [accumulator_state]}\n    accumulate:")
 	}
 	writeClosedVariantFile(t, root, "review/types.yaml", "types:\n  Review:\n    revision_id: text\n    token: text\n")
 	return root
@@ -49,16 +49,13 @@ connect:
 		"entities.yaml": "root: {}\n",
 		"events.yaml":   "work.requested:\n  token: text\nroot.closed:\nwork.started:\n  token: text\nreview.retry:\n  revision_id: text\n  token: text\nreview.closed:\n  revision_id: text\n",
 		"nodes.yaml": `controller:
-  execution_type: system_node
-  subscribes_to: [work.requested, root.closed]
-  event_handlers:
-    work.requested:
-      advances_to: active
-      emit:
-        event: work.started
-        fields: {token: payload.token}
-    root.closed:
-      advances_to: done
+  work.requested:
+    advances_to: active
+    emit:
+      event: work.started
+      fields: {token: payload.token}
+  root.closed:
+    advances_to: done
 `,
 		"review/schema.yaml": `name: review
 stages:
@@ -84,35 +81,32 @@ pins:
   token: text
 `,
 		"review/nodes.yaml": `controller:
-  execution_type: system_node
-  subscribes_to: [work.started, review.requested, review.retry, review.closed]
-  event_handlers:
-    work.started:
-      loop: {start: revision, from: queued}
-      advances_to: working
-      emit:
-        event: review.requested
-        fields:
-          revision_id: loop.revision_id
-          token: payload.token
-    review.requested:
-      loop: {admit: revision, from: working}
-      advances_to: reviewing
-      data_accumulation:
-        writes:
-          - {target_field: observed_revision, value: loop.revision_id}
-          - {target_field: observed_token, value: payload.token}
-    review.retry:
-      loop: {repeat: revision, from: reviewing}
-      advances_to: working
-      emit:
-        event: review.requested
-        fields:
-          revision_id: loop.revision_id
-          token: payload.token
-    review.closed:
-      loop: {close: revision, from: reviewing}
-      advances_to: approved
+  work.started:
+    loop: {start: revision, from: queued}
+    advances_to: working
+    emit:
+      event: review.requested
+      fields:
+        revision_id: loop.revision_id
+        token: payload.token
+  review.requested:
+    loop: {admit: revision, from: working}
+    advances_to: reviewing
+    data_accumulation:
+      writes:
+        - {target_field: observed_revision, value: loop.revision_id}
+        - {target_field: observed_token, value: payload.token}
+  review.retry:
+    loop: {repeat: revision, from: reviewing}
+    advances_to: working
+    emit:
+      event: review.requested
+      fields:
+        revision_id: loop.revision_id
+        token: payload.token
+  review.closed:
+    loop: {close: revision, from: reviewing}
+    advances_to: approved
 `,
 	}
 	for path, body := range files {

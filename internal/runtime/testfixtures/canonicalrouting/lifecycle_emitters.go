@@ -39,28 +39,22 @@ pins:
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  result: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `requester:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      advances_to: waiting
-      emit:
-        event: work.completed
-        fields: {result: "ready"}
+  work.requested:
+    advances_to: waiting
+    emit:
+      event: work.completed
+      fields: {result: "ready"}
 collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      data_accumulation:
-        writes:
-          - target_field: result
-            value: payload.result
-      rules:
-        - when: payload.result == 'ready'
-          advances_to: review
-        - when: payload.result in ['approved', 'rejected']
-          advances_to: done
+  work.completed:
+    data_accumulation:
+      writes:
+        - target_field: result
+          value: payload.result
+    rules:
+      - when: payload.result == 'ready'
+        advances_to: review
+      - when: payload.result in ['approved', 'rejected']
+        advances_to: done
 `)
 	return root
 }
@@ -89,45 +83,34 @@ pins:
 		writeClosedVariantFile(t, root, prefix+"events.yaml", "work.completed:\n  result: text\n")
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  result: text\n")
 		nodes := `controller:
-  execution_type: system_node
-  subscribes_to: [work.seeded, work.first, work.second]
-  event_handlers:
-    work.seeded:
-      advances_to: waiting
+  work.seeded:
+    advances_to: waiting
 `
 		handlers := []string{"first", "second"}
 		if reordered {
 			handlers = []string{"second", "first"}
 		}
 		for _, handler := range handlers {
-			nodes += fmt.Sprintf(`    work.%s:
-      guard:
-        checks:
-          - id: %s_choice
-            check: payload.choice in ['alpha', 'beta']
-          - id: %s_nonempty
-            check: payload.choice != ''
-      rules:
-`, handler, handler, handler)
+			nodes += fmt.Sprintf(`  work.%s:
+    guard: payload.choice in ['alpha', 'beta'] && payload.choice != ''
+    rules:
+`, handler)
 			for _, choice := range []string{"alpha", "beta"} {
-				nodes += fmt.Sprintf(`        - when: payload.choice == '%s'
-          advances_to: active
-          emit:
-            event: work.completed
-            fields: {result: '%s%s/%s'}
+				nodes += fmt.Sprintf(`      - when: payload.choice == '%s'
+        advances_to: active
+        emit:
+          event: work.completed
+          fields: {result: '%s%s/%s'}
 `, choice, prefix, handler, choice)
 			}
 		}
 		nodes += `collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      data_accumulation:
-        writes:
-          - target_field: result
-            value: payload.result
-      advances_to: done
+  work.completed:
+    data_accumulation:
+      writes:
+        - target_field: result
+          value: payload.result
+    advances_to: done
 `
 		writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
 	}
@@ -243,15 +226,12 @@ connect:
 		writeClosedVariantFile(t, root, prefix+"sink/final/schema.yaml", "name: final\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.completed\n")
 		writeClosedVariantFile(t, root, prefix+"sink/final/entities.yaml", "receipt:\n  result: text\n")
 		writeClosedVariantFile(t, root, prefix+"sink/final/nodes.yaml", `collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      data_accumulation:
-        writes:
-          - target_field: result
-            value: payload.result
-      advances_to: done
+  work.completed:
+    data_accumulation:
+      writes:
+        - target_field: result
+          value: payload.result
+    advances_to: done
 `)
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", "name: cascade\npins:\n  inputs:\n"+rootInputs+"  outputs:\n"+rootOutputs+"connect:\n"+rootConnects)
@@ -267,8 +247,8 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 	root := CopyLifecycleNestedCascade(t)
 	inputs, outputs, connects := "", "", ""
 	events := "work.observed:\n  seed: boolean\nwork.finished:\n  seed: boolean\n"
-	nodes := "controller:\n  execution_type: system_node\n  subscribes_to: [work.observed, work.finished"
-	handlers := "  event_handlers:\n    work.finished:\n      advances_to: done\n    work.observed:\n      guard:\n        id: frontier_noop\n        check: payload.seed\n"
+	nodes := "controller:\n"
+	handlers := "  work.finished:\n    advances_to: done\n  work.observed:\n    guard: payload.seed\n"
 	commands := []struct{ name, event, field, typ string }{
 		{"seed", "loop.start", "seed", "boolean"},
 		{"admit", "loop.admit", "revision_id", "text"},
@@ -286,8 +266,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 			for _, event := range []string{input, output} {
 				events += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  %s: %s\n", event, command.field, command.typ)
 			}
-			nodes += ", " + input
-			handlers += fmt.Sprintf("    %s:\n      advances_to: active\n      emit:\n        event: %s\n        fields:\n          case_id: payload.case_id\n          %s: payload.%s\n", input, output, command.field, command.field)
+			handlers += fmt.Sprintf("  %s:\n    advances_to: active\n    emit:\n      event: %s\n      fields:\n        case_id: payload.case_id\n        %s: payload.%s\n", input, output, command.field, command.field)
 			mode := "select"
 			if command.name == "seed" {
 				mode = "select-or-create"
@@ -310,16 +289,6 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 		writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
 		writeClosedVariantFile(t, root, prefix+"events.yaml", "loop.escaped:\n  key: revision_id\n  revision_id: text\n")
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver instance identity}\n")
-		for _, file := range []string{"nodes.yaml", "sink/nodes.yaml"} {
-			raw, err := os.ReadFile(filepath.Join(root, prefix+file))
-			if err != nil {
-				t.Fatal(err)
-			}
-			text := string(raw)
-			if file == "nodes.yaml" {
-			}
-			writeClosedVariantFile(t, root, prefix+file, text)
-		}
 		raw, err = os.ReadFile(filepath.Join(root, prefix+"sink/schema.yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -330,7 +299,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", "name: template-driver\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.observed\n    - work.finished\n"+inputs+"  outputs:\n"+outputs+"connect:\n"+connects)
 	writeClosedVariantFile(t, root, "events.yaml", events)
 	writeClosedVariantFile(t, root, "entities.yaml", "driver: {}\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", nodes+"]\n"+handlers)
+	writeClosedVariantFile(t, root, "nodes.yaml", nodes+handlers)
 	return root
 }
 
@@ -359,11 +328,8 @@ func CopyLifecycleForkSource(t testing.TB, gate bool) string {
 			text += "work.observed:\n  seed: boolean\n"
 		case "nodes.yaml":
 			text += `frontier:
-  execution_type: system_node
-  subscribes_to: [work.observed]
-  event_handlers:
-    work.observed:
-      guard: {id: observed, check: payload.seed == true}
+  work.observed:
+    guard: payload.seed == true
 `
 		}
 		writeClosedVariantFile(t, root, path, text)
@@ -444,22 +410,16 @@ pins:
 `
 	events := "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n"
 	nodes := `requester:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      advances_to: review
+  work.requested:
+    advances_to: review
 `
 	consumer := `collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      data_accumulation:
-        writes:
-          - target_field: result
-            value: payload.result
-      advances_to: done
+  work.completed:
+    data_accumulation:
+      writes:
+        - target_field: result
+          value: payload.result
+    advances_to: done
 `
 	prefix := ""
 	switch variant {
@@ -503,17 +463,14 @@ pins:
 		writeClosedVariantFile(t, root, "ordinary/schema.yaml", "name: ordinary\nstages:\n  waiting: {}\n  observed: {final: true}\npins:\n  inputs:\n    - ordinary.repeated\n")
 		writeClosedVariantFile(t, root, "ordinary/entities.yaml", "receipt:\n  token: text\n  revision_id: text\n")
 		writeClosedVariantFile(t, root, "ordinary/nodes.yaml", `collector:
-  execution_type: system_node
-  subscribes_to: [ordinary.repeated]
-  event_handlers:
-    ordinary.repeated:
-      data_accumulation:
-        writes:
-          - target_field: token
-            value: payload.token
-          - target_field: revision_id
-            value: payload.revision_id
-      advances_to: observed
+  ordinary.repeated:
+    data_accumulation:
+      writes:
+        - target_field: token
+          value: payload.token
+        - target_field: revision_id
+          value: payload.revision_id
+    advances_to: observed
 `)
 		if variant == LifecycleLoopRepeatEmitsUntilObserverFinish {
 			// The observer has its own finite work. Its explicit finish keeps
@@ -524,7 +481,6 @@ pins:
 				{"schema.yaml", "    to: ordinary\n", "    to: ordinary\n  - event: ordinary.finish\n    from: .\n    to: ordinary\n"},
 				{"ordinary/schema.yaml", "  observed: {final: true}\n", "  observed: {}\n  done: {final: true}\n"},
 				{"ordinary/schema.yaml", "    - ordinary.repeated\n", "    - ordinary.repeated\n    - ordinary.finish\n"},
-				{"ordinary/nodes.yaml", "  subscribes_to: [ordinary.repeated]\n", "  subscribes_to: [ordinary.repeated, ordinary.finish]\n"},
 			} {
 				raw := lifecycleStaticRead(t, root, edit.path)
 				if strings.Count(raw, edit.old) != 1 {
@@ -533,7 +489,7 @@ pins:
 				writeClosedVariantFile(t, root, edit.path, strings.Replace(raw, edit.old, edit.replacement, 1))
 			}
 			writeClosedVariantFile(t, root, "events.yaml", lifecycleStaticRead(t, root, "events.yaml")+"ordinary.finish:\n  seed: boolean\n")
-			writeClosedVariantFile(t, root, "ordinary/nodes.yaml", lifecycleStaticRead(t, root, "ordinary/nodes.yaml")+"    ordinary.finish:\n      advances_to: done\n")
+			writeClosedVariantFile(t, root, "ordinary/nodes.yaml", lifecycleStaticRead(t, root, "ordinary/nodes.yaml")+"  ordinary.finish:\n    advances_to: done\n")
 		}
 		return root
 	default:
@@ -580,21 +536,18 @@ connect:
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nloop.start:\n  seed: boolean\nloop.admit:\n  revision_id: text\nloop.repeat:\n  revision_id: text\nloop.close:\n  revision_id: text\nloop.escaped:\n  revision_id: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "work: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
-  execution_type: system_node
-  subscribes_to: [loop.start, loop.admit, loop.repeat, loop.close]
-  event_handlers:
-    loop.start:
-      loop: {start: revision, from: waiting}
-      advances_to: drafting
-    loop.admit:
-      loop: {admit: revision, from: drafting}
-      advances_to: review
-    loop.repeat:
-      loop: {repeat: revision, from: review}
-      advances_to: drafting
-    loop.close:
-      loop: {close: revision, from: review}
-      advances_to: done
+  loop.start:
+    loop: {start: revision, from: waiting}
+    advances_to: drafting
+  loop.admit:
+    loop: {admit: revision, from: drafting}
+    advances_to: review
+  loop.repeat:
+    loop: {repeat: revision, from: review}
+    advances_to: drafting
+  loop.close:
+    loop: {close: revision, from: review}
+    advances_to: done
 `)
 	writeClosedVariantFile(t, root, "sink/schema.yaml", `name: sink
 stages:
@@ -606,14 +559,11 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "sink/entities.yaml", "receipt:\n  revision_id: text\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
-  execution_type: system_node
-  subscribes_to: [loop.escaped]
-  event_handlers:
-    loop.escaped:
-      data_accumulation:
-        writes:
-          - target_field: revision_id
-            value: payload.revision_id
-      advances_to: done
+  loop.escaped:
+    data_accumulation:
+      writes:
+        - target_field: revision_id
+          value: payload.revision_id
+    advances_to: done
 `)
 }

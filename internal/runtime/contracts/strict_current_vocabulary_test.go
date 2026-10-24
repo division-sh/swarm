@@ -16,13 +16,12 @@ import (
 func TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges(t *testing.T) {
 	admitNodes := func(d yamlsource.Document) error { _, err := projectNodeDeclarationsValue(d.Root()); return err }
 	admitSchema := func(d yamlsource.Document) error { _, err := AdmitFlowSchemaValue(d.Root()); return err }
-	handler := "worker: {event_handlers: {work.ready: {%s}}}\n"
+	handler := "worker: {work.ready: {%s}}\n"
 	for _, tc := range []struct {
 		name, file, format string
 		keys               []string
 		admit              func(yamlsource.Document) error
 	}{
-		{"node", "nodes.yaml", "worker: {%s}\n", []string{"id", "permissions", "implementation", "owned_transitions", "idempotency_table"}, admitNodes},
 		{"handler", "nodes.yaml", handler, []string{"condition", "logic", "from", "dedup_by", "action", "select_entity", "select_or_create_entity", "branch", "emits", "payload_transform", "on_below_threshold", "on_dedup", "on_pass"}, admitNodes},
 		{"rules", "nodes.yaml", fmt.Sprintf(handler, "rules: [{%s}]"), []string{"condition", "action", "element_id", "emits", "payload_transform", "switch", "threshold", "policy", "temporal", "join", "loop", "collection", "schedule"}, admitNodes},
 		{"on_success", "nodes.yaml", fmt.Sprintf(handler, "on_success: {%s}"), []string{"action"}, admitNodes},
@@ -110,7 +109,7 @@ func TestCurrentVocabularyDiagnosticsAcrossDeclarationFamilies(t *testing.T) {
 		file, body, key, nearest string
 		admit                    func(yamlsource.Document) error
 	}{
-		{"nodes.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectNodeDeclarationsValue(d.Root()); return err }},
+		{"nodes.yaml", "worker: {work.ready: {descriptoin: typo}}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectNodeDeclarationsValue(d.Root()); return err }},
 		{"schema.yaml", "name: sample\nnaem: typo\n", "naem", "name", func(d yamlsource.Document) error { _, err := AdmitFlowSchemaValue(d.Root()); return err }},
 		{"agents.yaml", "worker: {intent: {inline: business intent}, modle: typo}\n", "modle", "model", func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tools.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},

@@ -23,7 +23,7 @@ func TestClockScheduleSourceRoundTripOnBothStores(t *testing.T) {
 				"events.yaml":        "poll.tick:\n",
 				"worker/schema.yaml": "stages: []\nschedules:\n  poll: {every: 1m, emit: poll.tick}\n",
 				"worker/events.yaml": "poll.tick:\n",
-				"worker/nodes.yaml":  "observer:\n  event_handlers:\n    poll.tick: {}\n",
+				"worker/nodes.yaml":  "observer:\n  poll.tick: {}\n",
 			}
 			for name, body := range files {
 				path := filepath.Join(root, name)

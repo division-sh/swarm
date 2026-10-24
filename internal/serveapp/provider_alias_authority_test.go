@@ -474,7 +474,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 	root := t.TempDir()
 	names := []string{"inbound.telegram", "inbound.telegram.text_message", "inbound.telegram.callback_action"}
 	imports := "imports:\n  provider_trigger_events:\n"
-	nodes := "observer:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(names, ", ") + "]\n  event_handlers:\n"
+	nodes := "observer:\n" + strings.Join(names, ", ") + "]\n"
 	for _, name := range names {
 		if name != "inbound.telegram" {
 			imports += "    - {provider: telegram, event: " + name + "}\n"
@@ -490,7 +490,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		}
 	}
 	rootNodes := strings.Replace(nodes, "subscribes_to: ["+strings.Join(names, ", ")+"]", "subscribes_to: ["+strings.Join(names[1:], ", ")+"]", 1)
-	rootNodes = strings.Replace(rootNodes, "    inbound.telegram:\n      guard: {id: admit, check: true}\n", "", 1)
+	rootNodes = strings.Replace(rootNodes, "  inbound.telegram:\n    guard: {id: admit, check: true}\n", "", 1)
 	connectedNames := names[1:]
 	if scenario.rawConnected {
 		connectedNames = names
@@ -523,7 +523,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 			}
 			files[alias+"-receiver/events.yaml"] = string(raw)
 		}
-		receiverNodes := "observer:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(connectedNames, ", ") + "]\n  event_handlers:\n"
+		receiverNodes := "observer:\n" + strings.Join(connectedNames, ", ") + "]\n"
 		for _, name := range connectedNames {
 			receiverNodes += "    " + name + ":\n      guard: {id: admit, check: true}\n"
 		}

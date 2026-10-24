@@ -35,14 +35,10 @@ pins:
 			// The lookup has one value, chosen, and fails on a missing key; its
 			// successful branch is therefore the effectful structural default.
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `router:
-  execution_type: system_node
-  subscribes_to: [requested]
-  produces: [completed]
-  event_handlers:
-    requested:
-      rules:
-        - lookup:
-            on: `+tc.path+`
+  requested:
+    rules:
+      - lookup:
+          on: `+tc.path+`
             entries: [{key: `+tc.key+`, value: chosen}]
             into: computed.choice
             default: fail

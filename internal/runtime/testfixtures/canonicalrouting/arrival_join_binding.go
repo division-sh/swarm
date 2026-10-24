@@ -30,13 +30,13 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 			files["schema.yaml"] += "  - {event: provider.notified, from: provider, to: observer, resolution: select}\n"
 			files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "    - provider.replied\n", "    - provider.replied\n    - provider.notified\n", 1)
 			files["provider/events.yaml"] += "ordinary.requested:\n  order_id: text\n  member_id: text\n  result: JoinResult\nprovider.notified:\n  order_id: text\n  member_id: text\n  result: JoinResult\n"
-			files["provider/nodes.yaml"] += `    ordinary.requested:
-      emit:
-        event: provider.notified
-        fields:
-          order_id: payload.order_id
-          member_id: payload.member_id
-          result: payload.result
+			files["provider/nodes.yaml"] += `  ordinary.requested:
+    emit:
+      event: provider.notified
+      fields:
+        order_id: payload.order_id
+        member_id: payload.member_id
+        result: payload.result
 `
 			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
 			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    - provider.requested\n", "", 1)
@@ -44,10 +44,10 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 			files["observer/entities.yaml"] = files["requester/entities.yaml"] + "  ordinary_result: JoinResult\n"
 			start := strings.Index(files["requester/nodes.yaml"], "collector:\n")
 			end := strings.Index(files["requester/nodes.yaml"], "dispatcher:\n")
-			files["observer/nodes.yaml"] = files["requester/nodes.yaml"][start:end] + `    provider.notified:
-      data_accumulation:
-        writes:
-          - {target_field: ordinary_result, value: payload.result}
+			files["observer/nodes.yaml"] = files["requester/nodes.yaml"][start:end] + `  provider.notified:
+    data_accumulation:
+      writes:
+        - {target_field: ordinary_result, value: payload.result}
 `
 		}
 		return files
@@ -81,18 +81,16 @@ func arrivalJoinPayloadDirectedFiles() map[string]string {
 		"events.yaml":   "work.requested:\n  prefix: text\n  suffix: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
 		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
 		"nodes.yaml": `worker:
-  execution_type: system_node
-  event_handlers:
-    work.requested:
-      data_accumulation:
-        writes:
-          - {target_field: work_count, value: entity.work_count + 1}
-      emit:
-        event: item.completed
-        fields:
-          order_id: payload.prefix + payload.suffix
-          member_id: "a"
-          result: {value: "computed-by-worker"}
+  work.requested:
+    data_accumulation:
+      writes:
+        - {target_field: work_count, value: entity.work_count + 1}
+    emit:
+      event: item.completed
+      fields:
+        order_id: payload.prefix + payload.suffix
+        member_id: "a"
+        result: {value: "computed-by-worker"}
 `,
 		"orders/schema.yaml": `name: orders
 instance: order_id
@@ -108,21 +106,17 @@ pins:
 		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
 		"orders/events.yaml":   "manual.abort:\ndispatch.completed:\n",
 		"orders/nodes.yaml": `collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete: {advances_to: ready}
-        on_deadline: {advances_to: attention}
+  item.completed:
+    join:
+      stage: awaiting
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      on_complete: {advances_to: ready}
+      on_deadline: {advances_to: attention}
 dispatcher:
-  execution_type: system_node
-  event_handlers:
-    manual.abort: {advances_to: dispatching}
-    dispatch.completed: {advances_to: awaiting}
+  manual.abort: {advances_to: dispatching}
+  dispatch.completed: {advances_to: awaiting}
 `,
 	}
 }
@@ -147,41 +141,33 @@ pins:
 		"requester/entities.yaml": "request_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
 		"requester/events.yaml":   "request.send:\nmanual.abort:\ndispatch.completed:\nprovider.requested:\n  order_id: text\n",
 		"requester/nodes.yaml": `requester:
-  execution_type: system_node
-  event_handlers:
-    request.send:
-      emit:
-        event: provider.requested
-        fields: {order_id: entity.order_id}
+  request.send:
+    emit:
+      event: provider.requested
+      fields: {order_id: entity.order_id}
 collector:
-  execution_type: system_node
-  event_handlers:
-    provider.replied:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete: {advances_to: ready}
-        on_deadline: {advances_to: attention}
+  provider.replied:
+    join:
+      stage: awaiting
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      on_complete: {advances_to: ready}
+      on_deadline: {advances_to: attention}
 dispatcher:
-  execution_type: system_node
-  event_handlers:
-    manual.abort: {advances_to: dispatching}
-    dispatch.completed: {advances_to: awaiting}
+  manual.abort: {advances_to: dispatching}
+  dispatch.completed: {advances_to: awaiting}
 `,
 		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    - provider.requested\n  outputs:\n    - provider.replied\n",
 		"provider/events.yaml": "provider.replied:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
 		"provider/nodes.yaml": `provider:
-  execution_type: system_node
-  event_handlers:
-    provider.requested:
-      emit:
-        event: provider.replied
-        fields:
-          order_id: payload.order_id
-          member_id: "a"
-          result: {value: "provider-result"}
+  provider.requested:
+    emit:
+      event: provider.replied
+      fields:
+        order_id: payload.order_id
+        member_id: "a"
+        result: {value: "provider-result"}
 `,
 	}
 }
@@ -199,29 +185,23 @@ pins:
 `,
 		"requester/events.yaml": "request.send:\n  token: text\nprovider.requested:\n  token: text\nreply.observed:\n  token: text\n  value: text\n",
 		"requester/nodes.yaml": `sender:
-  execution_type: system_node
-  event_handlers:
-    request.send:
-      emit:
-        event: provider.requested
-        fields: {token: payload.token}
+  request.send:
+    emit:
+      event: provider.requested
+      fields: {token: payload.token}
 receiver:
-  execution_type: system_node
-  event_handlers:
-    provider.replied:
-      emit:
-        event: reply.observed
-        fields: {token: payload.token, value: payload.value}
+  provider.replied:
+    emit:
+      event: reply.observed
+      fields: {token: payload.token, value: payload.value}
 `,
 		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    - provider.requested\n  outputs:\n    - provider.replied\n",
 		"provider/events.yaml": "provider.replied:\n  token: text\n  value: text\n",
 		"provider/nodes.yaml": `provider:
-  execution_type: system_node
-  event_handlers:
-    provider.requested:
-      emit:
-        event: provider.replied
-        fields: {token: payload.token, value: "provider-result"}
+  provider.requested:
+    emit:
+      event: provider.replied
+      fields: {token: payload.token, value: "provider-result"}
 `,
 	}
 }
@@ -242,12 +222,10 @@ connect:
 `
 	files["events.yaml"] = "stop.requested:\n  order_id: text\nhalt.requested:\n  order_id: text\n"
 	files["nodes.yaml"] = `worker:
-  execution_type: system_node
-  event_handlers:
-    stop.requested:
-      emit:
-        event: halt.requested
-        fields: {order_id: payload.order_id}
+  stop.requested:
+    emit:
+      event: halt.requested
+      fields: {order_id: payload.order_id}
 `
 	for _, flow := range []string{"orders", "mirror"} {
 		files[flow+"/schema.yaml"] = fmt.Sprintf(`name: %s
@@ -267,58 +245,54 @@ pins:
 			files[flow+"/events.yaml"] += name + ":\n  expected: integer\n  completed: integer\n  missing: [text]\n  results: [JoinResult]\n  timed_out: boolean\n  close_reason: text\n"
 		}
 		files[flow+"/nodes.yaml"] = `collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        id: primary
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        until: halt.requested
-        on_deadline: {advances_to: attention}
-        on_complete:
-          emit:
-            event: first.closed
-            fields:
-              expected: join.expected
-              completed: join.completed
-              missing: join.missing
-              results: join.results
-              timed_out: join.timed_out
-              close_reason: join.close_reason
-    alternate.completed:
-      join:
-        id: alternate
-        stage: awaiting
-        members: {count: 3, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        until: halt.requested
-        on_deadline: {advances_to: attention}
-        on_complete:
-          emit:
-            event: second.closed
-            fields:
-              expected: join.expected
-              completed: join.completed
-              missing: join.missing
-              results: join.results
-              timed_out: join.timed_out
-              close_reason: join.close_reason
-    halt.requested:
-      data_accumulation:
-        writes:
-          - {target_field: halt_count, value: entity.halt_count + 1}
-      emit:
-        event: halt.observed
-        fields: {order_id: entity.order_id, count: entity.halt_count}
+  item.completed:
+    join:
+      id: primary
+      stage: awaiting
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      until: halt.requested
+      on_deadline: {advances_to: attention}
+      on_complete:
+        emit:
+          event: first.closed
+          fields:
+            expected: join.expected
+            completed: join.completed
+            missing: join.missing
+            results: join.results
+            timed_out: join.timed_out
+            close_reason: join.close_reason
+  alternate.completed:
+    join:
+      id: alternate
+      stage: awaiting
+      members: {count: 3, by: payload.member_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      until: halt.requested
+      on_deadline: {advances_to: attention}
+      on_complete:
+        emit:
+          event: second.closed
+          fields:
+            expected: join.expected
+            completed: join.completed
+            missing: join.missing
+            results: join.results
+            timed_out: join.timed_out
+            close_reason: join.close_reason
+  halt.requested:
+    data_accumulation:
+      writes:
+        - {target_field: halt_count, value: entity.halt_count + 1}
+    emit:
+      event: halt.observed
+      fields: {order_id: entity.order_id, count: entity.halt_count}
 dispatcher:
-  execution_type: system_node
-  event_handlers:
-    manual.abort: {advances_to: dispatching}
-    dispatch.completed: {advances_to: awaiting}
+  manual.abort: {advances_to: dispatching}
+  dispatch.completed: {advances_to: awaiting}
 `
 	}
 	return files

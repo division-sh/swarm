@@ -70,7 +70,6 @@ type entityToolPipelineModule struct {
 
 func (m entityToolPipelineModule) SemanticSource() semanticview.Source    { return m.source }
 func (m entityToolPipelineModule) WorkflowNodes() []pipeline.WorkflowNode { return m.nodes }
-func (entityToolPipelineModule) GuardRegistry() pipeline.GuardRegistry    { return nil }
 
 type entityToolPipelineBus struct {
 	pipeline.WorkflowDeliveryRuntime
@@ -148,7 +147,7 @@ func newEntityToolPipeline(t *testing.T, selected any, source semanticview.Sourc
 		if err != nil {
 			t.Fatal(err)
 		}
-		entry := pipeline.WorkflowNode{Node: node, ExecutionType: declaration.Entry.ExecutionType}
+		entry := pipeline.WorkflowNode{Node: node, ExecutionType: contracts.EffectiveSystemNodeExecutionType(declaration.Entry)}
 		for _, subscription := range semanticview.ExecutableNodeEffectiveSubscriptions(source, node) {
 			entry.Subscriptions = append(entry.Subscriptions, events.EventType(subscription))
 		}

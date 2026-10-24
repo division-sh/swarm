@@ -60,7 +60,7 @@ func TestIssue642SettledFanOutSelectedRemovalAndReforkBothStores(t *testing.T) {
 					if variant == "changed" {
 						nodes = []byte(strings.Replace(string(nodes), "value: entry", "value: entry + '-selected'", 1))
 					} else {
-						nodes = []byte("fan-out-source:\n  execution_type: system_node\n  subscribes_to: [items.ready]\n  event_handlers:\n    items.ready:\n      emit:\n        event: items.child\n        fields:\n          value: \"'new-ordinary-handler'\"\n")
+						nodes = []byte("fan-out-source:\n  items.ready:\n    emit:\n      event: items.child\n      fields:\n        value: \"'new-ordinary-handler'\"\n")
 					}
 					if err := os.WriteFile(nodesPath, nodes, 0o644); err != nil {
 						t.Fatal(err)

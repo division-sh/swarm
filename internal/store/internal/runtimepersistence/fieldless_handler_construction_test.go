@@ -231,7 +231,7 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 						"schema.yaml":        "name: fieldless-handler\n",
 						"review/schema.yaml": "name: review\nstages:\n  pending: {}\n  reviewing: {}\n",
 						"review/events.yaml": "work.ready:\nwork.recorded:\n",
-						"review/nodes.yaml":  "inspect:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      advances_to: reviewing\n" + shape.effects,
+						"review/nodes.yaml":  "inspect:\n  work.ready:\n    advances_to: reviewing\n" + shape.effects,
 					}
 					if shape.entity != "" {
 						files["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"

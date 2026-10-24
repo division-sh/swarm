@@ -761,7 +761,6 @@ func (*sqliteFlowActivationBus) AdmitSourceArtifactFact(ctx context.Context) (co
 
 type sqliteFlowActivationWorkflowModule struct {
 	source semanticview.Source
-	guards runtimepipeline.GuardRegistry
 }
 
 func configureSQLiteFlowActivationLifecycle(
@@ -775,7 +774,6 @@ func configureSQLiteFlowActivationLifecycle(
 	source := semanticview.Wrap(bundle)
 	module := sqliteFlowActivationWorkflowModule{
 		source: source,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	options := runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture:        executionposture.Live,
@@ -808,10 +806,6 @@ func (m sqliteFlowActivationWorkflowModule) SemanticSource() semanticview.Source
 
 func (m sqliteFlowActivationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return nil
-}
-
-func (m sqliteFlowActivationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
 }
 
 func (b *sqliteFlowActivationBus) Publish(_ context.Context, evt events.Event) error {

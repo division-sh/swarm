@@ -48,7 +48,7 @@ func newNativeProspectiveSelection(t *testing.T, backend string) (receiverConfig
 		"worker/schema.yaml":   "name: worker\ninstance: item_id\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - item.created\n",
 		"worker/entities.yaml": "item:\n  item_id: text\n",
 		"worker/events.yaml":   "item.created:\n  item_id: text\nitem.finished:\n",
-		"worker/nodes.yaml":    "progress:\n  execution_type: system_node\n  subscribes_to: [item.finished]\n  event_handlers:\n    item.finished:\n      advances_to: done\n",
+		"worker/nodes.yaml":    "progress:\n  item.finished:\n    advances_to: done\n",
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

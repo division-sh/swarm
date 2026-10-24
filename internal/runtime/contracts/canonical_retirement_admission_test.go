@@ -24,9 +24,9 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 		{
 			name:      "node map key owns identity",
 			file:      "nodes.yaml",
-			canonical: "worker:\n  event_handlers: {}\n",
-			retired:   "worker:\n  id: worker\n  event_handlers: {}\n",
-			want:      `node field "id" is not supported`,
+			canonical: "worker:\n  {}\n",
+			retired:   "worker:\n  id: worker\n",
+			want:      `must be a mapping`,
 		},
 		{
 			name:      "event payload is not emitter metadata",

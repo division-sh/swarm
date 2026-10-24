@@ -26,32 +26,23 @@ ack:
   marker: text
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `seed:
-  execution_type: system_node
-  subscribes_to: [seed]
-  event_handlers:
-    seed:
-      data_accumulation:
-        writes: [{target_field: marker, value: "first"}]
+  seed:
+    data_accumulation:
+      writes: [{target_field: marker, value: "first"}]
 select:
-  execution_type: system_node
-  subscribes_to: [select]
-  event_handlers:
-    select:
-      guard: {check: has(entity.marker)}
-      rules:
-        - when: entity.marker == 'first'
-          emit: {event: selected, fields: {marker: "first"}}
-        - when: entity.marker == 'second'
-          emit: {event: selected, fields: {marker: "second"}}
-      data_accumulation:
-        writes: [{target_field: marker, value: entity.marker}]
+  select:
+    guard: has(entity.marker)
+    rules:
+      - when: entity.marker == 'first'
+        emit: {event: selected, fields: {marker: "first"}}
+      - when: entity.marker == 'second'
+        emit: {event: selected, fields: {marker: "second"}}
+    data_accumulation:
+      writes: [{target_field: marker, value: entity.marker}]
 final:
-  execution_type: system_node
-  subscribes_to: [selected]
-  event_handlers:
-    selected:
-      emit: {event: ack, fields: {marker: payload.marker}}
-      advances_to: done
+  selected:
+    emit: {event: ack, fields: {marker: payload.marker}}
+    advances_to: done
 `)
 	return root
 }

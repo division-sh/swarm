@@ -82,7 +82,7 @@ func TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores(t *testing.T) 
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend.name, false, map[string]string{
 					"schema.yaml": "name: timer-consumer\nstages:\n  waiting: {}\n",
 					"events.yaml": "test.node_emitted:\n",
-					"nodes.yaml":  "clock:\n  execution_type: system_node\n  timers:\n    - {id: heartbeat, event: test.node_emitted, delay: 1h, start_on: 'state:waiting', recurring: true}\n",
+					"nodes.yaml":  "clock:\n  timers:\n    - {id: heartbeat, event: test.node_emitted, delay: 1h, start_on: 'state:waiting', recurring: true}\n",
 				}, nil)
 				selected, db, ctx := f.store, f.db, f.ctx
 				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), ctx)

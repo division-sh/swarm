@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -100,7 +99,7 @@ func ActivityResultEventsForSite(site ActivitySite) (ActivityResultEvents, error
 			return ActivityResultEvents{}, fmt.Errorf("handler activity site must not carry a rule position")
 		}
 		if activityID == "" {
-			activityID = DefaultActivityID(site.Node.NodeID(), site.HandlerEventKey, site.Spec.Tool)
+			return ActivityResultEvents{}, fmt.Errorf("node %s handler %s activity.id is required; declare an explicit activity.id", site.Node.Key(), site.HandlerEventKey)
 		}
 	case ActivitySiteRule:
 		if site.RuleIndex < 0 {
@@ -153,39 +152,6 @@ func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCa
 	return EventCatalogEntry{
 		Payload: EventPayloadSpec{Type: "object", Properties: properties, Required: required},
 	}
-}
-
-func DefaultActivityID(nodeID, handlerEventKey, tool string) string {
-	return strings.Join(activityIDParts(nodeID, handlerEventKey, tool), "_")
-}
-
-func activityIDParts(parts ...string) []string {
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = activitySlug(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
-func activitySlug(raw string) string {
-	raw = strings.TrimSpace(strings.ToLower(raw))
-	var b strings.Builder
-	lastUnderscore := false
-	for _, r := range raw {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-			lastUnderscore = false
-			continue
-		}
-		if !lastUnderscore {
-			b.WriteByte('_')
-			lastUnderscore = true
-		}
-	}
-	return strings.Trim(b.String(), "_")
 }
 
 func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, status string) EventCatalogEntry {
@@ -341,7 +307,7 @@ func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() ([]curren
 func (b *WorkflowContractBundle) duplicateActivityIDError(id string, first, second ActivitySite) *LoaderDiagnostic {
 	location := func(site ActivitySite) LoaderDiagnosticLocation {
 		record, _ := b.ExecutableNode(site.Node)
-		slot := NodeProvenanceMapPath(NodeProvenanceMapPath("", site.Node.NodeID())+".event_handlers", site.HandlerEventKey) + "." + strings.TrimPrefix(site.Source, "handler.")
+		slot := NodeProvenanceMapPath(NodeProvenanceMapPath("", site.Node.NodeID()), site.HandlerEventKey) + "." + strings.TrimPrefix(site.Source, "handler.")
 		introduction, found := b.IntroductionLocation(record.Source.File, slot+".id", false)
 		if !found {
 			introduction, _ = b.IntroductionLocation(record.Source.File, slot, false)

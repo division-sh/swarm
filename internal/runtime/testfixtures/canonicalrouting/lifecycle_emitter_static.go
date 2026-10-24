@@ -78,7 +78,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 			writeClosedVariantFile(t, root, "prompts/collector.md", "Observe the completed loop escape.\n")
 		}
 		if variant == LifecycleStaticLoopLocalNodeInvalid {
-			nodes += "collector:\n  execution_type: system_node\n  subscribes_to: [loop.escaped]\n  event_handlers:\n    loop.escaped: {}\n"
+			nodes += "collector:\n  loop.escaped: {}\n"
 		}
 		if variant == LifecycleStaticLoopNoEmit {
 			schema = strings.Replace(schema, "      emit:\n        event: loop.escaped\n        fields: {revision_id: loop.revision_id}\n", "", 1)
@@ -93,7 +93,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticScopeMatrix, LifecycleStaticWildcardScope, LifecycleStaticForeignOnly:
 		if variant == LifecycleStaticWildcardScope {
 			nodes = strings.ReplaceAll(nodes, "[work.completed]", "[work.*]")
-			nodes = strings.ReplaceAll(nodes, "    work.completed:\n", "    work.*:\n")
+			nodes = strings.ReplaceAll(nodes, "  work.completed:\n", "  work.*:\n")
 		}
 		for _, scope := range []string{"left", "right", "left/deep"} {
 			writeClosedVariantFile(t, root, scope+"/schema.yaml", schema)
@@ -107,24 +107,19 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticMixedOutput, LifecycleStaticMixedDisconnected:
 		// A real handler outcome shares the gate event. This is a mixed-site
 		// counterexample, not an extra producer to satisfy a gate-only fixture.
-		nodes += "worker:\n  execution_type: system_node\n  subscribes_to: [work.handled]\n  event_handlers:\n    work.handled:\n      emit:\n        event: work.completed\n        fields: {result: \"handled\"}\n"
+		nodes += "worker:\n  work.handled:\n    emit:\n      event: work.completed\n      fields: {result: \"handled\"}\n"
 		events += "work.handled:\n"
 		schema += "    - work.handled\n"
 		schema += "  outputs: [work.completed]\n"
 		if variant == LifecycleStaticMixedOutput {
 			schema += "connect:\n  - {event: work.completed, from: ., to: sink}\n"
 			writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - work.completed\n")
-			writeClosedVariantFile(t, root, "sink/nodes.yaml", "collector:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed: {}\n")
+			writeClosedVariantFile(t, root, "sink/nodes.yaml", "collector:\n  work.completed: {}\n")
 		}
 	case LifecycleStaticActorCollision:
 		nodes = strings.ReplaceAll(nodes, "requester", "review_decision")
 		writeClosedVariantFile(t, root, "agents.yaml", "reviewer:\n  role: review_decision\n  intent: prompts/reviewer.md\n  subscriptions: [work.requested]\n")
 		writeClosedVariantFile(t, root, "prompts/reviewer.md", "Observe work requests.\n")
-	case LifecycleStaticHandlerAssertion:
-		if !strings.Contains(nodes, "requester:\n") {
-			t.Fatal("missing requester declaration for phantom producer assertion")
-		}
-		nodes = strings.Replace(nodes, "requester:\n", "requester:\n  produces: [work.completed]\n", 1)
 	case LifecycleStaticGateUnknownEvent:
 		schema = strings.Replace(schema, "event: work.completed", "event: absent.event", 1)
 	case LifecycleStaticGateBadField:
@@ -174,15 +169,15 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		}
 		events = strings.Replace(events, "loop.escaped:\n", "loop.escaped:\n  second_revision_id: text\n", 1)
 		events += "second.start:\n  seed: boolean\nsecond.admit:\n  second_revision_id: text\nsecond.repeat:\n  second_revision_id: text\nsecond.close:\n  second_revision_id: text\n"
-		operations := nodes[strings.Index(nodes, "    loop.start:\n"):]
+		operations := nodes[strings.Index(nodes, "  loop.start:\n"):]
 		operations = strings.NewReplacer("loop.", "second.", "revision_id", "second_revision_id", ": revision", ": second", "drafting", "drafting_second", "review", "review_second").Replace(operations)
-		nodes += "second-controller:\n  execution_type: system_node\n  subscribes_to: [second.start, second.admit, second.repeat, second.close]\n  event_handlers:\n" + operations
+		nodes += "second-controller:\n" + operations
 	case LifecycleStaticHandlerCycle:
 		// The handler chain closes independently of the gate's shared output.
-		nodes = strings.Replace(nodes, "      advances_to: review\n", "      advances_to: review\n      emit: {event: work.completed, fields: {result: \"handled\"}}\n", 1)
-		nodes = strings.Replace(nodes, "      advances_to: done\n", "      advances_to: done\n      emit: {event: work.requested, fields: {seed: true}}\n", 1)
+		nodes = strings.Replace(nodes, "    advances_to: review\n", "    advances_to: review\n    emit: {event: work.completed, fields: {result: \"handled\"}}\n", 1)
+		nodes = strings.Replace(nodes, "    advances_to: done\n", "    advances_to: done\n    emit: {event: work.requested, fields: {seed: true}}\n", 1)
 	case LifecycleStaticHandlerSelfCycle:
-		nodes = strings.Replace(nodes, "      advances_to: done\n", "      advances_to: done\n      emit: {event: work.completed, fields: {result: \"repeated\"}}\n", 1)
+		nodes = strings.Replace(nodes, "    advances_to: done\n", "    advances_to: done\n    emit: {event: work.completed, fields: {result: \"repeated\"}}\n", 1)
 	case LifecycleStaticLoopWrongFlow:
 		events = strings.Replace(events, "loop.escaped:\n  revision_id: text\n", "", 1)
 		writeClosedVariantFile(t, root, "foreign/schema.yaml", "name: foreign\n")
@@ -228,70 +223,55 @@ func CopyLifecycleEmitterHandlerFamilies(t testing.TB) string {
 	writeClosedVariantFile(t, root, "families/schema.yaml", "name: handler-families\n")
 	events := "direct:\nrouted:\naudit:\nescalated:\nspecialized:\n  bucket: text\nitem:\n  id: text\n"
 	nodes := `worker:
-  execution_type: system_node
-  event_handlers:
-    request:
-      emit: direct
-      guard:
-        id: guard
-        check: payload.score > 0
-        on_fail: "escalate:escalated"
+  request:
+    rules:
+      - when: payload.score > 0
+        emit: direct
+      - emit: escalated
 router:
-  execution_type: system_node
-  event_handlers:
-    request:
-      on_success: {emit: audit}
-      rules:
-        - {emit: routed}
+  request:
+    on_success: {emit: audit}
+    rules:
+      - {emit: routed}
 template:
-  execution_type: system_node
-  event_handlers:
-    request:
-      emit: {event: specialized}
-      rules:
-        - when: payload.score > 0
-          emit: {fields: {bucket: "high"}}
-        - emit: {fields: {bucket: "low"}}
+  request:
+    emit: {event: specialized}
+    rules:
+      - when: payload.score > 0
+        emit: {fields: {bucket: "high"}}
+      - emit: {fields: {bucket: "low"}}
 dispatcher:
-  execution_type: system_node
-  event_handlers:
-    request:
-      fan_out:
-        items_from: payload.items
-        as: element
-        identity: element
-        emit: {event: item, fields: {id: element}}
+  request:
+    fan_out:
+      items_from: payload.items
+      as: element
+      identity: element
+      emit: {event: item, fields: {id: element}}
 rule-dispatcher:
-  execution_type: system_node
-  event_handlers:
-    request:
-      rules:
-        - fan_out:
-            items_from: payload.items
-            as: element
-            identity: element
-            emit: {event: item, fields: {id: element}}
+  request:
+    rules:
+      - fan_out:
+          items_from: payload.items
+          as: element
+          identity: element
+          emit: {event: item, fields: {id: element}}
 completion:
-  execution_type: system_node
-  event_handlers:
-    request:
-      on_complete:
-        - emit: direct
+  request:
+    on_complete:
+      - emit: direct
 completion-dispatcher:
-  execution_type: system_node
-  event_handlers:
-    request:
-      on_complete:
-        - fan_out:
-            items_from: payload.items
-            as: element
-            identity: element
-            emit: {event: item, fields: {id: element}}
+  request:
+    on_complete:
+      - fan_out:
+          items_from: payload.items
+          as: element
+          identity: element
+          emit: {event: item, fields: {id: element}}
 `
 	for _, node := range []string{"worker", "router", "template", "dispatcher", "rule-dispatcher", "completion", "completion-dispatcher"} {
 		request := "request." + strings.ReplaceAll(node, "-", "_")
 		events += request + ":\n  score: integer\n  items: [text]\n"
-		nodes = strings.Replace(nodes, "    request:\n", "    "+request+":\n", 1)
+		nodes = strings.Replace(nodes, "  request:\n", "  "+request+":\n", 1)
 	}
 	writeClosedVariantFile(t, root, "families/events.yaml", events)
 	writeClosedVariantFile(t, root, "families/nodes.yaml", nodes)
@@ -308,8 +288,8 @@ func CopyLifecycleEmitterActivityOutcomes(t testing.TB, nested bool) string {
 		prefix = "child/"
 	}
 	nodes := lifecycleStaticRead(t, root, prefix+"nodes.yaml")
-	nodes = strings.Replace(nodes, "        tool: send\n", "        tool: send\n        approval: {decision: approve_send}\n", 1)
-	nodes += "    send.revision_requested: {}\n    send.rejected: {}\n"
+	nodes = strings.Replace(nodes, "      tool: send\n", "      tool: send\n      approval: {decision: approve_send}\n", 1)
+	nodes += "  send.revision_requested: {}\n  send.rejected: {}\n"
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
 	return root
 }
@@ -393,11 +373,11 @@ func CopyLifecycleEmitterRuleActivityOutcomes(t testing.TB, nested bool) string 
 		prefix = "child/"
 	}
 	nodes := lifecycleStaticRead(t, root, prefix+"nodes.yaml")
-	start := strings.Index(nodes, "      activity:\n")
+	start := strings.Index(nodes, "    activity:\n")
 	if start < 0 {
 		t.Fatal("activity fixture site missing")
 	}
-	end := strings.Index(nodes[start:], "    send.")
+	end := strings.Index(nodes[start:], "  send.")
 	if observer := strings.Index(nodes[start:], "observer-node:"); observer >= 0 && (end < 0 || observer < end) {
 		end = observer
 	}
@@ -406,9 +386,9 @@ func CopyLifecycleEmitterRuleActivityOutcomes(t testing.TB, nested bool) string 
 	}
 	end += start
 	activity := strings.TrimSuffix(nodes[start:end], "\n")
-	activity = "        - " + strings.TrimPrefix(activity, "      ")
+	activity = "      - " + strings.TrimPrefix(activity, "    ")
 	activity = strings.ReplaceAll(activity, "\n", "\n    ") + "\n"
-	nodes = nodes[:start] + "      rules:\n" + activity + nodes[end:]
+	nodes = nodes[:start] + "    rules:\n" + activity + nodes[end:]
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
 	return root
 }
@@ -420,7 +400,7 @@ func CopyLifecycleEmitterImportedApprovalReferences(t testing.TB) string {
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "internal/releasee2e/testdata/full_lifecycle/standing_telegram"), root)
 	nodes := lifecycleStaticRead(t, root, "telegram-chat/nodes.yaml")
-	nodes += "telegram-rejected:\n  execution_type: system_node\n  subscribes_to: [telegram_send_message.rejected]\n  event_handlers:\n    telegram_send_message.rejected: {}\n"
+	nodes += "telegram-rejected:\n  telegram_send_message.rejected: {}\n"
 	writeClosedVariantFile(t, root, "telegram-chat/nodes.yaml", nodes)
 	return root
 }

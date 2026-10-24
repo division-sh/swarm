@@ -49,7 +49,7 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 	}{
 		{name: "keyless root"},
 		{name: "keyed root", schema: "instance: tenant\n", fields: "  tenant: text\n"},
-		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: {check: entity.brief != ''}\n", refusal: "standing constructor is ineligible"},
+		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: entity.brief != ''\n", refusal: "standing constructor is ineligible"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -63,7 +63,7 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 			}
 			if tc.handler != "" {
 				documents["events.yaml"] += "work:\n"
-				documents["nodes.yaml"] += "reader:\n  execution_type: system_node\n  subscribes_to: [work]\n  event_handlers:\n    work:\n" + tc.handler
+				documents["nodes.yaml"] += "reader:\n  work:\n" + tc.handler
 			}
 			for name, contents := range documents {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
@@ -154,11 +154,8 @@ ingress:
 `
 
 const constructorIngressNodes = `receiver:
-  execution_type: system_node
-  subscribes_to: [inbound.constructor]
-  event_handlers:
-    inbound.constructor:
-      guard: {check: true}
+  inbound.constructor:
+    guard: true
 `
 
 func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T) {

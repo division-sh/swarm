@@ -10,7 +10,7 @@ func CopyPipelineDeliveryAuthority(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "test_entity: {}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "source.evt:\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "node-a:\n  source.evt:\n    advances_to: done\n")
 	return root
 }
 
@@ -24,7 +24,7 @@ func CopyPipelineConnectedDeliveryCollision(t testing.TB) string {
 	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\npins:\n  outputs: [deploy.done]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n")
 	writeClosedVariantFile(t, root, "receiver/schema.yaml", "name: receiver\npins:\n  inputs: [deploy.accepted, deploy.audited]\n")
-	writeClosedVariantFile(t, root, "receiver/nodes.yaml", "receiver-node:\n  execution_type: system_node\n  subscribes_to: [deploy.accepted, deploy.audited]\n  event_handlers:\n    deploy.accepted: {}\n    deploy.audited: {}\n")
+	writeClosedVariantFile(t, root, "receiver/nodes.yaml", "receiver-node:\n  deploy.accepted: {}\n  deploy.audited: {}\n")
 	return root
 }
 
@@ -37,6 +37,6 @@ func CopyPipelineDeliveryRetry(t testing.TB) string {
 	writeClosedVariantFile(t, root, "entities.yaml", "test_entity: {}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "source.evt:\nnode.completed:\n")
 	writeClosedVariantFile(t, root, "policy.yaml", "handler_retry_base_seconds: 30\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      emit: node.completed\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "node-a:\n  source.evt:\n    emit: node.completed\n")
 	return root
 }

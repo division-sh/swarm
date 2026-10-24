@@ -465,7 +465,7 @@ func TestAuthenticatedRawSettlementCannotEraseGenuineLocalConsumer(t *testing.T)
 	base := semanticviewtest.WithProviderIngress(semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
 		id: flow, mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
 		nodes: map[string]runtimecontracts.SystemNodeContract{"observer": {
-			SubscribesTo: []string{"inbound.telegram"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.telegram": {}},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.telegram": {}},
 		}},
 	}}, nil)), map[string][]string{flow: {"inbound.telegram"}})
 	catalog, batch := authenticatedTelegramBatchForSource(t, base, flow, false)

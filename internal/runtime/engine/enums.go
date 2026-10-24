@@ -1,12 +1,5 @@
 package engine
 
-import (
-	"fmt"
-	"strings"
-
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-)
-
 type OutcomeStatus uint8
 
 const (
@@ -77,54 +70,5 @@ func (f FailureDisposition) String() string {
 		return "dead_letter"
 	default:
 		return ""
-	}
-}
-
-type GuardFailureAction uint8
-
-const (
-	GuardFailureUnknown GuardFailureAction = iota
-	GuardFailureReject
-	GuardFailureDiscard
-	GuardFailureKill
-	GuardFailureEscalate
-)
-
-func (a GuardFailureAction) String() string {
-	switch a {
-	case GuardFailureReject:
-		return "reject"
-	case GuardFailureDiscard:
-		return "discard"
-	case GuardFailureKill:
-		return "kill"
-	case GuardFailureEscalate:
-		return "escalate"
-	default:
-		return ""
-	}
-}
-
-type GuardFailure struct {
-	Action    GuardFailureAction
-	EventType string
-}
-
-func GuardFailureFromSpec(spec runtimecontracts.GuardFailureSpec) (GuardFailure, error) {
-	switch spec.Action {
-	case runtimecontracts.GuardFailureActionReject:
-		return GuardFailure{Action: GuardFailureReject}, nil
-	case runtimecontracts.GuardFailureActionDiscard:
-		return GuardFailure{Action: GuardFailureDiscard}, nil
-	case runtimecontracts.GuardFailureActionKill:
-		return GuardFailure{Action: GuardFailureKill}, nil
-	case runtimecontracts.GuardFailureActionEscalate:
-		eventType := strings.TrimSpace(spec.Escalation.Event)
-		if eventType == "" {
-			return GuardFailure{}, fmt.Errorf("guard on_fail escalate requires event type")
-		}
-		return GuardFailure{Action: GuardFailureEscalate, EventType: eventType}, nil
-	default:
-		return GuardFailure{}, fmt.Errorf("unsupported guard on_fail action %q", spec.Action)
 	}
 }

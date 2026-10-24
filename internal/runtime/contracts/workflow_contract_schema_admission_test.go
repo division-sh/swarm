@@ -178,49 +178,6 @@ func TestA9RetiredActivationPresenceAdmission(t *testing.T) {
 	}
 }
 
-func TestA9StandingCorpusMigrationCoverage(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	for _, tc := range []struct {
-		name     string
-		root     string
-		bindings int
-	}{
-		{"telegram example", filepath.Join(repo, "examples/integrations/telegram-agent"), 1},
-		{"lifecycle telegram", filepath.Join(repo, "internal/releasee2e/testdata/full_lifecycle/standing_telegram"), 1},
-		{"channel onboarding", filepath.Join(repo, "internal/releasee2e/testdata/channel_onboarding_release"), 1},
-		{"standing root and beta", filepath.Join(repo, "internal/releasee2e/testdata/standing_root_tree"), 2},
-		{"generated root and beta", canonicalrouting.CopyStandingRootTreePublic(t), 2},
-		{"generated admission matrix", canonicalrouting.CopyInboundAdmissionPolicyMatrix(t), 1},
-		{"generated channel journey", canonicalrouting.CopyChannelLearnedObjectJourney(t), 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, tc.root, DefaultPlatformSpecFile(repo))
-			if err != nil {
-				t.Fatal(err)
-			}
-			retained, err := sourceartifact.DecodeLogical(bundle.SourceArtifact.LogicalBlob())
-			if err != nil {
-				t.Fatal(err)
-			}
-			rebuilt, err := LoadWorkflowContractBundleFromArtifact(repo, retained, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, candidate := range []*WorkflowContractBundle{bundle, rebuilt} {
-				bindings := 0
-				for _, flow := range candidate.FlowViews() {
-					if flow.Schema.Ingress != nil {
-						bindings++
-					}
-				}
-				if bindings != tc.bindings {
-					t.Fatalf("marker migration changed genuine bindings: got %d, want %d", bindings, tc.bindings)
-				}
-			}
-		})
-	}
-}
-
 func assertSchemaAdmissionInvalidSourceParity(t *testing.T, dir string) error {
 	t.Helper()
 	repo := repoRootForContractsTest(t)

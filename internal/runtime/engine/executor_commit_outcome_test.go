@@ -50,7 +50,7 @@ func TestExecutorRetainsAcknowledgedIntentsWithIndependentError(t *testing.T) {
 			result, err := executor.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: identity.NormalizeEntityID("entity-1"), Node: testFlowExecutableNode(t, "research", "scanner"), HandlerEventKey: "source.requested",
 				Event:   eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", []byte(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
-				Handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")}}},
+				Handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{ID: "scanner_source_requested_source_scrape", Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")}}},
 				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})})
 			if !errors.Is(err, injected) || owner.calls != 1 || result.Committed != owner.committed {
 				t.Fatalf("result=%+v err=%v commits=%d", result, err, owner.calls)

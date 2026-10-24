@@ -684,20 +684,6 @@ func (b *WorkflowContractBundle) exactFlowEventDeclarationView(flowID string) (*
 func clonePolicyDocument(in PolicyDocument) PolicyDocument {
 	return flowmodel.ClonePolicyDocument(in)
 }
-func (b *WorkflowContractBundle) GuardEntries() []GuardActionEntry {
-	if b == nil {
-		return nil
-	}
-	return b.Semantics.Guards
-}
-func (b *WorkflowContractBundle) GuardEntryByID(id string) (GuardActionEntry, bool) {
-	id = strings.TrimSpace(id)
-	if b == nil || id == "" {
-		return GuardActionEntry{}, false
-	}
-	entry, ok := b.Semantics.GuardByID[id]
-	return entry, ok
-}
 func (b *WorkflowContractBundle) FlowInitialStage(flowID string) string {
 	graph, ok := b.flowStageCatalog(flowID)
 	if ok && graph.HasInitialStage() {

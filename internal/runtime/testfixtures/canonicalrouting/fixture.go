@@ -387,10 +387,7 @@ pins:
     initial: 0
 `)
 	writeClosedNegativeFile(t, root, "legacy_static/nodes.yaml", `legacy-writer:
-  execution_type: system_node
-  subscribes_to: [legacy.seen]
-  event_handlers:
-    legacy.seen:
+  legacy.seen:
 `+handler+`      data_accumulation:
         writes:
           - source_field: legacy_id
@@ -414,14 +411,11 @@ pins:
     - subject.created
 `)
 	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
-  execution_type: system_node
-  subscribes_to: [subject.created]
-  event_handlers:
-    subject.created:
-      data_accumulation:
-        writes:
-          - source_field: display_name
-            target_field: display_name
+  subject.created:
+    data_accumulation:
+      writes:
+        - source_field: display_name
+          target_field: display_name
 `)
 }
 

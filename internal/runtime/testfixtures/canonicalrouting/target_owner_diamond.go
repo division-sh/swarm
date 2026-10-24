@@ -26,12 +26,8 @@ connect:
 `,
 		"events.yaml": "branch.start:\n  key: branch_id\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
-  execution_type: system_node
-  event_handlers:
-    branch.done:
-      guard:
-        id: root_owner
-        check: _entity.id != ""
+  branch.done:
+    guard: _entity.id != ""
 `,
 		"branch/schema.yaml": `name: branch
 instance: branch_id
@@ -52,12 +48,8 @@ connect:
 		"branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
 		"branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
 		"branch/nodes.yaml": `branch-worker:
-  execution_type: system_node
-  event_handlers:
-    branch.start:
-      guard:
-        id: branch_owner
-        check: _entity.id != ""
+  branch.start:
+    guard: _entity.id != ""
 `,
 
 		"branch/worker/result-static/schema.yaml": `name: static-result
@@ -66,12 +58,8 @@ pins:
     - work.ready
 `,
 		"branch/worker/result-static/nodes.yaml": `static-result-node:
-  execution_type: system_node
-  event_handlers:
-    work.ready:
-      guard:
-        id: inherited_owner
-        check: _entity.id != ""
+  work.ready:
+    guard: _entity.id != ""
 `,
 		"branch/worker/result/schema.yaml": `name: singleton-result
 pins:
@@ -79,9 +67,7 @@ pins:
     - work.ready
 `,
 		"branch/worker/result/nodes.yaml": `singleton-result-node:
-  execution_type: system_node
-  event_handlers:
-    work.ready: {}
+  work.ready: {}
 `,
 		"decoy/schema.yaml": `name: decoy
 pins:
@@ -96,12 +82,8 @@ pins:
 `,
 		"unrelated/worker/result/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/nodes.yaml": `hostile-node:
-  execution_type: system_node
-  event_handlers:
-    work.ready:
-      guard:
-        id: hostile_owner
-        check: _entity.id != ""
+  work.ready:
+    guard: _entity.id != ""
 `,
 	}
 	for name, body := range files {

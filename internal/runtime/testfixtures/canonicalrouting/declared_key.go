@@ -24,16 +24,13 @@ connect:
 `, strings.ReplaceAll(acquisition, "_", "-")))
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  receiver_id: text\n  account_id: text\n  item: text\nwork.keyed:\n  receiver_id: text\n  account_id: text\n  item: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      emit:
-        event: work.keyed
-        fields:
-          receiver_id: payload.receiver_id
-          account_id: payload.account_id
-          item: payload.item
+  work.requested:
+    emit:
+      event: work.keyed
+      fields:
+        receiver_id: payload.receiver_id
+        account_id: payload.account_id
+        item: payload.item
 `)
 	writeClosedVariantFile(t, root, "review/schema.yaml", fmt.Sprintf(`name: review
 instance: %s
@@ -46,13 +43,10 @@ pins:
 `, instanceField))
 	writeClosedVariantFile(t, root, "review/entities.yaml", "review_entity:\n  receiver_id: {type: text, indexed: true}\n  account_id: {type: text, indexed: true}\n  owner: {type: text, _unused_reason: distinguishes existing receiver state}\n")
 	writeClosedVariantFile(t, root, "review/nodes.yaml", `key-consumer:
-  execution_type: system_node
-  subscribes_to: [work.keyed]
-  event_handlers:
-    work.keyed:
-      accumulate:
-        into: items
-        from: payload
+  work.keyed:
+    accumulate:
+      into: items
+      from: payload
 `)
 	return root
 }

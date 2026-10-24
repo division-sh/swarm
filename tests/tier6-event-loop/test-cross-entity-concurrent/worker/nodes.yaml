@@ -1,6 +1,3 @@
 worker-node:
-  execution_type: system_node
-  subscribes_to: [task.submitted]
-  event_handlers:
-    task.submitted:
-      advances_to: done
+  task.submitted:
+    advances_to: done

@@ -11,7 +11,7 @@ func CopyTemplateAgentLocalEmission(t testing.TB) string {
 		"review/entities.yaml": "review:\n  instance_key: {type: text, _unused_reason: constructor identity}\n",
 		"review/events.yaml":   "assessment.reported:\n",
 		"review/agents.yaml":   "reviewer:\n  model: regular\n  intent: {inline: Report the assessment.}\n  emit_events: [assessment.reported]\n",
-		"review/nodes.yaml":    "review-finalize:\n  execution_type: system_node\n  event_handlers:\n    assessment.reported:\n      guard: {id: observed, check: true}\n",
+		"review/nodes.yaml":    "review-finalize:\n  assessment.reported:\n    guard: true\n",
 	} {
 		writeClosedVariantFile(t, root, path, body)
 	}

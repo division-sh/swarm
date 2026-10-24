@@ -1,15 +1,7 @@
 parent-node:
-  execution_type: system_node
-  subscribes_to: [job.submit]
-  produces: [work.requested]
-  event_handlers:
-    job.submit:
-      emit: work.requested
+  job.submit:
+    emit: work.requested
 
 parent-listener:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  produces: []
-  event_handlers:
-    work.completed:
-      advances_to: done
+  work.completed:
+    advances_to: done

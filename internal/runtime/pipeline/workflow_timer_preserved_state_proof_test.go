@@ -109,7 +109,7 @@ func VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t *testing.T, factor
 					files := map[string]string{
 						"schema.yaml": "name: preserved-timer-proof\nstages:\n  waiting: {}\n",
 						"events.yaml": "timer.arm:\ntimer.cancel:\ntimer.elapsed:\nwork.noted:\n",
-						"nodes.yaml":  "observer:\n  execution_type: system_node\n  event_handlers:\n    timer.arm: {}\n    timer.cancel: {}\n    work.noted: {}\n  timers:\n    - {id: event.timeout, event: timer.elapsed, start_on: 'event:timer.arm', cancel_on: 'event:timer.cancel', delay: 1h}\n",
+						"nodes.yaml":  "observer:\n  timer.arm: {}\n  timer.cancel: {}\n  work.noted: {}\n  timers:\n    - {id: event.timeout, event: timer.elapsed, start_on: 'event:timer.arm', cancel_on: 'event:timer.cancel', delay: 1h}\n",
 					}
 					entityType := ""
 					values := map[string]any{}

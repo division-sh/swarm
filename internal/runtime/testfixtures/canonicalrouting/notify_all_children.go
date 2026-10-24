@@ -81,18 +81,18 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 		applyClosedReplacement(t, ownerSchema, "    - account.notify.requested\n", "")
 	}
 	if opts.MissingEmitField {
-		applyClosedReplacement(t, ownerNodes, "            command: payload.command\n", "")
+		applyClosedReplacement(t, ownerNodes, "          command: payload.command\n", "")
 	}
 	if opts.ProducerTarget {
-		applyClosedReplacement(t, ownerNodes, "          event: account.notify.requested\n", `          event: account.notify.requested
-          target:
-            flow: account
-            match:
-              account_id: account_id
+		applyClosedReplacement(t, ownerNodes, "        event: account.notify.requested\n", `        event: account.notify.requested
+        target:
+          flow: account
+          match:
+            account_id: account_id
 `)
 	}
 	if opts.ProducerBroadcast {
-		applyClosedReplacement(t, ownerNodes, "          event: account.notify.requested\n", "          event: account.notify.requested\n          broadcast: true\n")
+		applyClosedReplacement(t, ownerNodes, "        event: account.notify.requested\n", "        event: account.notify.requested\n        broadcast: true\n")
 	}
 	if opts.ObjectMembership {
 		applyClosedReplacement(t, ownerEntities, "  account_ids: {type: \"[text]\", initial: []}\n", "  account_ids: {type: \"[AccountRef]\", initial: []}\n")
@@ -100,11 +100,11 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
   AccountRef:
     account_id: text
 `)
-		applyClosedReplacement(t, ownerNodes, "            account_id: account_id\n", "            account_id: account_id.account_id\n")
+		applyClosedReplacement(t, ownerNodes, "          account_id: account_id\n", "          account_id: account_id.account_id\n")
 	}
 	if opts.UndeclaredPayloadMembership {
-		applyClosedReplacement(t, ownerNodes, "        items_from: entity.account_ids\n", `        items_from: payload.account_ids
-        identity: account_id
+		applyClosedReplacement(t, ownerNodes, "      items_from: entity.account_ids\n", `      items_from: payload.account_ids
+      identity: account_id
 `)
 	}
 	if opts.AutoEmitOnCreate {
@@ -125,22 +125,22 @@ auto_emit_on_create:
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
-		applyClosedReplacement(t, ownerNodes, `            command: payload.command
-`, `            command: payload.command
-      join:
-        id: all-account-notifications-delivered
-        members:
-          from_fan_out: true
-        on_complete:
-          emit:
-            event: portfolio.notify.completed
-            fields:
-              total: join.total
-              succeeded: join.dispositions.succeeded
-              dead_lettered: join.dispositions.dead_lettered
-              no_route: join.dispositions.no_route
-              semantic_rejected: join.dispositions.semantic_rejected
-              canceled: join.dispositions.canceled
+		applyClosedReplacement(t, ownerNodes, `          command: payload.command
+`, `          command: payload.command
+    join:
+      id: all-account-notifications-delivered
+      members:
+        from_fan_out: true
+      on_complete:
+        emit:
+          event: portfolio.notify.completed
+          fields:
+            total: join.total
+            succeeded: join.dispositions.succeeded
+            dead_lettered: join.dispositions.dead_lettered
+            no_route: join.dispositions.no_route
+            semantic_rejected: join.dispositions.semantic_rejected
+            canceled: join.dispositions.canceled
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.notify.requested:
   key: account_id
@@ -162,7 +162,7 @@ portfolio.notify.completed:
 `, `    - account.notify.requested
     - portfolio.notify.completed
 `)
-		applyClosedReplacement(t, ownerNodes, "              canceled: join.dispositions.canceled\n", "              canceled: join.dispositions.canceled\n    portfolio.notify.completed: {}\n")
+		applyClosedReplacement(t, ownerNodes, "            canceled: join.dispositions.canceled\n", "            canceled: join.dispositions.canceled\n  portfolio.notify.completed: {}\n")
 	}
 	if opts.NumericRegistrationRows {
 		// Keep row fields addressable under the compiled structural-type contract.
@@ -190,45 +190,45 @@ portfolio.notify.completed:
 		applyClosedReplacement(t, ownerEntities, `  account_ids: {type: "[text]", initial: []}
 `, `  account_ids: {type: "[NumericAccount]", initial: []}
 `)
-		applyClosedReplacement(t, ownerNodes, `          - source_field: portfolio_id
-            target_field: portfolio_id
-`, `          - source_field: portfolio_id
-            target_field: portfolio_id
-          - source_field: threshold
-            target_field: threshold
+		applyClosedReplacement(t, ownerNodes, `        - source_field: portfolio_id
+          target_field: portfolio_id
+`, `        - source_field: portfolio_id
+          target_field: portfolio_id
+        - source_field: threshold
+          target_field: threshold
 `)
-		applyClosedReplacement(t, ownerNodes, "    portfolio.accounts.register.requested:\n", "    portfolio.accounts.register.requested:\n      guard: {check: has(entity.threshold)}\n")
-		applyClosedReplacement(t, ownerNodes, `        as: account_id
-        max_items: 100
-        emit:
-          event: account.registered
-          fields:
-            account_id: account_id
-`, `        as: account
-        identity: account.account_id
-        max_items: 100
-        emit:
-          event: account.registered
-          fields:
-            portfolio_id: payload.portfolio_id
-            account_id: account.account_id
-            eng_roles: account.eng_roles
-            gem_score: account.gem_score
-            eligible: entity.threshold >= 70
+		applyClosedReplacement(t, ownerNodes, "  portfolio.accounts.register.requested:\n", "  portfolio.accounts.register.requested:\n    guard: has(entity.threshold)\n")
+		applyClosedReplacement(t, ownerNodes, `      as: account_id
+      max_items: 100
+      emit:
+        event: account.registered
+        fields:
+          account_id: account_id
+`, `      as: account
+      identity: account.account_id
+      max_items: 100
+      emit:
+        event: account.registered
+        fields:
+          portfolio_id: payload.portfolio_id
+          account_id: account.account_id
+          eng_roles: account.eng_roles
+          gem_score: account.gem_score
+          eligible: entity.threshold >= 70
 `)
-		applyClosedReplacement(t, ownerNodes, `        as: account_id
-        max_items: 100
-        emit:
-          event: account.notify.requested
-          fields:
-            account_id: account_id
-`, `        as: account
-        identity: account.account_id
-        max_items: 100
-        emit:
-          event: account.notify.requested
-          fields:
-            account_id: account.account_id
+		applyClosedReplacement(t, ownerNodes, `      as: account_id
+      max_items: 100
+      emit:
+        event: account.notify.requested
+        fields:
+          account_id: account_id
+`, `      as: account
+      identity: account.account_id
+      max_items: 100
+      emit:
+        event: account.notify.requested
+        fields:
+          account_id: account.account_id
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
   key: account_id
@@ -241,22 +241,22 @@ portfolio.notify.completed:
   gem_score: number
   eligible: boolean
 `)
-		applyClosedReplacement(t, accountNodes, `    account.registered:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: account_id
-`, `    account.registered:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: account_id
-          - source_field: eng_roles
-            target_field: eng_roles
-          - source_field: gem_score
-            target_field: gem_score
-          - source_field: eligible
-            target_field: eligible
+		applyClosedReplacement(t, accountNodes, `  account.registered:
+    data_accumulation:
+      writes:
+        - source_field: account_id
+          target_field: account_id
+`, `  account.registered:
+    data_accumulation:
+      writes:
+        - source_field: account_id
+          target_field: account_id
+        - source_field: eng_roles
+          target_field: eng_roles
+        - source_field: gem_score
+          target_field: gem_score
+        - source_field: eligible
+          target_field: eligible
 `)
 		applyClosedReplacement(t, accountEntities, `account_state:
   account_id: text
@@ -269,18 +269,17 @@ portfolio.notify.completed:
   last_command: text
 `)
 		if opts.NumericReporterSink || opts.NumericInternalSettlement {
-			applyClosedReplacement(t, accountNodes, "    - account.registered\n", "")
-			applyClosedReplacement(t, accountNodes, `    account.registered:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: account_id
-          - source_field: eng_roles
-            target_field: eng_roles
-          - source_field: gem_score
-            target_field: gem_score
-          - source_field: eligible
-            target_field: eligible
+			applyClosedReplacement(t, accountNodes, `  account.registered:
+    data_accumulation:
+      writes:
+        - source_field: account_id
+          target_field: account_id
+        - source_field: eng_roles
+          target_field: eng_roles
+        - source_field: gem_score
+          target_field: gem_score
+        - source_field: eligible
+          target_field: eligible
 `, "")
 			applyClosedReplacement(t, accountSchema, "    - account.registered\n", "")
 		}
@@ -296,10 +295,7 @@ portfolio.notify.completed:
 			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\n", "    - portfolio.notify.requested\n    - account.registered\n")
 			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.registered\nconnect:\n")
 			writeClosedVariantFile(t, root, "nodes.yaml", `numeric-registration-reporter:
-  execution_type: system_node
-  subscribes_to: [account.registered]
-  event_handlers:
-    account.registered: {}
+  account.registered: {}
 `)
 		}
 		if opts.NumericInternalSettlement {
@@ -309,21 +305,17 @@ portfolio.notify.completed:
     resolution: select-or-create
 `, "")
 			applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", `numeric-registration-observer:
-  execution_type: system_node
-  subscribes_to:
-    - account.registered
-  event_handlers:
-    account.registered: {}
+  account.registered: {}
 portfolio-coordinator:
 `)
 		}
 		if opts.RegistrationUUIDField {
 			applyClosedReplacement(t, filepath.Join(root, "types.yaml"), "    external_id: text?\n", "    external_id: text\n")
-			applyClosedReplacement(t, ownerNodes, `            gem_score: account.gem_score
-            eligible: entity.threshold >= 70
-`, `            gem_score: account.gem_score
-            external_id: account.external_id
-            eligible: entity.threshold >= 70
+			applyClosedReplacement(t, ownerNodes, `          gem_score: account.gem_score
+          eligible: entity.threshold >= 70
+`, `          gem_score: account.gem_score
+          external_id: account.external_id
+          eligible: entity.threshold >= 70
 `)
 			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `  gem_score: number
   eligible: boolean
@@ -417,7 +409,7 @@ retired:
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "portfolio.opened:\n", "fixture.close.requested:\nportfolio.opened:\n")
 		applyClosedReplacement(t, ownerSchema, "name: portfolio\n", "name: portfolio\nstages: {active: {}, done: {final: true}}\n")
 		applyClosedReplacement(t, ownerSchema, "  inputs:\n", "  inputs:\n    - fixture.close.requested\n")
-		applyClosedReplacement(t, ownerNodes, "  event_handlers:\n", "    - fixture.close.requested\n  event_handlers:\n    fixture.close.requested: {advances_to: done}\n")
+		applyClosedReplacement(t, ownerNodes, "", "    - fixture.close.requested\n  fixture.close.requested: {advances_to: done}\n")
 	}
 	return root
 }

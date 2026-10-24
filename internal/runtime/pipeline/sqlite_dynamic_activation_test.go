@@ -673,31 +673,27 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 		"review/schema.yaml":   "name: review\nstages:\n  pending: {}\npins:\n  inputs:\n    - component_scaffold.spawn_requested\n",
 		"review/entities.yaml": "test_entity: {}\n",
 		"nodes.yaml": `fanout-node:
-  execution_type: system_node
-  event_handlers:
-    component_scaffold.batch_requested:
-      fan_out:
-        items_from: payload.components
-        as: component
-        identity: component.component_id
-        emit:
-          event: component_scaffold.spawn_requested
-          fields:
-            component_id: component.component_id
-            nested_items: ["prepare", "publish"]
+  component_scaffold.batch_requested:
+    fan_out:
+      items_from: payload.components
+      as: component
+      identity: component.component_id
+      emit:
+        event: component_scaffold.spawn_requested
+        fields:
+          component_id: component.component_id
+          nested_items: ["prepare", "publish"]
 nested-fanout-node:
-  execution_type: system_node
-  event_handlers:
-    component_scaffold.spawn_requested:
-      fan_out:
-        items_from: payload.nested_items
-        as: nested_item
-        identity: nested_item
-        emit:
-          event: component_scaffold.task_requested
-          fields:
-            component_id: payload.component_id
-            task: nested_item
+  component_scaffold.spawn_requested:
+    fan_out:
+      items_from: payload.nested_items
+      as: nested_item
+      identity: nested_item
+      emit:
+        event: component_scaffold.task_requested
+        fields:
+          component_id: payload.component_id
+          task: nested_item
 `,
 	})
 }

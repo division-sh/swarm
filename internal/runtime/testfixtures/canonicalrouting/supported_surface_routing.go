@@ -26,29 +26,26 @@ complete.no_match:
 direct:
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `selection-node:
-  execution_type: system_node
-  subscribes_to: [rules.selected, rules.fallback, rules.evaluation_failed, complete.selected, complete.no_match, direct]
-  event_handlers:
-    rules.selected:
-      rules:
-        - when: true
-    rules.fallback:
-      rules:
-        - when: |-
-                  false
-        - when: true
-    rules.evaluation_failed:
-      rules:
-        - when: payload.proof > 0
-        - when: true
-    complete.selected:
-      on_complete:
-        - condition: true
-    complete.no_match:
-      on_complete:
-        - condition: |-
-                       false
-    direct: {}
+  rules.selected:
+    rules:
+      - when: true
+  rules.fallback:
+    rules:
+      - when: |-
+                false
+      - when: true
+  rules.evaluation_failed:
+    rules:
+      - when: payload.proof > 0
+      - when: true
+  complete.selected:
+    on_complete:
+      - condition: true
+  complete.no_match:
+    on_complete:
+      - condition: |-
+                     false
+  direct: {}
 `)
 	return root
 }
@@ -88,16 +85,13 @@ pins:
     value: text
 `
 	joinNodes := `join-node:
-  execution_type: system_node
-  subscribes_to: [item.completed]
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        on_complete: {advances_to: ready}
-        deadline: {after: ` + timeout + `, from: stage_entry}
+  item.completed:
+    join:
+      stage: awaiting
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      on_complete: {advances_to: ready}
+      deadline: {after: ` + timeout + `, from: stage_entry}
         on_deadline: {advances_to: attention}
 `
 
@@ -139,11 +133,8 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "timer_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
-  execution_type: system_node
-  subscribes_to: [timer.cancel]
-  event_handlers:
-    timer.cancel:
-      advances_to: done
+  timer.cancel:
+    advances_to: done
 `)
 	return root
 }
@@ -167,13 +158,8 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "root_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
-  execution_type: system_node
-  subscribes_to: [deploy.done]
-  event_handlers:
-    deploy.done:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  deploy.done:
+    guard: _entity.id != ""
 `)
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer

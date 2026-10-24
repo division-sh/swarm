@@ -23,15 +23,12 @@ connect:
 	writeClosedVariantFile(t, root, "events.yaml", "parent.seeded:\n  work_id: text\nwork.requested:\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "seed: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `parent-node:
-  execution_type: system_node
-  subscribes_to: [parent.seeded]
-  event_handlers:
-    parent.seeded:
-      advances_to: active
-      emit:
-        event: work.requested
-        fields:
-          work_id: payload.work_id
+  parent.seeded:
+    advances_to: active
+    emit:
+      event: work.requested
+      fields:
+        work_id: payload.work_id
 `)
 	writeClosedVariantFile(t, root, "producer/schema.yaml", `name: producer
 stages:
@@ -46,19 +43,16 @@ pins:
 	writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/nodes.yaml", `producer-node:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      advances_to: active
-      data_accumulation:
-        writes:
-          - target_field: work_id
-            value: payload.work_id
-      emit:
-        event: work.ready
-        fields:
-          work_id: payload.work_id
+  work.requested:
+    advances_to: active
+    data_accumulation:
+      writes:
+        - target_field: work_id
+          value: payload.work_id
+    emit:
+      event: work.ready
+      fields:
+        work_id: payload.work_id
 `)
 	return root
 }

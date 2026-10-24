@@ -14,7 +14,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -79,12 +78,6 @@ func (r *persistentStateRepo) SaveState(_ context.Context, address StateAddress,
 		r.snapshot.StateCarrier.Gates = cloneBoolMap(mutation.StateCarrier.Gates)
 	}
 	return nil
-}
-
-type terminalGuardRunner struct{}
-
-func (terminalGuardRunner) EvaluateGuard(context.Context, identity.GuardKey, runtimeregistry.GuardInstruction, ExecutionContext) (bool, bool, error) {
-	return false, true, nil
 }
 
 func TestExecutorPersistCommitsCompleteAuthoritativeStateCarrier(t *testing.T) {
@@ -279,14 +272,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
-		GuardRegistry: stubGuardRegistry{entries: map[identity.GuardKey]runtimeregistry.GuardInstruction{
-			identity.NormalizeGuardKey("not_in_terminal_state"): {
-				Key:     identity.NormalizeGuardKey("not_in_terminal_state"),
-				Builtin: "not_in_terminal_state",
-			},
-		}},
-		GuardRunner: terminalGuardRunner{},
-	}, nil)
+	}, stubEvaluator{bools: map[string]bool{"_entity.current_state != 'done'": false}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
@@ -295,7 +281,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard:      &runtimecontracts.GuardSpec{ID: "not_in_terminal_state"},
+			Guard:      &runtimecontracts.GuardSpec{Check: "_entity.current_state != 'done'"},
 			AdvancesTo: "reopened",
 		},
 	})
@@ -331,10 +317,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard: &runtimecontracts.GuardSpec{
-				Check:  "entity.score >= 75",
-				OnFail: "reject",
-			},
+			Guard:      &runtimecontracts.GuardSpec{Check: "entity.score >= 75"},
 			AdvancesTo: "approved",
 		},
 	})
@@ -350,10 +333,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-2", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Guard: &runtimecontracts.GuardSpec{
-				Check:  "entity.score >= 75",
-				OnFail: "reject",
-			},
+			Guard:      &runtimecontracts.GuardSpec{Check: "entity.score >= 75"},
 			AdvancesTo: "approved",
 		},
 	})

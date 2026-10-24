@@ -112,7 +112,6 @@ type stubWorkflowModule struct{ source semanticview.Source }
 
 func (m stubWorkflowModule) SemanticSource() semanticview.Source         { return m.source }
 func (stubWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (stubWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 
 type stubWorkspaceLifecycle struct {
 	validateErr error

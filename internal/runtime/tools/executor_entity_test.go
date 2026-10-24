@@ -3034,7 +3034,7 @@ stages:
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  entity_writes:\n    "+entityType+": {save: all}\n")
 	if len(reviewedTransition) > 0 && reviewedTransition[0] {
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), "advance:\n")
-		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "nodes.yaml"), "reviewer:\n  execution_type: system_node\n  event_handlers:\n    advance: {advances_to: marginal_review}\n")
+		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "nodes.yaml"), "reviewer:\n  advance: {advances_to: marginal_review}\n")
 	}
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)

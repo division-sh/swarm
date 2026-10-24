@@ -26,10 +26,7 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "check.requested:\n  score: integer\ntask.ready:\nflow.finished:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `finish:
-  execution_type: system_node
-  subscribes_to: [flow.finished]
-  event_handlers:
-    flow.finished: {advances_to: done}
+  flow.finished: {advances_to: done}
 `)
 	writeClosedVariantFile(t, root, "guarded/schema.yaml", `name: guarded
 stages:
@@ -41,11 +38,11 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "guarded/entities.yaml", "test_entity: {}\n")
 	writeClosedVariantFile(t, root, "guarded/nodes.yaml", `test-node:
-  execution_type: system_node
-  subscribes_to: [check.requested]
-  event_handlers:
-    check.requested:
-      guard: {id: score_check, check: payload.score >= 100, on_fail: kill}
+  check.requested:
+    rules:
+      - when: payload.score >= 100
+      - advances_to: killed
+        terminate: true
 `)
 	return root
 }

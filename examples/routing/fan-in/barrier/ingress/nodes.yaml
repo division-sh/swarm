@@ -1,13 +1,9 @@
 ingress-node:
-  execution_type: system_node
-  subscribes_to: [operating.report.triggered]
-  produces: [operating.report.requested]
-  event_handlers:
-    operating.report.triggered:
-      emit:
-        event: operating.report.requested
-        fields:
-          operating_id: payload.operating_id
-          portfolio_id: payload.portfolio_id
-          period_id: payload.period_id
-          revenue: payload.revenue
+  operating.report.triggered:
+    emit:
+      event: operating.report.requested
+      fields:
+        operating_id: payload.operating_id
+        portfolio_id: payload.portfolio_id
+        period_id: payload.period_id
+        revenue: payload.revenue

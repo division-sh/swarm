@@ -29,7 +29,6 @@ types:
 `
 
 const admissionPublicNodes = `complete-task:
-  execution_type: system_node
   state_table: admission_list_state
   state_schema:
     fields:
@@ -43,30 +42,27 @@ const admissionPublicNodes = `complete-task:
       named_uppers: [LIST]
       scalar_amount: numeric(5,2)
       snapshot: jsonb
-  subscribes_to: [task.requested, key.observed]
-  produces: [key.observed]
-  event_handlers:
-    task.requested:
-      data_accumulation:
-        writes:
-          - labels
-          - lookup
-          - enums
-          - uuids
-          - {op: merge, target: entity.lookup, key: '2', value: {note: 'merged'}}
-          - {op: set, target: entity.lookup, key: '10', value: {id: 'ten'}}
-      advances_to: collecting
-      fan_out:
-        items_from: payload.lookup
-        as: map_key
-        identity: map_key
-        emit: {event: key.observed, fields: {member_id: map_key}}
-    key.observed:
-      join:
-        stage: collecting
-        members: {from: state.lookup, by: payload.member_id}
-        output: payload.member_id
-        on_complete: {advances_to: done}
+  task.requested:
+    data_accumulation:
+      writes:
+        - labels
+        - lookup
+        - enums
+        - uuids
+        - {op: merge, target: entity.lookup, key: '2', value: {note: 'merged'}}
+        - {op: set, target: entity.lookup, key: '10', value: {id: 'ten'}}
+    advances_to: collecting
+    fan_out:
+      items_from: payload.lookup
+      as: map_key
+      identity: map_key
+      emit: {event: key.observed, fields: {member_id: map_key}}
+  key.observed:
+    join:
+      stage: collecting
+      members: {from: state.lookup, by: payload.member_id}
+      output: payload.member_id
+      on_complete: {advances_to: done}
 `
 
 func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
@@ -234,7 +230,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			for index, spelling := range []string{"text[]", "[]text", "Item[]", "[]Item", "numeric(5,2)[]", "[]numeric(5,2)"} {
 				bad := filepath.Join(base, "node-refusal-"+string(rune('a'+index)))
 				copyReleaseTree(t, source, bad)
-				writeReleaseFile(t, filepath.Join(bad, "nodes.yaml"), "complete-task:\n  execution_type: system_node\n  state_schema:\n    fields:\n      items: {type: '"+spelling+"'}\n  event_handlers: {}\n")
+				writeReleaseFile(t, filepath.Join(bad, "nodes.yaml"), "complete-task:\n  state_schema:\n    fields:\n      items: {type: '"+spelling+"'}\n")
 				for _, command := range []string{"verify", "describe", "serve"} {
 					args := []string{command, bad, "--config", config}
 					if command != "serve" {

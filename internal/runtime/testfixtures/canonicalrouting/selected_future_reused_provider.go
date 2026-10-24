@@ -27,24 +27,20 @@ work.assigned:
   sequence: integer
 `,
 		"nodes.yaml": `controller:
-  execution_type: system_node
-  subscribes_to: [start.requested, work.progress, work.finished]
-  produces: [work.assigned]
-  event_handlers:
-    start.requested:
-      emit:
-        event: work.assigned
-        fields: {work_id: payload.work_id, sequence: 1}
-    work.progress:
-      emit:
-        event: work.assigned
-        fields: {work_id: payload.work_id, sequence: 2}
-    work.finished:
-      advances_to: done
-      data_accumulation:
-        source_event: work.finished
-        writes:
-          - {target_field: counter, value: entity.counter + 1}
+  start.requested:
+    emit:
+      event: work.assigned
+      fields: {work_id: payload.work_id, sequence: 1}
+  work.progress:
+    emit:
+      event: work.assigned
+      fields: {work_id: payload.work_id, sequence: 2}
+  work.finished:
+    advances_to: done
+    data_accumulation:
+      source_event: work.finished
+      writes:
+        - {target_field: counter, value: entity.counter + 1}
 `,
 		"work/schema.yaml": `name: work
 instance: work_id

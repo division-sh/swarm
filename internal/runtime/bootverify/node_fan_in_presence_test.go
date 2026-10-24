@@ -79,11 +79,8 @@ func writeJoinRetirementSource(t *testing.T, owner, body string) string {
   aggregation: text
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `collector:
-  description: &empty ''
-  execution_type: system_node
-  subscribes_to: [item.reported]
-  event_handlers:
-    item.reported:
+  state_table: &empty ''
+  item.reported:
       `+owner+":\n"+body)
 	return root
 }

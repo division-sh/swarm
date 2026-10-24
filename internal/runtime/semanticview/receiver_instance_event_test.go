@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -13,6 +14,15 @@ import (
 )
 
 func receiverInstanceSource(t *testing.T, mutation string) Source {
+	t.Helper()
+	source, err := admitReceiverInstanceSource(t, mutation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
+func admitReceiverInstanceSource(t *testing.T, mutation string) (Source, error) {
 	t.Helper()
 	root := canonicalrouting.CopySelectedForkReadiness(t, 0, "node")
 	if mutation != "" {
@@ -61,9 +71,9 @@ func receiverInstanceSource(t *testing.T, mutation string) Source {
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	return Wrap(bundle)
+	return Wrap(bundle), nil
 }
 
 func TestReceiverInstanceEventProofPreservesDescendantBoundary(t *testing.T) {
@@ -170,10 +180,8 @@ func TestReceiverInstanceEventProofTracksCompiledSchemaAndEdgeRemoval(t *testing
 	if _, ok := changed.Field("note"); !ok {
 		t.Fatal("concrete receiver lost the new producer field")
 	}
-	removed := receiverInstanceSource(t, "edge_removed")
-	for _, spelling := range []string{"worker.inspect.requested", "worker-flow/worker.inspect.requested", name} {
-		if proof := ResolveFlowEventProof(removed, "worker-flow", spelling); proof.HasSchema {
-			t.Fatalf("removed edge retained schema authority: %+v", proof)
-		}
+	removed, err := admitReceiverInstanceSource(t, "edge_removed")
+	if removed != nil || err == nil || !strings.Contains(err.Error(), `handler "worker.inspect.requested"`) || !strings.Contains(err.Error(), "undeclared event") {
+		t.Fatalf("removed edge retained receiver admission: %v, %v", removed != nil, err)
 	}
 }

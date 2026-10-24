@@ -451,49 +451,50 @@ func githubIssueOpenedPayload(installationID string, issueNumber int, title stri
 func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	commentHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{
-			Check:  `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
-			OnFail: "discard",
-		},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "github_create_issue_comment",
-			Tool: "github.create_issue_comment",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
-				"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
-				"repo":            runtimecontracts.CELExpression("payload.repository_name"),
-				"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
-				"body":            runtimecontracts.CELExpression("payload.body"),
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			Condition: `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
+			Activity: runtimecontracts.ActivitySpec{
+				ID:   "github_create_issue_comment",
+				Tool: "github.create_issue_comment",
+				Input: map[string]runtimecontracts.ExpressionValue{
+					"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
+					"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
+					"repo":            runtimecontracts.CELExpression("payload.repository_name"),
+					"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
+					"body":            runtimecontracts.CELExpression("payload.body"),
+				},
 			},
-		},
+		}},
 	}
 	createIssueHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`, OnFail: "discard"},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "github_create_issue",
-			Tool: "github.create_issue",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
-				"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
-				"repo":            runtimecontracts.CELExpression("payload.repository_name"),
-				"title":           runtimecontracts.CELExpression("payload.title"),
-				"body":            runtimecontracts.LiteralExpression("Created by Swarm follow-up"),
+		Rules: []runtimecontracts.HandlerRuleEntry{{Condition: `_entity.id != ""`,
+			Activity: runtimecontracts.ActivitySpec{
+				ID:   "github_create_issue",
+				Tool: "github.create_issue",
+				Input: map[string]runtimecontracts.ExpressionValue{
+					"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
+					"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
+					"repo":            runtimecontracts.CELExpression("payload.repository_name"),
+					"title":           runtimecontracts.CELExpression("payload.title"),
+					"body":            runtimecontracts.LiteralExpression("Created by Swarm follow-up"),
+				},
 			},
-		},
+		}},
 	}
 	addLabelsHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`, OnFail: "discard"},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "github_add_labels_to_issue",
-			Tool: "github.add_labels_to_issue",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
-				"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
-				"repo":            runtimecontracts.CELExpression("payload.repository_name"),
-				"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
-				"labels":          runtimecontracts.LiteralExpression([]any{"triage", "swarm"}),
+		Rules: []runtimecontracts.HandlerRuleEntry{{Condition: `_entity.id != ""`,
+			Activity: runtimecontracts.ActivitySpec{
+				ID:   "github_add_labels_to_issue",
+				Tool: "github.add_labels_to_issue",
+				Input: map[string]runtimecontracts.ExpressionValue{
+					"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
+					"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
+					"repo":            runtimecontracts.CELExpression("payload.repository_name"),
+					"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
+					"labels":          runtimecontracts.LiteralExpression([]any{"triage", "swarm"}),
+				},
 			},
-		},
+		}},
 	}
 	const (
 		commentNodeID = "github-issue-comment-responder"
@@ -502,15 +503,15 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 	)
 	nodes := map[string]runtimecontracts.SystemNodeContract{
 		commentNodeID: {
-			ExecutionType: runtimecontracts.SystemNodeExecutionType,
+
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issue_comment_created": commentHandler},
 		},
 		createNodeID: {
-			ExecutionType: runtimecontracts.SystemNodeExecutionType,
+
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issue_opened": createIssueHandler},
 		},
 		labelNodeID: {
-			ExecutionType: runtimecontracts.SystemNodeExecutionType,
+
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issue_opened": addLabelsHandler},
 		},
 	}

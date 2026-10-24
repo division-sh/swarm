@@ -53,7 +53,7 @@ func TestA2UntilConsumerUsesCompiledEventWithoutSyntheticHandler(t *testing.T) {
 				}
 				if consumer.Site == "join.until" {
 					closures++
-					if consumer.Kind != EventEndpointNodeGenerated || consumer.HandlerEvent != "arrived" || consumer.SourceLocation != "event_handlers.arrived.join.until" {
+					if consumer.Kind != EventEndpointNodeGenerated || consumer.HandlerEvent != "arrived" || consumer.SourceLocation != "arrived.join.until" {
 						t.Fatalf("closure mislabeled as authored handler: %#v", consumer)
 					}
 				}

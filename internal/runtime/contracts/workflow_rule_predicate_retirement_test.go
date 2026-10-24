@@ -155,7 +155,7 @@ func TestBundleAdmissionRejectsAuthoredDefaultMarker(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: rule-sentinel-proof\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n")
-	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - else: true\n          emit: proof.requested\n")
+	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  proof.requested:\n    rules:\n      - else: true\n        emit: proof.requested\n")
 	repoRoot := contractRepoRoot(t)
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err == nil || !strings.Contains(err.Error(), `field "else" is not supported`) || !strings.Contains(err.Error(), "DIALECT-RULES-DEFAULT") {
@@ -196,12 +196,12 @@ func TestBundleAdmissionRejectsRetiredRulePredicateAndCompilesWhen(t *testing.T)
 	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), "proof: {}\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n")
 	nodes := filepath.Join(root, "nodes.yaml")
-	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - condition: 'true'\n        - emit: proof.requested\n")
+	writeFixtureFile(t, nodes, "worker:\n  proof.requested:\n    rules:\n      - condition: 'true'\n      - emit: proof.requested\n")
 	repoRoot := contractRepoRoot(t)
 	if _, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), `field "condition" is not supported`) {
 		t.Fatalf("retired bundle admission = %v", err)
 	}
-	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - when: |-\n                true\n        - emit: proof.requested\n")
+	writeFixtureFile(t, nodes, "worker:\n  proof.requested:\n    rules:\n      - when: |-\n              true\n      - emit: proof.requested\n")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatal(err)

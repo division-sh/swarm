@@ -598,7 +598,6 @@ func assertEventBusTerminalRunRefusal(
 type fixtureWorkflowModule struct {
 	source        semanticview.Source
 	workflowNodes []runtimepipeline.WorkflowNode
-	guardRegistry runtimepipeline.GuardRegistry
 }
 
 func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
@@ -607,10 +606,6 @@ func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
 
 func (m *fixtureWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.workflowNodes...)
-}
-
-func (m *fixtureWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guardRegistry
 }
 
 func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.WorkflowModule {
@@ -623,7 +618,6 @@ func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowCon
 	return &fixtureWorkflowModule{
 		source:        source,
 		workflowNodes: workflowNodes,
-		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}
 }
 
@@ -4006,9 +4000,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	stages := runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active"}}}
-	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
-		ID: "selected_owner", Check: `_entity.id != ""`,
-	}}
+	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`}}
 	child := runtimecontracts.FlowContractView{
 		Path:  "child",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
@@ -4021,7 +4013,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-intake": {
-				ExecutionType: "system_node",
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"route.start": handler,
 				},
@@ -4040,7 +4032,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"project-observer": {
-				ExecutionType: "system_node",
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"route.start": handler,
 				},
@@ -4113,7 +4105,6 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 				Subscriptions: []events.EventType{"route.start"},
 			},
 		},
-		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}, bundle
 }
 
@@ -4693,7 +4684,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		Path: "child/grandchild",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
-				SubscribesTo: []string{"micro.done"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"micro.done": {},
 				},

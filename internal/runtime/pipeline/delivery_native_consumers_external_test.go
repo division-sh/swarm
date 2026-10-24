@@ -238,10 +238,6 @@ func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
 	pipeline.VerifyNativePipelineCompiledTransitionGuardDispositionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
-func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T) {
-	pipeline.VerifyNativeGuardKillUsesExactStageInEitherDeclarationOrderBothStoresForTest(t, pipelineDeliveryNativeFixture)
-}
-
 func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 	pipeline.VerifyNativePipelineCompiledTransitionStageGuardsOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
@@ -272,10 +268,6 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 
 func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 	pipeline.VerifyNativeCompiledTransitionPreviewExecutionAgreementOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
-}
-
-func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
-	pipeline.VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
 func TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores(t *testing.T) {

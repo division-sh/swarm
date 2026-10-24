@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -277,13 +279,11 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			errs = append(errs, fmt.Errorf("%w: node %s semantic scope: %v", ErrInvalidField, nodeID, scopeErr))
 			continue
 		}
-		if strings.TrimSpace(record.Entry.ExecutionType) != "" {
-			if err := ValidateSystemNodeExecutionType(record.Entry.ExecutionType); err != nil {
-				errs = append(errs, fmt.Errorf("%w: node %s %v", ErrInvalidField, nodeID, err))
-			}
-		}
 		for eventType, handler := range record.Entry.EventHandlers {
 			handler, _ = QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
+			if err := validateNodeHandlerEventDeclaration(bundle, record, node, eventType); err != nil {
+				errs = append(errs, err)
+			}
 			eventType = strings.TrimSpace(eventType)
 			if err := ValidateAccumulateHandlerIsolation(handler); err != nil {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s: %v", ErrInvalidField, nodeID, eventType, err))
@@ -291,7 +291,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			if workflowHandlerDeclaresConflictingCompletion(handler) {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s declares both on_complete and rules", ErrConflictingCompletion, nodeID, eventType))
 			}
-			if guardHasIdentityWithoutCheck(handler.Guard) {
+			if handler.Guard != nil && strings.TrimSpace(handler.Guard.Check) == "" {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s", ErrInvalidGuardCheck, nodeID, eventType))
 			}
 		}
@@ -318,23 +318,27 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	return nil
 }
 
+func validateNodeHandlerEventDeclaration(bundle *WorkflowContractBundle, record ScopedNodeRecord, node runtimeidentity.ExecutableNode, event string) error {
+	location := record.Source.File
+	slot := NodeProvenanceMapPath(NodeProvenanceMapPath("", node.NodeID()), event)
+	if introduction, found := bundle.IntroductionLocation(record.Source.File, slot, true); found {
+		location = fmt.Sprintf("%s:%d:%d", record.Source.File, introduction.Line, introduction.Column)
+	}
+	if _, reserved := systemNodeContractFields[event]; reserved {
+		return fmt.Errorf("%w: node %q in flow %q handler %q at %s is a node field, not an event; rename the event", ErrInvalidField, node.NodeID(), node.FlowPath(), event, location)
+	}
+	if !eventidentity.IsCanonicalName(event) && !eventidentity.IsCanonicalPattern(event) {
+		return fmt.Errorf("%w: node %q in flow %q handler %q at %s requires an exact event name or supported wildcard pattern", ErrInvalidField, node.NodeID(), node.FlowPath(), event, location)
+	}
+	if !bundle.executableNodeHandlerEventDeclared(node, event) {
+		return fmt.Errorf("%w: node %q in flow %q handler %q at %s refers to an undeclared event; declare the event in this flow or bind its producer-owned input", ErrInvalidField, node.NodeID(), node.FlowPath(), event, location)
+	}
+	return nil
+}
+
 func workflowHandlerDeclaresConflictingCompletion(handler SystemNodeEventHandler) bool {
 	return len(handler.Rules) > 0 && workflowHandlerHasOnComplete(handler)
 }
 func workflowHandlerHasOnComplete(handler SystemNodeEventHandler) bool {
 	return len(handler.OnComplete) > 0
-}
-func guardHasIdentityWithoutCheck(spec *GuardSpec) bool {
-	if spec == nil {
-		return false
-	}
-	if strings.TrimSpace(spec.Check) != "" {
-		return false
-	}
-	for _, check := range spec.Checks {
-		if strings.TrimSpace(check.Check) != "" {
-			return false
-		}
-	}
-	return strings.TrimSpace(spec.ID) != ""
 }

@@ -97,7 +97,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 	files["schema.yaml"] += "    - reader.cut\n"
 	files["events.yaml"] += "reader.cut:\npoll.tick:\n"
 	if scenario.deadline {
-		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "        output: payload.result\n", "        output: payload.result\n        deadline: {after: 1h, from: stage_entry}\n", 1)
+		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "      output: payload.result\n", "      output: payload.result\n      deadline: {after: 1h, from: stage_entry}\n", 1)
 		files["nodes.yaml"] += "        on_deadline: {advances_to: ready}\n"
 	}
 	if scenario.emptyList {
@@ -113,7 +113,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 		subscriptions = append(subscriptions, "manual.abort")
 	}
 	if scenario.noJoin {
-		files["nodes.yaml"] = "collector:\n  execution_type: system_node\n  event_handlers:\n    item.completed: {}\n"
+		files["nodes.yaml"] = "collector:\n  item.completed: {}\n"
 	}
 	bundle := loadPipelineLifecycleFixtureBundle(t, files)
 	source := semanticview.Wrap(bundle)

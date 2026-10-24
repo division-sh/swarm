@@ -1,17 +1,9 @@
 dispatcher:
-  execution_type: system_node
-  subscribes_to: [pipeline.start]
-  produces: [child/work.begin]
-  event_handlers:
-    pipeline.start:
-      emit: child/work.begin
+  pipeline.start:
+    emit: child/work.begin
 
 collector:
-  execution_type: system_node
-  subscribes_to: [task.done]
-  produces: [pipeline.complete]
-  event_handlers:
-    task.done:
-      advances_to: done
-      emit:
-        event: pipeline.complete
+  task.done:
+    advances_to: done
+    emit:
+      event: pipeline.complete

@@ -59,22 +59,20 @@ stages:
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "enter.s1:\nenter.s2:\nnote:\nobserved:\n",
 		"nodes.yaml": `router:
-  execution_type: system_node
-  event_handlers:
-    enter.s1: {advances_to: s1}
-    enter.s2: {advances_to: s2}
-    note:
-      data_accumulation:
-        writes:
-          - target_field: marker
-            value: |-
-              'updated'
-    observed:
-      data_accumulation:
-        writes:
-          - target_field: marker
-            value: |-
-              'observed'
+  enter.s1: {advances_to: s1}
+  enter.s2: {advances_to: s2}
+  note:
+    data_accumulation:
+      writes:
+        - target_field: marker
+          value: |-
+            'updated'
+  observed:
+    data_accumulation:
+      writes:
+        - target_field: marker
+          value: |-
+            'observed'
 `,
 	}
 	if action == "connected_qualified" || action == "connected_renamed" {

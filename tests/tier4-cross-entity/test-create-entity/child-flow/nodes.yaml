@@ -1,7 +1,3 @@
 child-node:
-  execution_type: system_node
-  subscribes_to: [child.start]
-  produces: []
-  event_handlers:
-    child.start:
-      advances_to: completed
+  child.start:
+    advances_to: completed

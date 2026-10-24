@@ -32,7 +32,7 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 						inputs:  []runtimecontracts.FlowInputEventPin{{Event: eventName}},
 						outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
 						nodes: map[string]runtimecontracts.SystemNodeContract{"observer": {
-							SubscribesTo:  []string{eventName},
+
 							EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {}},
 						}},
 					})

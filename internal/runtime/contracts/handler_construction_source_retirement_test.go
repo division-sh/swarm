@@ -13,7 +13,7 @@ import (
 func TestHandlerConstructionRetirementDiskAndReconstructedSource(t *testing.T) {
 	for _, variant := range []string{"absent", "", "true", "false", "null", "''", "[]", "{}", "[true]", "{value: true}"} {
 		t.Run(variant, func(t *testing.T) {
-			body := "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested:\n"
+			body := "worker:\n  work.requested:\n"
 			if variant != "absent" {
 				body += "      create_entity: " + variant + "\n"
 			}

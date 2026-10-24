@@ -1,18 +1,7 @@
 router:
-  execution_type: system_node
-  subscribes_to:
-    - validate.requested
-    - validation.done
-  produces: []
-
-  event_handlers:
-    validate.requested:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
-      emit: child/validate.start
-    validation.done:
-      guard:
-        id: check_child_gate
-        check: _entity.gates['child/g_validated'] == true
-      advances_to: done
+  validate.requested:
+    guard: _entity.id != ""
+    emit: child/validate.start
+  validation.done:
+    guard: _entity.gates['child/g_validated'] == true
+    advances_to: done

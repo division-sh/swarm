@@ -85,20 +85,16 @@ work.assigned:
   work_id: text
 `,
 		"nodes.yaml": `controller:
-  execution_type: system_node
-  subscribes_to: [start.requested, work.finished]
-  produces: [work.assigned]
-  event_handlers:
-    start.requested:
-      emit:
-        event: work.assigned
-        fields: {work_id: payload.work_id}
-    work.finished:
-      advances_to: done
-      data_accumulation:
-        source_event: work.finished
-        writes:
-          - {target_field: counter, value: entity.counter + 1}
+  start.requested:
+    emit:
+      event: work.assigned
+      fields: {work_id: payload.work_id}
+  work.finished:
+    advances_to: done
+    data_accumulation:
+      source_event: work.finished
+      writes:
+        - {target_field: counter, value: entity.counter + 1}
 `,
 		"work/schema.yaml":   workSchema,
 		"work/entities.yaml": workEntity,
@@ -107,16 +103,13 @@ work.assigned:
   result: text
 `,
 		"work/nodes.yaml": `finish:
-  execution_type: system_node
-  subscribes_to: [work.finished]
-  event_handlers:
-    work.finished:
-      advances_to: done
-      data_accumulation:
-        source_event: work.finished
-        writes:
-          - {target_field: work_id, value: payload.work_id}
-          - {target_field: result, value: payload.result}
+  work.finished:
+    advances_to: done
+    data_accumulation:
+      source_event: work.finished
+      writes:
+        - {target_field: work_id, value: payload.work_id}
+        - {target_field: result, value: payload.result}
 `,
 		"work/agents.yaml": `worker:
   role: worker

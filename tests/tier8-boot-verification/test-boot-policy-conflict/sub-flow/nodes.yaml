@@ -1,7 +1,3 @@
 sub-node:
-  execution_type: system_node
-  subscribes_to: [sub.requested]
-  produces: []
-  event_handlers:
-    sub.requested:
-      advances_to: done
+  sub.requested:
+    advances_to: done

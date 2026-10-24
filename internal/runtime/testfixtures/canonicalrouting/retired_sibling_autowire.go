@@ -17,6 +17,6 @@ connect:
 	writeClosedVariantFile(t, root, "producer/events.yaml", "scan.requested:\n")
 	writeClosedVariantFile(t, root, "discovery/schema.yaml", "name: discovery\npins:\n  inputs: [scan.requested]\n")
 	writeClosedVariantFile(t, root, "discovery/events.yaml", "scan.requested:\n")
-	writeClosedVariantFile(t, root, "discovery/nodes.yaml", "scan-orchestrator:\n  execution_type: system_node\n  event_handlers:\n    scan.requested: {}\n")
+	writeClosedVariantFile(t, root, "discovery/nodes.yaml", "scan-orchestrator:\n  scan.requested: {}\n")
 	return root
 }

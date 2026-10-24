@@ -22,10 +22,8 @@ stages:
   done: {final: true}
 `)
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `listener:
-  execution_type: system_node
-  event_handlers:
-    root.started:
-      advances_to: done
+  root.started:
+    advances_to: done
 `)
 	return root
 }

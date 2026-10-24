@@ -268,8 +268,6 @@ func payloadCompletenessEntitySchemaState(entityFields map[string]struct{}, fiel
 
 func payloadCompletenessDeclarativeSiteLabel(site runtimecontracts.HandlerDeclarativeEmitSite) string {
 	switch strings.TrimSpace(site.Source) {
-	case "handler.guard.on_fail.escalate":
-		return "guard.on_fail.escalate"
 	case "handler.rules.emit":
 		return site.RuleDisplay + ".emit"
 	case "handler.rules.fan_out.emit":

@@ -643,33 +643,21 @@ func selectedActivityProducerSourceOptions(t *testing.T, ordinaryRootLoop, activ
 		"entities.yaml": "default:\n  name: text\n",
 		"events.yaml":   "ordinary.ready:\nreview.inspect:\nsupport.drafted:\n",
 		"nodes.yaml": `reader:
-  execution_type: system_node
-  subscribes_to: [review.inspect]
-  event_handlers:
-    review.inspect:
-      activity: {id: inspect, tool: provider.read}
+  review.inspect:
+    activity: {id: inspect, tool: provider.read}
 support:
-  execution_type: system_node
-  subscribes_to: [support.drafted]
-  event_handlers:
-    support.drafted:
-      activity: {id: send_support_reply, tool: telegram.send_message, approval: {decision: support_reply}}
+  support.drafted:
+    activity: {id: send_support_reply, tool: telegram.send_message, approval: {decision: support_reply}}
 `,
 		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {}\n",
 		"flow-a/entities.yaml": "default:\n  name: text\n",
 		"flow-a/events.yaml":   "review.accepted:\nreview.inspect:\n",
 		"flow-a/nodes.yaml": `writer:
-  execution_type: system_node
-  subscribes_to: [review.accepted]
-  event_handlers:
-    review.accepted:
-      activity: {id: commit, tool: provider.write}
+  review.accepted:
+    activity: {id: commit, tool: provider.write}
 reader:
-  execution_type: system_node
-  subscribes_to: [review.inspect]
-  event_handlers:
-    review.inspect:
-      activity: {id: inspect, tool: provider.read}
+  review.inspect:
+    activity: {id: inspect, tool: provider.read}
 `,
 		"tools.yaml": `provider.read:
   handler_type: http
@@ -688,11 +676,8 @@ telegram.send_message:
 	if rootWrite {
 		files["events.yaml"] += "review.accepted:\n"
 		files["nodes.yaml"] += `writer:
-  execution_type: system_node
-  subscribes_to: [review.accepted]
-  event_handlers:
-    review.accepted:
-      activity: {id: commit, tool: provider.write}
+  review.accepted:
+    activity: {id: commit, tool: provider.write}
 `
 	}
 	if ordinaryRootLoop {
@@ -700,51 +685,42 @@ telegram.send_message:
 		files["schema.yaml"] += "  closed: {final: true}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
 		files["events.yaml"] = "ordinary.ready:\n  opaque_revision: RevisionText\nordinary.start:\nordinary.retry:\n  opaque_revision: RevisionText\nordinary.close:\n  opaque_revision: RevisionText\n"
 		files["nodes.yaml"] = `reader:
-  execution_type: system_node
-  subscribes_to: [ordinary.start, ordinary.ready, ordinary.retry, ordinary.close]
-  event_handlers:
-    ordinary.start:
-      loop: {start: revision, from: pending}
-      advances_to: pending
-    ordinary.ready:
-      loop: {admit: revision, from: pending}
-      advances_to: pending
-    ordinary.retry:
-      loop: {repeat: revision, from: pending}
-      advances_to: pending
-    ordinary.close:
-      loop: {close: revision, from: pending}
-      advances_to: closed
+  ordinary.start:
+    loop: {start: revision, from: pending}
+    advances_to: pending
+  ordinary.ready:
+    loop: {admit: revision, from: pending}
+    advances_to: pending
+  ordinary.retry:
+    loop: {repeat: revision, from: pending}
+    advances_to: pending
+  ordinary.close:
+    loop: {close: revision, from: pending}
+    advances_to: closed
 `
 	}
 	if activityLoop {
 		files["flow-a/schema.yaml"] += "  review: {}\n  closed: {final: true}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
 		files["flow-a/events.yaml"] = "review.accepted:\n  revision_id: text\nreview.inspect:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n"
 		files["flow-a/nodes.yaml"] = `writer:
-  execution_type: system_node
-  subscribes_to: [review.start, review.accepted, review.retry, review.close]
-  event_handlers:
-    review.start:
-      loop: {start: revision, from: pending}
-      advances_to: review
-    review.accepted:
-      loop: {admit: revision, from: review}
-      advances_to: review
-      activity: {id: commit, tool: provider.write}
-    review.retry:
-      loop: {repeat: revision, from: review}
-      advances_to: review
-    review.close:
-      loop: {close: revision, from: review}
-      advances_to: closed
+  review.start:
+    loop: {start: revision, from: pending}
+    advances_to: review
+  review.accepted:
+    loop: {admit: revision, from: review}
+    advances_to: review
+    activity: {id: commit, tool: provider.write}
+  review.retry:
+    loop: {repeat: revision, from: review}
+    advances_to: review
+  review.close:
+    loop: {close: revision, from: review}
+    advances_to: closed
 reader:
-  execution_type: system_node
-  subscribes_to: [review.inspect]
-  event_handlers:
-    review.inspect:
-      loop: {admit: revision, from: review}
-      advances_to: review
-      activity: {id: inspect, tool: provider.read}
+  review.inspect:
+    loop: {admit: revision, from: review}
+    advances_to: review
+    activity: {id: inspect, tool: provider.read}
 `
 	}
 	for path, content := range files {

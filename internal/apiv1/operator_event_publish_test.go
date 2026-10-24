@@ -1393,8 +1393,7 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 					}
 					bundle.FlowTree.Root.Children[0].Schema = bundle.FlowSchemas["operating"]
 					consumer := runtimecontracts.SystemNodeContract{
-						ExecutionType: "system_node",
-						SubscribesTo:  []string{"review.requested"},
+
 						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": {}},
 					}
 					bundle.FlowTree.Root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{"lower-precedence-consumer": consumer}
@@ -2523,7 +2522,7 @@ func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontra
 			},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				nodeID: {
-					SubscribesTo: []string{eventName},
+
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 						eventName: {},
 					},
@@ -2555,7 +2554,7 @@ func eventPublishFollowUpTestBundle() *runtimecontracts.WorkflowContractBundle {
 		"scan.unhandled": topicEventCatalogEntry(),
 	}
 	node := runtimecontracts.SystemNodeContract{
-		SubscribesTo: []string{"scan.requested", "scan.followup"},
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"scan.requested": {},
 			"scan.followup":  {},
@@ -2672,7 +2671,7 @@ func eventPublishTemplateInputTestBundle(t testing.TB, eventName string, authore
 		return mustCompileEventPublishTestBundle(bundle)
 	}
 	rootNode := runtimecontracts.SystemNodeContract{
-		SubscribesTo: []string{eventName},
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			eventName: {},
 		},

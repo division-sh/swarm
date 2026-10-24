@@ -174,7 +174,7 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"producer-local": {
-					SubscribesTo:  []string{eventName},
+
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: existingOwnerHandlerFixture()},
 				},
 			},
@@ -285,7 +285,7 @@ func mixedFanoutToFanoutSource(t testing.TB, reverse bool) semanticview.Source {
 	localNode := func(id, event string) map[string]runtimecontracts.SystemNodeContract {
 		return map[string]runtimecontracts.SystemNodeContract{
 			id: {
-				SubscribesTo:  []string{event},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: existingOwnerHandlerFixture()},
 			},
 		}

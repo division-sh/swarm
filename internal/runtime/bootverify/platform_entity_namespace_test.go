@@ -149,7 +149,7 @@ func TestRetiredReceiverSelectorsRejectEveryIngressShape(t *testing.T) {
 								}
 								text := string(data)
 								if file == "account/nodes.yaml" {
-									text = strings.Replace(text, "    account.ready: {}", "    account.ready:\n      "+selector+":\n        by: {account_id: payload.account_id}", 1)
+									text = strings.Replace(text, "  account.ready: {}", "  account.ready:\n    "+selector+":\n      by: {account_id: payload.account_id}", 1)
 								}
 								if !template && file == "account/schema.yaml" {
 									text = strings.Replace(text, "instance: account_id\n", "", 1)
@@ -176,10 +176,7 @@ func TestRun_RejectsSelectEntityByPlatformEntitySourceAuthority(t *testing.T) {
 		t.Run(acquisition, func(t *testing.T) {
 			root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
+  opco.spend_requested:
       `+acquisition+`:
         by:
           vertical_id: _entity.id

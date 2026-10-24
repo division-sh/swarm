@@ -1,13 +1,9 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [state.clear_requested]
-  produces: [state.cleared]
-  event_handlers:
-    state.clear_requested:
-      data_accumulation:
-        writes:
-          - {op: clear, target: entity.accumulated_count}
-          - {op: clear, target: entity.accumulated_total}
-      emit:
-        event: state.cleared
-      advances_to: cleared
+  state.clear_requested:
+    data_accumulation:
+      writes:
+        - {op: clear, target: entity.accumulated_count}
+        - {op: clear, target: entity.accumulated_total}
+    emit:
+      event: state.cleared
+    advances_to: cleared

@@ -27,14 +27,12 @@ func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *test
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "step.left:\nstep.right:\nobserve:\nfield.write:\n",
 		"nodes.yaml": `router:
-  execution_type: system_node
-  event_handlers:
-    step.left: {advances_to: left}
-    step.right: {advances_to: right}
-    observe: {}
-    field.write:
-      data_accumulation:
-        writes: [{target_field: marker, value: "changed"}]
+  step.left: {advances_to: left}
+  step.right: {advances_to: right}
+  observe: {}
+  field.write:
+    data_accumulation:
+      writes: [{target_field: marker, value: "changed"}]
 `,
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {

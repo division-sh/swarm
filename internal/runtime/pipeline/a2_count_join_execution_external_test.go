@@ -302,22 +302,20 @@ func a2CountJoinFiles(count int) map[string]string {
 		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
 		"events.yaml":   "item.completed:\n  member_id: text\n  result: JoinResult\nhalt.requested:\n",
 		"nodes.yaml": fmt.Sprintf(`collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {count: %d, by: payload.member_id}
-        output: payload.result
-        until: halt.requested
-        on_complete:
-          advances_to: ready
-          data_accumulation:
-            writes:
-              - {target_field: final_expected, value: join.expected}
-              - {target_field: final_completed, value: join.completed}
-              - {target_field: final_results, value: join.results}
-              - {target_field: final_reason, value: join.close_reason}
+  item.completed:
+    join:
+      stage: awaiting
+      members: {count: %d, by: payload.member_id}
+      output: payload.result
+      until: halt.requested
+      on_complete:
+        advances_to: ready
+        data_accumulation:
+          writes:
+            - {target_field: final_expected, value: join.expected}
+            - {target_field: final_completed, value: join.completed}
+            - {target_field: final_results, value: join.results}
+            - {target_field: final_reason, value: join.close_reason}
 `, count),
 	}
 }

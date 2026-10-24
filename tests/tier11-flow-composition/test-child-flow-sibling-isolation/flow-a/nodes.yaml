@@ -1,18 +1,10 @@
 alpha-intake:
-  execution_type: system_node
-  subscribes_to: [alpha.start]
-  produces: [internal.done]
-  event_handlers:
-    alpha.start:
-      advances_to: working
-      emit: internal.done
+  alpha.start:
+    advances_to: working
+    emit: internal.done
 
 alpha-finisher:
-  execution_type: system_node
-  subscribes_to: [internal.done]
-  produces: [alpha.complete]
-  event_handlers:
-    internal.done:
-      advances_to: processed
-      emit:
-        event: alpha.complete
+  internal.done:
+    advances_to: processed
+    emit:
+      event: alpha.complete

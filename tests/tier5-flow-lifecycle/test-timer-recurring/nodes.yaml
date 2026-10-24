@@ -1,6 +1,4 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [monitor.started, monitor.stopped, timer.tick]
   timers:
     - id: tick_timer
       event: timer.tick
@@ -8,10 +6,9 @@ test-node:
       start_on: event:monitor.started
       cancel_on: event:monitor.stopped
       recurring: true
-  event_handlers:
-    monitor.started:
-      advances_to: monitoring
-    monitor.stopped:
-      advances_to: done
-    timer.tick:
-      advances_to: monitoring
+  monitor.started:
+    advances_to: monitoring
+  monitor.stopped:
+    advances_to: done
+  timer.tick:
+    advances_to: monitoring

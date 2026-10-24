@@ -1,7 +1,3 @@
 complete-node:
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  produces: []
-  event_handlers:
-    task.assigned:
-      advances_to: done
+  task.assigned:
+    advances_to: done

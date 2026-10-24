@@ -18,13 +18,10 @@ func VerifyCompositionReceiverInitializationAndRepeatedBusinessWritesBothStoresF
 		"entities.yaml": "budget:\n  spent_usd: {type: number, initial: 0}\n  status: {type: text, initial: pending}\n",
 		"events.yaml":   "spend.recorded:\n  amount_usd: number\n  business_key: text\n",
 		"nodes.yaml": `budget-writer:
-  execution_type: system_node
-  subscribes_to: [spend.recorded]
-  event_handlers:
-    spend.recorded:
-      data_accumulation:
-        writes:
-          - {source_field: amount_usd, target_field: spent_usd}
+  spend.recorded:
+    data_accumulation:
+      writes:
+        - {source_field: amount_usd, target_field: spent_usd}
 `,
 	})
 	bundle, ok := semanticview.Bundle(source)

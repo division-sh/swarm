@@ -16,19 +16,13 @@ func CopyMaterializingSenderExistingReceiver(t testing.TB, requiresExisting bool
 	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  case_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "start:\n  case_id: text\nwork.ready:\n  case_id: text\n")
 	nodes := `intake:
-  execution_type: system_node
-  subscribes_to: [start]
-  event_handlers:
-    start:
-      data_accumulation:
-        writes: [{target_field: case_id, value: payload.case_id}]
-      emit: {event: work.ready, fields: {case_id: payload.case_id}}
+  start:
+    data_accumulation:
+      writes: [{target_field: case_id, value: payload.case_id}]
+    emit: {event: work.ready, fields: {case_id: payload.case_id}}
 receiver:
-  execution_type: system_node
-  subscribes_to: [work.ready]
-  event_handlers:
-    work.ready:
-      guard: {id: exact_owner, check: has(entity.case_id) && entity.case_id == payload.case_id}
+  work.ready:
+    guard: has(entity.case_id) && entity.case_id == payload.case_id
 `
 	if !requiresExisting {
 		nodes = strings.Replace(nodes, "has(entity.case_id) && entity.case_id == payload.case_id", "payload.case_id == 'exact'", 1)

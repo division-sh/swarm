@@ -33,7 +33,7 @@ func TestPolicyCaseRepeatedSelectorWithinTupleIsRefused2287(t *testing.T) {
 					root := t.TempDir()
 					writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: case_tuple\nstages: {done: {final: true}}\n")
 					writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\n  mode: text\n  target: text\ntask.done:\ntask.other:\n")
-					writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - case: {"+row+"}\n          emit: task.done\n        - emit: task.other\n")
+					writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  task.ready:\n    rules:\n      - case: {"+row+"}\n        emit: task.done\n      - emit: task.other\n")
 					repo := repoRootForContractsTest(t)
 					_, err = LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 				}
@@ -147,7 +147,7 @@ func TestPolicyCaseBundleShapeAdmission2287(t *testing.T) {
 			root := t.TempDir()
 			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: case_shape\nstages: {done: {final: true}}\n")
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\n  mode: text\n  target: text\n  ready: boolean\n  count: integer\ntask.done:\ntask.other:\n")
-			writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - case: {"+tc.row+"}\n          emit: task.done\n        - emit: task.other\n")
+			writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  task.ready:\n    rules:\n      - case: {"+tc.row+"}\n        emit: task.done\n      - emit: task.other\n")
 			repo := repoRootForContractsTest(t)
 			_, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 			if tc.refusal != "" {

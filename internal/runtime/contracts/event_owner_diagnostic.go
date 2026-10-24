@@ -34,7 +34,7 @@ func eventOwnerDeclarationLocations(bundle *WorkflowContractBundle, node runtime
 	var locations []string
 	add := func(handler, slot, label string) {
 		nodePath := NodeProvenanceMapPath("", node.NodeID())
-		path := NodeProvenanceMapPath(nodePath+".event_handlers", handler) + slot
+		path := NodeProvenanceMapPath(nodePath, handler) + slot
 		location := "location unavailable"
 		if introduction, found := bundle.IntroductionLocation(record.Source.File, path, false); found {
 			location = fmt.Sprintf("%s:%d:%d", record.Source.File, introduction.Line, introduction.Column)

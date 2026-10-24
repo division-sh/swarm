@@ -15,8 +15,6 @@ type nodePresenceShape struct {
 // Admission outcomes are field-specific. Semantic requiredness that depends on
 // the enclosing stage/operation is exercised by the supported branch tests.
 var nodeScalarFieldAdmission = map[string][8]bool{
-	"node.description":     {true, false, true, true, false, false, false, false},
-	"node.execution_type":  {true, false, true, true, false, false, false, false},
 	"node.state_table":     {true, false, true, true, false, false, false, false},
 	"timer.id":             {true, false, true, true, false, false, false, false},
 	"timer.stage":          {true, false, true, true, false, false, false, false},
@@ -30,11 +28,8 @@ var nodeScalarFieldAdmission = map[string][8]bool{
 	"handler.description":  {true, false, true, true, false, false, false, false},
 	"handler.advances_to":  {true, false, true, true, false, false, false, false},
 	"state.description":    {true, false, true, true, false, false, false, false},
-	"activity.id":          {true, false, true, true, false, false, false, false},
+	"activity.id":          {false, false, false, true, false, false, false, false},
 	"activity.tool":        {true, false, true, true, false, false, false, false},
-	"guard.id":             {true, false, true, true, false, false, false, false},
-	"guard.check":          {true, false, false, true, false, false, false, false},
-	"guard.policy_ref":     {true, false, true, true, false, false, false, false},
 	"query.source":         {true, false, true, true, false, false, false, false},
 	"query.entities":       {true, false, true, true, false, false, false, false},
 	"query.filter":         {true, false, false, true, false, false, false, false},
@@ -67,12 +62,11 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 		newTarget  func() any
 		fields     map[string]string
 	}{
-		{"node", "event_handlers: {}\n", func() any { return new(SystemNodeContract) }, map[string]string{"description": "Description", "execution_type": "ExecutionType", "state_table": "StateTable"}},
+		{"node", "task.ready: {}\n", func() any { return new(SystemNodeContract) }, map[string]string{"state_table": "StateTable"}},
 		{"timer", "", func() any { return new(WorkflowTimerContract) }, map[string]string{"id": "ID", "stage": "Stage", "event": "Event", "owner": "Owner", "action": "Action", "cancellation": "Cancellation", "delay": "Delay", "start_on": "StartOn", "cancel_on": "CancelOn"}},
 		{"handler", "emit: ready\n", func() any { return new(SystemNodeEventHandler) }, map[string]string{"description": "Description", "advances_to": "AdvancesTo"}},
 		{"state", "fields: {}\n", func() any { return new(NodeStateSchema) }, map[string]string{"description": "Description"}},
-		{"activity", "input: {}\n", func() any { return new(ActivitySpec) }, map[string]string{"id": "ID", "tool": "Tool"}},
-		{"guard", "checks: []\n", func() any { return new(GuardSpec) }, map[string]string{"id": "ID", "check": "Check", "policy_ref": "PolicyRef"}},
+		{"activity", "id: presence\ninput: {}\n", func() any { return new(ActivitySpec) }, map[string]string{"id": "ID", "tool": "Tool"}},
 		{"query", "count: false\n", func() any { return new(QuerySpec) }, map[string]string{"source": "Source", "entities": "Entities", "filter": "Filter", "group_by": "GroupBy", "store_as": "StoreAs"}},
 		{"group_by", "", func() any { return new(GroupBySpec) }, map[string]string{"items_from": "ItemsFrom", "key": "Key", "store_as": "StoreAs"}},
 		{"filter", "", func() any { return new(FilterSpec) }, map[string]string{"source": "Source", "items_from": "ItemsFrom", "condition": "Condition", "store_as": "StoreAs"}},
@@ -89,6 +83,9 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 				for index, shape := range nodePresenceShapes("payload.rows", "[payload.rows]", "{value: payload.rows}") {
 					t.Run(shape.name, func(t *testing.T) {
 						body := group.base
+						if group.name == "activity" && field == "id" {
+							body = "input: {}\n"
+						}
 						if shape.name != "missing" {
 							body += field + ": " + shape.value + "\n"
 						} else if body == "" {
@@ -157,13 +154,13 @@ func TestW4HandlerContainerPresence(t *testing.T) {
 				t.Fatalf("emit=%#v", h.Emit)
 			}
 		}},
-		{"activity", "task", "[task]", "{tool: search}", [8]bool{true, true, false, false, false, false, true, true}, func(t *testing.T, h SystemNodeEventHandler) {
+		{"activity", "task", "[task]", "{id: search, tool: search}", [8]bool{true, true, false, false, false, false, false, true}, func(t *testing.T, h SystemNodeEventHandler) {
 			if h.Activity.Tool != "search" {
 				t.Fatalf("activity=%#v", h.Activity)
 			}
 		}},
-		{"guard", "ready", "[ready]", "{id: ready, check: true}", [8]bool{true, true, false, false, false, false, true, true}, func(t *testing.T, h SystemNodeEventHandler) {
-			if h.Guard == nil || h.Guard.Check != "true" {
+		{"guard", "ready", "[ready]", "{id: ready, check: true}", [8]bool{true, false, false, true, false, false, false, false}, func(t *testing.T, h SystemNodeEventHandler) {
+			if h.Guard == nil || h.Guard.Check != "ready" {
 				t.Fatalf("guard=%#v", h.Guard)
 			}
 		}},

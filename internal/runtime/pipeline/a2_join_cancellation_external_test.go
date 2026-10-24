@@ -79,7 +79,7 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 					if mode != "stage_exit" {
 						next = "cancelled"
 					}
-					files["nodes.yaml"] += "controller:\n  execution_type: system_node\n  event_handlers:\n    abort.requested: {advances_to: " + next + "}\n    resume.requested: {advances_to: awaiting}\n"
+					files["nodes.yaml"] += "controller:\n  abort.requested: {advances_to: " + next + "}\n    resume.requested: {advances_to: awaiting}\n"
 					source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
 					ctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)
 					collector := externalPipelineSourceNode(t, source, ".", "collector")

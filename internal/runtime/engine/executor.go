@@ -3041,87 +3041,17 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 	return nil
 }
 
-func (e *Executor) executionContext(frame *executionFrame, step Step) ExecutionContext {
-	req := frame.req
-	req.State = frame.state.State
-	var payloadType *runtimecontracts.ResolvedCatalogType
-	if frame.payloadType != nil {
-		value := frame.payloadType.Clone()
-		payloadType = &value
-	}
-	return ExecutionContext{
-		Request:     req,
-		Base:        e.currentContext(frame),
-		PayloadType: payloadType,
-		EntityType:  frameExpressionOptions(frame).EntityType,
-		Step:        step,
-		Completed:   append([]Step(nil), frame.result.ExecutedSteps...),
-	}
-}
-
 func (e *Executor) evaluateGuardSpec(frame *executionFrame, spec *runtimecontracts.GuardSpec) (bool, []string, error) {
 	if spec == nil {
 		return true, nil, nil
 	}
-	effective := spec.EffectiveChecks()
-	evaluated := make([]string, 0, len(effective))
-	for _, check := range effective {
-		passed, ids, err := e.evaluateGuardCheck(frame, check)
-		evaluated = append(evaluated, ids...)
-		if err != nil {
-			return false, evaluated, err
-		}
-		if !passed {
-			return false, evaluated, nil
-		}
+	check := strings.TrimSpace(spec.Check)
+	if check == "" {
+		return false, nil, fmt.Errorf("guard requires a scalar boolean expression")
 	}
-	return true, evaluated, nil
+	passed, err := e.evaluator.EvalBool(check, e.currentContext(frame), joinExpressionOptions(frame))
+	return passed, []string{check}, err
 }
-
-func (e *Executor) evaluateGuardCheck(frame *executionFrame, guard runtimecontracts.GuardCheck) (bool, []string, error) {
-	label := guard.EffectiveIdentity()
-	if label == "" {
-		return true, nil, nil
-	}
-	id := strings.TrimSpace(guard.ID)
-	check := strings.TrimSpace(guard.Check)
-	evaluated := []string{label}
-	if check != "" {
-		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame), joinExpressionOptions(frame))
-		if err == nil {
-			return passed, evaluated, nil
-		}
-		if err != ErrNotImplemented || id == "" {
-			return false, evaluated, err
-		}
-	}
-	guardKey := identity.NormalizeGuardKey(id)
-	if e.deps.GuardRegistry == nil {
-		return false, evaluated, fmt.Errorf("guard %q requires runtime registry", id)
-	}
-	entry, ok := e.deps.GuardRegistry.Guard(guardKey)
-	if !ok || !e.deps.GuardRegistry.IsExecutable(guardKey) {
-		return false, evaluated, fmt.Errorf("guard %q is not executable", id)
-	}
-	if strings.TrimSpace(entry.Check) != "" {
-		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame), joinExpressionOptions(frame))
-		if err == nil {
-			return passed, evaluated, nil
-		}
-		if err != ErrNotImplemented {
-			return false, evaluated, err
-		}
-	}
-	if e.deps.GuardRunner != nil {
-		execCtx := e.executionContext(frame, StepGuard)
-		passed, handled, err := e.deps.GuardRunner.EvaluateGuard(frame.ctx, guardKey, entry, execCtx)
-		if handled || err != nil {
-			return passed, evaluated, err
-		}
-	}
-	return false, evaluated, fmt.Errorf("guard %q is not executable", id)
-}
-
 func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.HandlerRuleEntry, source handlerRuleSource) (*runtimecontracts.HandlerRuleEntry, int, error) {
 	hasExecutableRow := false
 	for idx := range rules {
@@ -3557,10 +3487,6 @@ func emitSourceRoute(frame *executionFrame) events.RouteIdentity {
 	return frame.req.ProducerSource.Route()
 }
 
-func (e *Executor) queueEmitIntent(frame *executionFrame, eventType string, payload map[string]any) (bool, error) {
-	return e.queueEmitIntentForSpec(frame, runtimecontracts.EmitSpec{Event: strings.TrimSpace(eventType)}, eventType, payload)
-}
-
 func (e *Executor) queueEmitIntentForSpec(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, payload map[string]any) (bool, error) {
 	nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
 	if err != nil {
@@ -3594,85 +3520,16 @@ func (e *Executor) resolveClearGates(frame *executionFrame) []string {
 	return normalizeStrings(stringSliceFromAny(mapsKeys(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))))
 }
 
-func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontracts.GuardSpec) error {
-	failureSpec, err := spec.FailureSpec()
-	if err != nil {
-		return err
-	}
-	parsed, err := GuardFailureFromSpec(failureSpec)
-	if err != nil {
-		return err
-	}
+func (e *Executor) applyGuardFailure(frame *executionFrame, _ *runtimecontracts.GuardSpec) error {
 	frame.req.Handler.AdvancesTo = ""
 	frame.req.Handler.SetsGate = nil
 	frame.req.Handler.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
 	frame.topLevelDataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
 	frame.req.Handler.Emit = runtimecontracts.EmitSpec{}
-	switch parsed.Action {
-	case GuardFailureReject:
-		frame.result.Status = OutcomeRejected
-		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "reject")
-		return nil
-	case GuardFailureDiscard:
-		frame.result.Status = OutcomeDiscarded
-		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "discard")
-		return nil
-	case GuardFailureKill:
-		frame.result.Status = OutcomeKilled
-		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "kill")
-		graph, ok := semanticview.WorkflowStageTopology(e.deps.Source, frame.req.ExecutionFlowID.String())
-		if !ok {
-			return fmt.Errorf("guard termination requires compiled flow")
-		}
-		if killedState := graph.GuardTerminationTarget(); killedState != "" {
-			if killedState != frame.result.CurrentState {
-				if len(frame.result.GuardsEvaluated) == 0 {
-					return fmt.Errorf("guard termination requires compiled flow and evaluated guard")
-				}
-				cause, err := runtimeworkflowlifecycle.NewGuardTermination(graph, frame.req.Node, frame.req.HandlerEventKey, frame.result.GuardsEvaluated[len(frame.result.GuardsEvaluated)-1], frame.result.CurrentState, killedState, frame.result.GuardsEvaluated)
-				if err != nil {
-					return err
-				}
-				if err := cause.ValidateHandlerEvidence(frame.req.Handler); err != nil {
-					return err
-				}
-				frame.result.StateMutation.Transition = &cause
-			}
-			frame.result.NextState = killedState
-			frame.state.State.CurrentState = killedState
-			frame.result.StateMutation.NextState = killedState
-		}
-		return nil
-	case GuardFailureEscalate:
-		eventType := parsed.EventType
-		frame.result.Status = OutcomeEscalated
-		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "escalate:"+eventType)
-		emitSpec, err := e.lowerEmitSpecForFrame(frame, "guard.on_fail.escalate", failureSpec.EscalationEmitSpec())
-		if err != nil {
-			return err
-		}
-		emitSpec.Event = eventType
-		payload := map[string]any{}
-		transformed, err := e.emitFieldsPayload(frame, emitSpec, eventType, frameExpressionOptions(frame))
-		if err != nil {
-			return err
-		}
-		if len(transformed) > 0 {
-			payload = transformed
-		}
-		shaped, err := e.shapeEmitPayload(frame, eventType, payload)
-		if err != nil {
-			return err
-		}
-		if _, err := e.queueEmitIntent(frame, eventType, shaped); err != nil {
-			return err
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported guard on_fail action %q", failureSpec.Action)
-	}
+	frame.result.Status = OutcomeRejected
+	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "reject")
+	return nil
 }
-
 func mapsKeys(values map[string]any) []any {
 	if len(values) == 0 {
 		return nil

@@ -152,7 +152,7 @@ func TestStreamAccumulatorDerivesNoIntrinsicTimeoutSubscriptionOrTransition(t *t
 	bundle := &WorkflowContractBundle{
 		Nodes: map[string]SystemNodeContract{
 			"collector": {
-				SubscribesTo: []string{"item.arrived"},
+
 				EventHandlers: map[string]SystemNodeEventHandler{
 					"item.arrived": {
 						Accumulate: &AccumulateSpec{Into: "items", From: "payload"},

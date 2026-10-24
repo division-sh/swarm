@@ -298,7 +298,7 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 		},
 	}
 	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"inbound.telegram.text_message": handler,
 		},
@@ -383,7 +383,6 @@ func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string)
 type telegramConnectorSupportedSurfaceModule struct {
 	source semanticview.Source
 	nodes  []runtimepipeline.WorkflowNode
-	guards runtimepipeline.GuardRegistry
 }
 
 func (m telegramConnectorSupportedSurfaceModule) SemanticSource() semanticview.Source {
@@ -392,10 +391,6 @@ func (m telegramConnectorSupportedSurfaceModule) SemanticSource() semanticview.S
 
 func (m telegramConnectorSupportedSurfaceModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
-}
-
-func (m telegramConnectorSupportedSurfaceModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
 }
 
 func startTelegramConnectorSupportedSurfaceCoordinator(
@@ -413,7 +408,6 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 	module := telegramConnectorSupportedSurfaceModule{
 		source: source,
 		nodes:  nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	pc := newExternalRuntimeTestActivityCoordinator(t, bus, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
 		SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),

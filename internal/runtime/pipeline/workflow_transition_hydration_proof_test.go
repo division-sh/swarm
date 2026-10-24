@@ -22,13 +22,11 @@ stages:
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "work:\n",
 		"nodes.yaml": `router:
-  execution_type: system_node
-  event_handlers:
-    work:
-      guard: {id: admitted-check, check: true, on_fail: reject}
-      rules:
-        - {when: false, advances_to: waiting}
-        - {advances_to: waiting}
+  work:
+    guard: true
+    rules:
+      - {when: false, advances_to: waiting}
+      - {advances_to: waiting}
 `,
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {

@@ -72,10 +72,8 @@ pins:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), rootEvents)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 parent-listener:
-  execution_type: system_node
-  subscribes_to: [`+parentSubscription+`]
-  event_handlers:
-    parent.lead_enriched: {}
+`+parentSubscription+`]
+  parent.lead_enriched: {}
 `)
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
@@ -93,20 +91,13 @@ name: worker
 	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "events.yaml"), workerEvents)
 	workerNodes := `
 worker-node:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  produces: [work.completed]
-  event_handlers:
-    work.requested:
-      emit: work.completed
+  work.requested:
+    emit: work.completed
 `
 	if variant == ImportBoundaryAliasConnectedWithLocalOutputObserver {
 		workerNodes += `
 worker-output-observer:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed: {}
+  work.completed: {}
 `
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "nodes.yaml"), workerNodes)

@@ -29,28 +29,21 @@ numeric.completed:
 `,
 		"types.yaml": "types:\n  NumericInput:\n    numbers: [integer]\n    fraction: numeric\n",
 		"nodes.yaml": `numeric:
-  execution_type: system_node
-  subscribes_to: [numeric.requested]
-  produces: [numeric.completed]
-  event_handlers:
-    numeric.requested:
-      emit:
-        event: numeric.completed
-        fields:
-          value: payload.value + payload.nested.numbers[?0].value() + 1
-          fraction: double(payload.nested.fraction) + 0.5
-          explicit_double: double(payload.value) + 1.0
+  numeric.requested:
+    emit:
+      event: numeric.completed
+      fields:
+        value: payload.value + payload.nested.numbers[?0].value() + 1
+        fraction: double(payload.nested.fraction) + 0.5
+        explicit_double: double(payload.value) + 1.0
 collector:
-  execution_type: system_node
-  subscribes_to: [numeric.completed]
-  event_handlers:
-    numeric.completed:
-      data_accumulation:
-        source_event: numeric.completed
-        writes:
-          - source_field: value
-            target_field: score
-      advances_to: done
+  numeric.completed:
+    data_accumulation:
+      source_event: numeric.completed
+      writes:
+        - source_field: value
+          target_field: score
+    advances_to: done
 `,
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(raw), 0600); err != nil {

@@ -1,11 +1,7 @@
 spawner:
-  execution_type: system_node
-  subscribes_to: [flow.created]
-  produces: [worker.requested]
-  event_handlers:
-    flow.created:
-      emit:
-        event: worker.requested
-        fields:
-          instance_id: payload.instance_id
-      advances_to: spawned
+  flow.created:
+    emit:
+      event: worker.requested
+      fields:
+        instance_id: payload.instance_id
+    advances_to: spawned

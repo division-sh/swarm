@@ -245,13 +245,8 @@ spec_authority:
 vocabulary:
   state_change: A transition in the entity state machine, triggered by an advances_to handler field.
   guard:
-    description: A boolean check evaluated before handler execution. If any guard check fails, the handler is blocked. Guards
-      use CEL expressions evaluated against entity, payload, and policy context.
-    on_fail_actions:
-    - reject (default)
-    - discard
-    - kill
-    - escalate:{event}
+    description: A scalar boolean CEL predicate evaluated before handler effects. A false predicate records rejection and
+      stops the handler. Conditional rows own no-match, termination and emitted escalation choices.
   timer:
     description: 'A time-based trigger attached to a stage. When the delay elapses, the platform emits the timer''s event,
       which can trigger a transition.
@@ -861,7 +856,7 @@ contract_formats:
                 fields:
                   revision_id: loop.revision_id
 
-        event_handlers:
+        worker:
           work.started:
             loop: {start: revision, from: queued}
             advances_to: drafting
@@ -1874,7 +1869,7 @@ contract_formats:
     routing_derivation:
       description: 'Routing is derived from two mechanisms:'
       typed_pubsub: 'Typed pub/sub routing derives from subscriptions — agents.yaml subscriptions,
-        nodes.yaml subscribes_to, and event_handlers keys. The platform matches canonical event identity
+        direct nodes.yaml handler keys. The platform matches canonical event identity
         only within one exact flow identity. Canonical name equality and filesystem ancestry never authorize cross-flow delivery.'
       inter_flow_connect: Between flows, authored topology derives only from exact least-common-ancestor schema connect entries over output and input pins. Output pins declare event identity and producer interface evidence, keyed receivers declare one scalar instance identity field, and each LCA connect owns its explicit ordinary resolution mode and key_from exception. Omission derives the same-named typed payload source; explicitly spelling that source is redundant and refused. The immutable compiled connection lowers these facts into route plans. See flow_model.composition_routing and engine.cross_flow_routing. Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary; authors must declare output/input pins and connect in the nearest common ancestor schema.yaml.
       input_source_resolution:
@@ -2061,7 +2056,7 @@ contract_formats:
             admitted receiver-owner evidence exists. Handler dependency classification describes reads and effects only,
             never permission to construct. Flow instance keys and compiled input/edge
             resolution select the receiving instance; handlers cannot acquire or select another receiver. Classification
-            accounts for durable state buckets, lifecycle transitions and gates, guard kill,
+            accounts for durable state buckets, lifecycle transitions and gates, selected termination,
             approval lifecycle, persistent clears, evidence recording, accumulation, joins, and nested rule sites rather than
             inferring dependency only from authored entity references. Entity-optional means that execution can proceed without
             declared fields; it still requires an exact constructed lifecycle header. Compiled parent-to-child topology supplies source/causal context,
@@ -2566,9 +2561,8 @@ contract_formats:
               - receiver scalar instance field and connection-owned source and ordinary resolution mode
               - lowered connect route-plan facts
               - RouteTable semantic subscribers
-              - nodes.yaml subscribes_to entries
               - agents.yaml subscriptions
-              - event_handlers keys
+              - direct nodes.yaml handler keys
               - pins.inputs and pins.outputs
             rule: Semantic route topology is the source for recipient
               derivation. Parent connect topology, its ordinary resolution and paired reply edges are
@@ -2824,17 +2818,15 @@ contract_formats:
 
       flows: []'
     schema_yaml: "stages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs: [hello.requested]\n  outputs: [hello.completed]"
-    nodes_yaml: "hello-node:\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit:\n        event: hello.completed\n\
-      \        fields:\n          result: payload.message"
+    nodes_yaml: "hello-node:\n  hello.requested:\n    advances_to: done\n    emit:\n      event: hello.completed\n      fields:\n        result: payload.message"
     events_yaml: "hello.requested:\n  message: text\nhello.completed:\n  result: text"
     agents_yaml: '{}'
   produces_derivation: >-
-    The produces field on system nodes is OPTIONAL. If omitted, the platform derives the effective production surface from
+    The platform derives the effective production surface from
     every supported declarative emit site at boot: handler top-level emit, rule-local emit, rules emit template specialization
     effective emits, selected on_complete emit, join outcome emit, and fan_out emit. Runtime routing, producer authority,
-    and transition checks consume this effective production surface, not raw authored produces. If present, produces is an
-    explicit authored assertion surface: the verifier checks it matches actual emits, including an explicit empty list, with
-    a PRODUCES-DRIFT warning. Authors should omit produces and let the platform derive it.
+    and transition checks consume this effective production surface, including generated activity result events.
+    Authored produces is retired and fails on presence.
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
     semantic_fields:
@@ -4077,7 +4069,7 @@ handler_specification:
       EventBus postcommit dispatcher or deferred publication transport. A failed independent handoff cannot skip its
       committed siblings. Release the entity lock before recursive dispatch and release or retain the exact delivery
       continuation after its durable outcome. Entityless and stateful handlers have different preparation rules but
-      share acknowledgement, publication finalization and continuation handling. Guard reject/discard, guard-kill,
+      share acknowledgement, publication finalization and continuation handling. Scalar guard rejection, selected termination,
       terminal-state rejection and preparation failure keep their distinct settlement and retry semantics. A
       positively acknowledged result remains committed despite later cancellation, panic or cleanup failure; those
       diagnostics do not authorize rollback, plan release or handler retry. Provider calls, asynchronous waits,
@@ -4145,7 +4137,7 @@ handler_specification:
       Handler rules and ordinary completion rows cannot author id or description; both fields fail
       current-vocabulary admission on presence. Positional identities are retained separately from display text.
   short_circuits:
-    guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
+    guard_fail: If the scalar guard is false, record rejection and stop the handler. No further steps execute.
   handler_fields:
     description: Fields within an event_handler declaration. Executed per the dependency graph defined in handler_execution_order.
       All fields are optional — the engine skips absent fields.
@@ -4166,21 +4158,13 @@ handler_specification:
         or replacement handler-local initialization flag exists.
     guard:
       field: guard
-      type: object — single check OR list of checks
-      purpose: Evaluate conditions before proceeding. All checks must pass.
-      single_form:
-        id: string — check identifier
-        check: string — expression evaluated against entity state, payload, and policy
-        policy_ref: string — optional annotation documenting which policy key is referenced
-        platform_builtin: string — optional reference to a platform-provided guard (e.g., authorization checks)
-      list_form:
-        checks: list of {id, check} objects — ALL must pass
-        on_fail: 'reject | kill | discard | escalate:{event_name} | {escalate: {event, fields}} — what to do when
-          any check fails. Default: reject. The scalar escalate:{event_name} shorthand emits an escalation event with
-          no explicit business payload. The object form authors explicit escalation business payload fields using the
-          same expression-value forms as emit.fields, evaluated at guard-failure time before later handler transforms
-          or data writes. Guard escalation never implicitly passes through trigger payload/entity metadata and cannot
-          author runtime-owned envelope fields as business payload.'
+      type: scalar CEL boolean expression
+      purpose: Evaluate one predicate before effects. False records a rejection without handler effects.
+      rule: >-
+        Object guards, check collections, guard ids, policy_ref, on_fail and the builtin guard registry are retired.
+        Combine predicates with CEL operators. Author a conditional ordered rule for recorded no-match filtering,
+        an explicit advances_to/terminate row for termination, or an ordinary emit row for escalation.
+        Query and clear_gates still run before guard evaluation; later transforms and writes cannot run on rejection.
     accumulate:
       field: accumulate
       type: object
@@ -4496,7 +4480,7 @@ handler_specification:
         excluded_surfaces: "`emit.from` is valid only on emitted-event payload surfaces. It is not a constructor, connection
           transform or data-handoff form. Constructor state consumes same-name supplied fields, not emit lowering."
       expression_value_grammar:
-        scope: "Every executable value slot in emit.fields (including guard escalation and fan_out emits), activity.input,
+        scope: "Every executable value slot in emit.fields (including rule and fan_out emits), activity.input,
           stage gate context/outcome emits, and data_accumulation write value/key/index. Predicate and fan_out.identity
           string carriers consume the same source classification before their existing scoped validators. Path
           selectors and inert sets_gate.value are separate categories."
@@ -4521,7 +4505,7 @@ handler_specification:
           sole-interpolation typed escape, predicate exception, or source translator. Reserved expression metadata
           forms remain rejected by the existing closed shape owner.
         predicates: >-
-          rules.when, ordinary on_complete.condition, guard.check/checks[].check, query.filter, filter.condition
+          rules.when, ordinary on_complete.condition, guard, query.filter, filter.condition
           and count.condition expect boolean expressions. Quoted source is a verification error naming the source,
           semantic slot, and fix: remove YAML quotes. Optional omission preserves the existing absence behavior.
           Predicate source receives ordinary CEL validation without a special else sentinel or interpreter.
@@ -5323,13 +5307,12 @@ handler_specification:
       generated_result_events:
         naming: >
           Generated names are <flow>/<activity_id>.succeeded and <flow>/<activity_id>.failed (no flow prefix at the root).
-          Rule activities require an explicit non-empty activity.id. Only handler-level activities may omit activity.id;
-          their default derives from node id, handler event key and tool id. Rule labels, predicate display and row positions
-          never supply activity identity. Admission, compiled catalog generation and execution reject unnamed rule activities
-          before effects; no positional or presentation fallback exists.
+          Every handler or rule activity requires an explicit non-empty activity.id. Rule labels, predicate display,
+          row positions and tool names never supply activity identity. Admission, compiled catalog generation and
+          execution reject unnamed activities before effects; no default or presentation fallback exists.
         selection_ownership: >
           Activity selection determines its ownership context and position in the same operation. Selecting an ordinary
-          on_complete row does not make handler.activity rule-owned or change its default ID. Only a selected rules activity
+          on_complete row does not make handler.activity rule-owned or change its explicit ID. Only a selected rules activity
           supplies a rule site. Join completion/deadline remain closed outcomes; handler.join continues to reject activity.
         materialization: Generated result events are contract-derived, visible in the resolved event catalog, schema registry,
           verifier output, and effective node produces. They are not authored in events.yaml. The verifier MUST reject any
@@ -5469,7 +5452,7 @@ handler_specification:
         its node declared.'
       limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
   expression_context:
-    description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
+    description: 'Defines the namespaces available in CEL expressions used in guard, on_complete.condition,
       rules.when, data_accumulation.writes[].value, query.filter, and filter.condition. Each namespace resolves to a specific
       data source. Declared bare entity values require program-point definite assignment; optional values require
       a presence decision. Undeclared field references are contract errors.'
@@ -5508,7 +5491,7 @@ handler_specification:
         usage: 'accumulated.filter(d, <condition>) — filter items by predicate. accumulated.size() — count items.
           accumulated.map(d, d.field) — extract field values. Item fields match the inbound event payload fields
           (e.g., d.dimension, d.score, d.tier for score.dimension_complete).'
-        not_available_in: 'guard.check — guards run before accumulation. handler-level on_complete is prohibited on
+        not_available_in: 'guard — guards run before accumulation. handler-level on_complete is prohibited on
           accumulate handlers and cannot recreate finite completion.'
         projection_boundary: |
           `materialize_from` consumes accumulated items through the source
@@ -5522,7 +5505,7 @@ handler_specification:
         available_in: 'data_accumulation.writes[].value with `fan_out.count` is the canonical way to write fan_out results to entity
           state. This writes the obligation cardinality to an entity field for
           downstream open-stream processing.'
-        not_available_in: 'guard.check — guards run before fan_out. on_complete.condition — use entity
+        not_available_in: 'guard — guards run before fan_out. on_complete.condition — use entity
           fields written by data_accumulation instead.'
         usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    value: fan_out.count"
       computed:
@@ -5599,32 +5582,25 @@ handler_specification:
   node_specification:
     node_fields:
       description: Top-level fields on a system node declaration.
-      required:
-        event_handlers: map of event_name → handler declaration
+      handlers: Every non-reserved key is an event name mapped directly to its handler declaration. Empty mappings are explicit no-op consumers.
       optional:
-        execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
-        subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
-          event_handlers keys when omitted. Join timeout delivery is platform-owned and derived from effective join plans.
-          Open stream accumulation derives no closure or deadline subscription. Slash-free flow-local wildcard
-          subscriptions remain explicit.
-        produces: list of event names this node emits. Omit for ordinary nodes; the effective production surface is derived
-          from supported declarative emit sites. If present, this is an explicit authored assertion checked against actual
-          emits.
-        description: string — human-readable description
         state_schema: map — fields the node persists per entity (accumulator state)
         state_table: string — table name for node state persistence
         timers: legacy/kernel timer declarations (see timer_model). Staged lifecycle
           timer authoring for flows using `stages:` is owned by
           `stages.<stage>.timers`, not node-level state timers.
         gate_state: map — gate field definitions for this node (boolean flags on entity)
-      admission_rule: Only the declared node vocabulary is admitted. Unknown keys fail before value decoding;
-        the map key is the identity. No authored identity override or removed-spelling table exists.
+      admission_rule: >-
+        The closed reserved fields are timers, state_schema, gate_state and state_table. All other keys must be declared
+        exact event names or supported flow-local wildcard patterns matching a declared event. The node map key owns
+        identity. execution_type, subscribes_to, produces and event_handlers fail on presence; no metadata union or
+        compatibility container exists. Undeclared or misspelled handler keys fail complete bundle admission.
       effective_semantics:
         id: YAML map key only, scoped by the existing declaration identity. No authored override or template spelling.
         execution_type: system_node
-        runtime_subscriptions: union of explicit subscribes_to entries, event_handlers keys, and intrinsic platform runtime
+        runtime_subscriptions: handler keys and intrinsic platform runtime
           events required by declared handler primitives such as platform.join_timeout
-        produces: events derived from supported declarative emit sites
+        produces: events derived once from declarative emit sites and generated activity results
     description: Complete specification for system nodes — the deterministic components that orchestrate state transitions.
       Every field used in nodes.yaml must be defined here.
   dependency_rules:
@@ -5763,7 +5739,7 @@ engine:
       while flow-owned agent admission may retain an already-normalized same-scope identity; neither form may cross a flow
       boundary. Local names never contain slashes. The platform resolves admitted references to full internal paths at boot.
     type_inference: 'No type suffix needed. The context determines the type: subscriptions and emit_events contain events.
-      Message targets contain agents. subscribes_to in nodes contains events. The type is implicit from where the reference
+      Message targets contain agents. Direct handler keys in nodes contain events. The type is implicit from where the reference
       appears. Exact subscriptions additionally consume the event-identity subscription boundary and cannot use generic
       absolute-path resolution as cross-flow delivery authority.'
     full_uri:
@@ -5794,7 +5770,7 @@ engine:
       target_routes: 'The resolved fan-out delivery route identities on the envelope: target_set[].flow_instance plus
         target_set[].entity_id. This is a concrete topology/runtime route carrier, never an authored selector.'
     resolution_rules:
-      contracts_always_local: 'Exact node subscribes_to values, handler keys, and event definitions in events.yaml use local
+      contracts_always_local: 'Exact node handler keys and event definitions in events.yaml use local
         names. Flow-owned agent subscription admission accepts local exact values and may retain an already-normalized exact
         identity only when it resolves to that same flow. Exact subscriptions never cross a flow boundary. Wildcard
         subscriptions are slash-free and flow-local; they never observe another flow.'
@@ -5815,7 +5791,7 @@ engine:
         the matched concrete local event schema in the exact receiver scope, preserving exact-handler precedence.'
       handler_lookup_localizes: 'When the runtime delivers an external event to a node, it MUST
         localize the event name before looking up the handler. Localization matches against the target
-        node''s declared local interface — input pins, subscribes_to entries, and handler keys. This
+        node''s declared local interface — input pins and handler keys. This
         applies to connected input-pin delivery and admitted same-flow typed pub/sub.
         Example: scoring/vertical.shortlisted → vertical.shortlisted when delivered to a validation
         node that declares vertical.shortlisted in any of those surfaces.'
@@ -6083,7 +6059,7 @@ engine:
         authority; cross-flow delivery requires output/input pins and nearest-LCA connect.
     contract_authoring_rules:
       handler_keys: Always local names. Never flow-prefixed.
-      subscribes_to: Exact node subscriptions use local names. Flow-owned agent exact subscriptions may be local or an
+      subscriptions: Node handler keys use local names. Flow-owned agent exact subscriptions may be local or an
         already-normalized same-scope identity accepted by typed admission. Cross-boundary slash-qualified and full-URI exact
         values are invalid. Wildcard subscriptions are slash-free and flow-local; cross-flow delivery requires pins/connect.
       timer_event_references: Always local exact names. Timers do not resolve qualified or wildcard subscription paths.
@@ -6651,7 +6627,7 @@ engine:
         after this point: event replays on recovery.'
     - step: 4
       name: resolve_subscribers
-      action: 'Look up subscribers by event path. Two kinds: system nodes (from nodes.yaml subscribes_to) and agents (from
+      action: 'Look up subscribers by event path. Two kinds: system nodes (from direct nodes.yaml handler keys) and agents (from
         agents.yaml subscriptions). Wildcard subscriptions are pre-expanded at boot and updated on dynamic instance creation.
         If event.target is set, narrow routing-execution subscribers to target.flow_instance before persisting event deliveries.
         If event.target_set is non-empty, persist one delivery row per target_set route/recipient pair and dispatch each
@@ -6752,7 +6728,7 @@ engine:
         (step 8) are replayed. Handler idempotency ensures replayed events produce the same result.
     single_node_handler_rule:
       description: Each event may be handled by at most ONE system node. If two system nodes declare the same event in their
-        event_handlers, boot fails. This ensures unambiguous state authority — one event, one state transition, one owner.
+        direct handler keys, boot fails. This ensures unambiguous state authority — one event, one state transition, one owner.
       agents: Not constrained. Multiple agents may subscribe to the same event freely.
       enforcement: Boot validation rejects duplicate node handlers for the same event.
     emit_payload_default: 'For supported declarative system-node emit sites, the platform constructs the business payload by:
@@ -6900,7 +6876,7 @@ engine:
       cancellation is atomic and cannot cancel or mutate a sibling declaration or another entry.
       An obsolete join continuation discarded before outcome execution performs no entity write, including no revision
       increment. Its exact delivery claim still settles once through the canonical no-op settlement path. This does not
-      change guard-discard handling for an admitted outcome or the evidence retained when a join outcome actually executes.
+      change no-match handling for an admitted outcome or the evidence retained when a join outcome actually executes.
     schedule_ownership: >-
       A join activation that creates its required completion or declared deadline schedule must have at least one exact owner before
       the selected mutation can commit: either a durable generic schedule store or a process scheduler. If neither capability
@@ -8820,8 +8796,8 @@ engine:
     retired_authored_fields:
       tools_tier2: RETIRED — use tools.
       subscriptions_bootstrap: RETIRED — use subscriptions.
-      subscribes_to: RETIRED for agents.yaml only — use subscriptions. Node subscribes_to and required_agents[].subscribes_to
-        remain canonical fields for their separate concepts.
+      subscribes_to: RETIRED for agents.yaml and nodes.yaml. Agents use subscriptions; nodes receive the events they handle.
+        required_agents[].subscribes_to remains a separate role-fulfillment constraint until its own retirement.
     emit_tool_convention:
       description: The platform auto-generates emit tools from each agent's emit_events list. Agents do NOT need to list emit
         tools in tools.
@@ -9306,7 +9282,7 @@ engine:
           primitive.
       trigger_forms:
         state: "state:<name> starts or cancels when an actual persisted transition enters the named state. Handling an event while already in that state is not a state entry."
-        event: "event:<name> starts or cancels only when the named event is admitted for the entity by an engine-handled outcome. Unknown, rejected, and discarded outcomes, including guard rejection/discard and deduplication discard, do not reconcile timers."
+        event: "event:<name> starts or cancels only when the named event is admitted for the entity by an engine-handled outcome. Unknown, rejected, and discarded outcomes, including scalar guard rejection and deduplication discard, do not reconcile timers."
         boot: "start_on: boot starts a global schedule at platform boot. This form is only valid on start_on."
       invalid_forms:
       - "Unprefixed trigger values are boot errors. The platform does not infer state-vs-event intent from bare strings."
@@ -9545,7 +9521,7 @@ engine:
       \n# Legacy/kernel timer example:\ntimers:\n  - id: daily_report\n    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\
       \n    start_on: boot\n    recurring: true"
   expression_language:
-    description: All guard checks, rule conditions, query/filter conditions, and on_complete branch conditions are evaluated using
+    description: Scalar guards, rule conditions, query/filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.
     authored_scalar_rule: >-
       Contract expression slots use handler_specification.handler_fields.emit.expression_value_grammar.
@@ -10359,19 +10335,12 @@ engine:
         gated pack owner exists, or the immutable resolved artifact fails canonical identity validation. This check is fail
         closed; no logical-id, role, mode, shard-parent, directory, environment, or generated-prose fallback exists.
       when: boot-only
-    - id: produces_drift
-      severity: warning
-      scope: per-node
-      trigger: >-
-        A node's explicit produces list does not match the set of events derived from its supported declarative emit
-        sites: handler top-level emit, rules emit, on_complete emit, and fan_out emit.
-      when: boot-only
     - id: invalid_field_detection
       severity: error
       scope: contract
       trigger: A declaration uses an unsupported or malformed field in a fail-closed contract surface. This includes node
-        top-level fields outside the defined node_fields set (execution_type, description, subscribes_to, event_handlers,
-        state_schema, state_table, timers, gate_state, produces) and malformed external tool-provider dispatch
+        retired node fields, undeclared direct handler keys, malformed reserved node fields
+        (state_schema, state_table, timers, gate_state), and malformed external tool-provider dispatch
         rate-limit declarations on HTTP tools, MCP servers, or policy.web_search_provider.
       when: boot-only
     - id: policy_conflict_detection
@@ -10405,11 +10374,6 @@ engine:
       scope: per-node
       trigger: A non-empty data_accumulation.source_event does not match its handler event and is not a derived fan_out source.
         Creating inputs consume the canonical same-name typed constructor; input pins own no initialization bindings.
-      when: boot-only
-    - id: phantom_produces
-      severity: warning
-      scope: per-node
-      trigger: A node's produces list includes an event that no handler in the node actually emits.
       when: boot-only
     - id: native_tools_valid
       severity: error
@@ -10479,7 +10443,7 @@ engine:
     - id: condition_expression_validation
       severity: error
       scope: per-node
-      trigger: A guard on_fail value is not one of reject, kill, discard, or escalate. Or a CEL condition is syntactically
+      trigger: A guard is not a nonempty scalar predicate. Or a CEL condition is syntactically
         invalid (parse failure). Or a condition string lacks a required context prefix (entity., payload., policy., accumulated.,
         fan_out.).
       when: boot-only
@@ -10586,7 +10550,7 @@ engine:
           Unperformed observations and startup execution obligations remain visible; never bare ok or an unconditional
           promise of live readiness. Portable validation explicitly reports structural scope.
         stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
-    check_count: 69 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation and constructor eligibility has one source check
+    check_inventory: The boot check registry owns the live primary and supplemental checks; managed credentials share the primary credential observation and constructor eligibility has one source check.
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and
@@ -10672,7 +10636,7 @@ compliance:
     description: How the runtime executes event handlers.
     rules:
     - Match inbound event to handler in owning node
-    - 'If handler has guard: evaluate condition. If false, reject or kill.'
+    - 'If handler has guard: evaluate its scalar predicate. If false, record rejection without handler effects.'
     - 'If handler has accumulate: admit the instance-scoped stream arrival, persist a new non-duplicate business payload, and continue per arrival.'
     - 'An arrival join consumes the publication-bound exact lifecycle entry. Its last member, until or deadline stores one close and one declaration-bound continuation; outcome effects do not run inline on the last arrival.'
     - 'If handler has on_complete: evaluate conditions, execute matching branch.'
@@ -10690,10 +10654,8 @@ compliance:
     - Root-level nodes must not duplicate flow-level node IDs
     - All handoff events must have both an emitter (source flow) and subscriber (target flow or declarative handoff)
   node_coherence:
-  - The effective runtime subscription surface includes every event in event_handlers. Explicit subscribes_to is required
-    only for slash-free flow-local wildcards that cannot be derived from exact handler keys.
-  - Every event in the effective production surface must have a payload schema in events.yaml. Explicit produces, when
-    authored, is an assertion checked against handler-derived emits.
+  - The effective runtime subscription surface derives from direct handler keys and intrinsic join arrivals.
+  - Every event in the effective production surface must have a payload schema in events.yaml or a generated activity schema.
   - Guards must reference fields that exist on the entity or in policy.yaml
   - advances_to states must be reachable from the current flow state space
   agent_coherence:
@@ -11743,7 +11705,7 @@ tool_model:
       installation id, API base URL, and RSA private key, and caches the returned installation access token until expiry.
       Runtime must fail closed when the inbound-selected installation id is absent or differs from the connected record.
       Issue-comment bot-loop flows that consume the typed `inbound.github.issue_comment_created` normalized event and call a GitHub App issue-comment
-      connector MUST guard app/bot-authored comments before activity lowering, using an `on_fail: discard` handler guard
+      connector MUST filter app/bot-authored comments before activity lowering, using a conditional activity rule
       or equivalent no-side-effect filter. Delivery-id dedupe alone is not sufficient because an app-authored response is a
       separate GitHub webhook delivery with a new delivery id.
       Private keys, generated JWTs, installation tokens, webhook signing secrets, and provider errors containing those values
@@ -24433,14 +24395,8 @@ observation_model:
     description: The result of a single handler execution.
     values:
       success: Handler ran to completion. All side effects committed.
-      reject: 'Guard failed with on_fail: reject. No side effects. Entity unchanged.'
-      discard: 'Guard failed with on_fail: discard. No side effects. No record.'
-      kill: 'Guard failed with on_fail: kill. Entity advanced to terminal state.'
-      escalate: 'Guard failed with on_fail: escalate:{event} or on_fail: {escalate: {event, fields}}. Escalation event
-        emitted instead. Scalar shorthand emits no explicit business payload. Object form fields use the same explicit
-        expression-value forms as declarative emit.fields, but they are evaluated at guard-failure time before later handler
-        transforms/data writes. No implicit trigger/entity passthrough occurs, runtime-owned envelope remains on the event
-        carrier, envelope-owned fields cannot be authored into business payload, and fail-closed contract validation applies.'
+      reject: 'Scalar guard failed. Rejection is recorded; no handler effects commit.'
+      no_match: 'No ordered rule matched. Recorded successful no-op, with no selected-row effects.'
       dead_letter: Handler failed after retry exhaustion OR chain depth exceeded. Event moved to dead_letters.
       terminal_reject: Event targeted an entity in terminal state. Rejected before handler execution.
       waiting: A finite join admitted an arrival but its declared membership completion condition is not yet met. The durable
@@ -25493,7 +25449,6 @@ static_analyzer:
       - on_complete branches
       - join outcome branches
       - fan_out per-item emit
-      - guard on_fail: escalate
       excludes:
       - cross-handler reaching-definitions
       - resolved-intent lint / provenance / handoff audit work

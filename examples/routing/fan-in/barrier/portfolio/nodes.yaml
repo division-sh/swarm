@@ -1,24 +1,20 @@
 portfolio-router:
-  execution_type: system_node
-  subscribes_to: [portfolio.setup, operating.reported]
-  produces: [period.setup, period.reported]
-  event_handlers:
-    portfolio.setup:
-      data_accumulation:
-        writes:
-          - source_field: portfolio_id
-            target_field: portfolio_id
-      emit:
-        event: period.setup
-        fields:
-          portfolio_id: payload.portfolio_id
-          period_id: payload.period_id
-          expected_operating_ids: payload.expected_operating_ids
-    operating.reported:
-      emit:
-        event: period.reported
-        fields:
-          portfolio_id: payload.portfolio_id
-          period_id: payload.period_id
-          operating_id: payload.operating_id
-          revenue: payload.revenue
+  portfolio.setup:
+    data_accumulation:
+      writes:
+        - source_field: portfolio_id
+          target_field: portfolio_id
+    emit:
+      event: period.setup
+      fields:
+        portfolio_id: payload.portfolio_id
+        period_id: payload.period_id
+        expected_operating_ids: payload.expected_operating_ids
+  operating.reported:
+    emit:
+      event: period.reported
+      fields:
+        portfolio_id: payload.portfolio_id
+        period_id: payload.period_id
+        operating_id: payload.operating_id
+        revenue: payload.revenue

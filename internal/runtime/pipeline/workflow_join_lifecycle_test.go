@@ -938,40 +938,36 @@ dispatch.completed:
 manual.abort:
 `,
 		"orders/nodes.yaml": `dispatcher:
-  execution_type: system_node
-  event_handlers:
-    order.accepted:
-      fan_out:
-        items_from: payload.line_items
-        as: line_item
-        identity: line_item.id
-        emit:
-          event: line_item.requested
-          fields:
-            line_item_id: line_item.id
-      advances_to: awaiting
-    dispatch.completed:
-      advances_to: awaiting
-    manual.abort:
-      advances_to: dispatching
+  order.accepted:
+    fan_out:
+      items_from: payload.line_items
+      as: line_item
+      identity: line_item.id
+      emit:
+        event: line_item.requested
+        fields:
+          line_item_id: line_item.id
+    advances_to: awaiting
+  dispatch.completed:
+    advances_to: awaiting
+  manual.abort:
+    advances_to: dispatching
 join-node:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        id: awaiting
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        on_complete: {advances_to: ready}
-        deadline: {after: 1h, from: stage_entry}
-        on_deadline: {advances_to: attention}
+  item.completed:
+    join:
+      id: awaiting
+      stage: awaiting
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      on_complete: {advances_to: ready}
+      deadline: {after: 1h, from: stage_entry}
+      on_deadline: {advances_to: attention}
 `,
 	}
 	if review {
 		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  awaiting: {}", "  awaiting: {}\n  reviewing: {}", 1)
 		files["orders/events.yaml"] += "review.requested:\napproval.completed:\n  member_id: text\n  result: ItemResult\n"
-		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    manual.abort:", "    review.requested:\n      advances_to: reviewing\n    manual.abort:", 1)
+		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "  manual.abort:", "  review.requested:\n    advances_to: reviewing\n  manual.abort:", 1)
 		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "id: awaiting", "id: shared", 1)
 		files["orders/nodes.yaml"] += `    approval.completed:
       join:
@@ -993,18 +989,18 @@ join-node:
 				from = "ready"
 			}
 		}
-		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    item.completed:\n      join:", "    item.completed:\n      loop: {admit: revision, from: awaiting}\n      join:", 1)
+		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "  item.completed:\n    join:", "  item.completed:\n    loop: {admit: revision, from: awaiting}\n    join:", 1)
 		if loop == "captured" {
 			for _, replacement := range []struct{ old, new string }{
-				{"on_complete: {advances_to: ready}", "on_complete:\n          advances_to: awaiting\n          data_accumulation:\n            writes:\n              - target_field: expected\n                value: |-\n                  [loop.revision_id]"},
-				{"on_deadline: {advances_to: attention}", "on_deadline:\n          advances_to: awaiting\n          data_accumulation:\n            writes:\n              - target_field: expected\n                value: |-\n                  [loop.revision_id]"},
+				{"on_complete: {advances_to: ready}", "on_complete:\n        advances_to: awaiting\n        data_accumulation:\n          writes:\n            - target_field: expected\n              value: |-\n                [loop.revision_id]"},
+				{"on_deadline: {advances_to: attention}", "on_deadline:\n        advances_to: awaiting\n        data_accumulation:\n          writes:\n            - target_field: expected\n              value: |-\n                [loop.revision_id]"},
 			} {
 				files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], replacement.old, replacement.new, 1)
 			}
 		}
 		files["orders/events.yaml"] += "loop.start:\nloop.repeat:\n  revision_id: text\n"
 		files["orders/events.yaml"] = strings.Replace(files["orders/events.yaml"], "item.completed:\n", "item.completed:\n  revision_id: text\n", 1)
-		files["orders/nodes.yaml"] += "observer:\n  execution_type: system_node\n  event_handlers:\n    loop.start:\n      loop: {start: revision, from: dispatching}\n      advances_to: awaiting\n    loop.repeat:\n      loop: {repeat: revision, from: " + from + "}\n      advances_to: awaiting\n"
+		files["orders/nodes.yaml"] += "observer:\n  loop.start:\n    loop: {start: revision, from: dispatching}\n    advances_to: awaiting\n  loop.repeat:\n    loop: {repeat: revision, from: " + from + "}\n    advances_to: awaiting\n"
 	}
 	// Root and child executions use independently compiled declarations, even
 	// when the fixture deliberately gives them identical local names.

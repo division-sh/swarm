@@ -330,26 +330,22 @@ pins:
 		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
 		"events.yaml":   "dispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\n",
 		"nodes.yaml": `dispatcher:
-  execution_type: system_node
-  event_handlers:
-    dispatch.completed:
-      advances_to: awaiting
-      emit:
-        event: item.completed
-        fields:
-          member_id: "a"
-          result: {value: "same-commit"}
+  dispatch.completed:
+    advances_to: awaiting
+    emit:
+      event: item.completed
+      fields:
+        member_id: "a"
+        result: {value: "same-commit"}
 collector:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete: {advances_to: ready}
-        on_deadline: {advances_to: attention}
+  item.completed:
+    join:
+      stage: awaiting
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      on_complete: {advances_to: ready}
+      on_deadline: {advances_to: attention}
 `,
 	}
 }

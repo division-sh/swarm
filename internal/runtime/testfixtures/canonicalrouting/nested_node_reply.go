@@ -88,53 +88,38 @@ request.finished:
   requester: text
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `stop-node:
-  execution_type: system_node
-  subscribes_to: [request.stop]
-  event_handlers:
-    request.stop: {advances_to: done}
+  request.stop: {advances_to: done}
 r1-start-node:
-  execution_type: system_node
-  subscribes_to: [r1.started]
-  event_handlers:
-    r1.started:
-      emit:
-        event: r1.dispatched
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
+  r1.started:
+    emit:
+      event: r1.dispatched
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
 r2-start-node:
-  execution_type: system_node
-  subscribes_to: [r2.started]
-  event_handlers:
-    r2.started:
-      emit:
-        event: r2.dispatched
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
+  r2.started:
+    emit:
+      event: r2.dispatched
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
 return-node:
-  execution_type: system_node
-  subscribes_to: [r1.finished, r2.finished]
-  event_handlers:
-    r1.finished:
-      emit:
-        event: request.finished
-        fields:
-          request_id: payload.request_id
-          result: payload.result
-          requester: payload.requester
-    r2.finished:
-      emit:
-        event: request.finished
-        fields:
-          request_id: payload.request_id
-          result: payload.result
-          requester: payload.requester
+  r1.finished:
+    emit:
+      event: request.finished
+      fields:
+        request_id: payload.request_id
+        result: payload.result
+        requester: payload.requester
+  r2.finished:
+    emit:
+      event: request.finished
+      fields:
+        request_id: payload.request_id
+        result: payload.result
+        requester: payload.requester
 result-observer:
-  execution_type: system_node
-  subscribes_to: [request.finished]
-  event_handlers:
-    request.finished: {}
+  request.finished: {}
 `)
 	for _, requester := range []string{"r1", "r2"} {
 		writeClosedVariantFile(t, root, requester+"/schema.yaml", "name: "+requester+`
@@ -151,22 +136,19 @@ request.finished:
   requester: text
 `)
 		writeClosedVariantFile(t, root, requester+"/nodes.yaml", `requester-node:
-  execution_type: system_node
-  subscribes_to: [request.dispatched, provider.replied]
-  event_handlers:
-    request.dispatched:
-      emit:
-        event: provider.requested
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-    provider.replied:
-      emit:
-        event: request.finished
-        fields:
-          request_id: payload.request_id
-          result: payload.result
-          requester: "`+requester+`"
+  request.dispatched:
+    emit:
+      event: provider.requested
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+  provider.replied:
+    emit:
+      event: request.finished
+      fields:
+        request_id: payload.request_id
+        result: payload.result
+        requester: "`+requester+`"
 `)
 	}
 	writeNestedNodeReplyChain(t, root, true)
@@ -208,27 +190,23 @@ t.requested:
   account_id: text
   request_id: text
 `)
-	nodes := `provider-node:
-  execution_type: system_node
-  subscribes_to: [` + strings.Join(requests, ", ") + `, t.replied]
-  event_handlers:
-`
+	nodes := "provider-node:\n"
 	for _, request := range requests {
-		nodes += "    " + request + `:
-      emit:
-        event: t.requested
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
+		nodes += "  " + request + `:
+    emit:
+      event: t.requested
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
 `
 	}
-	nodes += `    t.replied:
-      emit:
-        event: provider.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: payload.result
+	nodes += `  t.replied:
+    emit:
+      event: provider.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: payload.result
 `
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", nodes)
 	writeClosedVariantFile(t, root, "t/schema.yaml", `name: t
@@ -245,22 +223,19 @@ u.requested:
   request_id: text
 `)
 	writeClosedVariantFile(t, root, "t/nodes.yaml", `t-node:
-  execution_type: system_node
-  subscribes_to: [t.requested, u.replied]
-  event_handlers:
-    t.requested:
-      emit:
-        event: u.requested
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-    u.replied:
-      emit:
-        event: t.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: payload.result
+  t.requested:
+    emit:
+      event: u.requested
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+  u.replied:
+    emit:
+      event: t.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: payload.result
 `)
 	writeClosedVariantFile(t, root, "u/schema.yaml", `name: u
 pins:
@@ -273,15 +248,12 @@ pins:
   result: text
 `)
 	writeClosedVariantFile(t, root, "u/nodes.yaml", `u-node:
-  execution_type: system_node
-  subscribes_to: [u.requested]
-  event_handlers:
-    u.requested:
-      emit:
-        event: u.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: "approved"
+  u.requested:
+    emit:
+      event: u.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: "approved"
 `)
 }

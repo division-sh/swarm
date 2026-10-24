@@ -164,7 +164,7 @@ func TestFlowConstructorActivationConsumesExactInputBothStores(t *testing.T) {
 					"review/events.yaml":   "task.started:\n  request_id: text\n  brief: text\n  note: text?\n  message: text?\n" + test.eventFields,
 				}
 				if test.name == "ineligible input" {
-					files["review/nodes.yaml"] = "inspect:\n  execution_type: system_node\n  event_handlers:\n    task.started:\n      guard: {check: entity.missing != ''}\n"
+					files["review/nodes.yaml"] = "inspect:\n  task.started:\n    guard: entity.missing != ''\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 				f.constructKeylessRoot(t)

@@ -262,18 +262,7 @@ func appendGuardExecutableReaders(out *[]WorkflowExecutableReader, guard *runtim
 	if guard == nil {
 		return
 	}
-	for i, check := range guard.EffectiveChecks() {
-		kind := "guard.check"
-		if len(guard.Checks) > 0 {
-			kind = fmt.Sprintf("guard.checks[%d]", i)
-		}
-		before := len(*out)
-		appendConditionExecutableReader(out, kind, check.Check, WorkflowEntityFieldLifecycleGuard, WorkflowConditionContextGuard)
-		for index := before; index < len(*out); index++ {
-			(*out)[index].GuardCheckIndex = i
-			(*out)[index].HasGuardCheckIndex = true
-		}
-	}
+	appendConditionExecutableReader(out, "guard", guard.Check, WorkflowEntityFieldLifecycleGuard, WorkflowConditionContextGuard)
 }
 
 func appendDataAccumulationExecutableReaders(out *[]WorkflowExecutableReader, kind string, spec runtimecontracts.WorkflowDataAccumulation) {
@@ -521,8 +510,6 @@ type WorkflowExecutableReader struct {
 	AssignmentError           string
 	WriteIndex                int
 	HasWriteIndex             bool
-	GuardCheckIndex           int
-	HasGuardCheckIndex        bool
 	EmitSite                  *runtimecontracts.HandlerDeclarativeEmitSite
 	EmitField                 string
 	FanOutAfterWrites         bool
@@ -615,11 +602,7 @@ func WorkflowHandlerEmitExpressions(source semanticview.Source, node runtimeiden
 	}
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, plans) {
 		before := len(out)
-		kind, phase := site.Source, WorkflowEntityFieldLifecycleEmitFields
-		if site.Source == "handler.guard.on_fail.escalate" {
-			kind, phase = "guard escalation", WorkflowEntityFieldLifecycleGuardEscalation
-		}
-		appendSpec(kind, site.SiteKey, site.Spec, phase, site.ItemAlias)
+		appendSpec(site.Source, site.SiteKey, site.Spec, WorkflowEntityFieldLifecycleEmitFields, site.ItemAlias)
 		for index := before; index < len(out); index++ {
 			out[index].EmitSite = &site
 			if strings.HasSuffix(site.SiteKey, ".emit_template") {

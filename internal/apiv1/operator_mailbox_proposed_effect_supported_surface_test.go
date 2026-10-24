@@ -344,17 +344,14 @@ pins:
   text: text
 `)
 	writeRunCompletionFixtureFile(t, root+"/nodes.yaml", `support-agent:
-  execution_type: system_node
-  subscribes_to: [thing.created]
-  event_handlers:
-    thing.created:
-      advances_to: done
-      activity:
-        id: send_support_reply
-        tool: provider_write
-        input:
-          text: payload.text
-        approval: {decision: support_reply}
+  thing.created:
+    advances_to: done
+    activity:
+      id: send_support_reply
+      tool: provider_write
+      input:
+        text: payload.text
+      approval: {decision: support_reply}
 `)
 	writeRunCompletionFixtureFile(t, root+"/tools.yaml", fmt.Sprintf(`provider_write:
   description: Send the exact approved support reply.

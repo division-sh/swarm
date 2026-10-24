@@ -776,7 +776,6 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	}
 	module := conformanceLoadedWorkflowModule{
 		source: source, nodes: nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture: executionposture.Live,

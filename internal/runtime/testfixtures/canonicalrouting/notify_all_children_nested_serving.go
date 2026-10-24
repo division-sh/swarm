@@ -15,7 +15,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.tasks.completed\n    - account.task.completed\nconnect:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n", "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n  - event: account.tasks.completed\n    from: account\n    to: .\n  - event: account.task.completed\n    from: account/task\n    to: .\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "nodes.yaml"),
-		"            command: payload.command\n", "            command: payload.command\n            task_ids: [\"prepare\", \"publish\"]\n")
+		"          command: payload.command\n", "          command: payload.command\n          task_ids: [\"prepare\", \"publish\"]\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "events.yaml"),
 		"  command: text\nportfolio.notify.completed:", "  command: text\n  task_ids: [text]\nportfolio.notify.completed:")
 	// This closed variant uses business system-node recipients, not the example's
@@ -54,43 +54,38 @@ account.tasks.completed:
   canceled: integer
 `)
 	writeClosedVariantFile(t, root, "account/nodes.yaml", `account-node:
-  execution_type: system_node
-  subscribes_to:
-    - account.registered
-    - account.notify.requested
-  event_handlers:
-    account.registered:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: account_id
-    account.notify.requested:
-      fan_out:
-        items_from: payload.task_ids
-        as: task
-        identity: task
-        max_items: 2
+  account.registered:
+    data_accumulation:
+      writes:
+        - source_field: account_id
+          target_field: account_id
+  account.notify.requested:
+    fan_out:
+      items_from: payload.task_ids
+      as: task
+      identity: task
+      max_items: 2
+      emit:
+        event: account.task.requested
+        fields:
+          account_id: payload.account_id
+          task: task
+          task_key: payload.account_id + ":" + task
+    join:
+      id: direct-account-tasks-delivered
+      members:
+        from_fan_out: true
+      on_complete:
         emit:
-          event: account.task.requested
+          event: account.tasks.completed
           fields:
-            account_id: payload.account_id
-            task: task
-            task_key: payload.account_id + ":" + task
-      join:
-        id: direct-account-tasks-delivered
-        members:
-          from_fan_out: true
-        on_complete:
-          emit:
-            event: account.tasks.completed
-            fields:
-              account_id: entity.account_id
-              total: join.total
-              succeeded: join.dispositions.succeeded
-              dead_lettered: join.dispositions.dead_lettered
-              no_route: join.dispositions.no_route
-              semantic_rejected: join.dispositions.semantic_rejected
-              canceled: join.dispositions.canceled
+            account_id: entity.account_id
+            total: join.total
+            succeeded: join.dispositions.succeeded
+            dead_lettered: join.dispositions.dead_lettered
+            no_route: join.dispositions.no_route
+            semantic_rejected: join.dispositions.semantic_rejected
+            canceled: join.dispositions.canceled
 `)
 	writeClosedVariantFile(t, root, "account/task/schema.yaml", `name: account-task
 instance: task_key
@@ -113,25 +108,21 @@ pins:
   task: text
 `)
 	writeClosedVariantFile(t, root, "account/task/nodes.yaml", `task-worker:
-  execution_type: system_node
-  subscribes_to:
-    - account.task.requested
-  event_handlers:
-    account.task.requested:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: account_id
-          - source_field: task
-            target_field: task
-          - source_field: task_key
-            target_field: task_key
-      advances_to: completed
-      emit:
-        event: account.task.completed
-        fields:
-          account_id: payload.account_id
-          task: payload.task
+  account.task.requested:
+    data_accumulation:
+      writes:
+        - source_field: account_id
+          target_field: account_id
+        - source_field: task
+          target_field: task
+        - source_field: task_key
+          target_field: task_key
+    advances_to: completed
+    emit:
+      event: account.task.completed
+      fields:
+        account_id: payload.account_id
+        task: payload.task
 `)
 	return root
 }

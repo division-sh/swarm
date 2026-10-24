@@ -30,13 +30,9 @@ pins:
     type: integer
     _unused_reason: output-mode child primary entity proof field
 `, `reader:
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      guard:
-        check: has(entity.priority) && entity.priority >= 0
-      advances_to: done
+  task.assigned:
+    guard: has(entity.priority) && entity.priority >= 0
+    advances_to: done
 `)
 	return root
 }
@@ -112,38 +108,33 @@ line_item.requested:
     type: "[text]"
     initial: []
 `, `support-node:
-  execution_type: system_node
-  subscribes_to:
-    - ticket.opened
-    - ticket.closed
-  event_handlers:
-    ticket.opened:
-      fan_out:
-        items_from: payload.line_items
-        as: line_item
-        identity: line_item
-        emit:
-          event: line_item.requested
-          fields:
-            line_item_id: line_item
-            line_item_index: fan_out.index
-      advances_to: active
-    ticket.closed:
-      join:
-        stage: active
-        members:
-          from: state.expected_line_item_ids
-          by: payload.line_item_id
-        output: payload.result
-        on_complete:
-          advances_to: review
-        deadline:
-          after: 1h
-          from: stage_entry
-        on_deadline:
-          advances_to: timed_out
-    ticket.sla_escalated: {}
-    line_item.requested: {}
+  ticket.opened:
+    fan_out:
+      items_from: payload.line_items
+      as: line_item
+      identity: line_item
+      emit:
+        event: line_item.requested
+        fields:
+          line_item_id: line_item
+          line_item_index: fan_out.index
+    advances_to: active
+  ticket.closed:
+    join:
+      stage: active
+      members:
+        from: state.expected_line_item_ids
+        by: payload.line_item_id
+      output: payload.result
+      on_complete:
+        advances_to: review
+      deadline:
+        after: 1h
+        from: stage_entry
+      on_deadline:
+        advances_to: timed_out
+  ticket.sla_escalated: {}
+  line_item.requested: {}
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\n  line_items: [text]\nticket.closed:\n  line_item_id: string\n  result: string\n")
 	return root
@@ -158,6 +149,11 @@ func CopyInboundAdmissionPolicyMatrix(t testing.TB) string {
 		"schema.yaml": "name: inbound-admission-policy-matrix\n",
 		"matrix/schema.yaml": `name: matrix
 stages: []
+imports:
+  provider_trigger_events:
+    - {provider: telegram, event: inbound.telegram}
+    - {provider: telegram, event: inbound.telegram.text_message}
+    - {provider: intercom, event: inbound.intercom}
 ingress:
   alias: matrix
   providers:
@@ -231,13 +227,13 @@ func inboundAdmissionEvents() string {
 func inboundAdmissionNodes() string {
 	events := []string{"inbound.telegram", "inbound.telegram.text_message", "inbound.intercom", "inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"}
 	var out strings.Builder
-	out.WriteString("matrix-sink:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(events, ", ") + "]\n  event_handlers:\n")
+	out.WriteString("matrix-sink:\n")
 	for _, event := range events {
-		fmt.Fprintf(&out, `    %s:
-      data_accumulation:
-        writes:
-          - target_field: service_id
-            value: "standing"
+		fmt.Fprintf(&out, `  %s:
+    data_accumulation:
+      writes:
+        - target_field: service_id
+          value: "standing"
 `, event)
 	}
 	return out.String()
@@ -263,17 +259,14 @@ widget.started:
   seed: boolean
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `scorer:
-  execution_type: system_node
-  subscribes_to: [widget.scored]
-  event_handlers:
-    widget.scored:
-      guard: {check: has(entity.score)}
-      data_accumulation:
-        source_event: widget.scored
-        writes:
-          - target_field: score
-            value: entity.score + payload.delta
-      advances_to: done
+  widget.scored:
+    guard: has(entity.score)
+    data_accumulation:
+      source_event: widget.scored
+      writes:
+        - target_field: score
+          value: entity.score + payload.delta
+    advances_to: done
 `)
 	return root
 }
@@ -334,27 +327,18 @@ ticket.assigned:
   priority: text
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `classifier:
-  execution_type: system_node
-  subscribes_to: [ticket.classified]
-  produces: [ticket.assigned]
-  event_handlers:
-    ticket.classified:
-      guard:
-        check: entity.category != '' && entity.priority != ''
-      emit:
-        event: ticket.assigned
-        fields:
-          category: entity.category
-          priority: entity.priority
-      advances_to: assigned
+  ticket.classified:
+    guard: entity.category != '' && entity.priority != ''
+    emit:
+      event: ticket.assigned
+      fields:
+        category: entity.category
+        priority: entity.priority
+    advances_to: assigned
 assignee:
-  execution_type: system_node
-  subscribes_to: [ticket.assigned]
-  event_handlers:
-    ticket.assigned:
-      guard:
-        check: entity.category != ''
-      advances_to: resolved
+  ticket.assigned:
+    guard: entity.category != ''
+    advances_to: resolved
 `)
 	return root
 }
@@ -385,28 +369,20 @@ func CopyVerifyMissingPin(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-missing-pin-warning\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.requested\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\ntask.completed:\nchild/task.assigned:\nchild/task.result:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `dispatcher:
-  execution_type: system_node
-  subscribes_to: [task.requested, child/task.result]
-  produces: [task.completed, child/task.assigned]
-  event_handlers:
-    task.requested:
-      emit: child/task.assigned
-    child/task.result:
-      advances_to: done
-      emit:
-        event: task.completed
+  task.requested:
+    emit: child/task.assigned
+  child/task.result:
+    advances_to: done
+    emit:
+      event: task.completed
 `)
 	writeLegacyInstanceFlow(t, root, "child", "name: child\nstages:\n  idle: {}\n  working: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n    - task.feedback\n", "task.assigned:\ntask.feedback:\n  comment: string\ntask.result:\n", "work_item: {}\n", `worker:
-  execution_type: system_node
-  subscribes_to: [task.assigned, task.feedback]
-  produces: [task.result]
-  event_handlers:
-    task.assigned:
-      advances_to: working
-    task.feedback:
-      advances_to: done
-      emit:
-        event: task.result
+  task.assigned:
+    advances_to: working
+  task.feedback:
+    advances_to: done
+    emit:
+      event: task.result
 `)
 	return root
 }
@@ -417,7 +393,7 @@ func CopyRunForkTarget(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "entities.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "stages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.requested\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: []\n  event_handlers:\n    task.requested:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  task.requested:\n    advances_to: done\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n")
 	return root
 }
@@ -432,19 +408,16 @@ func CopyScenarioSetup(t testing.TB) string {
 	writeClosedVariantFile(t, root, "events.yaml", "opco.product_review_requested:\n  product_id: text\n  note: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "product:\n  product_id:\n    type: text\n    _unused_reason: scenario setup identity\n  note: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `reviewer:
-  execution_type: system_node
-  subscribes_to: [opco.product_review_requested]
   gate_state:
     gates: [review_ready]
-  event_handlers:
-    opco.product_review_requested:
-      data_accumulation:
-        source_event: opco.product_review_requested
-        writes:
-          - source_field: note
-            target_field: note
-      clear_gates: [review_ready]
-      advances_to: ready
+  opco.product_review_requested:
+    data_accumulation:
+      source_event: opco.product_review_requested
+      writes:
+        - source_field: note
+          target_field: note
+    clear_gates: [review_ready]
+    advances_to: ready
 `)
 	writeClosedVariantFile(t, root, "tests/setup-target.yaml", `name: setup target and expectation
 setup:

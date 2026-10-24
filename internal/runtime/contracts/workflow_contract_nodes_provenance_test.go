@@ -32,8 +32,8 @@ func TestNodeAdmissionAliasMergeAndNestedCoordinates(t *testing.T) {
 		name, source string
 		line, column int
 	}{
-		{"alias", "first: &node\n  event_handlers:\n    task.ready:\n      emit: task.done\nsecond: *node\n", 5, 9},
-		{"merge", "first: &node\n  event_handlers:\n    task.ready:\n      emit: task.done\nsecond:\n  <<: *node\n", 6, 7},
+		{"alias", "first: &node\n  task.ready:\n    emit: task.done\nsecond: *node\n", 4, 9},
+		{"merge", "first: &node\n  task.ready:\n    emit: task.done\nsecond:\n  <<: *node\n", 5, 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot, err := yamlsource.Load([]byte(tc.source))
@@ -48,16 +48,16 @@ func TestNodeAdmissionAliasMergeAndNestedCoordinates(t *testing.T) {
 				t.Fatal("alias/merge lost the executed nested effect")
 			}
 			bundle := retainedLocationFixture(t, "nodes.yaml", tc.source)
-			proof, found := bundle.IntroductionLocation("nodes.yaml", `second.event_handlers["task.ready"].emit`, false)
+			proof, found := bundle.IntroductionLocation("nodes.yaml", `second["task.ready"].emit`, false)
 			if !found || proof.File != "nodes.yaml" || proof.Line != tc.line || proof.Column != tc.column {
 				t.Fatalf("authored introduction coordinate: %#v", proof)
 			}
 		})
 	}
 	for _, source := range []string{
-		"worker:\n  event_handlers:\n    task.ready:\n      emit: {event: task.done, event: task.other}\n",
-		"worker:\n  event_handlers:\n    task.ready:\n      emit:\n        event: task.done\n        fields: {value: {nested: 1, nested: 2}}\n",
-		"worker: &node\n  event_handlers:\n    task.ready:\n      emit:\n        event: task.done\n        fields: *node\n",
+		"worker:\n  task.ready:\n    emit: {event: task.done, event: task.other}\n",
+		"worker:\n  task.ready:\n    emit:\n      event: task.done\n      fields: {value: {nested: 1, nested: 2}}\n",
+		"worker: &node\n  task.ready:\n    emit:\n      event: task.done\n      fields: *node\n",
 	} {
 		snapshot, err := yamlsource.Load([]byte(source))
 		if err != nil {
@@ -67,7 +67,7 @@ func TestNodeAdmissionAliasMergeAndNestedCoordinates(t *testing.T) {
 			t.Fatalf("nested duplicate/cycle lost source-located rejection: %v", err)
 		}
 	}
-	bundle := retainedLocationFixture(t, "nodes.yaml", "worker: {event_handlers: {}}\n")
+	bundle := retainedLocationFixture(t, "nodes.yaml", "worker: {}\n")
 	for _, slot := range []string{"missing", "worker.absent", "worker[0]", "worker.", `worker["unterminated]`} {
 		if location, found := bundle.IntroductionLocation("nodes.yaml", slot, false); found || location != (yamlsource.Location{}) {
 			t.Fatalf("unresolved diagnostic slot %q invented a position: %+v", slot, location)

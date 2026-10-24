@@ -35,47 +35,35 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
 	responseSchema := "provider.replied:\n  account_id: text\n  request_id: text\n  result: text\n"
 	finishedSchema := "request.finished:\n  request_id: text\n  result: text\n"
 	requesterNode := `requester-node:
-  execution_type: system_node
-  subscribes_to: [request.started, provider.replied]
-  event_handlers:
-    request.started:
-      emit:
-        event: provider.requested
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-    provider.replied:
-      emit:
-        event: request.finished
-        fields:
-          request_id: payload.request_id
-          result: payload.result
+  request.started:
+    emit:
+      event: provider.requested
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+  provider.replied:
+    emit:
+      event: request.finished
+      fields:
+        request_id: payload.request_id
+        result: payload.result
 `
 	providerNode := `provider-node:
-  execution_type: system_node
-  subscribes_to: [provider.requested]
-  event_handlers:
-    provider.requested:
-      emit:
-        event: provider.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: "approved"
+  provider.requested:
+    emit:
+      event: provider.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: "approved"
 `
 	stopNode := `stop-node:
-  execution_type: system_node
-  subscribes_to: [request.stop]
-  event_handlers:
-    request.stop: {advances_to: done}
+  request.stop: {advances_to: done}
 `
 	if rootRequester {
 		writeClosedVariantFile(t, root, "events.yaml", startSchema+requestSchema+finishedSchema)
 		writeClosedVariantFile(t, root, "nodes.yaml", stopNode+requesterNode+`result-observer:
-  execution_type: system_node
-  subscribes_to: [request.finished]
-  event_handlers:
-    request.finished: {}
+  request.finished: {}
 `)
 		writeClosedVariantFile(t, root, "provider/schema.yaml", "name: provider\npins:\n  inputs: [provider.requested]\n  outputs: [provider.replied]\n")
 		writeClosedVariantFile(t, root, "provider/events.yaml", responseSchema)
@@ -83,10 +71,7 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
 	} else {
 		writeClosedVariantFile(t, root, "events.yaml", startSchema+responseSchema)
 		writeClosedVariantFile(t, root, "nodes.yaml", stopNode+providerNode+`result-observer:
-  execution_type: system_node
-  subscribes_to: [request.finished]
-  event_handlers:
-    request.finished: {}
+  request.finished: {}
 `)
 		writeClosedVariantFile(t, root, "requester/schema.yaml", "name: requester\npins:\n  inputs: [request.started, provider.replied]\n  outputs: [provider.requested, request.finished]\n")
 		writeClosedVariantFile(t, root, "requester/events.yaml", requestSchema+finishedSchema)
@@ -105,13 +90,10 @@ func CopyMixedReplyRequest(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.finished:\n", "request.observed:\n  request_id: text\nrequest.finished:\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `request-observer:
-  execution_type: system_node
-  subscribes_to: [provider.requested]
-  event_handlers:
-    provider.requested:
-      emit:
-        event: request.observed
-        fields: {request_id: payload.request_id}
+  provider.requested:
+    emit:
+      event: request.observed
+      fields: {request_id: payload.request_id}
 result-observer:
 `)
 	return root
@@ -125,22 +107,22 @@ func CopyHandedOffMixedReplyRequest(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.started:\n  account_id: text\n  request_id: text\n",
 		"request.started:\n  account_id: text\n  request_id: text\n  items: [text]\n")
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    request.started:
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `  request.started:
+    emit:
+      event: provider.requested
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+`, `  request.started:
+    fan_out:
+      items_from: payload.items
+      as: request_id
+      identity: request_id
       emit:
         event: provider.requested
         fields:
           account_id: payload.account_id
-          request_id: payload.request_id
-`, `    request.started:
-      fan_out:
-        items_from: payload.items
-        as: request_id
-        identity: request_id
-        emit:
-          event: provider.requested
-          fields:
-            account_id: payload.account_id
-            request_id: request_id
+          request_id: request_id
 `)
 	return root
 }
@@ -157,13 +139,10 @@ func CopyMixedReplyResponse(t testing.TB, handedOff ...bool) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    correlation_key: request_id\n", "    correlation_key: request_id\n  - {event: provider.replied, from: provider, to: ., rename: provider.observed}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "request.finished:\n", "reply.observed:\n  request_id: text\nrequest.finished:\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `response-observer:
-  execution_type: system_node
-  subscribes_to: [provider.observed]
-  event_handlers:
-    provider.observed:
-      emit:
-        event: reply.observed
-        fields: {request_id: payload.request_id}
+  provider.observed:
+    emit:
+      event: reply.observed
+      fields: {request_id: payload.request_id}
 result-observer:
 `)
 	return root
@@ -241,16 +220,14 @@ func RenameRootReplyEndpoints(t testing.TB, root string, rootRequester bool) {
 		applyClosedReplacement(t, filepath.Join(root, "provider", "schema.yaml"), "inputs: [provider.requested]", "inputs: [provider.received]")
 	}
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), request, replacement)
-	applyClosedReplacement(t, nodes, "subscribes_to: [provider.requested]", "subscribes_to: [provider.received]")
-	applyClosedReplacement(t, nodes, "    provider.requested:\n", "    provider.received:\n")
+	applyClosedReplacement(t, nodes, "  provider.requested:\n", "  provider.received:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - event: provider.replied\n", "  - event: provider.replied\n    rename: requester.received\n")
 	nodes = filepath.Join(root, "nodes.yaml")
 	if !rootRequester {
 		nodes = filepath.Join(root, "requester", "nodes.yaml")
 		applyClosedReplacement(t, filepath.Join(root, "requester", "schema.yaml"), "inputs: [request.started, provider.replied]", "inputs: [request.started, requester.received]")
 	}
-	applyClosedReplacement(t, nodes, "subscribes_to: [request.started, provider.replied]", "subscribes_to: [request.started, requester.received]")
-	applyClosedReplacement(t, nodes, "    provider.replied:\n", "    requester.received:\n")
+	applyClosedReplacement(t, nodes, "  provider.replied:\n", "  requester.received:\n")
 }
 
 func CopyRootReplyConsumerBoundary(t testing.TB, rootRequester, reply, nested, agent bool) (root, owner string) {

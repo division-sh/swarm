@@ -49,7 +49,7 @@ func CopyChannelNoticeJourney(t testing.TB) string {
 		"  - {event: work.requested, from: ., to: reviews}\n  - {event: notice.requested, from: ., to: notices}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  detail: text\nnotice.requested:\n  seed: boolean\n")
 	writeClosedVariantFile(t, root, "notices/schema.yaml", "name: notices\nstages: []\npins:\n  inputs: [notice.requested]\n")
-	writeClosedVariantFile(t, root, "notices/nodes.yaml", "start:\n  execution_type: system_node\n  subscribes_to: [notice.requested]\n  event_handlers:\n    notice.requested: {}\n")
+	writeClosedVariantFile(t, root, "notices/nodes.yaml", "start:\n  notice.requested: {}\n")
 	writeClosedVariantFile(t, root, "notices/agents.yaml", `observer:
   role: observer
   intent: {inline: 'Notify the operator about the observed work.'}
@@ -88,7 +88,7 @@ func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "provider: telegram\n      tool: telegram.send_message", "provider: mock\n      tool: mock.deliver")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "    - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "tool: telegram.send_message", "tool: mock.deliver")
-	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "          chat_id: \"42\"\n          text: \"review\"", "          queue: \"queue-b\"\n          body: \"approved-effect\"\n          controls: []")
+	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "        chat_id: \"42\"\n        text: \"review\"", "        queue: \"queue-b\"\n        body: \"approved-effect\"\n        controls: []")
 	writeClosedVariantFile(t, root, "reviews/events.yaml", "work.completed:\n  result: text\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `name: object-channel
 pins:
@@ -140,14 +140,11 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "reviews/entities.yaml", "work:\n  detail: text\n")
 	writeClosedVariantFile(t, root, "reviews/nodes.yaml", `requester:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      data_accumulation:
-        writes:
-          - {target_field: detail, value: payload.detail}
-      advances_to: review
+  work.requested:
+    data_accumulation:
+      writes:
+        - {target_field: detail, value: payload.detail}
+    advances_to: review
 `)
 	writeClosedVariantFile(t, root, "ingress/schema.yaml", `name: ingress
 stages:

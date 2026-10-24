@@ -49,11 +49,11 @@ func TestAuthoredEmitSites_GuardEscalationObjectCarriesFields(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("expected one guard escalation authored emit site, got %d: %#v", len(matches), authoredEmitSiteSummaries(sites))
 	}
-	if matches[0].Site != "handler.guard.on_fail.escalate" {
-		t.Fatalf("site = %q, want handler.guard.on_fail.escalate", matches[0].Site)
+	if matches[0].Site != "handler.rules.emit" {
+		t.Fatalf("site = %q, want handler.rules.emit", matches[0].Site)
 	}
-	if matches[0].Handler.Guard == nil || matches[0].Handler.Guard.ID != "guard-escalate" || matches[0].RuleDisplay != "" {
-		t.Fatalf("guard identity was lost or projected as a rule label: %#v", matches[0])
+	if matches[0].Handler.Guard != nil || matches[0].RuleDisplay != "rules[1]: default" {
+		t.Fatalf("conditional emit lost its derived row identity: %#v", matches[0])
 	}
 	if expr := matches[0].Spec.Fields["score"]; expr.Kind != runtimecontracts.ExpressionKindCEL || expr.CEL != "payload.score" {
 		t.Fatalf("score field = %#v, want CEL payload.score", expr)
@@ -282,14 +282,12 @@ scan:
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 dispatcher:
-  execution_type: system_node
-  event_handlers:
-    scan.corpus_dispatch:
-      emit:
-        event: market_research.scan_assigned
-        from: entity
-        fields:
-          geography: payload.geography
+  scan.corpus_dispatch:
+    emit:
+      event: market_research.scan_assigned
+      from: entity
+      fields:
+        geography: payload.geography
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -302,86 +300,36 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string)
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
 		return ""
 	}
-	guardYAML := ""
-	if strings.TrimSpace(guardEventType) != "" {
-		guardYAML = `      guard:
-        id: guard-escalate
-        check: false
-        on_fail: "escalate:` + guardEventType + `"
-`
+	prefix := nodeID + ":\n  " + trigger + ":\n"
+	if strings.TrimSpace(guardEventType) == "" {
+		return prefix + "    emit: " + eventType + "\n"
 	}
-	return nodeID + `:
-  execution_type: system_node
-  event_handlers:
-    ` + trigger + `:
-` + guardYAML + `
-      emit:
-        event: ` + eventType + `
-`
+	return prefix + "    rules:\n      - when: false\n        emit: " + eventType + "\n      - emit: " + guardEventType + "\n"
 }
 
 func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEventType string) string {
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
 		return ""
 	}
-	return nodeID + `:
-  execution_type: system_node
-  event_handlers:
-    ` + trigger + `:
-      guard:
-        id: guard-escalate
-        check: false
-        on_fail:
-          escalate:
-            event: ` + guardEventType + `
-            fields:
-              score: payload.score
-              reason:
-                "score_below_threshold"
-
-      emit:
-        event: ` + eventType + `
-`
+	return nodeID + ":\n  " + trigger + ":\n    rules:\n      - when: false\n        emit: " + eventType +
+		"\n      - emit:\n          event: " + guardEventType + "\n          fields:\n            score: payload.score\n            reason: \"score_below_threshold\"\n"
 }
 
 func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, successEventType string) string {
 	if strings.TrimSpace(nodeID) == "" {
 		return ""
 	}
-	return nodeID + `:
-  execution_type: system_node
-  event_handlers:
-    ` + trigger + `:
-      on_success:
-        emit: ` + successEventType + `
-      rules:
-        - emit: ` + ruleEventType + `
-`
+	return nodeID + ":\n  " + trigger + ":\n    on_success:\n      emit: " + successEventType +
+		"\n    rules:\n      - emit: " + ruleEventType + "\n"
 }
 
 func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string {
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
 		return ""
 	}
-	return nodeID + `:
-  execution_type: system_node
-  event_handlers:
-    ` + trigger + `:
-      emit:
-        event: ` + eventType + `
-        fields:
-          shared: payload.shared
-      rules:
-        - when: payload.score >= 80
-          emit:
-            fields:
-              bucket: 'high'
-        - emit:
-            fields:
-              bucket: 'low'
-`
+	return nodeID + ":\n  " + trigger + ":\n    emit:\n      event: " + eventType +
+		"\n      fields:\n        shared: payload.shared\n    rules:\n      - when: payload.score >= 80\n        emit:\n          fields:\n            bucket: 'high'\n      - emit:\n          fields:\n            bucket: 'low'\n"
 }
-
 func countAuthoredEmitSites(sites []AuthoredEmitSite, flowID, nodeID, eventType string) int {
 	return len(authoredEmitSitesByFlowNodeEvent(sites, flowID, nodeID, eventType))
 }

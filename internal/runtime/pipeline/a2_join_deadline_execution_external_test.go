@@ -63,7 +63,7 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "[item.completed, halt.requested]", "[item.completed, halt.requested, touch]", 1)
 				files["events.yaml"] += "touch:\n"
 				files["entities.yaml"] += "  marker: integer\n  final_missing: [text]\n  final_timed_out: boolean\n  members_list: [text]\n"
-				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "        until: halt.requested\n", "        until: halt.requested\n        deadline: {after: 1h, from: stage_entry}\n", 1)
+				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "      until: halt.requested\n", "      until: halt.requested\n      deadline: {after: 1h, from: stage_entry}\n", 1)
 				files["nodes.yaml"] += `        on_deadline:
           advances_to: ready
           data_accumulation:

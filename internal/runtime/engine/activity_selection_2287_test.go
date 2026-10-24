@@ -27,7 +27,7 @@ func activitySelectionSource2287(t *testing.T, flow string, handler c.SystemNode
 	}
 	bundle := &c.WorkflowContractBundle{
 		Tools: sourceWithActivityTool().ToolEntries(),
-		Nodes: map[string]c.SystemNodeContract{"scanner": {ExecutionType: "system_node", EventHandlers: map[string]c.SystemNodeEventHandler{"source.requested": qualified}}},
+		Nodes: map[string]c.SystemNodeContract{"scanner": {EventHandlers: map[string]c.SystemNodeEventHandler{"source.requested": qualified}}},
 		Events: map[string]c.EventCatalogEntry{"source.requested": {Payload: c.EventPayloadSpec{
 			Properties: map[string]c.EventFieldSpec{"url": {Type: "text"}, "member": {Type: "text"}, "result": {Type: "text"}}, Required: []string{"url"},
 		}}},
@@ -39,9 +39,6 @@ func activitySelectionSource2287(t *testing.T, flow string, handler c.SystemNode
 func assertHandlerActivityIntentCatalog2287(t *testing.T, source semanticview.Source, node identity.ExecutableNode, handler c.SystemNodeEventHandler, intent ActivityIntent) {
 	t.Helper()
 	id := handler.Activity.ID
-	if id == "" {
-		id = "scanner_source_requested_source_scrape"
-	}
 	base := id
 	if node.FlowPath() != "." {
 		base = node.FlowPath() + "/" + id
@@ -80,8 +77,8 @@ func assertHandlerActivityIntentCatalog2287(t *testing.T, source semanticview.So
 func TestExecutor_HandlerActivityCompletionSelectionKeepsCatalogOwnership(t *testing.T) {
 	for _, flow := range []string{".", "research"} {
 		for _, selected := range []bool{false, true} {
-			for _, id := range []string{"", "explicit_fetch"} {
-				t.Run(fmt.Sprintf("%s/selected_%t/explicit_%t", flow, selected, id != ""), func(t *testing.T) {
+			for _, id := range []string{"scanner_source_requested_source_scrape", "explicit_fetch"} {
+				t.Run(fmt.Sprintf("%s/selected_%t/%s", flow, selected, id), func(t *testing.T) {
 					condition := "false"
 					if selected {
 						condition = ""
@@ -189,7 +186,7 @@ func TestExecutor_SelectionPresentationKeepsFullAdmittedText(t *testing.T) {
 	}
 	for _, flow := range []string{".", "research"} {
 		t.Run(flow, func(t *testing.T) {
-			admitted.Activity = c.ActivitySpec{Tool: "source_scrape", Input: map[string]c.ExpressionValue{"url": c.RefExpression("payload.url")}}
+			admitted.Activity = c.ActivitySpec{ID: "scanner_source_requested_source_scrape", Tool: "source_scrape", Input: map[string]c.ExpressionValue{"url": c.RefExpression("payload.url")}}
 			source, node, handler := activitySelectionSource2287(t, flow, admitted)
 			order := []string{}
 			repo, writer := &orderedStateRepo{order: &order}, &orderedActivityWriter{order: &order}
