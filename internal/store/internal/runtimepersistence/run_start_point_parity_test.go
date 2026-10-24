@@ -21,6 +21,7 @@ func TestRunStartOriginalPointPreservesCreatingInputBothStores(t *testing.T) {
 				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 			})
 			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			at := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 			initial := eventtest.RunCreatingRootIngress(uuid.NewString(), "origin.trigger", "ingress", "", json.RawMessage(`{}`), 0,

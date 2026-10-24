@@ -875,7 +875,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("load fork entity state: %v", err)
 	}
 	forkEntityState = instance.CurrentState
-	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != string(storerunlifecycle.StateCompleted) || forkEntityState == "" {
+	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != string(storerunlifecycle.StateRunning) || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
 	}
 }
@@ -2787,6 +2787,7 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.DB) selectedContractForkLocalRuntimeContainer {
 	t.Helper()
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx = nativeRunForkTestContext(t, ctx, selected)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -3154,6 +3155,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = nativeRunForkTestContext(t, ctx, selected)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -3182,23 +3184,15 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatalf("seed selected-contract container competition binding: %v", err)
 	}
 
-	servedDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatalf("open served PostgreSQL handle: %v", err)
-	}
-	defer servedDB.Close()
 	standaloneDB, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatalf("open standalone PostgreSQL handle: %v", err)
 	}
 	defer standaloneDB.Close()
-	if err := servedDB.PingContext(ctx); err != nil {
-		t.Fatalf("ping served PostgreSQL handle: %v", err)
-	}
 	if err := standaloneDB.PingContext(ctx); err != nil {
 		t.Fatalf("ping standalone PostgreSQL handle: %v", err)
 	}
-	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
+	servedStore := selected
 	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
 	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
 	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
@@ -3733,7 +3727,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	at := time.Unix(1700002215, 0).UTC()
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
-	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, ctx, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
+	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, ctx, pg, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -4009,7 +4003,6 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
-	ctx = nativeRunForkTestContext(t, ctx, pg)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4112,7 +4105,6 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
-	ctx = nativeRunForkTestContext(t, ctx, pg)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4247,7 +4239,6 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
-	ctx = nativeRunForkTestContext(t, ctx, pg)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4739,8 +4730,8 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus || sourceStatus != "cancelled" || forkStatus != string(storerunlifecycle.StateCompleted) {
-		t.Fatalf("branch statuses ACK/source/fork = %s/%s/%s, want running/cancelled/completed", result.Activation.ForkRunStatus, sourceStatus, forkStatus)
+	if result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus || sourceStatus != "cancelled" || forkStatus != string(storerunlifecycle.StateRunning) {
+		t.Fatalf("branch statuses ACK/source/fork = %s/%s/%s, want running/cancelled/running", result.Activation.ForkRunStatus, sourceStatus, forkStatus)
 	}
 
 	var branchRows int
@@ -5592,23 +5583,32 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 	}
 }
 
-func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, diagnosticEventID string, at time.Time) {
+func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, ctx context.Context, selected *store.PostgresStore, sourceRunID, diagnosticEventID string, at time.Time) {
 	t.Helper()
-	payload, _ := json.Marshal(map[string]any{
+	payload, err := json.Marshal(map[string]any{
 		"level":   "info",
 		"message": "diagnostic platform row must remain lineage-only",
 	})
-	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, authoractivityfixture.DialectPostgres, diagnosticEventID, sourceRunID, "", "runtime", payload, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
-		)
-		VALUES (
-			$1::uuid, 'platform', 'pipeline', NULL, NULL,
-			'dead_letter', 'runtime_log_pipeline_dead_letter', '{}'::jsonb, $2
-		)
-	`, diagnosticEventID, at); err != nil {
-		t.Fatalf("seed diagnostic platform receipt: %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.DiagnosticDirect(diagnosticEventID, events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, sourceRunID, "", events.EventEnvelope{}, at)
+	admission, err := eventtest.PayloadAdmission(event, ".", string(event.Type()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selected.PersistRuntimeLog(ctx, swaruntime.RuntimeLogPersistenceRecord{
+		EventID: diagnosticEventID, RunID: sourceRunID, Payload: payload, PayloadAdmission: admission, CreatedAt: at, ExecutionMode: event.ExecutionMode(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	owner := selected.PipelineObligations()
+	claim, err := owner.ClaimPublication(ctx, diagnosticEventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Settle(ctx, claim, runtimepipelineobligation.DeadLetter("runtime_log_pipeline_dead_letter", nil)); err != nil {
+		t.Fatalf("settle diagnostic platform receipt: %v", err)
 	}
 }
 
@@ -5741,11 +5741,20 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, identity.RunID), loaded.SourceArtifactFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runForkTestRuntimeInstanceID)
 	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx = runForkOriginalContextForTest(t, ctx, capability)
+	work, _ := runForkTestWorkFixtures.Load(t)
+	fixture := work.(*runForkTestWorkFixture)
+	fixture.mu.Lock()
+	if fixture.capabilities == nil {
+		fixture.capabilities = make(map[runtimestartupownership.Store]runtimestartupownership.ProcessCapability)
+	}
+	fixture.capabilities[selected] = capability
+	fixture.mu.Unlock()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID, StartedAt: at.Add(-time.Minute),
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,

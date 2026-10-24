@@ -267,7 +267,7 @@ func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSet
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := correlation.WithRunID(testAuthorActivityContext(), owner.RunID)
+			ctx := correlation.WithRunID(fixture.context, owner.RunID)
 			observed, found, err := fixture.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(ctx, request)
 			if err != nil {
 				t.Fatal(err)
@@ -294,5 +294,5 @@ func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSet
 			instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = root.TemplateID, root.InstancePath, root.EntityID
 		}
 	}
-	return commitPreparedWorkflowAggregateFixture(t, testAuthorActivityContext(), fixture.store.(agentFixtureFlowStore), owner.RunID, instance, now)
+	return commitPreparedWorkflowAggregateFixture(t, fixture.context, fixture.store.(agentFixtureFlowStore), owner.RunID, instance, now)
 }

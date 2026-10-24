@@ -158,6 +158,7 @@ func TestActiveRunQuiescenceCancelsExactGenericAndWorkflowTimerFamiliesOnBothSto
 			selected := store.(genericScheduleLifecycleConsumerStore)
 			runID := runtimecorrelation.RunIDFromContext(seedCtx)
 			ctx := authorGenericScheduleConsumerContext(runID)
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			generic, workflow := seedGenericScheduleTimerFamilies(t, selected, db, ctx)
 			result, err := selected.ApplyActiveRunQuiescence(ctx, runtimerunquiescence.Request{
 				OperationName: "test_generic_schedule_family_quiescence",
@@ -185,6 +186,7 @@ func TestRunControlStopCancelsExactGenericAndWorkflowTimerFamiliesOnBothStores(t
 			selected := store.(genericScheduleLifecycleConsumerStore)
 			runID := runtimecorrelation.RunIDFromContext(seedCtx)
 			ctx := authorGenericScheduleConsumerContext(runID)
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			generic, workflow := seedGenericScheduleTimerFamilies(t, selected, db, ctx)
 			state, err := selected.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 				RunID: runID, Reason: "test_stop", ControlledBy: "test", Now: time.Now().UTC(),

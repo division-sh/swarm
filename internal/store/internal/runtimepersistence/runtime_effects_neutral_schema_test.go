@@ -89,7 +89,7 @@ func proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t *testing.T, fixtu
 			authorized := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "authorized", false, false)
 			launched := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "launched", true, false)
 			observed := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "response-observed", true, true)
-			summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
+			summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.ctx, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
 			if err != nil {
 				t.Fatalf("reconcile %s attempts: %v", registration.Adapter, err)
 			}
@@ -165,6 +165,7 @@ func nonCompletionRegistrationsForParity(t *testing.T) []runtimeeffects.Registra
 func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore, db *sql.DB, sqlite bool) neutralEffectParityFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	now := time.Now().UTC()
 	agentID := "neutral-effect-parity-agent"
 	identity := testAgentIdentity(t, agentID, "neutral")

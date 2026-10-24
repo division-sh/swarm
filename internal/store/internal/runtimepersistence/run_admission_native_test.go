@@ -49,6 +49,7 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, runLifecycleCandidateParityReplacementArtifact)
 			for _, change := range []string{"pause", "source-revision", "terminal", "complete", "fork-source", "terminal-uuid-alias", "terminal-unbound-caller"} {
 				t.Run(change, func(t *testing.T) {
@@ -65,6 +66,9 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 					err := runSelectedFixtureMutation(ctx, fixture.store, "canonical admission invalidation", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 						var original runtimecorrelation.SourceArtifactFact
 						if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+							if _, err := mutationprotocol.RunRowLock(txctx, tx, runID, true); err != nil {
+								return err
+							}
 							original, err = writer.RequireActiveSourceTx(txctx, tx, runID)
 							return err
 						}); err != nil {
@@ -155,6 +159,7 @@ func TestRunAdmissionMissingRunRefusesBeforeMutationBothStores(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			rollback := errors.New("rollback after missing-run admission")
 			err := runSelectedFixtureMutation(ctx, fixture.store, "missing-run admission", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
@@ -193,6 +198,7 @@ func TestRunAdmissionWarmArtifactLossRefusesBothStores(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Now().UTC())
 			rollback := errors.New("rollback after warmed-artifact refusal")

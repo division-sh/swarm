@@ -245,12 +245,10 @@ func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T)
 }
 
 func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
-	db := openAuthorActivityAdapterDB(t)
-	backend, err := sqlitebackend.New(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	db, backend := store.backend.ConstructionHandle(), store.backend
 	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), uuid.NewString())
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	ctx = runtimecorrelation.WithSourceArtifactFact(
 		ctx,
 		mustStoreTestSourceArtifactFact("bundle-v2:sha256:"+strings.Repeat("a", 64)),
@@ -260,6 +258,12 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 		uuid.NewString(), events.EventType("phrase.completed"), "phrase-completer", "", []byte(`{}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, now,
 	)
+	setupCtx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), store)
+	requireRunningRunForTest(t, setupCtx, store, event.RunID(), now)
+	setup, err := authoractivityadapter.List(ctx, db, authoractivityadapter.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
+	if err != nil || len(setup.Occurrences) != 1 || setup.Occurrences[0].Kind != runtimeauthoractivity.KindRunLifecycle {
+		t.Fatalf("native run setup activity = %#v, %v", setup, err)
+	}
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +288,7 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := authoractivityadapter.List(ctx, db, authoractivityadapter.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
+	page, err := authoractivityadapter.List(ctx, db, authoractivityadapter.DialectSQLite, runtimeauthoractivity.ListOptions{AfterSequence: setup.Occurrences[0].Sequence, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -519,6 +519,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	base := time.Unix(1700000300, 0).UTC()
@@ -594,6 +595,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	businessEvent := uuid.NewString()
@@ -623,6 +625,7 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	entityOne := uuid.NewString()

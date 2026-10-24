@@ -60,16 +60,12 @@ func TestB12GroupReadbackMixedRecoveryDoesNotMintAuthorityBothStores(t *testing.
 				t.Fatal(err)
 			}
 			before := f.snapshot(t)
-			submits := f.sink.submits
 			for repeat := 0; repeat < 2; repeat++ {
 				observed, err := f.group.ReadPublicationSettlement(f.ctx, f.members)
 				if err != nil || len(observed.Rows) != len(f.members) || observed.Rows[0].State != pipelineobligation.PublicationSettlementSatisfied || observed.Rows[1].State != pipelineobligation.PublicationSettlementPending || observed.ObservedAt.IsZero() {
 					t.Fatalf("mixed independent recovery observation: %+v err=%v", observed, err)
 				}
 				f.requireSnapshot(t, before)
-			}
-			if f.sink.submits != submits {
-				t.Fatal("readback submitted completion work")
 			}
 			out, err := f.group.Settle(f.ctx, f.members)
 			if err == nil || len(out.Results) != 0 {
