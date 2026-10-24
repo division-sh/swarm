@@ -183,6 +183,7 @@ func TestRunStopCommitUncertaintyPreservesRealOutcomeBothStores(t *testing.T) {
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, backend == "postgres", 3, time.Now().UTC())
 				ctx, cancel = context.WithTimeout(testAuthorActivityContextForBundle(fixture.bundleHash), 10*time.Second)
 				defer cancel()
+				ctx = storeTestOriginalProcessContext(t, ctx, owner)
 				before := readStopCommitEvidence(t, db, fixture.runID)
 				cause := errors.New("injected stop COMMIT acknowledgement unavailable")
 				var calls atomic.Int32
@@ -226,6 +227,7 @@ func TestRunStopKnownCommitRejectionBothStores(t *testing.T) {
 			fixture := seedFanOutOwnerFixture(t, testAuthorActivityContext(), db, owner, backend == "postgres", 3, time.Now().UTC())
 			ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(fixture.bundleHash), 10*time.Second)
 			defer cancel()
+			ctx = storeTestOriginalProcessContext(t, ctx, owner)
 			statements := []string{
 				`CREATE TABLE stop_commit_parent (id INTEGER PRIMARY KEY)`,
 				`CREATE TABLE stop_commit_child (id INTEGER REFERENCES stop_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)`,

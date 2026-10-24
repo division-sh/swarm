@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -1005,6 +1006,7 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 				StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 			})
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			flowPath := "run-stop-guidance/" + backend
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			artifact := storeTestSourceArtifact("standing-run-stop-guidance-" + backend)
@@ -1013,7 +1015,7 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 
 				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 			}
-			seedStoreTestPersistedArtifact(t, db, artifact)
+			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), artifact)
 			created, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatalf("create standing service: %v", err)

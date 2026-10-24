@@ -12,6 +12,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -49,7 +50,10 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db := tc.open(t)
-			ctx := testAuthorActivityContext()
+			ctx, err := agentfixture.ProcessContext(t, testAuthorActivityContext(), selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
 			retiredRunID := uuid.NewString()
 			currentRunID := uuid.NewString()
 			ambiguousRunID := uuid.NewString()

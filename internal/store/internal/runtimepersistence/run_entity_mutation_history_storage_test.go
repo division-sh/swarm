@@ -87,6 +87,7 @@ func TestRunEntityMutationHistoryStorageRefusesRawInvalidCancelledClosedAndUnava
 		for _, cut := range []string{"invalid-run", "nil-run", "cancelled", "closed", "unavailable"} {
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				f, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = f.originalContext(ctx)
 				run := uuid.NewString()
 				seedEntityToolStorageWitness(t, f, run, uuid.NewString(), false, true)
 				switch cut {

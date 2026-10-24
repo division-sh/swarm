@@ -21,7 +21,7 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, selected, db, sqlite)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.ctx
 			process := fixture.process
 			authority, err := process.Evidence()
 			if err != nil {
@@ -124,7 +124,6 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 			}
 			t.Run("other_normal_source", func(t *testing.T) {
 				otherRun := uuid.NewString()
-				ctx = storeTestOriginalProcessContext(t, ctx, selected)
 				requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 					RunID: otherRun, BundleHash: otherHash, Artifact: otherArtifact,
 					Origin: semanticScenarioSetupRunOriginForTest(), StartedAt: time.Now().UTC(),

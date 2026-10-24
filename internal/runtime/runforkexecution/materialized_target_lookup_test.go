@@ -49,14 +49,15 @@ func TestSelectedForkMaterializedTargetLookupBothStores(t *testing.T) {
 			} else {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
+			ctx := nativeRunForkTestContext(t, runForkTestContext(t), selected)
 			for _, topology := range []string{"root", "nested-keyed"} {
-				t.Run(topology, func(t *testing.T) { proveMaterializedTargetLookup(t, selected, topology) })
+				t.Run(topology, func(t *testing.T) { proveMaterializedTargetLookup(t, ctx, selected, topology) })
 			}
 		})
 	}
 }
 
-func proveMaterializedTargetLookup(t *testing.T, selected materializedTargetTestStore, topology string) {
+func proveMaterializedTargetLookup(t *testing.T, ctx context.Context, selected materializedTargetTestStore, topology string) {
 	t.Helper()
 	rootPath := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	if topology == "nested-keyed" {
@@ -69,7 +70,7 @@ func proveMaterializedTargetLookup(t *testing.T, selected materializedTargetTest
 		t.Fatal(err)
 	}
 	runID := uuid.NewString()
-	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(context.Background(), runID), loaded.SourceArtifactFact)
+	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	bundle, _ := semanticview.Bundle(loaded.Source)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash()})

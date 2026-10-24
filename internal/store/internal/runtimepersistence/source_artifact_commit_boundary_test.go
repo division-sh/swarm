@@ -44,6 +44,7 @@ func Test2376SourceArtifactCommitUncertaintyBothStores(t *testing.T) {
 					})
 					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 					defer cancel()
+					ctx = storeTestOriginalProcessContext(t, ctx, owner)
 					ensure := func() (sourceartifact.EnsureResult, error) {
 						if withData {
 							return selected.EnsureSourceArtifactWithData(ctx, artifact, durabledata.Catalog{BundleHash: artifact.BundleHash()})

@@ -117,9 +117,33 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 	contexts.mu.Unlock()
 	var outcome error
 	if retained != nil {
-		outcome = retireQuiescentSelectedTestContext(wait, owner, child)
+		storage, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
+		if err != nil {
+			return selectedRetainedExecutionObservation{}, err
+		}
+		for storage.State == "running" {
+			pending, err := storetest.ReadServedIncompletePipelineHandoffCount(wait, selected, child)
+			if err != nil {
+				return selectedRetainedExecutionObservation{}, err
+			}
+			if pending == 0 {
+				break
+			}
+			select {
+			case <-wait.Done():
+				return selectedRetainedExecutionObservation{}, context.Cause(wait)
+			case <-time.After(10 * time.Millisecond):
+			}
+			storage, err = storetest.ReadSelectedExecutionStorage(wait, selected, child)
+			if err != nil {
+				return selectedRetainedExecutionObservation{}, err
+			}
+		}
+		if storage.State == "running" {
+			outcome = retireQuiescentSelectedTestContext(wait, owner, child)
+		}
 		contexts.mu.Lock()
-		outcome = retained.err
+		outcome = errors.Join(outcome, retained.err)
 		contexts.mu.Unlock()
 	}
 	storage, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
@@ -136,7 +160,7 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 		outcome = errors.Join(outcome, failures.FromEnvelope(*header.Failure))
 	}
 	wantState := "running"
-	if header.Status != "running" {
+	if header.Status != "running" || errors.Is(outcome, context.Canceled) {
 		wantState = "closed"
 	}
 	if storage.State != wantState {
@@ -172,6 +196,10 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 		return observed.ForkEvents[i].SourceEventID < observed.ForkEvents[j].SourceEventID
 	})
 	observed.ExecutedEventCount = len(observed.ForkEvents)
+	for _, event := range observed.ForkEvents {
+		diagnostic, err := storetest.ReadNodeDeliveryDiagnosticStorage(wait, selected, event.ForkEventID)
+		t.Logf("selected physical node settlement: event=%s diagnostic=%+v error=%v", event.ForkEventID, diagnostic, err)
+	}
 	return observed, outcome
 }
 

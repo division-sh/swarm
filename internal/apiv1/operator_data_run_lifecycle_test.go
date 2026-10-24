@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -680,8 +681,18 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("register amended catalog: %v", err)
 			}
 			amendedSource := semanticview.Wrap(amendedBundle)
+			process, _ := worklifetime.ProcessFromContext(ctx)
+			amendedWork, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: amendedBundleHash})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := amendedWork.RetireAndWait(ctx); err != nil {
+					t.Error(err)
+				}
+			})
 			amendedBus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &amended, runtimebus.EventBusOptions{
-				ContractBundle: amendedSource, SourceArtifactFact: mustAPITestSourceArtifactFact(amendedBundleHash),
+				ContractBundle: amendedSource, SourceArtifactFact: mustAPITestSourceArtifactFact(amendedBundleHash), WorkOwner: amendedWork,
 			})
 			if err != nil {
 				t.Fatalf("new amended data EventBus: %v", err)

@@ -45,7 +45,8 @@ func TestRunLifecycleOwnerRejectsSourceWithoutArtifact(t *testing.T) {
 	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
 
-	_, err := pg.CreateRun(testAuthorActivityContext(), storerunlifecycle.CreateRequest{
+	ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), pg)
+	_, err := pg.CreateRun(ctx, storerunlifecycle.CreateRequest{
 		RunID: runID, Origin: storerunlifecycle.ScenarioSetupRunOrigin(),
 		Source: mustStoreTestSourceArtifactFact(testCanonicalBundleHash), StartedAt: time.Now().UTC(),
 	})
