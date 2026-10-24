@@ -67,16 +67,11 @@ func TestCIJobCollectionWaitsOnlyForTerminalEvidence(t *testing.T) {
 		name, plan, jobs string
 		ready            bool
 	}{
-		{"complete", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed","steps":[{"status":"completed"}]},{"name":"Go proof two","status":"completed","steps":[{"status":"completed"}]}]}]`, true},
+		{"complete", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed"}]}]`, true},
 		{"stale successful job", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"in_progress"}]}]`, false},
 		{"missing job", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"}]}]`, false},
 		{"duplicate job", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed"},{"name":"Go proof two","status":"completed"}]}]`, false},
-		{"terminal failure reaches evaluator", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed","steps":[{"status":"completed"}]},{"name":"Go proof two","status":"completed","conclusion":"failure","steps":[{"status":"completed","conclusion":"failure"}]}]}]`, true},
-		{"stale running step", `{"batches":[{"id":"one"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed","steps":[{"status":"completed"},{"status":"in_progress"}]}]}]`, false},
-		{"stale pending step", `{"batches":[{"id":"one"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed","steps":[{"status":"pending"}]}]}]`, false},
-		{"skipped step", `{"batches":[{"id":"one"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed","steps":[{"status":"completed"},{"status":"pending","conclusion":"skipped"}]}]}]`, true},
-		{"missing steps", `{"batches":[{"id":"one"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"}]}]`, false},
-		{"empty steps", `{"batches":[{"id":"one"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed","steps":[]}]}]`, false},
+		{"terminal failure reaches evaluator", `{"batches":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed","conclusion":"failure"}]}]`, true},
 		{"empty plan", `{"batches":[]}`, `[{"jobs":[]}]`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

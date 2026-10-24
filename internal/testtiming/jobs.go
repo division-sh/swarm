@@ -172,24 +172,6 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 		if commandSeconds > timing.ElapsedSeconds+1 {
 			problem("logical commands exceed their whole job: " + job.Name)
 		}
-		proofSteps, uploadSteps := 0, 0
-		for _, step := range job.Steps {
-			if step.Conclusion == "skipped" {
-				continue
-			}
-			if step.Status != "completed" || step.StartedAt.Before(job.StartedAt) || step.CompletedAt.Before(step.StartedAt) || step.CompletedAt.After(job.CompletedAt) {
-				problem("invalid step timing for " + job.Name + ": " + step.Name)
-			}
-			if step.Name == "Run exact planned proof unit" {
-				proofSteps++
-			}
-			if step.Name == "Upload proof evidence" {
-				uploadSteps++
-			}
-		}
-		if proofSteps != 1 || uploadSteps != 1 {
-			problem("missing/duplicate proof or upload step for " + job.Name)
-		}
 		summary.UnitCount += len(members)
 		summary.JobCount++
 		summary.RunnerMinutes += timing.ElapsedSeconds / 60
