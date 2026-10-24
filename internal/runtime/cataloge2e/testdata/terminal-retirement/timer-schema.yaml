@@ -6,9 +6,8 @@ stages:
         advances_to: complete
   complete:
     final: true
-pins:
-  inputs:
-    - worker.inspect.requested
-    - worker.ready.requested
-  outputs:
-    - worker.observed
+inputs:
+  - worker.inspect.requested
+  - worker.ready.requested
+outputs:
+  - worker.observed
