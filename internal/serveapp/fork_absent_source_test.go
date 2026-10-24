@@ -107,6 +107,13 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
 				t.Fatal("live switching changed source business state")
 			}
+			var latest apiv1.RunForkExecutionResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
+				"source_run_id": sibling.ForkRunID, "idempotency_key": "root-latest-state-fork",
+			}, &latest)
+			if latest.ForkPointKind != "state_revision" || latest.ForkEventID != "" || latest.ForkRevision <= 0 || latest.ExecutedEventCount != 0 || latest.ForkRunStatus != "live" || latest.SourceRunStatus != "paused" || latest.SourceFrozen {
+				t.Fatalf("latest did not use an input-free committed state cut: %+v", latest)
+			}
 			var replayKind, replayRoute string
 			if err := rt.DB.QueryRow(`SELECT e.routing_source_kind, CAST(e.source_route AS TEXT) FROM events e JOIN run_fork_selected_contract_executions x ON x.fork_run_id=e.run_id AND x.fork_event_id=e.event_id WHERE x.fork_run_id=$1 AND x.source_event_id=$2 AND e.event_name='item.processed'`, fork.ForkRunID, published.EventID).Scan(&replayKind, &replayRoute); err != nil {
 				t.Fatal(err)

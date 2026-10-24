@@ -105,7 +105,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 		t.Fatalf("event.publish result = %#v", published)
 	}
 	waitServedRunDeliveryQuiescence(t, deliveryReader, started.RunID)
-	requireServedRunStatus(t, endpoint, started.RunID, "completed")
+	requireServedRunStatus(t, endpoint, started.RunID, "live")
 
 	var fork apiv1.RunForkExecutionResult
 	forkResponse := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
@@ -128,12 +128,12 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	if err := json.Unmarshal(forkResponse.Result, &fork); err != nil {
 		t.Fatalf("decode run.fork result: %v\n%s", err, forkResponse.Result)
 	}
-	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "completed" || fork.ExecutedEventCount != 0 {
+	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
 	waitServedEventPublishedLog(t, endpoint, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, published.EventID))
 	waitServedRunDeliveryQuiescence(t, deliveryReader, fork.ForkRunID)
-	requireServedRunStatus(t, endpoint, fork.ForkRunID, "completed")
+	requireServedRunStatus(t, endpoint, fork.ForkRunID, "live")
 
 	var runReadback map[string]any
 	requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": fork.ForkRunID}, &runReadback)
