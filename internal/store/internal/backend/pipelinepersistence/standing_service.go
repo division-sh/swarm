@@ -689,6 +689,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		}
 		if _, err := s.createRun(txctx, tx, runtimerunlifecycle.CreateRequest{
 			RunID: nextRunID, Origin: origin, Source: declarationSource, StartedAt: now,
+			LiveScope: runtimerunlifecycle.LiveRunScope{FlowPath: current.FlowPath},
 		}); err != nil {
 			return err
 		}
@@ -1141,6 +1142,7 @@ func (s *standingServiceAdapter) createStandingServiceTx(ctx context.Context, tx
 	}
 	if _, err := s.createRun(ctx, tx, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: candidate.Source, StartedAt: now,
+		LiveScope: runtimerunlifecycle.LiveRunScope{FlowPath: candidate.FlowPath},
 	}); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}

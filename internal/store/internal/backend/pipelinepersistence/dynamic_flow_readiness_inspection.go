@@ -147,7 +147,7 @@ func (inspection dynamicFlowReadinessInspection) snapshot(ctx context.Context, s
 }
 
 func (inspection dynamicFlowReadinessInspection) scopedRuns(ctx context.Context, tx *sql.Tx, source correlation.SourceArtifactFact, runID string) ([]string, error) {
-	query := `SELECT run_id FROM runs WHERE bundle_hash=$1 AND LOWER(TRIM(status)) IN ('running','paused')`
+	query := `SELECT run_id FROM runs WHERE bundle_hash=$1 AND LOWER(TRIM(status)) IN ('running','paused','live')`
 	args := []any{source.BundleHash()}
 	if runID != "" {
 		query += ` AND run_id=$2`

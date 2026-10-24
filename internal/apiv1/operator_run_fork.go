@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -71,6 +72,12 @@ type SelectedContractRunForkExecutor struct {
 	ExecuteSelectedContractRunFork SelectedContractRunForkExecutionFunc
 	SourceLoader                   runtimerunforkexecution.SelectedContractSourceLoader
 	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
+	RuntimeContexts                *runtimepkg.RuntimeContextManager
+	LiveRuns                       runtimerunlifecycle.LiveRunReader
+}
+
+func (e SelectedContractRunForkExecutor) ForksBecomeLive() bool {
+	return e.RuntimeContexts != nil && e.LiveRuns != nil
 }
 
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
@@ -80,18 +87,71 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	if e.ExecuteSelectedContractRunFork == nil {
 		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract executor")
 	}
-	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+	var liveRuntime *runtimepkg.Runtime
+	if e.RuntimeContexts != nil {
+		var selected selectedRuntimeContext
+		var err error
+		ctx, selected, err = runtimeBundleContextByHash(ctx, e.RuntimeContexts, req.BundleHash, req.SourceRunID)
+		if err != nil {
+			return RunForkExecutionResult{}, err
+		}
+		liveRuntime = selected.Runtime
+		if liveRuntime == nil {
+			return RunForkExecutionResult{}, errors.New("run.fork requires its admitted runtime")
+		}
+	}
+	runtimeRequest := runtimerunforkexecution.SelectedContractExecutionRequest{
 		ForkOperation:      req.ForkOperation,
 		SourceRunID:        strings.TrimSpace(req.SourceRunID),
 		At:                 strings.TrimSpace(req.ForkEventID),
 		AtStart:            req.AtStart,
 		ExpectedBundleHash: strings.TrimSpace(req.BundleHash),
 		AllowSourceFreeze:  req.AllowSourceFreeze,
+		LiveRuntime:        liveRuntime,
 		DataPinOverrides:   req.DataPinOverrides,
 		SourceLoader:       e.SourceLoader,
 		ContractSelection:  req.ContractSelection,
 		AgentRuntime:       e.AgentRuntime,
-	})
+	}
+	var result runtimerunforkexecution.SelectedContractExecutionResult
+	var err error
+	execute := func() error {
+		result, err = e.ExecuteSelectedContractRunFork(ctx, runtimeRequest)
+		return err
+	}
+	if liveRuntime != nil {
+		if e.LiveRuns == nil {
+			return RunForkExecutionResult{}, errors.New("live fork requires the durable flow selector")
+		}
+		scope, scopeErr := e.LiveRuns.LoadRunLiveScope(ctx, req.SourceRunID)
+		if scopeErr != nil {
+			return RunForkExecutionResult{}, scopeErr
+		}
+		if scopeErr := scope.Validate(); scopeErr != nil {
+			return RunForkExecutionResult{}, scopeErr
+		}
+		live, found, readErr := e.LiveRuns.LoadLiveRun(ctx, scope)
+		if readErr != nil {
+			return RunForkExecutionResult{}, readErr
+		}
+		if found {
+			parkCtx, parked, _, acquireErr := runtimeBundleContextByRun(ctx, e.RuntimeContexts, live.RunID)
+			if acquireErr != nil {
+				return RunForkExecutionResult{}, acquireErr
+			}
+			err = parked.Runtime.WithParkedLiveRun(parkCtx, live, execute)
+			if !result.Activation.Activated {
+				err = errors.Join(err, parked.Runtime.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
+			}
+		} else {
+			err = execute()
+		}
+		if result.Activation.Activated {
+			err = errors.Join(err, liveRuntime.ReconcileLiveRun(context.WithoutCancel(ctx), result.Materialization.ForkRunID))
+		}
+	} else {
+		err = execute()
+	}
 	acknowledged := exactSelectedForkActivation(req, result)
 	if result.Activation.Activated && !acknowledged {
 		return RunForkExecutionResult{}, errors.Join(err, fmt.Errorf("selected fork activation has no exact acknowledged identity"))
@@ -209,7 +269,8 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		if !availability.Available() {
 			return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
 		}
-		if activeRunStatus(availability.Status) && !params.AllowSourceFreeze {
+		liveExecutor, liveMode := opts.Executor.(interface{ ForksBecomeLive() bool })
+		if activeRunStatus(availability.Status) && !params.AllowSourceFreeze && !(liveMode && liveExecutor.ForksBecomeLive()) {
 			return nil, NewInvalidParamsError(map[string]any{
 				"field":  "allow_source_freeze",
 				"reason": "must be true to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started",

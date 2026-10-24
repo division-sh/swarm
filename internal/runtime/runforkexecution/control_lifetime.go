@@ -144,6 +144,19 @@ func (o SelectedContractExecutionOwner) acquireSelectedStop(ctx context.Context,
 }
 
 func (o SelectedContractExecutionOwner) StopSelectedFork(ctx context.Context, req runcontrol.TransitionRequest) (result runcontrol.TransitionResult, selected bool, finalErr error) {
+	ports, err := o.require()
+	if err != nil {
+		return result, false, err
+	}
+	binding, exists, err := ports.fork.LoadRunForkSelectedContractBinding(ctx, req.RunID)
+	if err != nil {
+		return result, false, err
+	}
+	if exists {
+		if ordinary, err := o.ordinaryHandoff(ctx, req.RunID, binding); err != nil || ordinary {
+			return result, false, err
+		}
+	}
 	use, selected, err := o.acquireSelectedStop(ctx, req.RunID)
 	if err != nil || !selected {
 		return result, selected, err

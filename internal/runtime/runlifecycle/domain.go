@@ -673,6 +673,7 @@ const (
 	CandidateRequested        CandidateRequestDisposition = "requested"
 	CandidateAlreadyCurrent   CandidateRequestDisposition = "already_current"
 	CandidateDeferredPaused   CandidateRequestDisposition = "deferred_paused"
+	CandidateRetainedLive     CandidateRequestDisposition = "retained_live"
 	CandidateAbsorbedTerminal CandidateRequestDisposition = "absorbed_terminal"
 )
 
@@ -732,7 +733,7 @@ func (r CandidateRequestResult) Validate() error {
 	switch r.Disposition {
 	case CandidateRequested, CandidateAlreadyCurrent:
 		return r.Candidate.Validate()
-	case CandidateDeferredPaused, CandidateAbsorbedTerminal:
+	case CandidateDeferredPaused, CandidateRetainedLive, CandidateAbsorbedTerminal:
 		if r.Candidate.Revision != 0 || !r.Candidate.DueAt.IsZero() {
 			return fmt.Errorf("%s candidate result must not carry candidate identity", r.Disposition)
 		}

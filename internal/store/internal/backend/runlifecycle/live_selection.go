@@ -31,6 +31,20 @@ func (s *RunLifecycleSQLiteOwner) LoadLiveRun(ctx context.Context, scope runtime
 	return loadLiveRun(ctx, s.backend, scope)
 }
 
+func (s *RunLifecyclePostgresOwner) LoadRunLiveScope(ctx context.Context, runID string) (runtimerunlifecycle.LiveRunScope, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimerunlifecycle.LiveRunScope{}, err
+	}
+	return liveScopeForRun(ctx, s.backend, runID)
+}
+
+func (s *RunLifecycleSQLiteOwner) LoadRunLiveScope(ctx context.Context, runID string) (runtimerunlifecycle.LiveRunScope, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimerunlifecycle.LiveRunScope{}, err
+	}
+	return liveScopeForRun(ctx, s.backend, runID)
+}
+
 func loadLiveRun(ctx context.Context, q rowQueryer, scope runtimerunlifecycle.LiveRunScope) (runtimerunlifecycle.LiveRun, bool, error) {
 	if err := scope.Validate(); err != nil {
 		return runtimerunlifecycle.LiveRun{}, false, err

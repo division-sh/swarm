@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -33,6 +34,7 @@ type SelectedContractExecutionRequest struct {
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	AllowSourceFreeze       bool
+	LiveRuntime             *runtimepkg.Runtime
 	DataPinOverrides        []durabledata.ExplicitPin
 
 	Owner             SelectedContractExecutionOwner
@@ -235,6 +237,9 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 	}
 	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
+	if req.LiveRuntime != nil {
+		return container.activateLive(prepared, req, result)
+	}
 	activation, err := container.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		InheritedSchedules:    prepared.readiness,
 		ForkOperation:         forkOperation,
@@ -343,6 +348,9 @@ func admitSelectedEventPointOwedSchedule(plan runfork.RunForkPlan) error {
 		if schedule.Command.RunID != plan.SourceRunID {
 			return fmt.Errorf("selected-contract one-shot belongs to another source run")
 		}
+		return plan.ForkPoint.Validate()
+	}
+	if plan.ForkPoint.Kind == runfork.RunForkPointStateRevision {
 		return plan.ForkPoint.Validate()
 	}
 	return fmt.Errorf("selected-contract event-point execution requires selected frontier events or an exact owed schedule")
