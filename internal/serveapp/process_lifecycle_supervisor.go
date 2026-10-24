@@ -17,8 +17,8 @@ import (
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
-// processLifecycleSupervisor owns only serve-process runtime attachment and
-// shutdown. Bundle replacement is not a supported process operation.
+// processLifecycleSupervisor serializes runtime attachment, bundle swaps,
+// destructive reset, and shutdown for the serve process.
 type processLifecycleSupervisor struct {
 	ready             serveReadiness
 	processCapability runtimestartupownership.ProcessCapability

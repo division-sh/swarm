@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
@@ -19,20 +22,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			finalErr = errors.Join(finalErr, req.Owner.completePreparation(prepared))
 		}
 	}()
-	if req.AcquireLiveRuntime != nil {
-		use, err := req.AcquireLiveRuntime(ctx, prepared.loadedSource.SourceArtifactFact.BundleHash())
-		if use != nil {
-			defer func() { finalErr = errors.Join(finalErr, use.Done()) }()
-		}
-		if err != nil {
-			return out, err
-		}
-		if use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(prepared.loadedSource.SourceArtifactFact) {
-			return out, errors.New("live fork requires its exact ordinarily admitted target")
-		}
-		req.LiveRuntime = use.Runtime()
-	}
-	execute := func() error {
+	execute := func(context.Context) error {
 		executed = true
 		out, finalErr = executePreparedSelectedContractRunFork(ctx, req, prepared)
 		return finalErr
@@ -53,32 +43,79 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	}
 	if found {
 		use, lookup, availability, err := req.LiveContexts.AcquireRun(ctx, live.RunID)
-		if use != nil {
-			defer func() { finalErr = errors.Join(finalErr, use.Done()) }()
-		}
 		if err != nil {
+			if use != nil {
+				err = errors.Join(err, use.Done())
+			}
 			return out, err
 		}
 		if !lookup.Loaded() || !availability.Available() || use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(live.Source) {
-			return out, errors.New("live predecessor requires its exact admitted runtime")
+			if use != nil {
+				finalErr = use.Done()
+			}
+			return out, errors.Join(finalErr, errors.New("live predecessor requires its exact admitted runtime"))
 		}
 		parked, parkCtx := use.Runtime(), use.WorkContext()
-		finalErr = parked.WithParkedLiveRun(parkCtx, live, execute)
-		if !out.Activation.Activated {
-			finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
+		if live.Source.Matches(prepared.loadedSource.SourceArtifactFact) {
+			req.LiveRuntime = parked
+			finalErr = parked.WithParkedLiveRun(parkCtx, live, execute)
+			if !out.Activation.Activated {
+				finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
+			}
+			finalErr = errors.Join(finalErr, use.Done())
+		} else {
+			pauseCtx, release, err := parked.ParkLiveRun(parkCtx, live)
+			if err != nil {
+				return out, errors.Join(err, use.Done())
+			}
+			releaseUse := sync.OnceValue(func() error { release(); return use.Done() })
+			defer func() { finalErr = errors.Join(finalErr, releaseUse()) }()
+			acquire := req.AcquireLiveRuntime
+			paused := false
+			req.AcquireLiveRuntime = func(ctx context.Context, hash string) (*runtimepkg.RuntimeContextUse, error) {
+				if acquire == nil || parked.RunControl == nil {
+					return nil, errors.New("bundle swap requires its existing runtime and run-control owners")
+				}
+				// Materialization has revalidated the immutable plan, and selected
+				// dispatch has settled. Only now change its observed source status.
+				result, err := parked.RunControl.Pause(pauseCtx, runcontrol.TransitionRequest{RunID: live.RunID, Reason: "fork bundle swap", ControlledBy: "run.fork"})
+				paused = result.Status == runcontrol.StatusPaused
+				if err != nil {
+					return nil, err
+				}
+				if err := releaseUse(); err != nil {
+					return nil, err
+				}
+				return acquire(ctx, hash)
+			}
+			finalErr = execute(ctx)
+			finalErr = errors.Join(finalErr, releaseUse())
+			if !paused && !out.Activation.Activated {
+				finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
+			}
 		}
 	} else {
-		finalErr = execute()
+		finalErr = execute(ctx)
 	}
 	if out.Activation.Activated {
-		finalErr = errors.Join(finalErr, req.LiveRuntime.ReconcileLiveRun(context.WithoutCancel(ctx), out.Materialization.ForkRunID))
+		use, lookup, _, err := req.LiveContexts.AcquireRun(context.WithoutCancel(ctx), out.Materialization.ForkRunID)
+		if err == nil && (use == nil || !lookup.Loaded()) {
+			err = errors.New("committed live fork requires its current ordinary runtime")
+		}
+		if err == nil {
+			err = use.Runtime().ReconcileLiveRun(use.WorkContext(), out.Materialization.ForkRunID)
+		}
+		if use != nil {
+			err = errors.Join(err, use.Done())
+		}
+		finalErr = errors.Join(finalErr, err)
 	}
 	return out, finalErr
 }
 
 func (c selectedContractForkLocalRuntimeContainer) activatePrepared(p *PreparedSelectedFork, req SelectedContractExecutionRequest, result SelectedContractExecutionResult, diagnostic error) (SelectedContractExecutionResult, error) {
 	c.diagnostics.add(diagnostic)
-	if req.LiveRuntime == nil {
+	if req.LiveRuntime == nil && req.AcquireLiveRuntime == nil {
 		return result, errors.New("fork activation requires its ordinarily admitted live target")
 	}
 	return c.activateLive(p, req, result)
@@ -111,6 +148,19 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	// Shutdown retires that grant and therefore belongs after the native handoff.
 	if err := runtime.stopExecutionWork(); err != nil {
 		return out, err
+	}
+	if req.LiveRuntime == nil && req.AcquireLiveRuntime != nil {
+		use, err := req.AcquireLiveRuntime(p.operation.Context(), p.loadedSource.SourceArtifactFact.BundleHash())
+		if use != nil {
+			defer func() { finalErr = errors.Join(finalErr, use.Done()) }()
+		}
+		if err != nil {
+			return out, err
+		}
+		if use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(p.loadedSource.SourceArtifactFact) {
+			return out, errors.New("live fork requires its exact ordinarily admitted target")
+		}
+		req.LiveRuntime = use.Runtime()
 	}
 	evidence, err := req.LiveRuntime.CurrentStartupGrantEvidence()
 	if err != nil {

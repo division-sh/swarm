@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 // Artifact admission below is private setup. This proves the public fork and
@@ -101,7 +102,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				if predecessor == nil || successor == nil || predecessor == successor {
 					t.Fatal("reset reused selected family instead of constructing a successor")
 				}
-				if _, _, err := predecessor.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: "late-predecessor"}); !errors.Is(err, worklifetime.ErrRetired) {
+				if _, _, err := predecessor.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: uuid.NewString()}); !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("predecessor stop did not remain retired: %v", err)
 				}
 				expireWorkspaceProofResetTransportCache(t, selected.Idempotency(), selected.RuntimeDeps().EventStore)
