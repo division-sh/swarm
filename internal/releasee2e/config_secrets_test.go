@@ -116,6 +116,7 @@ func assertDeploymentSecretReadback(t *testing.T, result releaseCommandResult, c
 		Secrets []struct {
 			Key, Source string
 			Writable    bool
+			Shadowed    bool
 			Present     bool
 			RequiredBy  []struct{ Kind, Name string } `json:"required_by"`
 		}
@@ -148,10 +149,20 @@ func assertDeploymentSecretReadback(t *testing.T, result releaseCommandResult, c
 		}
 		return
 	}
-	if len(report.Secrets) != 1 {
-		t.Fatalf("compiled list must name only the selected provider: %s", result.output)
+	wantRecords := 1
+	if present && backend != "claude_cli" {
+		wantRecords = 2
 	}
-	record := report.Secrets[0]
+	if len(report.Secrets) != wantRecords {
+		t.Fatalf("compiled list lost an exact consumer observation: %s", result.output)
+	}
+	if wantRecords == 2 {
+		inventory := report.Secrets[0]
+		if inventory.Key != key || inventory.Source != "env" || !inventory.Present || inventory.Writable || !inventory.Shadowed || len(inventory.RequiredBy) != 0 {
+			t.Fatalf("wrong environment inventory readback: %s", result.output)
+		}
+	}
+	record := report.Secrets[wantRecords-1]
 	wantSource := ""
 	if present {
 		wantSource = "file"
