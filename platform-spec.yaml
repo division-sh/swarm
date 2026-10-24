@@ -14232,7 +14232,7 @@ flow_model:
     owner: platform-spec.yaml#flow_model.flow_instance_authoring
     locked_principle: >
       Swarm's default authoring model is flow-instance-centered. A normal flow
-      instance owns one primary state state. Cross-flow composition routes to
+      instance owns one primary state record. Cross-flow composition routes to
       flow instances through `connect` and instance keys. Lists and maps are
       contained state inside the primary state. Authors promote contained state
       to child/template flows only when it needs independent lifecycle, routing,
@@ -25258,7 +25258,7 @@ static_analyzer:
     supported_surface: cmd/swarm verify
     spec_basis:
     - handler_specification.expression_context.boot_validation
-    - handler_specification.expression_context.namespaces.entity
+    - handler_specification.expression_context.namespaces.state
     - handler_specification.handler_fields.create_entity
     - handler_specification.dependency_graph
     scope:
@@ -25651,45 +25651,11 @@ static_analyzer:
         rule: Explicit `initial:` on the field counts as authored creation-time coverage.
       unused_reason:
         rule: Explicit `_unused_reason:` documents intentional no-writer intent and suppresses this slice only.
-      materialize_from:
-        rule: Explicit `materialize_from:` counts as runtime-owned writer coverage when accumulator_entity_projection verify passes.
       handler_write_sites:
         rule: Handler write targets that name the field explicitly count as coverage. This includes data_accumulation, compute,
           filter/group_by/reduce/count store_as, query store_as, and clear targets.
     rule: Emit hard invalidity when a declared entity field has no authored writer coverage, no explicit `initial:`, and no
       `_unused_reason:`.
-  slice_6b_accumulator_entity_projection:
-    id: accumulator_entity_projection
-    domain: semantic_validity
-    authority: hard_invalidity
-    severity: error
-    canonical_owner: internal/runtime/accprojection resolver consumed by bootverify and runtime executor
-    supported_surface: cmd/swarm verify and runtime handler execution
-    spec_basis:
-    - entity_contracts.accumulator_entity_projection
-    - handler_specification.handler_fields.accumulate
-    - design_principles.no_structural_primitive_elides_type_discipline
-    rule: |
-      Verify every `materialize_from` field through the shared projection
-      resolver. Hard invalidity if the reference is malformed, the source node
-      is missing or cross-flow, the source handler lacks matching
-      `accumulate.into`, multiple handlers on one node declare the same
-      projectable buffer, the source/target types are not named-type lists, the
-      source event payload lacks the complete typed view, project coverage is
-      partial, reaches undeclared source fields/metadata/extras, references an
-      undeclared policy path, uses an unsupported binding namespace, the field
-      also declares `_unused_reason`, or any other authored writer targets the
-      same field.
-    runtime_rule: |
-      After each open-stream accumulator arrival is admitted, runtime writes the
-      current projection as a full replacement before emit.fields. Handler
-      `rules` do not guard projection eligibility. The projected result is
-      validated through entity named-type normalization. Failure rolls back the
-      whole handler transaction. If a verify-clean declaration exists for the
-      active stream accumulator but runtime resolves zero projection bindings,
-      execution fails closed as a runtime invariant violation rather than
-      silently skipping the projection. Projection is per admitted arrival and
-      is never gated by finite completion, timeout, or handler `on_complete`.
   slice_6c_accumulator_static_safety:
     ids:
     - accumulator_input_producer_path
