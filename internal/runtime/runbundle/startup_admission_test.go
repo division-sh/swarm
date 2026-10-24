@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -102,7 +104,13 @@ func testUpgradeRetainedInstances(t *testing.T) {
 			RootEntities: contracts.EntityContractsDocument{"record": {Fields: map[string]contracts.EntityFieldDecl{
 				"count": {Type: fieldType},
 			}}},
+			Events: map[string]contracts.EventCatalogEntry{"work.queued": {Payload: contracts.EventPayloadSpec{
+				Type: "object", Properties: map[string]contracts.EventFieldSpec{"count": {Type: fieldType}},
+			}}},
 		}
+		root := &contracts.FlowContractView{Paths: contracts.FlowContractPaths{FlowPath: "."},
+			Schema: *bundle.RootSchema, Events: bundle.Events}
+		bundle.FlowTree = contracts.FlowTree{Root: root, ByID: map[string]*contracts.FlowContractView{".": root}}
 		if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
 			t.Fatal(err)
 		}
@@ -139,6 +147,30 @@ func testUpgradeRetainedInstances(t *testing.T) {
 			}
 		})
 	}
+	t.Run("queued event keeps its admitted schema", func(t *testing.T) {
+		event, err := events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{
+			RunID: state.RunID, Facts: events.EventFacts{
+				ID: "queued-1", Type: "work.queued", Payload: []byte(`{"count":5}`), ExecutionMode: executionmode.Live,
+				Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "operator"},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		queued := UpgradeState{RunID: state.RunID, Events: []events.Event{event}}
+		for _, fieldType := range []string{"integer", "double"} {
+			blockers, err := CheckUpgrade(context.Background(), current, source("ready", fieldType), queued)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fieldType == "integer" && len(blockers) != 0 {
+				t.Fatalf("unchanged queued schema blocked: %+v", blockers)
+			}
+			if fieldType == "double" && (len(blockers) != 1 || blockers[0].Kind != "queued_event_schema_changed") {
+				t.Fatalf("changed queued schema admitted: %+v", blockers)
+			}
+		}
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := CheckUpgrade(ctx, current, source("ready", "integer"), state); !errors.Is(err, context.Canceled) {

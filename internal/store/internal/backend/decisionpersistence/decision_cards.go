@@ -320,6 +320,20 @@ func (s *DecisionSQLiteOwner) ListDecisionCards(ctx context.Context, opts decisi
 	return listDecisionCards(ctx, s.backend, opts, false)
 }
 
+func (s *DecisionPostgresOwner) ListDecisionCardsTx(ctx context.Context, tx *sql.Tx, opts decisioncard.ListOptions) ([]decisioncard.ListItem, string, error) {
+	if tx == nil {
+		return nil, "", fmt.Errorf("decision-card read requires its existing transaction")
+	}
+	return listDecisionCards(ctx, tx, opts, true)
+}
+
+func (s *DecisionSQLiteOwner) ListDecisionCardsTx(ctx context.Context, tx *sql.Tx, opts decisioncard.ListOptions) ([]decisioncard.ListItem, string, error) {
+	if tx == nil {
+		return nil, "", fmt.Errorf("decision-card read requires its existing transaction")
+	}
+	return listDecisionCards(ctx, tx, opts, false)
+}
+
 func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncard.ListOptions, postgres bool) ([]decisioncard.ListItem, string, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 50

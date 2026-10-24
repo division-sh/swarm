@@ -330,7 +330,7 @@ type persistedFanOutBarrier struct {
 
 func loadFanOutBarriers(
 	ctx context.Context,
-	tx *sql.Tx,
+	q pipelineQueryer,
 	postgres bool,
 	runID string,
 	status fanoutbarrier.Status,
@@ -365,7 +365,7 @@ func loadFanOutBarriers(
 	if postgres && forUpdate {
 		query += " FOR UPDATE"
 	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

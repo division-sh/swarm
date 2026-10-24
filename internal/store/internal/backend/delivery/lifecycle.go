@@ -1119,5 +1119,13 @@ func (s *DeliverySQLiteOwner) ActiveRunDeliverySnapshotsTx(ctx context.Context, 
 	return sqliteDeliveryAdapter.ActiveRunSnapshots(ctx, tx, runID)
 }
 
+func (s *DeliveryPostgresOwner) ReadActiveRunDeliverySnapshotsTx(ctx context.Context, tx *sql.Tx, runID string) ([]runtimedelivery.Snapshot, error) {
+	return postgresDeliveryAdapter.ReadActiveRunSnapshots(ctx, tx, runID)
+}
+
+func (s *DeliverySQLiteOwner) ReadActiveRunDeliverySnapshotsTx(ctx context.Context, tx *sql.Tx, runID string) ([]runtimedelivery.Snapshot, error) {
+	return sqliteDeliveryAdapter.ReadActiveRunSnapshots(ctx, tx, runID)
+}
+
 var _ runtimedelivery.Store = (*DeliveryPostgresOwner)(nil)
 var _ runtimedelivery.Store = (*DeliverySQLiteOwner)(nil)

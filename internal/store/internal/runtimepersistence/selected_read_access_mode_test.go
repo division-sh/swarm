@@ -13,15 +13,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t *testing.T) {
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := semanticview.Wrap(bundle)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
@@ -56,6 +67,20 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 					t.Fatalf("%s: %v", read.name, err)
 				}
 			}
+			upgrade, err := store.ReadBundleUpgradeState(ctx, runID, view)
+			if err != nil || upgrade.RunID != runID || len(upgrade.Instances)+len(upgrade.Deliveries)+len(upgrade.Cards)+len(upgrade.Barriers)+len(upgrade.Events) != 0 {
+				t.Fatalf("empty run upgrade read: %+v, %v", upgrade, err)
+			}
+			foreignBundle := *bundle
+			foreignBundle.SourceArtifact = sourceartifactfixture.New("global/schema.yaml", []byte("name: other\n"))
+			if partial, err := store.ReadBundleUpgradeState(ctx, runID, semanticview.Wrap(&foreignBundle)); err == nil || partial.RunID != "" {
+				t.Fatalf("foreign admitted source returned upgrade state: %+v, %v", partial, err)
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			if partial, err := store.ReadBundleUpgradeState(cancelled, runID, view); !errors.Is(err, context.Canceled) || partial.RunID != "" {
+				t.Fatalf("cancelled upgrade read returned state: %+v, %v", partial, err)
+			}
 			after := captureSelectedReadSideEffects(t, db, postgres, runID)
 			if after != before {
 				t.Fatalf("reader-as-writer side effects changed: before=%+v after=%+v", before, after)
@@ -76,6 +101,9 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 			if !errors.As(err, &notActive) || notActive.State != runtimerunlifecycle.StateCancelled {
 				t.Fatalf("terminal publication preflight error = %v, want cancelled RunNotActiveError", err)
 			}
+			if partial, err := store.ReadBundleUpgradeState(ctx, runID, view); err == nil || partial.RunID != "" {
+				t.Fatalf("terminal run returned upgrade state: %+v, %v", partial, err)
+			}
 			afterTerminalRead := captureSelectedReadSideEffects(t, db, postgres, runID)
 			if afterTerminalRead != beforeTerminalRead {
 				t.Fatalf("terminal refusal changed mutation side effects: before=%+v after=%+v", beforeTerminalRead, afterTerminalRead)
@@ -90,6 +118,7 @@ type selectedReadProof struct {
 }
 
 type selectedReaderAsWriterStore interface {
+	ReadBundleUpgradeState(context.Context, string, semanticview.Source) (runbundle.UpgradeState, error)
 	RequirePresentRun(context.Context, string) error
 	RequireActiveRun(context.Context, string) error
 	RequirePresentRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)

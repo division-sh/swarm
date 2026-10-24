@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -36,6 +37,7 @@ type admissionInspectionPort interface {
 	authorityInspectionPort
 	ActiveNonStandingRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error)
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
+	ReadBundleUpgradeState(context.Context, string, semanticview.Source) (runbundle.UpgradeState, error)
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
 	InspectDeliveryRecovery(context.Context, correlation.SourceArtifactFact) (deliverylifecycle.RecoveryInventory, error)
 	ReadTimerObligations(context.Context, timerobligation.Scope, time.Time) (timerobligation.Snapshot, error)
@@ -149,6 +151,15 @@ type AdmissionSnapshot struct {
 	ctx   context.Context
 	store admissionInspectionPort
 	fresh bool
+}
+
+func (s *AdmissionSnapshot) ReadBundleUpgradeState(ctx context.Context, runID string, source semanticview.Source) (runbundle.UpgradeState, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return runbundle.UpgradeState{}, err
+	}
+	defer done()
+	return s.store.ReadBundleUpgradeState(ctx, runID, source)
 }
 
 func (s *AdmissionSnapshot) InspectRunMutationDrift(ctx context.Context, runID string) (mutationlog.DriftReport, error) {
