@@ -1654,7 +1654,7 @@ func loadFlowActivationEntityContracts(
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "stages:\n  active: {}\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType))
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -5818,7 +5818,7 @@ func loadRootAndFlowStaticAgentSource(t *testing.T) semanticview.Source {
 	root := filepath.Join(t.TempDir(), "root-and-flow-static-agents")
 
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned:\ntask.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 test-agent:
@@ -5830,7 +5830,7 @@ test-agent:
 `)
 
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "schema.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "events.yaml"), "work.requested:\nwork.completed:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "agents.yaml"), `
 operator:
@@ -5860,7 +5860,7 @@ func loadFilesystemStaticAgentSource(t *testing.T) semanticview.Source {
 item:
   item_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -5910,7 +5910,7 @@ func loadNestedProjectAgentSource(t *testing.T, mode string) semanticview.Source
 item:
   item_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -6163,11 +6163,11 @@ func loadAgentPlatformDefaultsMaterializationSource(t *testing.T) semanticview.S
 	root := t.TempDir()
 
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
 	for _, flowID := range []string{"static_support", "template_support"} {
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "{}\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "stages: []\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), flowID+".requested:\n  entity_id: string\n")
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "static_support", "agents.yaml"), `
