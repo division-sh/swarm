@@ -78,7 +78,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 `, "")
 	}
 	if opts.OmitOutputPin {
-		applyClosedReplacement(t, ownerSchema, "    - account.notify.requested\n", "")
+		applyClosedReplacement(t, ownerSchema, "  - account.notify.requested\n", "")
 	}
 	if opts.MissingEmitField {
 		applyClosedReplacement(t, ownerNodes, "          command: payload.command\n", "")
@@ -117,10 +117,10 @@ account.created:
 auto_emit_on_create:
   event: account.created
 `)
-		applyClosedReplacement(t, accountSchema, `    - account.notify.requested
-`, `    - account.notify.requested
-  outputs:
-    - account.created
+		applyClosedReplacement(t, accountSchema, `  - account.notify.requested
+`, `  - account.notify.requested
+outputs:
+  - account.created
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
@@ -156,9 +156,9 @@ portfolio.notify.completed:
   semantic_rejected: integer
   canceled: integer
 `)
-		applyClosedReplacement(t, ownerSchema, `    - account.notify.requested
-`, `    - account.notify.requested
-    - portfolio.notify.completed
+		applyClosedReplacement(t, ownerSchema, `  - account.notify.requested
+`, `  - account.notify.requested
+  - portfolio.notify.completed
 `)
 		applyClosedReplacement(t, ownerNodes, "            canceled: join.dispositions.canceled\n", "            canceled: join.dispositions.canceled\n  portfolio.notify.completed: {}\n")
 	}
