@@ -76,7 +76,8 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	return out, finalErr
 }
 
-func (c selectedContractForkLocalRuntimeContainer) activatePrepared(p *PreparedSelectedFork, req SelectedContractExecutionRequest, result SelectedContractExecutionResult, _ error) (SelectedContractExecutionResult, error) {
+func (c selectedContractForkLocalRuntimeContainer) activatePrepared(p *PreparedSelectedFork, req SelectedContractExecutionRequest, result SelectedContractExecutionResult, diagnostic error) (SelectedContractExecutionResult, error) {
+	c.diagnostics.add(diagnostic)
 	if req.LiveRuntime == nil {
 		return result, errors.New("fork activation requires its ordinarily admitted live target")
 	}
