@@ -338,6 +338,20 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		var selected selectedRuntimeContext
 		ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
 		if err != nil {
+			var unavailable *ApplicationError
+			if req.Method == "mailbox.decide" && errors.As(err, &unavailable) && unavailable.Code == BundleUnavailableCode {
+				lookup, availability, readErr := opts.RuntimeContexts.LookupRunStatus(ctx, card.RunID)
+				if readErr != nil {
+					return nil, errors.Join(err, readErr)
+				}
+				if !lookup.Loaded() && availability.Available() && availability.Status == "paused" && availability.BundleHash == card.BundleHash {
+					details := bundleAvailabilityDetails(availability)
+					details["cause"] = runtimeContextLookupCause(lookup)
+					details["required_action"] = "continue"
+					details["reason"] = fmt.Sprintf("Run %s is paused; continue it before answering this card.", card.RunID)
+					return nil, NewApplicationError(BundleUnavailableCode, unavailable.Retryable, details)
+				}
+			}
 			return nil, err
 		}
 		if selected.Runtime == nil || selected.Runtime.Pipeline == nil || selected.Runtime.Bus == nil {

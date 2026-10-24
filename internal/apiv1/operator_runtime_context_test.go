@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -431,6 +432,37 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 	if primaryCards.calls != 0 {
 		t.Fatalf("primary decision path calls = %d, want 0", primaryCards.calls)
 	}
+	t.Run("paused_unloaded_answer", func(t *testing.T) {
+		pausedRunID := uuid.NewString()
+		ctx := testAuthorActivityContextForSource(context.Background(), runtimeContextTestSourceFact(runtimeContextTestBundleHashB))
+		storetest.RequireRun(t, ctx, fixture.pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: pausedRunID, BundleHash: runtimeContextTestBundleHashB, State: storerunlifecycle.StatePaused})
+		pending, continuation := newAPIHumanTaskAckLossCard(t, pausedRunID, runtimeContextTestBundleHashB, now)
+		continuation.BudgetBundleHash = runtimeContextTestBundleHashB
+		if err := fixture.pg.CreateHumanTaskCard(ctx, pending, continuation); err != nil {
+			t.Fatal(err)
+		}
+		result := manager.DeactivateBundleHash(runtimeContextTestBundleHashB, swruntime.RuntimeContextCauseUnloaded)
+		if !result.Found || !result.Changed {
+			t.Fatalf("withdraw card bundle: %+v", result)
+		}
+		before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, fixture.pg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		answer := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"paused-decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"paused-unloaded-decide"}}`, pending.CardID, pending.CardContentHash))
+		if answer.Error == nil {
+			t.Fatal("paused unloaded card answer was accepted")
+		}
+		data := asMap(t, answer.Error.Data)
+		details := asMap(t, data["details"])
+		if data["code"] != BundleUnavailableCode || details["cause"] != swruntime.RuntimeContextCauseUnloaded || details["run_id"] != pausedRunID || details["required_action"] != "continue" || !strings.Contains(fmt.Sprint(details["reason"]), pausedRunID) {
+			t.Fatalf("paused unloaded answer lost its typed refusal or guidance: %#v", data)
+		}
+		after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, fixture.pg)
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatalf("paused unloaded answer changed application tables: err=%v", err)
+		}
+	})
 }
 
 func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T) {
