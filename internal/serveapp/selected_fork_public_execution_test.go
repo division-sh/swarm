@@ -1,12 +1,14 @@
 package serveapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/pprof"
 	"slices"
 	"sync"
 	"testing"
@@ -64,6 +66,20 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					caps, err := prior(owner, req)
 					if prepare := caps.PrepareRunRuntime; prepare != nil {
 						caps.PrepareRunRuntime = func(ctx context.Context, runID string) error {
+							started := time.Now()
+							captured := make(chan struct{})
+							timer := time.AfterFunc(4*time.Second, func() {
+								defer close(captured)
+								var stack bytes.Buffer
+								_ = pprof.Lookup("goroutine").WriteTo(&stack, 2)
+								t.Logf("W4 continue stack after %s for %s:\n%s", time.Since(started), runID, stack.String())
+							})
+							defer func() {
+								if !timer.Stop() {
+									<-captured
+								}
+								t.Logf("W4 continue preparation elapsed=%s run=%s", time.Since(started), runID)
+							}()
 							err := prepare(ctx, runID)
 							if err != nil {
 								t.Logf("W4 continue runtime preparation for %s: %v", runID, err)
