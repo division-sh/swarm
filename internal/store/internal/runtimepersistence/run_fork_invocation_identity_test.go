@@ -18,6 +18,7 @@ func TestRunForkFreshInvocationsAtSameCutHaveIndependentChildrenBothStores(t *te
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			fixture := backend.open(t)
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			owner, db := fixture.store.(runForkSelectedLifecycleStore), fixture.db
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			at := time.Now().UTC().Truncate(time.Microsecond)

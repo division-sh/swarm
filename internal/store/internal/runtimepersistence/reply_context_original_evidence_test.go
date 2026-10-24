@@ -20,7 +20,7 @@ func TestIssue642OriginalReplyEvidenceAtomicFenceBothStores(t *testing.T) {
 	}{{"sqlite", setupSQLiteReplyContextStoreTest}, {"postgres", setupPostgresReplyContextStoreTest}} {
 		t.Run(backend.name, func(t *testing.T) {
 			store, seed := backend.setup(t)
-			ctx, run, sibling := context.Background(), uuid.NewString(), uuid.NewString()
+			ctx, run, sibling := originalStoreFixtureContext(t, testAuthorActivityContext(), store), uuid.NewString(), uuid.NewString()
 			request, otherRequest, runlessRequest := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			if err := seed(ctx, run, request); err != nil {
 				t.Fatal(err)
@@ -84,7 +84,7 @@ func TestIssue642EnclosingReplyAdmissionIsAtomicBothStores(t *testing.T) {
 	}{{"sqlite", setupSQLiteReplyContextStoreTest}, {"postgres", setupPostgresReplyContextStoreTest}} {
 		t.Run(backend.name, func(t *testing.T) {
 			store, seed := backend.setup(t)
-			ctx, run := context.Background(), uuid.NewString()
+			ctx, run := originalStoreFixtureContext(t, testAuthorActivityContext(), store), uuid.NewString()
 			q1, q2, answer := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			if err := seed(ctx, run, q1, q2, answer); err != nil {
 				t.Fatal(err)

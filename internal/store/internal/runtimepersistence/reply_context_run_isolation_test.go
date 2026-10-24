@@ -26,7 +26,7 @@ func TestIssue642ReplyCorrelationScopesBothStores(t *testing.T) {
 	}{{"sqlite", setupSQLiteReplyContextStoreTest}, {"postgres", setupPostgresReplyContextStoreTest}} {
 		t.Run(backend.name, func(t *testing.T) {
 			store, seed := backend.setup(t)
-			ctx := context.Background()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			origin := events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/shared-key", EntityID: uuid.NewString()}
 			create := func(t *testing.T, run string) runtimereplycontext.Record {
 				t.Helper()

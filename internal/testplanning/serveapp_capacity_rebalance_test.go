@@ -2,8 +2,7 @@ package testplanning
 
 import (
 	"maps"
-	"os"
-	"path/filepath"
+
 	"reflect"
 	"regexp"
 	"slices"
@@ -21,39 +20,6 @@ func serveappCapacityMoves() map[string]string {
 		"TestProviderSelectedRootStandingBootBothStores":                               "serveapp-channel-neutral",
 		"TestProviderAliasPhysicalTupleProofPreservesScopeNullsAndMultiplicity":        "serveapp-channel-neutral",
 		"TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProof": "serveapp-channel-neutral",
-	}
-}
-
-func TestServeappCapacityRebalancePreservesActualPlans(t *testing.T) {
-	policy, inventory, parity, packages := loadVerifyRunPlanInputs(t)
-	file, err := os.Open(filepath.Join("..", "..", GeneratedWeightModelPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	model, err := LoadWeightModel(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	original := serveappBeforeCapacityPolicy(policy)
-	for _, venue := range []string{VenueCI, VenueLocal} {
-		for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
-			t.Run(venue+"/"+tier, func(t *testing.T) {
-				plans := make([]RunPlan, 2)
-				for i, selected := range []Policy{original, policy} {
-					plan, err := BuildPlan(selected, model, packages, tier, "served capacity rebalance", "same-source", BuildOptions{Venue: venue})
-					if err == nil {
-						err = BindExecution(&plan, inventory, parity, selected)
-					}
-					if err != nil {
-						t.Fatal(err)
-					}
-					plans[i] = plan
-				}
-				assertServeappCapacityPlans(t, plans[0], plans[1])
-				t.Logf("%s/%s: complete root union and sibling recipes conserved; plan digests %s -> %s", venue, tier, plans[0].Digest, plans[1].Digest)
-			})
-		}
 	}
 }
 

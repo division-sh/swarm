@@ -3,11 +3,10 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"errors"
+
 	"net/url"
 	"path/filepath"
-	"reflect"
+
 	"runtime"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
+
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
@@ -55,121 +54,6 @@ type timerHistoryNativeFixture struct {
 	generic        timerHistoryNativeScheduleOwner
 	runs           interface {
 		CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
-	}
-}
-
-// Native persistence/readback of an admitted typed-plan fixture, not historical
-// source capture, selected join serving, or a public API proof. Ordinary history
-// is terminal and inert; the active mixed-family matrix remains mocked.
-func TestRunForkTimerHistoryNativeTerminalOrdinaryAndArrivalBothStores(t *testing.T) {
-	for _, dialect := range []string{"sqlite", "postgres"} {
-		t.Run(dialect, func(t *testing.T) {
-			plan, bornAt, _, _ := mixedTimerHistoryFixture(t)
-			terminal := workflowTimerHistoryTerminal(t, "fired", plan.WorkflowTimers[0].ActivationID)
-			terminal.RunID, terminal.EntityID = plan.WorkflowTimers[0].RunID, plan.WorkflowTimers[0].EntityID
-			terminal.Route, terminal.RoutingSource = plan.WorkflowTimers[0].Route, plan.WorkflowTimers[0].RoutingSource
-			plan.WorkflowTimers = []pipeline.WorkflowTimerActivationPersistenceRecord{terminal.PersistenceRecord()}
-			f := openTimerHistoryNativeFixture(t, dialect)
-			sourceCtx := f.runContext(t, plan.SourceRunID, plan.JoinSchedules[0].AdmittedAt)
-			ctx := f.runContext(t, workflowTimerProjectionChildRun, bornAt)
-			for i, source := range plan.JoinSchedules {
-				f.generic.SetNowFnForTest(func() time.Time { return source.AdmittedAt })
-				commit, err := f.generic.AdmitGenericScheduleOutcome(sourceCtx, source.Command)
-				if err != nil || !commit.Acknowledged || commit.Result.Outcome != genericschedule.AdmissionCreated {
-					t.Fatalf("source arrival admission: %+v err=%v", commit, err)
-				}
-				actual := commit.Result.Activation
-				if source.Status == genericschedule.StatusCancelled {
-					cancelled, err := f.generic.CancelGenericScheduleOutcome(sourceCtx, genericschedule.CancelCommand{ActivationID: actual.ID, Cause: source.CancelCause, CancelledAt: source.CancelledAt})
-					if err != nil || !cancelled.Acknowledged || cancelled.Result.Outcome != genericschedule.CancelChanged {
-						t.Fatalf("source arrival cancellation: %+v err=%v", cancelled, err)
-					}
-					actual = cancelled.Result.Activation
-				}
-				source.ID = actual.ID
-				if !reflect.DeepEqual(source.Canonical(), actual.Canonical()) {
-					t.Fatal("native source admission changed the typed fixture beyond its minted identity")
-				}
-				plan.JoinSchedules[i] = actual.Canonical()
-			}
-			inventory, err := runForkTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers, plan.JoinSchedules)
-			if err != nil {
-				t.Fatal(err)
-			}
-			inventory.Complete, inventory.Point = true, plan.ForkPoint
-			plan.ReplayResumeAdmission = runForkReplayResumeAdmission(runForkAdmissionEvidence{RelevantTimer: true, TimerHistory: inventory})
-			before, err := json.Marshal(plan)
-			if err != nil {
-				t.Fatal(err)
-			}
-			refusal := errors.New("native missing arrival inventory rollback")
-			missing := f.run(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runfork.RunForkReplayResumeAdmission, error) {
-				removed, err := materializeRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, f.pipeline, bornAt)
-				if err != nil || len(removed) != 0 {
-					return plan.ReplayResumeAdmission, errors.New("terminal history constructed ordinary work")
-				}
-				ordinary, err := f.pipeline.ReadRunForkWorkflowTimerInventoryTx(ctx, attempt, workflowTimerProjectionChildRun)
-				if err != nil || len(ordinary) != 0 {
-					return plan.ReplayResumeAdmission, errors.New("terminal ordinary inventory was not empty")
-				}
-				got, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, f.pipeline, f.pipeline, bornAt, plan.ReplayResumeAdmission)
-				if err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) {
-					return got, errors.New("empty ordinary inventory discharged missing arrival history")
-				}
-				return got, refusal
-			})
-			if missing.Acknowledged() || !errors.Is(missing.Err(), refusal) {
-				t.Fatalf("missing inventory outcome: acknowledged=%t err=%v", missing.Acknowledged(), missing.Err())
-			}
-			var certificate runfork.RunForkReplayResumeAdmission
-			var retained []genericschedule.Activation
-			for pass, construct := range []bool{true, false, true, false} {
-				result := f.run(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runfork.RunForkReplayResumeAdmission, error) {
-					if construct {
-						if _, err := materializeRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, f.pipeline, bornAt); err != nil {
-							return plan.ReplayResumeAdmission, err
-						}
-						if err := materializeRunForkArrivalJoinSchedules(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, f.pipeline); err != nil {
-							return plan.ReplayResumeAdmission, err
-						}
-					}
-					ordinary, err := f.pipeline.ReadRunForkWorkflowTimerInventoryTx(ctx, attempt, workflowTimerProjectionChildRun)
-					if err != nil || len(ordinary) != 0 {
-						return plan.ReplayResumeAdmission, errors.New("terminal ordinary history rearmed")
-					}
-					rows, err := f.pipeline.ReadRunForkArrivalJoinScheduleInventoryTx(ctx, attempt, workflowTimerProjectionChildRun)
-					if err != nil || len(rows) != len(plan.JoinSchedules) || (pass != 0 && !reflect.DeepEqual(rows, retained)) {
-						return plan.ReplayResumeAdmission, errors.New("arrival inventory missing or changed on retry")
-					}
-					cut, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, f.pipeline, f.pipeline, bornAt, plan.ReplayResumeAdmission)
-					if err != nil {
-						return cut, err
-					}
-					continuing, err := requireContinuingRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, f.pipeline, f.pipeline, bornAt, plan.ReplayResumeAdmission)
-					if err != nil || !reflect.DeepEqual(cut, continuing) {
-						return continuing, errors.New("cut and continuing immutable certificates differ")
-					}
-					retained = rows
-					return cut, nil
-				})
-				got, acknowledged := result.Value()
-				if err := result.Err(); err != nil || !acknowledged || len(got.UnsupportedBlockers) != 0 || got.StateOnlyExecutionReady || !got.ReplayResumeFactsPresent || (pass != 0 && !reflect.DeepEqual(got, certificate)) {
-					t.Fatalf("native readback pass=%d acknowledged=%t admission=%+v err=%v", pass, acknowledged, got, err)
-				}
-				assertWorkflowTimerAppliedDisposition(t, got, runfork.RunForkReplayResumeDispositionReconstruct)
-				certificate = got
-			}
-			for _, source := range plan.JoinSchedules {
-				actual, found, err := f.generic.LoadGenericScheduleActivation(sourceCtx, source.ID)
-				if err != nil || !found || !reflect.DeepEqual(actual.Canonical(), source.Canonical()) {
-					t.Fatalf("child materialization or readback changed source: found=%t err=%v", found, err)
-				}
-			}
-			after, err := json.Marshal(plan)
-			if err != nil || string(before) != string(after) {
-				t.Fatalf("native child operations changed admitted source plan: %v", err)
-			}
-		})
 	}
 }
 

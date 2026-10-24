@@ -31,6 +31,7 @@ func TestSelectedAuthorityLeaseClockExpiresInsideNativeTransactionBothStores(t *
 			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, selected, db, sqlite)
 			ctx := testAuthorActivityContextForBundle(fixture.request.DeclarationPlan.BundleHash)
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			source, err := correlation.NewSourceArtifactFact(fixture.request.DeclarationPlan.BundleHash)
 			if err != nil {
 				t.Fatal(err)

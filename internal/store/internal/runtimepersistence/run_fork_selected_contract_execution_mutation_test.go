@@ -41,7 +41,7 @@ import (
 func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFrontier(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
 	eventID := uuid.NewString()
@@ -635,7 +635,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
 	sourceEventID := uuid.NewString()
@@ -783,7 +783,7 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -941,7 +941,7 @@ func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t 
 func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1060,7 +1060,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1229,7 +1229,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsBranchDivergence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1283,7 +1283,7 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1317,7 +1317,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1433,7 +1433,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEvent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1475,7 +1475,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformControlEvent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1509,7 +1509,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1543,7 +1543,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLogDiagnostic(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
@@ -1577,7 +1577,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
 	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")

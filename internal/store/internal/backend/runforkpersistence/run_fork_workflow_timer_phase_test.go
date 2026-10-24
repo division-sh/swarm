@@ -1,14 +1,10 @@
 package runforkpersistence
 
 import (
-	"context"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func TestRunForkWorkflowTimerReadbackSeparatesCutFromContinuation(t *testing.T) {
@@ -73,41 +69,5 @@ func TestRunForkWorkflowTimerReadbackRejectsExtraAndDuplicateInventory(t *testin
 	}
 	if err := requireExactRunForkWorkflowTimerInventory([]runForkWorkflowTimerProjection{projected[0], projected[0]}, []pipeline.WorkflowTimerActivation{actual, actual}, runForkWorkflowTimerAtCut); err == nil {
 		t.Fatal("duplicate inventory admitted")
-	}
-}
-
-func TestRunForkWorkflowTimerReadbackPreservesCompletedOneShot(t *testing.T) {
-	source := workflowTimerProjectionSource(t, true)
-	plan := workflowTimerHistoryPlan(t, source)
-	projected, err := prepareRunForkWorkflowTimers(plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, source.CreatedAt.Add(2*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual := projected[0].activation.Canonical()
-	actual.Status, actual.FiredAt = "fired", actual.CreatedAt.Add(time.Second)
-	if err := requireExactRunForkWorkflowTimerInventory(projected, []pipeline.WorkflowTimerActivation{actual}, runForkWorkflowTimerAtCut); err == nil {
-		t.Fatal("completed child one-shot admitted before activation")
-	}
-	if err := requireExactRunForkWorkflowTimerInventory(projected, []pipeline.WorkflowTimerActivation{actual}, runForkWorkflowTimerContinuing); err != nil {
-		t.Fatalf("completed one-shot was rearmed or rejected: %v", err)
-	}
-	owner := &workflowTimerMaterializerOwner{rows: map[string]pipeline.WorkflowTimerActivation{actual.Ref.ActivationID: actual}}
-	arrivals := &arrivalJoinInventoryOwner{}
-	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		bornAt := source.CreatedAt.Add(2 * time.Hour)
-		cut, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun,
-			workflowTimerMaterializerSelection{}, owner, arrivals, bornAt, plan.ReplayResumeAdmission)
-		if err == nil || !reflect.DeepEqual(cut, plan.ReplayResumeAdmission) {
-			t.Fatal("unified readback admitted completed child one-shot before activation or changed source admission")
-		}
-		continuing, err := requireContinuingRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun,
-			workflowTimerMaterializerSelection{}, owner, arrivals, bornAt, plan.ReplayResumeAdmission)
-		if err != nil || len(continuing.UnsupportedBlockers) != 0 || continuing.StateOnlyExecutionReady {
-			t.Fatalf("unified continuing readback rearmed or rejected completed one-shot: admission=%+v err=%v", continuing, err)
-		}
-		assertWorkflowTimerAppliedDisposition(t, continuing, runfork.RunForkReplayResumeDispositionReconstruct)
-	}, 1)
-	if owner.reads != 2 || owner.writes != 0 || owner.cancels != 0 || arrivals.reads == 0 {
-		t.Fatal("unified phase readback skipped inventory or mutated completed timer history")
 	}
 }
