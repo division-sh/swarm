@@ -247,7 +247,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		if err != nil {
 			return release(err)
 		}
-		rawSettlement := eb.admitProviderRawSettlement(item.Kind, admitted.Event())
+		rawSettlement := eb.admitProviderRawSettlement(validated, index, admitted.Event())
 		prepared, command, err := eb.prepareClosedPublication(preparedCtx, eventBusCommitPublishPlan{
 			bus: eb, event: admitted.Event(), admitted: admitted, providerRawSettlement: rawSettlement, runProposal: runProposal,
 		})
@@ -291,8 +291,12 @@ func (eb *EventBus) previewInboundConstructions(ctx context.Context, runID strin
 	return ctx, nil
 }
 
-func (eb *EventBus) admitProviderRawSettlement(kind runtimeprovideroutput.Kind, evt events.Event) providerRawSettlementAdmission {
-	if eb == nil || eb.semanticSource == nil || kind != runtimeprovideroutput.KindRaw {
+func (eb *EventBus) admitProviderRawSettlement(batch InboundDeliveryBatch, ordinal int, evt events.Event) providerRawSettlementAdmission {
+	if eb == nil || eb.semanticSource == nil || ordinal < 0 || ordinal >= len(batch.Events) {
+		return providerRawSettlementAdmission{}
+	}
+	output := batch.Events[ordinal]
+	if output.Kind != runtimeprovideroutput.KindRaw || batch.Admission.ValidateOutput(eb.sourceArtifactFact.BundleHash(), batch.Provider, ordinal, len(batch.Events), evt, output.Kind, output.Authorization) != nil {
 		return providerRawSettlementAdmission{}
 	}
 	source := evt.RoutingSource()
@@ -301,10 +305,6 @@ func (eb *EventBus) admitProviderRawSettlement(kind runtimeprovideroutput.Kind, 
 	}
 	sourceRoute := source.Route().Normalized()
 	if sourceRoute.FlowID == "" || sourceRoute.EntityID != "" || sourceRoute.FlowInstance != "" || evt.HasTargetRoute() || len(evt.TargetRoutes()) != 0 {
-		return providerRawSettlementAdmission{}
-	}
-	producer := runtimepinrouting.ResolveFlowInputProducer(eb.semanticSource, sourceRoute.FlowID, string(evt.Type()))
-	if !producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
 		return providerRawSettlementAdmission{}
 	}
 	if runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(evt.Type()), source).HasRuntimeConsumer() {

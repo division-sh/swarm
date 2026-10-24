@@ -307,11 +307,16 @@ func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBefore
 func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testing.T) {
 	entityID := eventtest.UUID("provider-raw-settlement-entity")
 	exactTarget := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
-	externalSource := inboundRawSettlementRoutingSource(t)
-	exactEvent := inboundRawSettlementEvent(externalSource, events.RouteIdentity{})
-	exactBus := &EventBus{semanticSource: inboundRawSettlementSource(t, true)}
+	source, _, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", false)
+	exactEvent := batch.Events[0].Event
+	externalSource := exactEvent.RoutingSource()
+	fact, err := runtimecorrelation.NewSourceArtifactFact(batch.Admission.SourceBundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	exactBus := &EventBus{semanticSource: source, sourceArtifactFact: fact}
 
-	admission := exactBus.admitProviderRawSettlement(runtimeprovideroutput.KindRaw, exactEvent)
+	admission := exactBus.admitProviderRawSettlement(batch, 0, exactEvent)
 	liveNoSubscriber := RoutePlan{ordinarySource: ordinaryPublicationSource{route: events.RouteIdentity{
 		FlowID: "telegram-ingress", FlowInstance: exactTarget.FlowInstance, EntityID: entityID,
 	}}}
@@ -345,7 +350,10 @@ func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testi
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tc.bus.admitProviderRawSettlement(tc.kind, tc.event)
+			candidate := batch
+			candidate.Events = append([]InboundDeliveryEvent(nil), batch.Events...)
+			candidate.Events[0].Kind = tc.kind
+			got := tc.bus.admitProviderRawSettlement(candidate, 0, tc.event)
 			if got.authorizes(tc.event, tc.event, tc.plan) {
 				t.Fatal("partial or hostile facts minted deliberate provider raw settlement")
 			}
