@@ -276,6 +276,13 @@ func TestWorkerNativeHostCanceledCommittedCallIsUncertainAndNotReplayed(t *testi
 		t.Fatal("host call checkpoint was not reached")
 	}
 	stop()
+	// The child joins its client work; the independently scheduled HTTP peer
+	// acknowledges that cancellation on its own handler lifetime.
+	select {
+	case <-retired:
+	case <-outer.Done():
+		t.Fatal("held HTTP request did not retire after native cancellation")
+	}
 	err := <-completed
 	var execution *WorkerExecutionError
 	if !errors.As(err, &execution) || !execution.Started || !execution.Observed || !errors.Is(err, context.Canceled) || failures.FromError(err, "test", "cancel").Failure.Class != failures.ClassOutcomeUncertain {

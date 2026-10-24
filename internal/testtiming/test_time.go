@@ -16,14 +16,14 @@ import (
 )
 
 const (
-	TestTimeReferenceRunID  = int64(38086512667)
-	TestTimeReferenceHead   = "3d87f2ba3598b0728e754512c8e7f57e9a96d17a"
-	TestTimeReferenceSource = "c293cda6b003dc50519e2b861af5fbbeeffd7421"
-	TestTimeApproval        = "https://github.com/division-sh/swarm/issues/2535#issuecomment-6103962032"
-	TestTimeReferencePolicy = "1173c9a9f1bf40bce34df26c866aa355deee187867f149f8e5d5a79f022881f2"
+	TestTimeReferenceRunID  = int64(39925311892)
+	TestTimeReferenceHead   = "ff2b05757301839c496a060f4cbed8c291cf9813"
+	TestTimeReferenceSource = "ff2b05757301839c496a060f4cbed8c291cf9813"
+	TestTimeApproval        = "https://github.com/division-sh/swarm/issues/2727"
+	TestTimeReferencePolicy = "8c468ca59cb4a24e6c247c3feaa35729adc127a6bc955d0e93e5d12d6df31460"
 	// Changing the anchor requires a reviewed versioned policy adjustment, not
 	// a Test-Time body line, automatic publisher, or each new merge base.
-	TestTimeReferenceDigest = "c784737d62a250fa87eab2948bc8cc8f69ce64cf43e0cda86d2244dd54bce961"
+	TestTimeReferenceDigest = "f8d5e6370ab297552076d56991055b1bc2e8df632f434c328d4346ea10414e7d"
 	// User-ratified finite placement, independently reviewed against this full
 	// execution. This does not grant an aggregate allowance or approve core.
 	testTimeCodemodPlacementApproval   = "https://github.com/division-sh/swarm/pull/2604#issuecomment-6104099093"
