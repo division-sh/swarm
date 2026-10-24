@@ -638,8 +638,14 @@ func TestConnectorPackImportApplicationSurvivesSemanticSourceWrappers(t *testing
 }
 
 func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
+	child := &runtimecontracts.FlowContractView{Path: "child", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"}}
 	explicit := providerConnectorScopedSource{
-		Source:     semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
+			FlowTree: runtimecontracts.FlowTree{
+				Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{*child}},
+				ByID: map[string]*runtimecontracts.FlowContractView{"child": child},
+			},
+		}),
 		flowScopes: []semanticview.FlowScope{{ID: "child", Path: "child"}},
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "github", "github.create_issue"),
