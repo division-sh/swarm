@@ -46,6 +46,8 @@ func TestNodeQueryAdmissionConsumesCollectionDataflowOwner(t *testing.T) {
 	for _, tc := range []struct{ name, source, wantError string }{
 		{"path", "query: {source: payload.items, select: [id, note]}\nfilter: {items_from: computed.query, condition: true}\n", ""},
 		{"table", "query: {entities: state}\n", ""},
+		{"state member is not a table", "query: {entities: state.items}\n", "use source for collection paths"},
+		{"retired type is not a table", "query: {entities: items}\n", "does not match"},
 		{"dual source", "query: {source: payload.items, entities: state}\n", "exactly one collection source"},
 		{"missing source", "query: {count: false}\n", "exactly one collection source"},
 		{"future source", "query: {source: computed.filter}\nfilter: {items_from: payload.items, condition: true}\n", "same or a later execution phase"},
