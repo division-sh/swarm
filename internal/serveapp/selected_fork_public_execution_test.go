@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -61,6 +62,15 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 					once.Do(func() { supervisors <- req.RuntimeSupervisor })
 					caps, err := prior(owner, req)
+					if prepare := caps.PrepareRunRuntime; prepare != nil {
+						caps.PrepareRunRuntime = func(ctx context.Context, runID string) error {
+							err := prepare(ctx, runID)
+							if err != nil {
+								t.Logf("W4 continue runtime preparation for %s: %v", runID, err)
+							}
+							return err
+						}
+					}
 					if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); err == nil && ok {
 						execute := executor.ExecuteSelectedContractRunFork
 						executor.ExecuteSelectedContractRunFork = func(ctx context.Context, request runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
@@ -289,28 +299,184 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if selectedDiagnostics == 0 || ordinaryDiagnostics == 0 {
 				t.Fatalf("handoff did not retain both diagnostic owners: selected=%d ordinary=%d", selectedDiagnostics, ordinaryDiagnostics)
 			}
-			sourceAfter := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
-			if !reflect.DeepEqual(sourceBefore, sourceAfter) {
-				for table, before := range sourceBefore {
-					if !reflect.DeepEqual(before, sourceAfter[table]) {
-						t.Logf("R12 source %s: before=%v after=%v", table, before, sourceAfter[table])
-					}
-				}
-				t.Fatal("public selected execution changed source domain")
-			}
+			requireForkSourceSelfReleaseConservation(t, selected.RuntimeDeps().EventStore, seed.RunID, sourceBefore)
 			completionCount := 1
 			if nativeRead {
 				completionCount = 2
 			}
-			requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, childEvent, true, completionCount)
-			t.Run("terminal_public_readback", func(t *testing.T) {
+			requireForkLivePublicControls(t, rt.Endpoint, supervisor, selected.RuntimeDeps().EventStore, seed.RunID, rt.BundleHash, fork.ForkRunID, childHash)
+			t.Run("live_public_readback", func(t *testing.T) {
 				requireSelectedForkDeclaredAgentReads(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, completionCount)
-				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
-					t.Fatal("terminal selected readback changed source domain")
-				}
+				requireSelectedForkMixedBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent, rows["consumer"].ID)
 			})
 		})
 	}
+}
+
+func requireForkSourceSelfReleaseConservation(t *testing.T, owner runtimebus.EventStore, runID string, before map[string]storetest.SelectedForkStorageTableSnapshot) {
+	t.Helper()
+	after := readWorkspaceProofSourceDomain(t, owner, runID)
+	eventsBefore, eventsAfter := before["events"], after["events"]
+	if len(eventsAfter.Rows) != len(eventsBefore.Rows)+1 || !reflect.DeepEqual(eventsBefore.Columns, eventsAfter.Columns) {
+		t.Fatal("source handoff must add exactly one lifecycle receipt event")
+	}
+	var added []string
+	for _, row := range eventsAfter.Rows {
+		if !slices.Contains(eventsBefore.Rows, row) {
+			added = append(added, row)
+		}
+	}
+	if len(added) != 1 {
+		t.Fatal("source handoff replaced an original event or added extra events")
+	}
+	decoded, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: eventsAfter.Columns, Rows: added})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := func(column string) string {
+		value, err := decoded[0][column].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text("payload")), &payload); err != nil {
+		t.Fatal(err)
+	}
+	details, _ := payload["details"].(map[string]any)
+	if text("run_id") != runID || text("event_name") != "platform.runtime_log" || text("event_class") != "diagnostic_direct" ||
+		details["action"] != "platform.agent_lifecycle_transition" ||
+		details["previous_phase"] != "running" || details["phase"] != "registered" || details["run_mode"] != "stopped" {
+		t.Fatalf("source handoff added something other than its exact self-release: %+v", payload)
+	}
+	operations, err := storetest.DecodeSelectedForkSnapshotRows(readWorkspaceProofApplication(t, owner)["agent_lifecycle_operations"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchedOperation := false
+	for _, operation := range operations {
+		id, err := operation["operation_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != details["operation_id"] {
+			continue
+		}
+		kind, kindErr := operation["operation_kind"].Text()
+		actor, actorErr := operation["agent_id"].Text()
+		run, runErr := operation["run_id"].Text()
+		if kindErr != nil || actorErr != nil || runErr != nil || kind != "self_release" || actor != details["agent_id"] || run != runID {
+			t.Fatal("source lifecycle receipt is not its actor's native self-release operation")
+		}
+		matchedOperation = true
+	}
+	if !matchedOperation {
+		t.Fatal("source self-release has no native operation")
+	}
+	diagnostics, err := storetest.ReadSelectedForkLifecycleDiagnosticStorage(t.Context(), owner, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, original := 0, false
+	for _, row := range diagnostics.Receipts {
+		var receipt struct {
+			EventID string         `json:"event_id"`
+			RunID   string         `json:"run_id"`
+			Payload map[string]any `json:"payload"`
+		}
+		if err := json.Unmarshal(row.Projection, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if receipt.EventID == text("event_id") {
+			if receipt.RunID != runID || details["outbox_id"] != row.OutboxID || !reflect.DeepEqual(receipt.Payload, payload) {
+				t.Fatalf("source self-release differs from its native receipt: %+v", receipt)
+			}
+			matched++
+		}
+		prior, _ := receipt.Payload["details"].(map[string]any)
+		if receipt.RunID == runID && prior["phase"] == "running" && prior["generation"] != nil &&
+			reflect.DeepEqual(prior["generation"], details["generation"]) &&
+			reflect.DeepEqual(prior["agent_identity"], details["agent_identity"]) && prior["agent_identity"] != nil &&
+			reflect.DeepEqual(prior["process_binding"], details["process_binding"]) && prior["process_binding"] != nil {
+			for _, encoded := range eventsBefore.Rows {
+				rows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: eventsBefore.Columns, Rows: []string{encoded}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				id, err := rows[0]["event_id"].Text()
+				if err != nil {
+					t.Fatal(err)
+				}
+				original = original || id == receipt.EventID
+			}
+		}
+	}
+	if matched != 1 || !original {
+		t.Fatal("source self-release lacks its receipt or changed the original actor generation/process binding")
+	}
+	eventsAfter.Rows = slices.DeleteFunc(slices.Clone(eventsAfter.Rows), func(row string) bool { return row == added[0] })
+	after["events"] = eventsAfter
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("source handoff changed original business rows or another source table")
+	}
+}
+
+func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *processLifecycleSupervisor, owner runtimebus.EventStore, sourceRunID, sourceHash, childRunID, childHash string) {
+	t.Helper()
+	status := func(runID, want string) {
+		var result struct {
+			Run struct{ Status string } `json:"run"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &result)
+		if result.Run.Status != want {
+			t.Fatalf("run %s status=%s, want %s", runID, result.Run.Status, want)
+		}
+	}
+	control := func(method, runID string) {
+		var result struct{ OK bool }
+		requireServedJSONRPCResult(t, endpoint, method, map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()}, &result)
+		if !result.OK {
+			t.Fatalf("%s did not acknowledge %s", method, runID)
+		}
+	}
+	conflict := func(runID, liveID, hash string) {
+		before := readWorkspaceProofApplication(t, owner)
+		err := requireServedJSONRPCError(t, endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()})
+		if err.Data["code"] != apiv1.RunFlowAlreadyLiveCode {
+			t.Fatalf("continue escaped live-run selection: %+v", err)
+		}
+		details, _ := err.Data["details"].(map[string]any)
+		if details["live_run_id"] != liveID || !reflect.DeepEqual(before, readWorkspaceProofApplication(t, owner)) {
+			t.Fatalf("conflicting continue changed state or lost the live sibling: %+v", err)
+		}
+		grant, grantErr := supervisor.CurrentRuntime().CurrentStartupGrantEvidence()
+		if grantErr != nil || grant.BundleHash != hash {
+			t.Fatalf("conflicting continue replaced the live bundle: %+v %v", grant, grantErr)
+		}
+	}
+	status(sourceRunID, "paused")
+	status(childRunID, "live")
+	conflict(sourceRunID, childRunID, childHash)
+	control("run.pause", childRunID)
+	status(childRunID, "paused")
+	control("run.continue", sourceRunID)
+	status(sourceRunID, "live")
+	status(childRunID, "paused")
+	conflict(childRunID, sourceRunID, sourceHash)
+	control("run.pause", sourceRunID)
+	control("run.continue", childRunID)
+	status(sourceRunID, "paused")
+	status(childRunID, "live")
+	stop := map[string]any{"run_id": sourceRunID, "idempotency_key": "W4-unloaded-source-stop"}
+	var stopped, replayed map[string]any
+	requireServedJSONRPCResult(t, endpoint, "run.stop", stop, &stopped)
+	requireServedJSONRPCResult(t, endpoint, "run.stop", stop, &replayed)
+	if stopped["ok"] != true || !reflect.DeepEqual(stopped, replayed) {
+		t.Fatalf("paused unloaded stop lost its canonical replay: first=%v replay=%v", stopped, replayed)
+	}
+	status(sourceRunID, "cancelled")
+	status(childRunID, "live")
 }
 
 func readWorkspaceProofSourceDomain(t *testing.T, owner runtimebus.EventStore, runID string) map[string]storetest.SelectedForkStorageTableSnapshot {
