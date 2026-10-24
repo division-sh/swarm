@@ -1209,6 +1209,9 @@ func debtSelectedFixtureSourcePins(root, baseRoot string) error {
 	if debtBaselineChecksum(before) == debtSelectedFixtureComposedOldSHA256 {
 		pins[0].source, pins[0].checksum = debtSelectedFixtureComposedOldSource, debtSelectedFixtureComposedOldSHA256
 		pins[1].source, pins[1].checksum = debtSelectedFixtureComposedCurrentSource, debtSelectedFixtureComposedCurrentSHA256
+	} else if debtBaselineChecksum(before) == debtSelectedFixtureComposedCurrentSHA256 {
+		pins[0].source, pins[0].checksum = debtSelectedFixtureComposedCurrentSource, debtSelectedFixtureComposedCurrentSHA256
+		pins[1].source, pins[1].checksum = debtSelectedFixtureComposedCurrentSource, debtSelectedFixtureComposedCurrentSHA256
 	}
 	for _, pin := range pins {
 		archived, err := debtGit(root, "show", pin.source+":"+path)
