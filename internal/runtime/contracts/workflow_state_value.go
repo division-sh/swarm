@@ -7,7 +7,18 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-// State syntax owns fields, not an entity-type or permission coordinate.
+// Provisional R18 binding, local diagnostics only until the user rules.
+const stateEntityType = "state"
+
+func projectStateDeclarations(root yamlsource.Value, types TypeCatalogDocument) (EntityContractsDocument, error) {
+	state, err := projectStateContract(root, types)
+	if err != nil {
+		return nil, err
+	}
+	return EntityContractsDocument{stateEntityType: state}, nil
+}
+
+// State syntax owns fields, not an authored entity-type or permission coordinate.
 func projectStateContract(root yamlsource.Value, types TypeCatalogDocument) (EntityContract, error) {
 	fields, err := uniqueYAMLMappingFields(root, "state.yaml")
 	if err != nil {

@@ -186,9 +186,6 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 			}}
 		}
 	}
-	if err := validateRootPrimaryEntityLoadBoundary(bundle); err != nil {
-		return &LoadValidationError{Items: []error{err}}
-	}
 	for _, entities := range bundle.flowEntities {
 		for entityType, contract := range entities {
 			if strings.TrimSpace(contract.Owner) != "" {
@@ -197,43 +194,6 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 				}}
 			}
 		}
-	}
-	for _, flowID := range sortedFlowSchemaIDs(bundle.FlowSchemas) {
-		if err := validatePrimaryEntityLoadBoundary(bundle, flowID); err != nil {
-			return &LoadValidationError{Items: []error{err}}
-		}
-	}
-	return nil
-}
-
-func validateRootPrimaryEntityLoadBoundary(bundle *WorkflowContractBundle) error {
-	if bundle == nil {
-		return nil
-	}
-	if len(bundle.RootEntities) <= 1 {
-		return nil
-	}
-	if _, err := bundle.ResolveRootPrimaryEntity(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validatePrimaryEntityLoadBoundary(bundle *WorkflowContractBundle, flowID string) error {
-	flowID = strings.TrimSpace(flowID)
-	if bundle == nil || flowID == "" {
-		return nil
-	}
-	_, ok := bundle.FlowSchemas[flowID]
-	if !ok {
-		return nil
-	}
-	entities := bundle.flowEntities[flowID]
-	if len(entities) <= 1 {
-		return nil
-	}
-	if _, err := bundle.ResolveFlowPrimaryEntity(flowID); err != nil {
-		return err
 	}
 	return nil
 }
@@ -357,22 +317,16 @@ func (b *WorkflowContractBundle) ResolveTestSetupPrimaryEntity(flowID, entityTyp
 
 func resolvePrimaryEntityContract(flowID string, entities EntityContractsDocument, types TypeCatalogDocument) (PrimaryEntityContract, error) {
 	flowID = strings.TrimSpace(flowID)
-	label := defaultPrimaryEntityFlowLabel(flowID)
-	keys := sortedEntityContractKeys(entities)
-	switch len(keys) {
-	case 0:
-		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s has no declared entity types; stateful normal flows must declare exactly one entity type or be explicitly stateless/template", label)
-	case 1:
-		entityType := keys[0]
-		return PrimaryEntityContract{
-			FlowID:     flowID,
-			EntityType: entityType,
-			Contract:   cloneEntityContract(entities[entityType]),
-			Types:      cloneTypeCatalogDocument(types),
-		}, nil
-	default:
-		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s declares multiple entity types %s; normal flow authoring supports exactly one entity type", label, strings.Join(keys, ", "))
+	state, present := entities[stateEntityType]
+	if !present {
+		return PrimaryEntityContract{}, fmt.Errorf("flow %s has no state.yaml", defaultPrimaryEntityFlowLabel(flowID))
 	}
+	return PrimaryEntityContract{
+		FlowID:     flowID,
+		EntityType: stateEntityType,
+		Contract:   cloneEntityContract(state),
+		Types:      cloneTypeCatalogDocument(types),
+	}, nil
 }
 
 func sortedEntityContractKeys(entities EntityContractsDocument) []string {
