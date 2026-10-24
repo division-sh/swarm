@@ -216,6 +216,35 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 	if !second.Found || second.Changed || second.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("second DeactivateBundleHash result = %#v, want idempotent original cause", second)
 	}
+	replacement := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	if err := manager.RegisterLiveReplacement(replacement); err == nil {
+		t.Fatal("bundle replacement admitted while another context was loaded")
+	}
+	if result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded); result.ShutdownErr != nil {
+		t.Fatal(result.ShutdownErr)
+	}
+	manager.contexts[runtimeContextTestHashB].shutdownMu.Lock()
+	err = manager.RegisterLiveReplacement(replacement)
+	manager.contexts[runtimeContextTestHashB].shutdownMu.Unlock()
+	if err == nil {
+		t.Fatal("bundle replacement raced an unfinished join")
+	}
+	if err := manager.RegisterLiveReplacement(replacement); err != nil {
+		t.Fatal(err)
+	}
+	if primary, found := manager.Primary(); !found || primary.BundleHash() != runtimeContextTestHashB {
+		t.Fatalf("joined replacement is not the exact primary: %+v %t", primary, found)
+	}
+	if use, _, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashB); err != nil || use == nil {
+		t.Fatalf("fresh replacement is not admitted: %v", err)
+	} else {
+		if use.Runtime() != replacement.Runtime || use.Runtime() == contextB.Runtime {
+			t.Error("replacement reused the retired runtime")
+		}
+		if err := use.Done(); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibility(t *testing.T) {

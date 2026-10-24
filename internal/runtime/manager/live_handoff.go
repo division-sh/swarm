@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"sync"
 )
 
 // WithParkedRun joins process-local attempts without terminalizing the retained
@@ -12,10 +13,29 @@ func (am *AgentManager) WithParkedRun(ctx context.Context, runID string, commit 
 	if am == nil || runID == "" || commit == nil {
 		return errors.New("run handoff requires its Manager, exact run and commit owner")
 	}
+	release, err := am.ParkLiveRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return commit()
+}
+
+func (am *AgentManager) ParkLiveRun(ctx context.Context, runID string) (_ func(), result error) {
+	if am == nil || runID == "" {
+		return nil, errors.New("run handoff requires its Manager and exact run")
+	}
 	am.dynamicFlowRetirementMu.Lock()
-	defer am.dynamicFlowRetirementMu.Unlock()
 	am.dynamicFlowAttachmentMu.Lock()
-	defer am.dynamicFlowAttachmentMu.Unlock()
+	release := sync.OnceFunc(func() {
+		am.dynamicFlowAttachmentMu.Unlock()
+		am.dynamicFlowRetirementMu.Unlock()
+	})
+	defer func() {
+		if result != nil {
+			release()
+		}
+	}()
 	am.dynamicFlowReadinessMu.Lock()
 	var keys []dynamicFlowRuntimeReadinessKey
 	for key := range am.dynamicFlowActiveAttempts {
@@ -28,14 +48,14 @@ func (am *AgentManager) WithParkedRun(ctx context.Context, runID string, commit 
 	for _, key := range keys {
 		lease, err := am.beginWork(ctx, "park live flow for handoff")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		retirement := &preparedFlowTopologyRetirement{manager: am, lease: lease}
 		if err := am.retireCurrentDynamicFlowActiveAttempt(ctx, key, retirement, flowActivationProcessRetirement); err != nil {
-			return errors.Join(err, retirement.abort())
+			return nil, errors.Join(err, retirement.abort())
 		}
 	}
-	return commit()
+	return release, nil
 }
 
 func (am *AgentManager) ReconcileLiveRun(ctx context.Context, runID string) error {

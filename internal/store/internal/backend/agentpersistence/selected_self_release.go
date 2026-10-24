@@ -19,8 +19,10 @@ func RequireSelectedSelfReleaseTx(ctx context.Context, tx *sql.Tx, runID, execut
 		return errors.New("selected live handoff requires its still-admitted generation")
 	}
 	var pending int
+	// Canonical loop self_release retains a registered, stopped declaration.
+	// Requiring terminality here would reject its exact durable outcome.
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents agent
-		WHERE agent.run_id=$1 AND (agent.lifecycle_phase<>'terminated' OR agent.lifecycle_run_mode<>'stopped')
+		WHERE agent.run_id=$1 AND (agent.lifecycle_phase NOT IN ('registered','terminated') OR agent.lifecycle_run_mode<>'stopped')
 		AND EXISTS (SELECT 1 FROM runtime_generation_grants g
 			WHERE g.grant_id=agent.lifecycle_generation_grant_id AND g.selected_execution_id=$2)`, runID, executionID).Scan(&pending); err != nil {
 		return err

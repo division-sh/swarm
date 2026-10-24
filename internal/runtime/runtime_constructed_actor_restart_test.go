@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -329,6 +330,18 @@ func proveNativeConstructedActorSourceSetRebind(t *testing.T, ctx context.Contex
 	current, found, err := capability.CurrentSourceSet(ctx)
 	if err != nil || !found {
 		t.Fatalf("load predecessor source set: found=%v err=%v", found, err)
+	}
+	empty, err := agenttopology.EmptySourceSetPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capability.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: empty, RequirePausedRemoval: true,
+	}); !errors.Is(err, runcontrol.ErrNotPaused) {
+		t.Fatalf("source swap did not refuse its executing run: %v", err)
+	}
+	if unchanged, found, err := capability.CurrentSourceSet(ctx); err != nil || !found || unchanged.Revision != current.Revision {
+		t.Fatalf("refused source swap changed committed membership: %+v %t %v", unchanged, found, err)
 	}
 	spareArtifact, err := sourceartifact.AdmitDirectory(canonicalrouting.CopySelectedConstructedAgentInput(t))
 	if err != nil {

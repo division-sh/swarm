@@ -17,13 +17,17 @@ const (
 )
 
 type SourceSetCommitRequest struct {
-	Operation        SourceSetOperation `json:"operation"`
-	OperationID      string             `json:"operation_id"`
-	ExpectedRevision string             `json:"expected_revision,omitempty"`
-	Plan             SourceSetPlan      `json:"plan"`
+	Operation            SourceSetOperation `json:"operation"`
+	OperationID          string             `json:"operation_id"`
+	ExpectedRevision     string             `json:"expected_revision,omitempty"`
+	Plan                 SourceSetPlan      `json:"plan"`
+	RequirePausedRemoval bool               `json:"require_paused_removal,omitempty"`
 }
 
 func (r SourceSetCommitRequest) Validate() error {
+	if r.RequirePausedRemoval && r.Operation != OperationRestoreSourceSet {
+		return errors.New("paused source removal requires restore_source_set")
+	}
 	switch r.Operation {
 	case OperationInstallCompleteSourceSet, OperationRestoreSourceSet,
 		OperationApplyDestructiveResetTopology:
