@@ -218,15 +218,12 @@ func loadProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBu
 stages:
   discovered: {}
   scored: {final: true}
-pins:
-  outputs:
-    - score.dimension_complete
+outputs:
+  - score.dimension_complete
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `
-types:
-  DimensionScore:
-    dimension: text
-    score: integer
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `DimensionScore:
+  dimension: text
+  score: integer
 `)
 	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
 vertical:

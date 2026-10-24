@@ -3,6 +3,5 @@ stages:
   new: {}
   active: {}
   processed: {final: true}
-pins:
-  inputs:
-    - work.begin
+inputs:
+  - work.begin

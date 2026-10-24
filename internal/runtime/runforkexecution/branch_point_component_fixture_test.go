@@ -315,7 +315,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	t.Helper()
 	selected := owner.ports.fork
 	repo, root := runForkExecutionRepoRoot(t), t.TempDir()
-	writeSelectedContractFixtureFile(t, root+"/schema.yaml", "name: branch-revision\nstages:\n  pending: {}\n  later: {final: true}\npins:\n  outputs:\n    - records.ready\n")
+	writeSelectedContractFixtureFile(t, root+"/schema.yaml", "name: branch-revision\nstages:\n  pending: {}\n  later: {final: true}\noutputs:\n  - records.ready\n")
 	writeSelectedContractFixtureFile(t, root+"/events.yaml", "records.ready:\n  body: text\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

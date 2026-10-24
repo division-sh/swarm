@@ -113,7 +113,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema += "  outputs: [work.completed]\n"
 		if variant == LifecycleStaticMixedOutput {
 			schema += "connect:\n  - {event: work.completed, from: ., to: sink}\n"
-			writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - work.completed\n")
+			writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\ninputs:\n  - work.completed\n")
 			writeClosedVariantFile(t, root, "sink/nodes.yaml", "collector:\n  work.completed: {}\n")
 		}
 	case LifecycleStaticActorCollision:

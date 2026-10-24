@@ -39,15 +39,14 @@ func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandl
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "pins:\n  inputs:\n    - opco.spend_requested\n  outputs:\n    - opco.spend_requested\nconnect:\n  - {event: opco.spend_requested, from: ., to: treasury}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "inputs:\n  - opco.spend_requested\noutputs:\n  - opco.spend_requested\nconnect:\n  - {event: opco.spend_requested, from: ., to: treasury}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "opco.spend_requested:\n  entity_id: uuid\n  vertical_id: text\n  amount_usd: number\n")
 	writeClosedVariantFile(t, root, "treasury/schema.yaml", `name: treasury
 stages:
   active: {}
   archived: {final: true}
-pins:
-  inputs:
-    - opco.spend_requested
+inputs:
+  - opco.spend_requested
 `)
 	writeClosedVariantFile(t, root, "treasury/events.yaml", `opco.spend_recorded:
   vertical_id: string
@@ -93,11 +92,10 @@ func CopyRootDefaultStaticInput(t testing.TB, handler RootStaticHandler, entityI
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-default-static-fixture
 stages:
   active: {}
-pins:
-  inputs:
-    - subject.created
-  outputs:
-    - subject.observed
+inputs:
+  - subject.created
+outputs:
+  - subject.observed
 `)
 	entityIDField := ""
 	switch entityID {
@@ -155,12 +153,11 @@ stages:
     final: true
   attention:
     final: true
-pins:
-  inputs:
-    - order.started
-    - order.dispatched
-    - item.completed
-    - fork.probe
+inputs:
+  - order.started
+  - order.dispatched
+  - item.completed
+  - fork.probe
 `,
 		"entities.yaml": `order:
   expected:
@@ -169,9 +166,8 @@ pins:
   dispatch_id: text
   probe: text
 `,
-		"types.yaml": `types:
-  JoinResult:
-    ok: boolean
+		"types.yaml": `JoinResult:
+  ok: boolean
 `,
 		"events.yaml": `order.started:
   expected: [text]
@@ -245,7 +241,7 @@ stages:
   feature_list: [Feature]
   review_scores: map[text]integer
 `,
-		"operating/types.yaml":  "types:\n  Brief:\n    summary: text\n  Feature:\n    name: text\n",
+		"operating/types.yaml":  "Brief:\n  summary: text\nFeature:\n  name: text\n",
 		"operating/events.yaml": "opco.product_review_requested:\n  note: text\n",
 		"operating/nodes.yaml": `reviewer:
   gate_state:
@@ -273,16 +269,14 @@ func CopyTemplateConnectRollback(t testing.TB) string {
 
 		"schema.yaml": "name: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, resolution: select-or-create}\n",
 		"producer/schema.yaml": `name: producer
-pins:
-  outputs:
-    - deploy.done
+outputs:
+  - deploy.done
 `,
 		"producer/events.yaml": "deploy.done:\n  key: vertical_id\n  vertical_id: string\n",
 		"consumer/schema.yaml": `name: consumer
 instance: vertical_id
-pins:
-  inputs:
-    - deploy.done
+inputs:
+  - deploy.done
 `,
 		"consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  deploy.done: {}\n",
@@ -300,7 +294,7 @@ func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
 		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
 		"account/entities.yaml", "account/nodes.yaml", "account/schema.yaml", "account")
 	files := map[string]string{
-		"schema.yaml": "name: empire-outbox\npins:\n  outputs:\n    - opco.create_requested\nconnect:\n  - {event: opco.create_requested, from: ., to: operating, resolution: create}\n",
+		"schema.yaml": "name: empire-outbox\noutputs:\n  - opco.create_requested\nconnect:\n  - {event: opco.create_requested, from: ., to: operating, resolution: create}\n",
 
 		"events.yaml": `approval.completed:
   entity_id: string?
@@ -334,9 +328,8 @@ instance: instance_id
 stages:
   initializing: {}
   ready: {final: true}
-pins:
-  inputs:
-    - opco.create_requested
+inputs:
+  - opco.create_requested
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
@@ -376,11 +369,10 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `,
 		"schema.yaml": `name: provider-rollback-proof
-pins:
-  inputs:
-    - inbound.telegram
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram
+outputs:
+  - inbound.telegram.text_message
 connect:
   - event: inbound.telegram.text_message
     from: .
@@ -390,9 +382,8 @@ connect:
 		"events.yaml": "inbound.telegram:\n  raw: boolean\ninbound.telegram.text_message:\n  chat_id: text\n",
 		"consumer/schema.yaml": `name: consumer
 instance: chat_id
-pins:
-  inputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.text_message
 `,
 		"consumer/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n",
 		"consumer/nodes.yaml":    nodes,

@@ -14,13 +14,12 @@ func CopyGuardForkContinuation(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   ready: {}
   done: {final: true}
-pins:
-  inputs:
-    - check.requested
-    - task.ready
-    - flow.finished
-  outputs:
-    - check.requested
+inputs:
+  - check.requested
+  - task.ready
+  - flow.finished
+outputs:
+  - check.requested
 connect:
   - {event: check.requested, from: ., to: guarded}
 `)
@@ -32,9 +31,8 @@ connect:
 stages:
   ready: {}
   killed: {final: true}
-pins:
-  inputs:
-    - check.requested
+inputs:
+  - check.requested
 `)
 	writeClosedVariantFile(t, root, "guarded/entities.yaml", "test_entity: {}\n")
 	writeClosedVariantFile(t, root, "guarded/nodes.yaml", `test-node:

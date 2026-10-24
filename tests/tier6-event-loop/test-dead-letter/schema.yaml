@@ -2,6 +2,5 @@ name: test-dead-letter
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.submitted
+inputs:
+  - task.submitted

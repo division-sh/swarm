@@ -1,11 +1,15 @@
 review:
   classes:
     hard: {disposition: review.reported}
+  inputs: {left: integer, right: integer}
   rules:
     - id: R1
       class: hard
       text: Compare the supplied numbers.
       params: {limit: 3}
+      pin_candidate: false
+      check:
+        equal: {left: input.left, right: input.right}
 matches:
   classes:
     invalid: {disposition: work.rejected}

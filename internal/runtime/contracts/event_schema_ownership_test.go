@@ -333,13 +333,8 @@ func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRo
 validation.requested:
   # Producer-owned request schema
   candidate:
-    type: ProducerCandidate?
-    description: Candidate under validation
-    pattern: ^[a-z]+$
+    type: text?
 `), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "producer", "types.yaml"), []byte("scalars:\n  ProducerCandidate: text\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))

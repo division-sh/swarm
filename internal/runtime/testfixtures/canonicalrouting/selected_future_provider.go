@@ -13,18 +13,17 @@ func CopySelectedFutureProviderInput(t testing.TB) string {
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [task.assigned, construction.started]
-  outputs: [task.assigned]
+inputs: [task.assigned, construction.started]
+outputs: [task.assigned]
 connect:
   - {event: task.assigned, from: ., to: templ, resolution: select-or-create}
 `)
-	writeClosedVariantFile(t, root, "templ/schema.yaml", "name: templ\ninstance: work_id\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [task.assigned]\n  outputs: [construction.started]\nconnect:\n  - {event: construction.started, from: ., to: child}\n  - {event: construction.started, from: ., to: audit}\n")
+	writeClosedVariantFile(t, root, "templ/schema.yaml", "name: templ\ninstance: work_id\nstages:\n  active: {}\n  done: {final: true}\ninputs: [task.assigned]\noutputs: [construction.started]\nconnect:\n  - {event: construction.started, from: ., to: child}\n  - {event: construction.started, from: ., to: audit}\n")
 	for _, path := range []string{"templ/child", "templ/audit"} {
-		writeClosedVariantFile(t, root, path+"/schema.yaml", "name: descendant\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [construction.started]\n  outputs: [work.ready]\nconnect:\n  - {event: work.ready, from: ., to: leaf}\nrequired_agents:\n  - {role: worker, subscribes_to: [work.ready]}\n")
+		writeClosedVariantFile(t, root, path+"/schema.yaml", "name: descendant\nstages:\n  active: {}\n  done: {final: true}\ninputs: [construction.started]\noutputs: [work.ready]\nconnect:\n  - {event: work.ready, from: ., to: leaf}\nrequired_agents:\n  - {role: worker, subscribes_to: [work.ready]}\n")
 		writeClosedVariantFile(t, root, path+"/events.yaml", "work.ready:\n  work_id: text\nwork.finish:\n")
 		writeClosedVariantFile(t, root, path+"/nodes.yaml", "publish:\n  construction.started:\n    emit:\n      event: work.ready\n      fields: {work_id: payload.work_id}\nfinish:\n  work.finish:\n    advances_to: done\n")
-		writeClosedVariantFile(t, root, path+"/leaf/schema.yaml", "name: leaf\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [work.ready]\nrequired_agents:\n  - {role: worker, subscribes_to: [work.ready]}\n")
+		writeClosedVariantFile(t, root, path+"/leaf/schema.yaml", "name: leaf\nstages:\n  active: {}\n  done: {final: true}\ninputs: [work.ready]\nrequired_agents:\n  - {role: worker, subscribes_to: [work.ready]}\n")
 		writeClosedVariantFile(t, root, path+"/leaf/events.yaml", "work.finish:\n")
 		writeClosedVariantFile(t, root, path+"/leaf/nodes.yaml", "finish:\n  work.finish:\n    advances_to: done\n")
 	}

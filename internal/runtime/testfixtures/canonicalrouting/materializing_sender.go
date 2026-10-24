@@ -12,7 +12,7 @@ import (
 func CopyMaterializingSenderExistingReceiver(t testing.TB, requiresExisting bool) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", "name: materializing-sender\npins:\n  inputs:\n    - start\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: materializing-sender\ninputs:\n  - start\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  case_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "start:\n  case_id: text\nwork.ready:\n  case_id: text\n")
 	nodes := `intake:
@@ -34,7 +34,7 @@ receiver:
 func CopyProspectiveTerminalSender(t testing.TB) string {
 	t.Helper()
 	root := CopyMaterializingSenderExistingReceiver(t, true)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: materializing-sender\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - start\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: materializing-sender\nstages:\n  waiting: {}\n  done: {final: true}\ninputs:\n  - start\n")
 	path := filepath.Join(root, "nodes.yaml")
 	raw, err := os.ReadFile(path)
 	if err != nil {

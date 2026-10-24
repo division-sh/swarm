@@ -2,7 +2,7 @@ item.created:
   item_id: string
   items: [IntakeItem]
 item.processed:
-  item_id: string?
+  item_id: string
   score: number
 item.review_requested:
   score: number

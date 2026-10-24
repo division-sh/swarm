@@ -38,22 +38,22 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 		{
 			name:      "input pin has derived name",
 			file:      "schema.yaml",
-			canonical: baseSchema + "pins:\n  inputs: [work.requested]\n",
-			retired:   baseSchema + "pins:\n  inputs:\n    - name: work_requested\n      event: work.requested\n",
+			canonical: baseSchema + "inputs: [work.requested]\n",
+			retired:   baseSchema + "inputs:\n  - name: work_requested\n    event: work.requested\n",
 			want:      `must be a scalar text`,
 		},
 		{
 			name:      "input pin carries are derived",
 			file:      "schema.yaml",
-			canonical: baseSchema + "pins:\n  inputs: [work.requested]\n",
-			retired:   baseSchema + "pins:\n  inputs:\n    - event: work.requested\n      carries: [work_id]\n",
+			canonical: baseSchema + "inputs: [work.requested]\n",
+			retired:   baseSchema + "inputs:\n  - event: work.requested\n    carries: [work_id]\n",
 			want:      `must be a scalar text`,
 		},
 		{
 			name:      "output pin key is derived",
 			file:      "schema.yaml",
-			canonical: baseSchema + "pins:\n  outputs: [work.completed]\n",
-			retired:   baseSchema + "pins:\n  outputs:\n    - event: work.completed\n      key: work_id\n",
+			canonical: baseSchema + "outputs: [work.completed]\n",
+			retired:   baseSchema + "outputs:\n  - event: work.completed\n    key: work_id\n",
 			want:      `must be a scalar text`,
 			output:    true,
 		},
@@ -93,11 +93,11 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 			if _, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec); err == nil || !contractErrorContains(err, tc.want) {
 				t.Fatalf("retired bundle admission error = %v, want %q", err, tc.want)
 			} else if tc.file == "schema.yaml" {
-				path := `["pins"]["inputs"][0]`
+				path := `["inputs"][0]`
 				if tc.output {
-					path = `["pins"]["outputs"][0]`
+					path = `["outputs"][0]`
 				}
-				if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "schema.yaml:4:") {
+				if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "schema.yaml:3:") {
 					t.Fatalf("pin shape refusal lost its exact source: %v", err)
 				}
 			}

@@ -36,7 +36,7 @@ func TestR7DirectoryScalarSelectorsBothStores(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 					"schema.yaml":          "name: scalar-index\n",
 					"events.yaml":          "checkpoint:\n",
-					"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+					"worker/schema.yaml":   "name: worker\ninstance: item_id\ninputs:\n  - item.created\n",
 					"worker/entities.yaml": "item:\n  item_id: " + scalar.kind + "\n",
 					"worker/events.yaml":   "item.created:\n  item_id: " + scalar.kind + "\n",
 				}, nil)
@@ -199,7 +199,7 @@ func TestR7ConstructionAddressImmutableBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":        "name: immutable-construction\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"schema.yaml":        "name: immutable-construction\ninstance: item_id\ninputs:\n  - item.created\n",
 				"events.yaml":        "item.created:\n  item_id: text\n",
 				"entities.yaml":      "item:\n  item_id: text\n",
 				"detail/schema.yaml": "name: detail\n",
@@ -603,7 +603,7 @@ func TestR7DirectoryDeclarationCannotHideCorruptKeyedConstructionBothStores(t *t
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml":          "name: keyed-corruption-proof\n",
-				"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"worker/schema.yaml":   "name: worker\ninstance: item_id\ninputs:\n  - item.created\n",
 				"worker/entities.yaml": "item:\n  item_id: text\n",
 				"worker/events.yaml":   "item.created:\n  item_id: text\n",
 			}, nil)

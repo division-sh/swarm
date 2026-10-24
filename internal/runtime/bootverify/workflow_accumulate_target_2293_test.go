@@ -18,7 +18,7 @@ func loadAccumulateTarget2293(t *testing.T, target, payload string) *c.WorkflowC
 	writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "Review:\n  reviewer_id: text\n  rating: Rating\nRating: ['low', 'high']\nOtherRating: ['other', 'high']\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "Work:\n  "+target+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "review.received:\n  "+strings.ReplaceAll(payload, "\n", "\n  ")+"\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "collector:\n  execution_type: system_node\n  subscribes_to: [review.received]\n  event_handlers:\n    review.received:\n      accumulate: {target: reviews, key: reviewer_id}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "collector:\n  review.received:\n    accumulate: {target: reviews, key: reviewer_id}\n")
 	return loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
 }
 

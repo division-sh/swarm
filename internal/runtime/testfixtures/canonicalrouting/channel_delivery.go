@@ -48,7 +48,7 @@ func CopyChannelNoticeJourney(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: work.requested, from: ., to: reviews}\n",
 		"  - {event: work.requested, from: ., to: reviews}\n  - {event: notice.requested, from: ., to: notices}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  detail: text\nnotice.requested:\n  seed: boolean\n")
-	writeClosedVariantFile(t, root, "notices/schema.yaml", "name: notices\nstages: []\npins:\n  inputs: [notice.requested]\n")
+	writeClosedVariantFile(t, root, "notices/schema.yaml", "name: notices\nstages: []\ninputs: [notice.requested]\n")
 	writeClosedVariantFile(t, root, "notices/nodes.yaml", "start:\n  notice.requested: {}\n")
 	writeClosedVariantFile(t, root, "notices/agents.yaml", `observer:
   role: observer
@@ -91,15 +91,14 @@ func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "        chat_id: \"42\"\n        text: \"review\"", "        queue: \"queue-b\"\n        body: \"approved-effect\"\n        controls: []")
 	writeClosedVariantFile(t, root, "reviews/events.yaml", "work.completed:\n  result: text\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `name: object-channel
-pins:
-  inputs:
-    - work.requested
-    - observer.requested
-    - effect.requested
-  outputs:
-    - work.requested
-    - observer.requested
-    - effect.requested
+inputs:
+  - work.requested
+  - observer.requested
+  - effect.requested
+outputs:
+  - work.requested
+  - observer.requested
+  - effect.requested
 connect:
   - {event: work.requested, from: ., to: reviews}
   - {event: effect.requested, from: ., to: reviews}
@@ -113,11 +112,10 @@ func copyChannelLearnedObjectInputJourney(t testing.TB, inputType string) string
 	t.Helper()
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", `name: object-channel
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.requested
+inputs:
+  - work.requested
+outputs:
+  - work.requested
 connect:
   - {event: work.requested, from: ., to: reviews}
 `)
@@ -150,9 +148,8 @@ pins:
 stages:
   active: {gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}
   done: {final: true}
-pins:
-  inputs:
-    - inbound.mock
+inputs:
+  - inbound.mock
 ingress:
   alias: objects
   providers: [{provider: mock, signing_secret: webhook_signing.mock}]

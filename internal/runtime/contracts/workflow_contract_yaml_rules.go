@@ -46,7 +46,6 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 	if w == nil {
 		return nil
 	}
-	w.Field = strings.TrimSpace(w.Field)
 	w.SourceField = strings.TrimSpace(w.SourceField)
 	w.Operation = WorkflowDataOperation(strings.TrimSpace(string(w.Operation)))
 	w.TargetRef = strings.TrimSpace(w.TargetRef)
@@ -79,10 +78,6 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 		return fmt.Errorf("workflow data write must not declare both target_field and target_path")
 	}
 	switch {
-	case w.Field != "":
-		if w.SourceField != "" || w.TargetField != "" || w.TargetPathRef != "" || !w.Value.IsZero() {
-			return fmt.Errorf("workflow data write %q must use bare direct form only", w.Field)
-		}
 	case w.SourceField != "":
 		if (w.TargetField == "" && w.TargetPathRef == "") || !w.Value.IsZero() {
 			return fmt.Errorf("workflow data write with source_field %q must also declare target_field or target_path and no value/expression", w.SourceField)
@@ -114,7 +109,7 @@ func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 	if w.TargetRef == "" {
 		return fmt.Errorf("workflow data write op %q requires target", w.Operation)
 	}
-	if w.Field != "" || w.SourceField != "" || w.TargetField != "" || w.TargetPathRef != "" {
+	if w.SourceField != "" || w.TargetField != "" || w.TargetPathRef != "" {
 		return fmt.Errorf("workflow data write op %q must use target, not field/source_field/target_field/target_path", w.Operation)
 	}
 	if strings.TrimSpace(w.TargetRef) != "" && paths.Parse(w.TargetRef).Root != paths.RootEntity {

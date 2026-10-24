@@ -1,4 +1,3 @@
 stages: []
-pins:
-  inputs:
-    - item.received
+inputs:
+  - item.received

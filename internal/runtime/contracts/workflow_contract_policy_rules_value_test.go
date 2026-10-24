@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-const r3AgentRules = "review:\n  classes: {hard: {disposition: none}}\n  rules:\n    - id: R1\n      class: hard\n      text: Review the input\n"
+const r3AgentRules = "review:\n  classes: {hard: {disposition: none}}\n  rules:\n    - id: R1\n      class: hard\n      text: Compare the input\n"
 const r3MachineRules = "review:\n  classes: {hard: {disposition: none}}\n  inputs: {left: string, right: string}\n  rules:\n    - id: R1\n      class: hard\n      text: Compare the input\n      pin_candidate: false\n      check: {equal: {left: input.left, right: input.right}}\n"
 
 func admitR3Rules(t *testing.T, body string) (RulesDocument, error) {
@@ -82,13 +82,13 @@ func TestR3PolicyLiteralJSONAdmission(t *testing.T) {
 func TestR3RuleFieldPresenceMatrix(t *testing.T) {
 	states := []string{"missing", "null", "empty", "scalar", "empty_sequence", "sequence", "empty_mapping", "mapping"}
 	for _, tc := range []struct{ name, base, needle, line, scalar, sequence, mapping, admit string }{
-		{"classes", r3AgentRules, "  classes: {hard: {disposition: none}}\n", "  classes: ", "hard", "[hard]", "{hard: {disposition: none}}", "mapping"},
-		{"rules", r3AgentRules, "  rules:\n    - id: R1\n      class: hard\n      text: Review the input\n", "  rules: ", "R1", "[{id: R1, class: hard, text: Review}]", "{id: R1}", "sequence"},
-		{"disposition", r3AgentRules, "  classes: {hard: {disposition: none}}\n", "  classes: {hard: {disposition: ", "none", "[none]", "{event: none}", "scalar"},
-		{"id", r3AgentRules, "    - id: R1\n", "    - id: ", "R1", "[R1]", "{id: R1}", "scalar"},
-		{"class", r3AgentRules, "      class: hard\n", "      class: ", "hard", "[hard]", "{class: hard}", "scalar"},
-		{"text", r3AgentRules, "      text: Review the input\n", "      text: ", "Review", "[Review]", "{text: Review}", "scalar"},
-		{"params", r3AgentRules, "      text: Review the input\n", "      params: ", "7", "[7]", "{x: 7}", "missing,empty_mapping,mapping"},
+		{"classes", r3MachineRules, "  classes: {hard: {disposition: none}}\n", "  classes: ", "hard", "[hard]", "{hard: {disposition: none}}", "mapping"},
+		{"rules", r3MachineRules, "  rules:\n    - id: R1\n      class: hard\n      text: Compare the input\n      pin_candidate: false\n      check: {equal: {left: input.left, right: input.right}}\n", "  rules: ", "R1", "[{id: R1, class: hard, text: Review, pin_candidate: false, check: {equal: {left: input.left, right: input.right}}}]", "{id: R1}", "sequence"},
+		{"disposition", r3MachineRules, "  classes: {hard: {disposition: none}}\n", "  classes: {hard: {disposition: ", "none", "[none]", "{event: none}", "scalar"},
+		{"id", r3MachineRules, "    - id: R1\n", "    - id: ", "R1", "[R1]", "{id: R1}", "scalar"},
+		{"class", r3MachineRules, "      class: hard\n", "      class: ", "hard", "[hard]", "{class: hard}", "scalar"},
+		{"text", r3MachineRules, "      text: Compare the input\n", "      text: ", "Review", "[Review]", "{text: Review}", "scalar"},
+		{"params", r3MachineRules, "      text: Compare the input\n", "      params: ", "7", "[7]", "{x: 7}", "missing,empty_mapping,mapping"},
 		{"inputs", r3MachineRules, "  inputs: {left: string, right: string}\n", "  inputs: ", "string", "[string]", "{left: string, right: string}", "mapping"},
 		{"pin_candidate", r3MachineRules, "      pin_candidate: false\n", "      pin_candidate: ", "false", "[false]", "{flag: false}", "scalar"},
 		{"check", r3MachineRules, "      check: {equal: {left: input.left, right: input.right}}\n", "      check: ", "equal", "[equal]", "{equal: {left: input.left, right: input.right}}", "mapping"},
@@ -137,14 +137,14 @@ func TestR3RuleNestedFieldPresenceMatrix(t *testing.T) {
 		build                               func(string) string
 		admit                               string
 	}{
-		{"set", r3AgentRules, r3AgentRules, "review: wrong", "review: {classes: {hard: {disposition: none}}, rules: [{id: R1, class: hard, text: Review}]}", func(v string) string { return "review: " + v + "\n" }, "mapping"},
-		{"class entry", r3AgentRules, "{hard: {disposition: none}}", "hard", "{disposition: none}", func(v string) string { return "{hard: " + v + "}" }, "mapping"},
-		{"rule entry", r3AgentRules, "    - id: R1\n      class: hard\n      text: Review the input\n", "R1", "{id: R1, class: hard, text: Review}", func(v string) string { return "    - " + v + "\n" }, "mapping"},
+		{"set", r3MachineRules, r3MachineRules, "review: wrong", "review: {classes: {hard: {disposition: none}}, inputs: {left: string, right: string}, rules: [{id: R1, class: hard, text: Review, pin_candidate: false, check: {equal: {left: input.left, right: input.right}}}]}", func(v string) string { return "review: " + v + "\n" }, "mapping"},
+		{"class entry", r3MachineRules, "{hard: {disposition: none}}", "hard", "{disposition: none}", func(v string) string { return "{hard: " + v + "}" }, "mapping"},
+		{"rule entry", r3MachineRules, "    - id: R1\n      class: hard\n      text: Compare the input\n      pin_candidate: false\n      check: {equal: {left: input.left, right: input.right}}\n", "R1", "{id: R1, class: hard, text: Review, pin_candidate: false, check: {equal: {left: input.left, right: input.right}}}", func(v string) string { return "    - " + v + "\n" }, "mapping"},
 		{"input type", r3MachineRules, "left: string", "string", "{type: string}", func(v string) string { return "left: " + v }, "scalar"},
 		{"equal", r3MachineRules, "equal: {left: input.left, right: input.right}", "equal", "{left: input.left, right: input.right}", func(v string) string { return "equal: " + v }, "mapping"},
 		{"left operand", r3MachineRules, "left: input.left", "input.left", "{source: input.left}", func(v string) string { return "left: " + v }, "scalar"},
 		{"right operand", r3MachineRules, "right: input.right", "input.right", "{source: input.right}", func(v string) string { return "right: " + v }, "scalar"},
-		{"param scalar", r3AgentRules + "      params: {limit: 3}\n", "limit: 3", "false", "{value: 3}", func(v string) string { return "limit: " + v }, "missing,scalar,''"},
+		{"param scalar", r3MachineRules + "      params: {limit: 3}\n", "limit: 3", "false", "{value: 3}", func(v string) string { return "limit: " + v }, "missing,scalar,''"},
 	} {
 		for _, state := range states {
 			t.Run(field.name+"/"+state, func(t *testing.T) {
@@ -184,12 +184,12 @@ func TestR3RuleNestedFieldPresenceMatrix(t *testing.T) {
 
 func TestR3RuleClosedVariantsAndFiniteParams(t *testing.T) {
 	for _, body := range []string{
-		strings.Replace(r3AgentRules, "review:\n", "review:\n  unknown: null\n", 1),
-		strings.Replace(r3AgentRules, "disposition: none", "disposition: none, unknown: null", 1),
-		strings.Replace(r3AgentRules, "id: R1", "id: 7", 1),
-		strings.Replace(r3AgentRules, "text: Review the input", "text: 7", 1),
-		r3AgentRules + "      check: null\n", r3AgentRules + "      pin_candidate: false\n",
-		strings.Replace(r3AgentRules, "review:\n", "review:\n  inputs: null\n", 1),
+		strings.Replace(r3MachineRules, "review:\n", "review:\n  unknown: null\n", 1),
+		strings.Replace(r3MachineRules, "disposition: none", "disposition: none, unknown: null", 1),
+		strings.Replace(r3MachineRules, "id: R1", "id: 7", 1),
+		strings.Replace(r3MachineRules, "text: Compare the input", "text: 7", 1),
+		r3MachineRules + "      check: null\n", r3MachineRules + "      pin_candidate: false\n",
+		strings.Replace(r3MachineRules, "review:\n", "review:\n  inputs: null\n", 1),
 		strings.Replace(r3MachineRules, "      pin_candidate: false\n", "", 1),
 		strings.Replace(r3MachineRules, "left: input.left", "left: ''", 1),
 		strings.Replace(r3MachineRules, "{equal: {left: input.left, right: input.right}}", "{unknown: {}}", 1),
@@ -204,12 +204,12 @@ func TestR3RuleClosedVariantsAndFiniteParams(t *testing.T) {
 		}
 	}
 	for _, value := range []string{"null", "[]", "{}", ".inf", "-.inf", ".nan"} {
-		if _, err := admitR3Rules(t, r3AgentRules+"      params: {p: "+value+"}\n"); err == nil {
+		if _, err := admitR3Rules(t, r3MachineRules+"      params: {p: "+value+"}\n"); err == nil {
 			t.Fatalf("invalid param admitted %s", value)
 		}
 	}
 	for _, value := range []string{"''", "0", "false", "1.5", "'policy.limit'"} {
-		if _, err := admitR3Rules(t, r3AgentRules+"      params: {p: "+value+"}\n"); err != nil {
+		if _, err := admitR3Rules(t, r3MachineRules+"      params: {p: "+value+"}\n"); err != nil {
 			t.Fatalf("inert param rejected %s: %v", value, err)
 		}
 	}
@@ -231,7 +231,7 @@ func TestR3PolicyReservedLookingLiteralAndSiblingAnchor(t *testing.T) {
 }
 
 func TestR3RuleAliasMergeClosedFields(t *testing.T) {
-	valid := "review: &rule\n  classes: &classes {hard: {disposition: none}}\n  rules: &rows [{id: R1, class: hard, text: Review}]\nsecond: *rule\nthird: {<<: *rule}\n"
+	valid := "review: &rule\n  classes: &classes {hard: {disposition: none}}\n  inputs: {left: string, right: string}\n  rules: &rows [{id: R1, class: hard, text: Review, pin_candidate: false, check: {equal: {left: input.left, right: input.right}}}]\nsecond: *rule\nthird: {<<: *rule}\n"
 	rules, err := admitR3Rules(t, valid)
 	if err != nil || len(rules) != 3 {
 		t.Fatalf("aliases: %#v, %v", rules, err)
@@ -245,7 +245,7 @@ func TestR3RuleAliasMergeClosedFields(t *testing.T) {
 }
 
 func TestR3PolicyRulesDiskArtifactCatalogRetainedParity(t *testing.T) {
-	for _, rulesBody := range []string{r3AgentRules, r3MachineRules, r3AgentRules + "      unknown: null\n"} {
+	for _, rulesBody := range []string{r3MachineRules, r3AgentRules, r3MachineRules + "      unknown: null\n"} {
 		root := t.TempDir()
 		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: policy-rules-parity\n")
 		writeFixtureFile(t, filepath.Join(root, "rules.yaml"), rulesBody)
@@ -297,7 +297,7 @@ func TestR3PolicyRulesDocumentWideExpansionBudget(t *testing.T) {
 		for _, mode := range []string{"alias", "merge"} {
 			body := "base: &base {value: kept, description: data, override: false, nested: {a: 1, b: 2}}\n"
 			if family == "rules" {
-				body = "base: &base {classes: {hard: {disposition: none}}, rules: [{id: R1, class: hard, text: Review}]}\n"
+				body = "base: &base {classes: {hard: {disposition: none}}, inputs: {left: string, right: string}, rules: [{id: R1, class: hard, text: Review, pin_candidate: false, check: {equal: {left: input.left, right: input.right}}}]}\n"
 			}
 			for _, count := range []int{10, 10000} {
 				var text strings.Builder

@@ -6,9 +6,8 @@ stages:
       - {after: 72h, advances_to: expired}
   complete: {final: true}
   expired: {final: true}
-pins:
-  inputs:
-    - item.registered
-    - item.finished
-  outputs:
-    - item.reported
+inputs:
+  - item.registered
+  - item.finished
+outputs:
+  - item.reported

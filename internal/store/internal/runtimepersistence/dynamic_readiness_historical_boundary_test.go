@@ -24,7 +24,7 @@ func TestR7ReadinessDiagnosticsDoNotExemptLaterNativeForkConstructionBothStores(
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml":               "name: later-native-diagnostic\n",
 				"events.yaml":               "checkpoint:\n",
-				"worker/schema.yaml":        "name: worker\ninstance: item_id\npins:\n  inputs: [item.created]\n",
+				"worker/schema.yaml":        "name: worker\ninstance: item_id\ninputs: [item.created]\n",
 				"worker/entities.yaml":      "item:\n  item_id: text\n",
 				"worker/events.yaml":        "item.created:\n  item_id: text\n",
 				"worker/detail/schema.yaml": "name: fieldless-detail\n",

@@ -3,6 +3,5 @@ stages:
   pending: {}
   working: {}
   complete: {final: true}
-pins:
-  inputs:
-    - work.requested
+inputs:
+  - work.requested

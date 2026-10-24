@@ -681,10 +681,8 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 func TestVerifyCommandRejectsTypeInvalidNamedJoinResult(t *testing.T) {
 	sourceRoot := writeDescribeStageGraphContracts(t)
 	flowRoot := filepath.Join(sourceRoot, "support")
-	writeDescribeTestFile(t, filepath.Join(flowRoot, "types.yaml"), `
-types:
-  JoinResult:
-    value: text
+	writeDescribeTestFile(t, filepath.Join(flowRoot, "types.yaml"), `JoinResult:
+  value: text
 `)
 	eventsPath := filepath.Join(flowRoot, "events.yaml")
 	events, err := os.ReadFile(eventsPath)

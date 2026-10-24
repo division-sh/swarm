@@ -28,7 +28,7 @@ func TestProjectNodeDataAccumulationValue(t *testing.T) {
 	}
 	accumulation := nodes["worker"].EventHandlers["task.requested"].DataAccumulation
 	if accumulation.SourceEvent != "task.requested" || len(accumulation.Writes) != 3 ||
-		accumulation.Writes[0].Field != "name" || accumulation.Writes[1].Value.CEL != "payload.count" ||
+		accumulation.Writes[0].SourceField != "name" || accumulation.Writes[0].TargetField != "name" || accumulation.Writes[1].Value.CEL != "payload.count" ||
 		accumulation.Writes[2].Operation != WorkflowDataOperationClear {
 		t.Fatalf("write forms not preserved: %#v", accumulation)
 	}

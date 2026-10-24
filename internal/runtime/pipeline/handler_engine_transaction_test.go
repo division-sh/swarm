@@ -147,7 +147,7 @@ func handlerEngineProjectNodeModule(t *testing.T) *previewWorkflowModule {
 		"schema.yaml":   "name: handler-engine-test\nstages:\n  queued: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "custom.trigger:\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
-		"types.yaml":    "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
+		"types.yaml":    "EmitSummary:\n  entity_id: text\n  stage: text\nEmitFlags:\n  ready: boolean\n",
 		"nodes.yaml":    "node-a:\n  {}\n",
 	})}
 	return module
@@ -562,7 +562,7 @@ func VerifyNativeExecuteNodeContractHandlerRejectsMissingWriteSourceBeforeEmitFo
 	_, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "business_brief"},
+				{TargetField: "business_brief", SourceField: "business_brief"},
 			},
 			SourceEvent: "research.completed",
 		},
@@ -623,7 +623,7 @@ func VerifyNativeExecuteNodeContractHandlerPublishesAfterPersistencePrerequisite
 	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, node, runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "business_brief"},
+				{TargetField: "business_brief", SourceField: "business_brief"},
 			},
 			SourceEvent: "research.completed",
 		},

@@ -43,9 +43,8 @@ func CopyDuplicateScopedSingletonDemand(t testing.TB) string {
 	for _, flowID := range []string{"a", "b"} {
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "schema.yaml"), `
 name: `+flowID+`
-pins:
-  inputs:
-    - item.received
+inputs:
+  - item.received
 `)
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "events.yaml"), "item.received:\n  items: [text]\n")
 		entities := "state: {}\n"
@@ -79,25 +78,22 @@ func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonC
 		writeStatelessCountJoinSingletonCoordinatorFlow(t, root)
 		return
 	}
-	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\npins:\n  inputs:\n    - lead.observed\n  outputs:\n    - lead.observed\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\ninputs:\n  - lead.observed\noutputs:\n  - lead.observed\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 stages: []
-pins:
-  inputs:
-    - lead.observed
+inputs:
+  - lead.observed
 `)
-	writeSingletonCoordinatorFile(t, root, "types.yaml", `
-types:
-  LeadScore:
-    status: text
-    score: integer
-    observations: [Observation]
-  Observation:
-    source: text
-    note: text
-  AuditEntry:
-    ref: text
-    action: text
+	writeSingletonCoordinatorFile(t, root, "types.yaml", `LeadScore:
+  status: text
+  score: integer
+  observations: [Observation]
+Observation:
+  source: text
+  note: text
+AuditEntry:
+  ref: text
+  action: text
 `)
 	entities := `
 coordinator_state:
@@ -137,7 +133,7 @@ coordinator-indexer:
 
 func writeStatelessCountJoinSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
-	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: stateless-count-join\npins:\n  inputs: [job.received]\nconnect:\n  - {event: job.received, from: ., to: coordinator}\n")
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: stateless-count-join\ninputs: [job.received]\nconnect:\n  - {event: job.received, from: ., to: coordinator}\n")
 	writeSingletonCoordinatorFile(t, root, "types.yaml", singletonCoordinatorTypesYAMLForFixture())
 	writeSingletonCoordinatorFile(t, root, "events.yaml", "job.received:\n  vertical_id: text\n  job: Job\n")
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
@@ -145,9 +141,8 @@ stages:
   active: {}
   done: {final: true}
   failed: {final: true}
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `)
 	writeSingletonCoordinatorFile(t, root, "coordinator/types.yaml", singletonCoordinatorTypesYAMLForFixture())
 	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")
@@ -165,11 +160,9 @@ coordinator-node:
 }
 
 func singletonCoordinatorTypesYAMLForFixture() string {
-	return `
-types:
-  Job:
-    id: text
-    title: text
+	return `Job:
+  id: text
+  title: text
 `
 }
 
@@ -186,15 +179,14 @@ func writeRetiredFanInSingletonCoordinatorFlow(t testing.TB, root string) {
 // admission and syntax-guard proof; it is not a supported coordinator shape.
 func RetiredFanInCoordinatorSchema() string {
 	return `name: coordinator
-pins:
-  inputs:
-    - event: job.received
-      resolution:
-        mode: fan-in
-        aggregation: stream
-        window: payload.vertical_id
-        dedup_by: [event.id]
-        singleton: coordinator
+inputs:
+  - event: job.received
+    resolution:
+      mode: fan-in
+      aggregation: stream
+      window: payload.vertical_id
+      dedup_by: [event.id]
+      singleton: coordinator
 `
 }
 

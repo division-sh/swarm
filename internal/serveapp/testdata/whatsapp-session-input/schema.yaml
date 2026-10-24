@@ -5,13 +5,12 @@ imports:
       event: inbound.whatsapp.message
 stages:
   active: {}
-pins:
-  inputs:
-    - inbound.whatsapp
-    - work.requested
-  outputs:
-    - inbound.whatsapp.message
-    - work.requested
+inputs:
+  - inbound.whatsapp
+  - work.requested
+outputs:
+  - inbound.whatsapp.message
+  - work.requested
 ingress:
   alias: reception
   providers:

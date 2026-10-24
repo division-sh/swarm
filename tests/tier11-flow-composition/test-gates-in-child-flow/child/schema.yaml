@@ -1,9 +1,8 @@
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - validate.start
-  outputs:
-    - validation.done
+inputs:
+  - validate.start
+outputs:
+  - validation.done
 name: child

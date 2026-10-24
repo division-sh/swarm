@@ -1045,8 +1045,7 @@ imports:
   provider_trigger_events:
     - provider: github
       event: inbound.github.push.normalized
-pins:
-  outputs: [inbound.github.push.normalized]
+outputs: [inbound.github.push.normalized]
 `
 	leafSchema := `name: ingress
 ingress:
@@ -1054,8 +1053,7 @@ ingress:
   providers:
     - provider: github
       signing_secret: proof-secret
-pins:
-  outputs: [inbound.github.push.normalized]
+outputs: [inbound.github.push.normalized]
 `
 	files := map[string]string{"schema.yaml": rootSchema + fmt.Sprintf("connect:\n  - event: inbound.github.push.normalized\n    from: %s\n    to: .\n", flowPath), flowPath + "/schema.yaml": leafSchema}
 	parts := strings.Split(flowPath, "/")

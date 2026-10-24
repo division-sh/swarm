@@ -21,12 +21,12 @@ func TestRootPinCannotSatisfyUnconnectedPrivateSourceInput(t *testing.T) {
 				root := t.TempDir()
 				rootSchema := "name: root\n"
 				if rootPin {
-					rootSchema += "pins:\n  inputs:\n    - thing.created\n"
+					rootSchema += "inputs:\n  - thing.created\n"
 				}
 				for path, body := range map[string]string{
 					"schema.yaml":       rootSchema,
 					"events.yaml":       "thing.created:\n",
-					"child/schema.yaml": "name: child\npins:\n  inputs:\n    - thing.created\n",
+					"child/schema.yaml": "name: child\ninputs:\n  - thing.created\n",
 					"child/nodes.yaml":  "observer:\n  thing.created:\n    guard: true\n",
 				} {
 					file := filepath.Join(root, path)

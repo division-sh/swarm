@@ -143,7 +143,7 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 				}
 				// Keep the child available for the stop/recovery being tested;
 				// automatic completion is a separate behavioral reach.
-				writeSelectedContractFixtureFile(t, filepath.Join(controlRoot, "schema.yaml"), "stages:\n  pending: {}\n  done: {}\npins:\n  inputs: [item.received]\n  outputs: [item.processed]\n")
+				writeSelectedContractFixtureFile(t, filepath.Join(controlRoot, "schema.yaml"), "stages:\n  pending: {}\n  done: {}\ninputs: [item.received]\noutputs: [item.processed]\n")
 				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: controlRoot}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 				if err != nil {

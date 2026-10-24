@@ -2,6 +2,5 @@ name: test-non-agent-replay-fail-closed
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
+inputs:
+  - task.assigned

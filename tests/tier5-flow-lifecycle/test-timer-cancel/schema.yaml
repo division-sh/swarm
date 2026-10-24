@@ -3,11 +3,10 @@ stages:
   waiting: {}
   cancelled: {}
   done: {final: true}
-pins:
-  inputs:
-    - timer.scheduled
-    - timer.cancel_requested
-    - timer.check
-  outputs:
-    - timer.check
-    - timer.cancelled
+inputs:
+  - timer.scheduled
+  - timer.cancel_requested
+  - timer.check
+outputs:
+  - timer.check
+  - timer.cancelled

@@ -15,11 +15,10 @@ stages:
   serving: {}
   retired:
     final: true
-pins:
-  inputs:
-    - inbound.telegram
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram
+outputs:
+  - inbound.telegram.text_message
 ingress:
   alias: chat
   providers:

@@ -1,8 +1,7 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - scores.submitted
-  outputs:
-    - scores.aggregated
+inputs:
+  - scores.submitted
+outputs:
+  - scores.aggregated

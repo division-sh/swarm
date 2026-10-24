@@ -18,10 +18,9 @@ imports:
   connector_packs: [{provider: telegram, tool: telegram.send_message}]
   provider_trigger_events: [{provider: telegram, event: inbound.telegram.text_message}]
 connect: [{event: work.requested, from: source, to: worker, rename: work.received, resolution: create, key_from: event.id}]
-pins:
-  inputs:
-    - work.requested
-  outputs: [work.completed]
+inputs:
+  - work.requested
+outputs: [work.completed]
 required_agents: [{role: worker, subscribes_to: [], emits: [work.completed], description: ''}]
 auto_emit_on_create: {event: work.started}
 stages:
@@ -50,14 +49,13 @@ stages:
     description: *label
     timers: [{after: 1s, emit: work.expired}]
   done: {final: true}
-pins:
-  inputs: [work.requested]
-  outputs: [work.completed]
+inputs: [work.requested]
+outputs: [work.completed]
 `
 
 const (
 	SchemaConnectParserEnvelope    = "connect:\n  -"
-	SchemaPinsParserEnvelope       = "pins:"
-	SchemaInputPinsParserEnvelope  = "pins:\n  inputs:"
-	SchemaOutputPinsParserEnvelope = "pins:\n  outputs:"
+	SchemaPinsParserEnvelope       = ""
+	SchemaInputPinsParserEnvelope  = "inputs:"
+	SchemaOutputPinsParserEnvelope = "outputs:"
 )

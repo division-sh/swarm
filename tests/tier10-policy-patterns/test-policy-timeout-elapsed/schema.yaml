@@ -2,9 +2,8 @@ stages:
   waiting: {}
   done: {final: true}
   timed_out: {final: true}
-pins:
-  inputs:
-    - task.done
-    - timer.check
-  outputs:
-    - task.timed_out
+inputs:
+  - task.done
+  - timer.check
+outputs:
+  - task.timed_out

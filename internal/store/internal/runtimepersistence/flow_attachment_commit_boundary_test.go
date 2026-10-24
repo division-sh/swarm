@@ -25,7 +25,7 @@ func TestFlowAttachmentNativeLostAckAfterRebindBothStores(t *testing.T) {
 			selected, _, connector := newP16RaceStore(t, backend)
 			f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
 				"schema.yaml":          "name: attachment-rebind-ack\n",
-				"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+				"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
 				"review/entities.yaml": "review_item:\n  request_id: text\n",
 				"review/events.yaml":   "task.started:\n",
 			}, nil, ownStoreTestAgentManager, nil)
@@ -230,7 +230,7 @@ func TestFlowAttachmentNativeCommitAcknowledgmentBothStores(t *testing.T) {
 					selected, _, connector := newP16RaceStore(t, backend)
 					f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
 						"schema.yaml":          "name: attachment-commit-boundary\n",
-						"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+						"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
 						"review/entities.yaml": "review_item:\n  request_id: text\n",
 						"review/events.yaml":   "task.started:\n",
 					}, nil, ownStoreTestAgentManager, nil)

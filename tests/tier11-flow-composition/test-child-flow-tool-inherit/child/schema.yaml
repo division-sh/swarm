@@ -2,6 +2,5 @@ name: child
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - child.task
+inputs:
+  - child.task

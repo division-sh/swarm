@@ -16,19 +16,17 @@ connect:
   - {event: mixed.multi, from: producer, to: child}
 `,
 		"producer/schema.yaml": `name: producer
-pins:
-  outputs:
-    - mixed.none
-    - mixed.one
-    - mixed.multi
+outputs:
+  - mixed.none
+  - mixed.one
+  - mixed.multi
 `,
 		"producer/events.yaml": "mixed.none:\nmixed.one:\nmixed.multi:\n",
 		"one/schema.yaml": `name: one
 stages:
   active: {}
-pins:
-  inputs:
-    - mixed.one
+inputs:
+  - mixed.one
 `,
 		"one/entities.yaml": "test_entity: {}\n",
 		"one/nodes.yaml": `one-node:
@@ -37,9 +35,8 @@ pins:
 		"multi-a/schema.yaml": `name: multi-a
 stages:
   active: {}
-pins:
-  inputs:
-    - mixed.multi
+inputs:
+  - mixed.multi
 `,
 		"multi-a/entities.yaml": "test_entity: {}\n",
 		"multi-a/nodes.yaml": `multi-a-node:
@@ -48,9 +45,8 @@ pins:
 		"multi-b/schema.yaml": `name: multi-b
 stages:
   active: {}
-pins:
-  inputs:
-    - mixed.multi
+inputs:
+  - mixed.multi
 `,
 		"multi-b/entities.yaml": "test_entity: {}\n",
 		"multi-b/nodes.yaml": `multi-b-node:
@@ -59,9 +55,8 @@ pins:
 		"child/schema.yaml": `name: child
 stages:
   active: {}
-pins:
-  inputs:
-    - mixed.multi
+inputs:
+  - mixed.multi
 `,
 		"child/entities.yaml": "test_entity: {}\n",
 		"child/nodes.yaml": `child-node:

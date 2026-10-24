@@ -40,7 +40,7 @@ func TestEntityMutationHandlerReadsOrderedDraft(t *testing.T) {
 }
 
 func TestEntityMutationHandlerMissingSourceRollsBackList(t *testing.T) {
-	for _, write := range []rc.WorkflowDataWrite{{Field: "left"}, {SourceField: "missing", TargetField: "right"}} {
+	for _, write := range []rc.WorkflowDataWrite{{SourceField: "left", TargetField: "left"}, {SourceField: "missing", TargetField: "right"}} {
 		exec, frame := sparseMutationFrame()
 		before := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 		err := exec.applyDataAccumulation(frame, rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{

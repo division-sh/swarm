@@ -30,7 +30,7 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 		t.Run(fixture.name, func(t *testing.T) {
 			backend := fixture.backend
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
-			writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "types:\n  AccountInput:\n    delivery_id: text\n    user_id: text\n    labels: {type: '[text]?'}\n    attributes: 'map[text]text?'\n    nested: NullProbe?\n  NullProbe:\n    user_id: text\n")
+			writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "AccountInput:\n  delivery_id: text\n  user_id: text\n  labels: {type: '[text]?'}\n  attributes: 'map[text]text?'\n  nested: NullProbe?\nNullProbe:\n  user_id: text\n")
 			writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: AccountInput\n")
 			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)

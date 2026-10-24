@@ -35,8 +35,8 @@ func TestEmitCompletenessConsumesSharedRuleDisplayAndKeepsSingularJoins(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: emit-display\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  outputs: [chosen, fallback]\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  JoinValue:\n    value: {type: text}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: emit-display\nstages:\n  pending: {}\n  done: {final: true}\noutputs: [chosen, fallback]\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "JoinValue:\n  value: {type: text}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "request:\n  ready: {type: boolean}\n  member_id: {type: text}\n  value: {type: JoinValue}\nchosen:\nfallback:\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  request:\n      "+strings.ReplaceAll(tc.source, "\n", "\n      ")+"\n")
 			repo := canonicalrouting.RepoRoot(t)

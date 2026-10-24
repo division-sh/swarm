@@ -1,6 +1,5 @@
 name: account
 instance: account_id
-pins:
-  inputs:
-    - account.setup
-    - account.ready
+inputs:
+  - account.setup
+  - account.ready

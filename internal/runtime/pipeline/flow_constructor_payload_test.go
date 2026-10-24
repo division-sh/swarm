@@ -38,7 +38,7 @@ func TestFlowConstructorInitialStateUsesCompiledOwner(t *testing.T) {
 
 func TestFlowConstructorPayloadConsumesExactDeliveryProjection(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: constructor-projection\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+		"schema.yaml":   "name: constructor-projection\ninstance: item_id\ninputs:\n  - item.created\n",
 		"entities.yaml": "item:\n  item_id: text\n  precise: double?\n  message: text?\n",
 		"events.yaml":   "item.created:\n  precise: double\n  message: text\n",
 	})
@@ -116,7 +116,7 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: typed-instance-key\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"schema.yaml":   "name: typed-instance-key\ninstance: item_id\ninputs:\n  - item.created\n",
 				"entities.yaml": "item:\n  item_id: " + test.fieldType + "\n",
 				"events.yaml":   "item.created:\n  item_id: " + test.fieldType + "\n",
 			})
@@ -150,7 +150,7 @@ func TestFlowConstructorResolvedKeySatisfiesOnlyItsDeclaredSlot(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: constructor-key-slot\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"schema.yaml":   "name: constructor-key-slot\ninstance: item_id\ninputs:\n  - item.created\n",
 				"entities.yaml": "item:\n  item_id: text\n  message: text?\n",
 				"events.yaml":   eventSchema,
 			})

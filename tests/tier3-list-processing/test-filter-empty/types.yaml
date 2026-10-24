@@ -1,4 +1,3 @@
-types:
-  FilteredItem:
-    id: text?
-    score: integer
+FilteredItem:
+  id: text?
+  score: integer

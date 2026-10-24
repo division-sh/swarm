@@ -1,8 +1,7 @@
 stages:
   pending: {}
   routing: {final: true}
-pins:
-  inputs:
-    - batch.submitted
-  outputs:
-    - routed.a
+inputs:
+  - batch.submitted
+outputs:
+  - routed.a

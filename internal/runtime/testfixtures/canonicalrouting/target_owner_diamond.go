@@ -10,11 +10,10 @@ func CopyTargetOwnerDiamond(t testing.TB) string {
 	files := map[string]string{
 
 		"schema.yaml": `name: target-owner-diamond
-pins:
-  inputs:
-    - branch.done
-  outputs:
-    - branch.start
+inputs:
+  - branch.done
+outputs:
+  - branch.start
 connect:
   - event: branch.start
     from: .
@@ -31,12 +30,11 @@ connect:
 `,
 		"branch/schema.yaml": `name: branch
 instance: branch_id
-pins:
-  inputs:
-    - branch.start
-  outputs:
-    - work.ready
-    - branch.done
+inputs:
+  - branch.start
+outputs:
+  - work.ready
+  - branch.done
 connect:
   - event: work.ready
     from: .
@@ -53,32 +51,28 @@ connect:
 `,
 
 		"branch/worker/result-static/schema.yaml": `name: static-result
-pins:
-  inputs:
-    - work.ready
+inputs:
+  - work.ready
 `,
 		"branch/worker/result-static/nodes.yaml": `static-result-node:
   work.ready:
     guard: _entity.id != ""
 `,
 		"branch/worker/result/schema.yaml": `name: singleton-result
-pins:
-  inputs:
-    - work.ready
+inputs:
+  - work.ready
 `,
 		"branch/worker/result/nodes.yaml": `singleton-result-node:
   work.ready: {}
 `,
 		"decoy/schema.yaml": `name: decoy
-pins:
-  outputs:
-    - work.ready
+outputs:
+  - work.ready
 `,
 		"decoy/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/schema.yaml": `name: hostile
-pins:
-  inputs:
-    - work.ready
+inputs:
+  - work.ready
 `,
 		"unrelated/worker/result/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/nodes.yaml": `hostile-node:

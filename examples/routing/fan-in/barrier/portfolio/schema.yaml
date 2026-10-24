@@ -1,13 +1,12 @@
 name: portfolio
 instance: portfolio_id
 stages: []
-pins:
-  inputs:
-    - portfolio.setup
-    - operating.reported
-  outputs:
-    - period.setup
-    - period.reported
+inputs:
+  - portfolio.setup
+  - operating.reported
+outputs:
+  - period.setup
+  - period.reported
 connect:
   - {event: period.setup, from: ., to: period, resolution: create}
   - {event: period.reported, from: ., to: period, resolution: select}

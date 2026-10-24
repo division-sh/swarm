@@ -1,8 +1,7 @@
 stages:
   listening: {}
   matched: {final: true}
-pins:
-  inputs:
-    - task.completed
-  outputs:
-    - match.found
+inputs:
+  - task.completed
+outputs:
+  - match.found

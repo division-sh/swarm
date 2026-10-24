@@ -12,6 +12,9 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return FlowSchemaDocument{}, err
 	}
+	if retired, err := root.Lookup("pins"); err == nil && retired.Presence != yamlsource.PresenceMissing {
+		return FlowSchemaDocument{}, nodeValueError(retired.Value, fmt.Errorf("DIALECT-PINS: pins is not a schema field; put inputs and outputs directly at the schema.yaml root"))
+	}
 	fields, err := schemaValueFields(root, "schema", flowSchemaDocumentFields, true)
 	if err != nil {
 		return FlowSchemaDocument{}, err
@@ -40,8 +43,14 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 			out.Imports, err = projectSchemaImportsValue(value)
 		case "connect":
 			out.Connect, err = projectSchemaConnectValue(value)
-		case "pins":
-			out.Pins, err = projectSchemaPinsValue(value)
+		case "inputs", "outputs":
+			var pins FlowPins
+			pins, err = projectSchemaPinsValue(value, name)
+			if name == "inputs" {
+				out.Pins.Inputs = pins.Inputs
+			} else {
+				out.Pins.Outputs = pins.Outputs
+			}
 		case "required_agents":
 			out.RequiredAgentsDeclared = true
 			out.RequiredAgents, err = projectSchemaRequiredAgentsValue(value)

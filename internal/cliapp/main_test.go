@@ -3079,7 +3079,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "duplicate activity after connector import",
-			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
+			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\ninputs: [z.request, a.request]\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
 				"nodes.yaml":  "sender:\n  z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n  a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
@@ -3089,7 +3089,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "duplicate activity on one YAML line",
-			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
+			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\ninputs: [z.request, a.request]\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
 				"nodes.yaml":  "sender:\n  z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n  a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
@@ -3676,7 +3676,7 @@ stages:
   done: {final: true}
 `
 	if opts.publicInput {
-		schema += "pins:\n  inputs: [item.arrived]\n"
+		schema += "inputs: [item.arrived]\n"
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), schema)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `

@@ -15,8 +15,8 @@ intake-router:
           score: intake_item.score
   item.processed:
     accumulate:
-      into: processed_items
-      from: payload
+      target: processed_items
+      key: item_id
     emit:
       event: item.review_requested
       fields:

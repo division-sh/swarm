@@ -3,6 +3,5 @@ stages:
   pending: {}
   working: {}
   done: {final: true}
-pins:
-  inputs:
-    - entry.right
+inputs:
+  - entry.right

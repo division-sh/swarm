@@ -16,7 +16,7 @@ func TestRewriteGeneratedPositivePins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Replace(before, "pins:\n  inputs:\n    events:\n      - {event: work.requested, source: harness}\n  outputs:\n    events:\n      - {event: work.completed, sink: harness}\n", "pins:\n  inputs:\n    - work.requested\n  outputs:\n    - work.completed\n", 1)
+	want := strings.Replace(before, "inputs:\n  events:\n    - {event: work.requested, source: harness}\noutputs:\n  events:\n    - {event: work.completed, sink: harness}\n", "inputs:\n  - work.requested\noutputs:\n  - work.completed\n", 1)
 	if got := generatedSourceLiteral(t, after); got != want {
 		t.Fatalf("rewritten source = %q, want %q", got, want)
 	}
@@ -90,7 +90,7 @@ func TestRewritePinMutationConsumersTrackCurrentSequences(t *testing.T) {
 
 func TestRewritePinMutationPreservesCompleteInlineDirection(t *testing.T) {
 	name := "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go"
-	before := "pins:\n  inputs: [loop.escaped]\n  outputs: [work.completed]\n"
+	before := "inputs: [loop.escaped]\noutputs: [work.completed]\n"
 	if got := rewritePinMutationLiteral(name, before); got != before {
 		t.Fatalf("complete direction changed: %q", got)
 	}

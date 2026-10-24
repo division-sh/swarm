@@ -46,7 +46,7 @@ func Test2293FanOutSourceUUIDOrderCannotChangeHistoricalState(t *testing.T) {
 func Test2293FanOutSourcePhysicalHistoryAndConversationFoldBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			db, run, entity := runDriftDatabase(t, backend)
+			db, run, entity := runDriftDatabase(t, backend, true)
 			before, err := inspectRunDriftTest(t, db, run)
 			if err != nil || len(before.Rows) != 0 || before.EntitiesChecked != 1 {
 				t.Fatalf("baseline drift: %+v err=%v", before, err)
@@ -75,7 +75,7 @@ func Test2293FanOutSourcePhysicalHistoryAndConversationFoldBothStores(t *testing
 			fork := runfork.OperatorConversationForkSession{SourceRunID: run,
 				ForkPoint: runfork.ConversationForkPointDescriptor{SelectedAt: at.Add(time.Hour)}}
 			got, err := loadConversationForkEntitySnapshot(context.Background(), owner, tx, fork)
-			if err != nil || len(got) != 1 || got[0].EntityID != entity || got[0].CurrentState != "queued" || !reflect.DeepEqual(got[0].Fields, map[string]any{"value": "original"}) {
+			if err != nil || len(got) != 1 || got[0].EntityID != entity || got[0].CurrentState == nil || *got[0].CurrentState != "queued" || !reflect.DeepEqual(got[0].Fields, map[string]any{"value": "original"}) {
 				t.Fatalf("conversation fold applied source evidence or created an entity: %+v err=%v", got, err)
 			}
 			if _, err := tx.Exec(`UPDATE entity_mutations SET new_value='null' WHERE mutation_id=$1`, "ffffffff-ffff-ffff-ffff-ffffffffffff"); err != nil {

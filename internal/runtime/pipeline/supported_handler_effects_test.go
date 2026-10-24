@@ -20,7 +20,7 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				source := loadWorkflowTempSource(t, map[string]string{
 					"schema.yaml":   "name: findings\nstages:\n  active: {}\n  done: {final: true}\n",
-					"types.yaml":    "types:\n  Finding:\n    summary: text\n",
+					"types.yaml":    "Finding:\n  summary: text\n",
 					"entities.yaml": "work:\n  findings: {type: '[Finding]', initial: []}\n  status: {type: text, initial: pending}\n",
 					"events.yaml":   "finding.received:\n  summary: text\n  status: text\nfinding.recorded:\n  status: text\n",
 					"nodes.yaml": `writer:

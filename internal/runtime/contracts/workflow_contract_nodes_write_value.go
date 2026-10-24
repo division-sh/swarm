@@ -9,12 +9,22 @@ import (
 
 func projectNodeDataAccumulationValue(value yamlsource.Value) (WorkflowDataAccumulation, error) {
 	fields, err := nodeValueFields(value, "data_accumulation", map[string]struct{}{
-		"writes": {}, "source_event": {},
+		"writes": {}, "source_event": {}, "from": {},
 	})
 	if err != nil {
 		return WorkflowDataAccumulation{}, err
 	}
 	var out WorkflowDataAccumulation
+	if from, present := fields["from"]; present {
+		out.From, err = nodeValueRequiredText(from, "data_accumulation.from")
+		if err != nil {
+			return WorkflowDataAccumulation{}, err
+		}
+		out.From = strings.TrimSpace(out.From)
+		if out.From != "payload" {
+			return WorkflowDataAccumulation{}, nodeValueError(from, fmt.Errorf("data_accumulation.from must be payload"))
+		}
+	}
 	if source, present := fields["source_event"]; present {
 		out.SourceEvent, err = nodeValueText(source, "data_accumulation.source_event")
 		if err != nil {
@@ -44,11 +54,11 @@ func projectNodeDataWriteValue(value yamlsource.Value) (WorkflowDataWrite, error
 		if err != nil {
 			return WorkflowDataWrite{}, err
 		}
-		out := WorkflowDataWrite{Field: strings.TrimSpace(field)}
+		out := WorkflowDataWrite{SourceField: strings.TrimSpace(field), TargetField: strings.TrimSpace(field)}
 		return out, hydrateWorkflowDataWrite(&out)
 	}
 	fields, err := nodeValueFields(value, "data_accumulation.writes", map[string]struct{}{
-		"field": {}, "source_field": {}, "target_field": {}, "target_path": {}, "target": {},
+		"source_field": {}, "target_field": {}, "target_path": {}, "target": {},
 		"op": {}, "key": {}, "index": {}, "value": {},
 	})
 	if err != nil {
@@ -62,7 +72,7 @@ func projectNodeDataWriteValue(value yamlsource.Value) (WorkflowDataWrite, error
 		key    string
 		target *string
 	}{
-		{"field", &out.Field}, {"source_field", &out.SourceField},
+		{"source_field", &out.SourceField},
 		{"target_field", &out.TargetField}, {"target_path", &out.TargetPathRef},
 		{"target", &out.TargetRef},
 	} {

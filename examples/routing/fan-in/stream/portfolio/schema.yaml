@@ -1,5 +1,4 @@
 name: portfolio
 instance: period_id
-pins:
-  inputs:
-    - operating.reported
+inputs:
+  - operating.reported

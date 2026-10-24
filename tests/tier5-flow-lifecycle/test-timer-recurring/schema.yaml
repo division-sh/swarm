@@ -1,10 +1,9 @@
 stages:
   monitoring: {}
   done: {final: true}
-pins:
-  inputs:
-    - monitor.started
-    - monitor.stopped
-    - timer.tick
-  outputs:
-    - timer.tick
+inputs:
+  - monitor.started
+  - monitor.stopped
+  - timer.tick
+outputs:
+  - timer.tick

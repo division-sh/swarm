@@ -1,7 +1,6 @@
 name: producer
-pins:
-  outputs:
-    - mixed.none
-    - mixed.one
-    - mixed.multi
-    - mixed.agent
+outputs:
+  - mixed.none
+  - mixed.one
+  - mixed.multi
+  - mixed.agent

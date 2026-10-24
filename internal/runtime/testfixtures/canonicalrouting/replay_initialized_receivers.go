@@ -11,11 +11,10 @@ func CopyReplayInitializedReceivers(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", `name: replay-initialized-receivers
-pins:
-  inputs:
-    - start
-  outputs:
-    - work.ready
+inputs:
+  - start
+outputs:
+  - work.ready
 connect:
   - {event: work.ready, from: ., to: left}
   - {event: work.ready, from: ., to: right}

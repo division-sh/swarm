@@ -1,9 +1,8 @@
 name: template-create-minted-key
-pins:
-  inputs:
-    - validation.triggered
-  outputs:
-    - validation.triggered
+inputs:
+  - validation.triggered
+outputs:
+  - validation.triggered
 connect:
   - event: validation.triggered
     from: .

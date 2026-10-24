@@ -121,14 +121,14 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		local += "  " + result + ":\n    guard: int(payload.value) >= 0\n"
 	}
 	wildcard := "wildcard:\n  result.*:\n    guard: int(payload.value) >= 0\n"
-	sourceSchema := "name: publication-source\npins:\n  inputs:\n" + inputPins + "  outputs:\n" + outputPins
+	sourceSchema := "name: publication-source\ninputs:\n" + inputPins + "  outputs:\n" + outputPins
 	if mode == "root" {
 		sourceSchema = strings.Replace(sourceSchema, "  outputs:\n", siblingInputPins+"  outputs:\n"+siblingInputPins, 1)
 		writeClosedVariantFile(t, root, "schema.yaml", sourceSchema+"connect:\n"+connects)
 		writeClosedVariantFile(t, root, "events.yaml", requestSchemas+eventSchemas+siblingRequestSchemas)
 		writeClosedVariantFile(t, root, "nodes.yaml", handlers+local+wildcard)
 	} else {
-		rootSchema := "name: publication-driver\npins:\n  inputs:\n"
+		rootSchema := "name: publication-driver\ninputs:\n"
 		if mode == "template" {
 			sourceSchema = strings.Replace(sourceSchema, "name: publication-source\n", "name: publication-source\ninstance: case_id\n", 1)
 			rootSchema += requestSchemasToPins(families) + "  outputs:\n"
@@ -160,14 +160,14 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			writeClosedVariantFile(t, root, "source/entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
 		}
 	}
-	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n"+outputPins)
+	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\ninputs:\n"+outputPins)
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	// A sibling's local subscriptions are not authority for source publications.
 	siblingEvents := ""
 	for _, result := range results {
 		siblingEvents += result + ":\n  case_id: text\n  value: " + valueType + "\n"
 	}
-	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\npins:\n  inputs:\n"+siblingInputPins)
+	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\ninputs:\n"+siblingInputPins)
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingEvents)
 	writeClosedVariantFile(t, root, "sibling/nodes.yaml", siblingProducers+local)
 	return root

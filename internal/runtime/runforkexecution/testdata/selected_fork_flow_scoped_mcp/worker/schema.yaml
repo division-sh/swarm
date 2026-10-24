@@ -1,4 +1,3 @@
 name: selected-fork-flow-scoped-worker
-pins:
-  inputs:
-    - task.assigned
+inputs:
+  - task.assigned

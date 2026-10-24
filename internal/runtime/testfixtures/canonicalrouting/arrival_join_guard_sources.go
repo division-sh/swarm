@@ -4,11 +4,10 @@ package canonicalrouting
 // executable bundles or authoring/admission APIs.
 func ArrivalJoinRetirementGuardCases() []ConnectionAdmissionCase {
 	cases := []ConnectionAdmissionCase{
-		{Name: "homonyms", Source: `pins:
-  inputs:
-    events:
-      - {event: requested, resolution: {mode: fan-out}}
-      - {event: replied, resolution: {mode: reply, replies_to: requested, correlation_key: task_id}}
+		{Name: "homonyms", Source: `inputs:
+  events:
+    - {event: requested, resolution: {mode: fan-out}}
+    - {event: replied, resolution: {mode: reply, replies_to: requested, correlation_key: task_id}}
 worker:
   arrived:
     accumulate: {into: reports, from: payload, key: payload.id}
@@ -25,9 +24,8 @@ business_event:
 		{Name: "aliases", Source: `policy: &policy {mode: reply, aggregation: null}
 arrival: &arrival {accumulate: {window: null}}
 entries: &entries [{event: arrived, resolution: {<<: *policy}}]
-pins:
-  inputs:
-    events: *entries
+inputs:
+  events: *entries
 worker:
   arrived: *arrival
 `},

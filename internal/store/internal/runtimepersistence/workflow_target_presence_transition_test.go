@@ -159,7 +159,7 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":          "name: constructed-target-transition\n",
-		"review/schema.yaml":   "name: review\ninstance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\npins:\n  inputs: [review.created]\n",
+		"review/schema.yaml":   "name: review\ninstance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\ninputs: [review.created]\n",
 		"review/entities.yaml": "review_item:\n  account_id: text\n  handled: {type: boolean, initial: false}\n",
 		"review/events.yaml":   "review.created:\n  account_id: text\nfinish.requested:\nsettle.requested:\n",
 		"review/nodes.yaml": `progress:

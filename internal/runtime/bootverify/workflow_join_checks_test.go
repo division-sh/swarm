@@ -199,9 +199,8 @@ stages:
   active: {}
   done: {}
   failed: {}
-pins:
-  inputs:
-    - item.received
+inputs:
+  - item.received
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "entities.yaml"), `
 state:

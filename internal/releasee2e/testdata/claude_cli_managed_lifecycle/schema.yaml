@@ -1,11 +1,10 @@
 name: claude-cli-release-lifecycle
 stages: {done: {final: true}}
-pins:
-  inputs:
-    - task.assigned
-  outputs:
-    - task.assigned
-    - agent.completed
+inputs:
+  - task.assigned
+outputs:
+  - task.assigned
+  - agent.completed
 connect:
   - event: task.assigned
     from: .

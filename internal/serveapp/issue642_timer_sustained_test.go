@@ -58,14 +58,13 @@ func issue642SustainedTimerSource(t *testing.T) string {
 		"schema.yaml": `stages:
   waiting: {}
   checked: {final: true}
-pins:
-  inputs:
-    - timer.scheduled
-    - timer.check
-  outputs:
-    - timer.check
-    - timer.armed
-    - timer.finished
+inputs:
+  - timer.scheduled
+  - timer.check
+outputs:
+  - timer.check
+  - timer.armed
+  - timer.finished
 `,
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {

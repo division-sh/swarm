@@ -7,9 +7,8 @@ imports:
     - provider: whatsapp
       event: inbound.whatsapp.message
 stages: []
-pins:
-  inputs: [inbound.whatsapp]
-  outputs: [inbound.whatsapp.message]
+inputs: [inbound.whatsapp]
+outputs: [inbound.whatsapp.message]
 ingress:
   alias: reception
   providers:

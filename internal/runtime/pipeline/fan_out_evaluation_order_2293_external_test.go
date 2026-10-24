@@ -44,23 +44,21 @@ func Test2293SelectedFanOutRetainsEvaluationSourceAcrossRuleWriteBothStores(t *t
 				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "    - seed\n", "    - seed\n    - history.cut\n", 1)
 				files["entities.yaml"] = "work:\n  items:\n    type: '[text]?'\n    initial: " + a2OrderYAMLJSON(t, original) + "\n"
 				files["nodes.yaml"] = `writer:
-  execution_type: system_node
-  event_handlers:
-    seed: {}
-    batch.ready:
-      rules:
-        - when: has(entity.items)
-          fan_out:
-            items_from: entity.items
-            as: key
-            emit:
-              event: item.ready
-              fields:
-                member_id: key
-                index: fan_out.index
-                count: fan_out.count
-                result: >-
-                  [7]
+  seed: {}
+  batch.ready:
+    rules:
+      - when: has(entity.items)
+        fan_out:
+          items_from: entity.items
+          as: key
+          emit:
+            event: item.ready
+            fields:
+              member_id: key
+              index: fan_out.index
+              count: fan_out.count
+              result: >-
+                [7]
 `
 				if after == "removed" {
 					files["nodes.yaml"] += "          data_accumulation:\n            writes:\n              - op: clear\n                target: entity.items\n"
@@ -183,41 +181,39 @@ func Test2293HandlerAndSelectedEntityFanOutKeepIndependentHistoryBothStores(t *t
 			files := a2MapFanOutFiles(false)
 			files["entities.yaml"] = "work:\n  items: {type: '[text]?', initial: [first]}\n  other_items: {type: '[text]', initial: [second]}\n"
 			files["nodes.yaml"] = `writer:
-  execution_type: system_node
-  event_handlers:
-    seed: {}
-    batch.ready:
-      guard: {id: source_present, check: has(entity.items), on_fail: reject}
-      fan_out:
-        items_from: entity.items
-        as: key
-        emit:
-          event: item.ready
-          fields:
-            member_id: key
-            index: fan_out.index
-            count: fan_out.count
-            result: >-
-              [7]
-      rules:
-        - when: has(entity.items)
-          fan_out:
-            items_from: entity.other_items
-            as: key
-            emit:
-              event: item.ready
-              fields:
-                member_id: key
-                index: fan_out.index
-                count: fan_out.count
-                result: >-
-                  [7]
-          data_accumulation:
-            writes:
-              - op: clear
-                target: entity.items
-              - target_field: other_items
-                value: ["final"]
+  seed: {}
+  batch.ready:
+    guard: {id: source_present, check: has(entity.items), on_fail: reject}
+    fan_out:
+      items_from: entity.items
+      as: key
+      emit:
+        event: item.ready
+        fields:
+          member_id: key
+          index: fan_out.index
+          count: fan_out.count
+          result: >-
+            [7]
+    rules:
+      - when: has(entity.items)
+        fan_out:
+          items_from: entity.other_items
+          as: key
+          emit:
+            event: item.ready
+            fields:
+              member_id: key
+              index: fan_out.index
+              count: fan_out.count
+              result: >-
+                [7]
+        data_accumulation:
+          writes:
+            - op: clear
+              target: entity.items
+            - target_field: other_items
+              value: ["final"]
 `
 			p := newA2MapFanOutExecutionFromFiles(t, backend.open(t), false, files)
 			reader := p.selected.events.(interface {
@@ -303,31 +299,29 @@ func Test2293HandlerAndSelectedFanOutCommitDistinctSitesBothStores(t *testing.T)
 		t.Run(backend.name, func(t *testing.T) {
 			files := a2MapFanOutFiles(false)
 			files["nodes.yaml"] = `writer:
-  execution_type: system_node
-  event_handlers:
-    seed: {}
-    batch.ready:
-      fan_out:
-        items_from: payload.items
-        as: key
-        emit:
-          event: item.ready
-          fields:
-            member_id: key
-            index: fan_out.index
-            count: fan_out.count
-            result: payload.items[?key].orValue([])
-      rules:
-        - fan_out:
-            items_from: payload.items
-            as: key
-            emit:
-              event: item.ready
-              fields:
-                member_id: key
-                index: fan_out.index
-                count: fan_out.count
-                result: payload.items[?key].orValue([])
+  seed: {}
+  batch.ready:
+    fan_out:
+      items_from: payload.items
+      as: key
+      emit:
+        event: item.ready
+        fields:
+          member_id: key
+          index: fan_out.index
+          count: fan_out.count
+          result: payload.items[?key].orValue([])
+    rules:
+      - fan_out:
+          items_from: payload.items
+          as: key
+          emit:
+            event: item.ready
+            fields:
+              member_id: key
+              index: fan_out.index
+              count: fan_out.count
+              result: payload.items[?key].orValue([])
 `
 			p := newA2MapFanOutExecutionFromFiles(t, backend.open(t), false, files)
 			trigger := p.publish(t, "batch.ready", map[string]any{"a": []any{7}})

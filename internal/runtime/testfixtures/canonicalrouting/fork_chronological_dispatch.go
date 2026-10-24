@@ -16,11 +16,10 @@ stages:
   pending: {}
   processed: {}
   done: {final: true}
-pins:
-  inputs:
-    - item.received
-  outputs:
-    - item.processed
+inputs:
+  - item.received
+outputs:
+  - item.processed
 `,
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "item.received:\n  entity_id: uuid\nitem.processed:\n",

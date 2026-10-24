@@ -11,16 +11,15 @@ func TestDurableDataImportShapeUsesCompiledStructuralFields(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-shape\n")
-	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  ResumeText: text\n  CandidateUUID: uuid\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 candidate.created:
   key: id
   id: text
-  resume: ResumeText
-  cover: {type: "text?", pattern: "^Dear"}
+  resume: text
+  cover: text?
   score: integer
   metadata: json?
-  token: CandidateUUID
+  token: uuid
   stamp: timestamp?
 `)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))

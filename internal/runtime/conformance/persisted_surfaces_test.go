@@ -2018,7 +2018,6 @@ func newConformanceManagedConversation(t *testing.T, agentID string, identity ag
 		Role:           "tester",
 		FlowID:         "global",
 		Intent:         intent,
-		Criteria:       []string{},
 		ProviderPrompt: providerPrompt,
 		RuntimeMode:    contract.RuntimeMode,
 		Provider:       contract.Provider,

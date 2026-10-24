@@ -536,7 +536,7 @@ func TestFlowConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
 
 func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte("pins: {inputs: [work.requested]}"), &doc); err != nil {
+	if err := decodeNodeTestYAML([]byte("inputs: [work.requested]\noutputs: [work.completed]\n"), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if doc.Pins.Inputs.EventPins[0].Event != "work.requested" {
@@ -544,9 +544,14 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 	}
 	for _, source := range []string{"harness", "external", "null", "{}", "[]", "''"} {
 		var invalid FlowSchemaDocument
-		err := decodeNodeTestYAML([]byte("pins: {inputs: [{event: work.requested, source: "+source+"}]}"), &invalid)
+		err := decodeNodeTestYAML([]byte("inputs: [{event: work.requested, source: "+source+"}]"), &invalid)
 		if err == nil || !strings.Contains(err.Error(), `must be a scalar text`) {
 			t.Fatalf("source %s: %v", source, err)
+		}
+	}
+	for _, value := range []string{"null", "{}", "{inputs: [work.requested]}", "false"} {
+		if err := decodeNodeTestYAML([]byte("pins: "+value+"\n"), &doc); err == nil || !strings.Contains(err.Error(), "inputs") || !strings.Contains(err.Error(), "outputs") {
+			t.Fatalf("retired pins wrapper lacks refusal/teaching: %v", err)
 		}
 	}
 }
@@ -626,10 +631,9 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields(t *testing.T
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
 name: invalid-output-pins
-pins:
-  outputs:
-    - event: deploy.done
-      unknown: nope
+outputs:
+  - event: deploy.done
+    unknown: nope
 `), &doc)
 	if err == nil || !strings.Contains(err.Error(), "scalar text") || !strings.Contains(err.Error(), `["outputs"][0]`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want names-only output shape rejection", err)
@@ -638,7 +642,7 @@ pins:
 
 func TestFlowSchemaDocumentDecode_PreservesClosedOutputPinSinkEnum(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte("pins: {outputs: [work.completed]}"), &doc); err != nil {
+	if err := decodeNodeTestYAML([]byte("outputs: [work.completed]"), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if doc.Pins.Outputs.EventPins[0].Event != "work.completed" {
@@ -646,7 +650,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedOutputPinSinkEnum(t *testing.T)
 	}
 	for _, sink := range []string{"harness", "external", "null", "{}", "[]", "''"} {
 		var invalid FlowSchemaDocument
-		err := decodeNodeTestYAML([]byte("pins: {outputs: [{event: work.completed, sink: "+sink+"}]}"), &invalid)
+		err := decodeNodeTestYAML([]byte("outputs: [{event: work.completed, sink: "+sink+"}]"), &invalid)
 		if err == nil {
 			t.Fatalf("retired output mapping accepted: sink=%s", sink)
 		}
@@ -1746,9 +1750,8 @@ func TestFlowPinsDecode_PreservesCanonicalScalarEventEntries(t *testing.T) {
 	var schema FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`stages:
   pending: {}
-pins:
-  inputs: [check.requested]
-  outputs: [check.passed]
+inputs: [check.requested]
+outputs: [check.passed]
 `), &schema); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -1766,8 +1769,8 @@ func TestW2RejectsAuthoredPinName(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "input", raw: "pins:\n  inputs:\n    - name: work_requested\n      event: work.requested\n", want: `must be a scalar text`},
-		{name: "output", raw: "pins:\n  outputs:\n    - name: work_completed\n      event: work.completed\n", want: "must be a scalar text"},
+		{name: "input", raw: "inputs:\n  - name: work_requested\n    event: work.requested\n", want: `must be a scalar text`},
+		{name: "output", raw: "outputs:\n  - name: work_completed\n    event: work.completed\n", want: "must be a scalar text"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
@@ -1785,12 +1788,12 @@ func TestW2RejectsRetiredPinMetadataAndNonLocalEvents(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "input carries", raw: "pins:\n  inputs:\n    - event: work.requested\n      carries:\n        work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `must be a scalar text`},
-		{name: "output key", raw: "pins:\n  outputs:\n    - event: work.completed\n      key: work_id\n", want: "must be a scalar text"},
-		{name: "output carries", raw: "pins:\n  outputs:\n    - event: work.completed\n      carries: [work_id]\n", want: "must be a scalar text"},
-		{name: "qualified input", raw: "pins:\n  inputs: [producer/work.requested]\n", want: "exact local canonical event identity"},
-		{name: "wildcard input", raw: "pins:\n  inputs: ['work.*']\n", want: "exact local canonical event identity"},
-		{name: "qualified output", raw: "pins:\n  outputs: [consumer/work.completed]\n", want: "exact local canonical event identity"},
+		{name: "input carries", raw: "inputs:\n  - event: work.requested\n    carries:\n      work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `must be a scalar text`},
+		{name: "output key", raw: "outputs:\n  - event: work.completed\n    key: work_id\n", want: "must be a scalar text"},
+		{name: "output carries", raw: "outputs:\n  - event: work.completed\n    carries: [work_id]\n", want: "must be a scalar text"},
+		{name: "qualified input", raw: "inputs: [producer/work.requested]\n", want: "exact local canonical event identity"},
+		{name: "wildcard input", raw: "inputs: ['work.*']\n", want: "exact local canonical event identity"},
+		{name: "qualified output", raw: "outputs: [consumer/work.completed]\n", want: "exact local canonical event identity"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
@@ -1808,20 +1811,18 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "null pins", raw: "pins: null\n", want: "mapping, got null"},
-		{name: "empty pins", raw: "pins: {}\n", want: "pins must be a non-empty mapping"},
-		{name: "null inputs", raw: "pins:\n  inputs: null\n", want: "is null, want sequence"},
-		{name: "empty outputs", raw: "pins:\n  outputs: {}\n", want: "is empty_mapping, want sequence"},
-		{name: "retired input wrapper", raw: "pins:\n  inputs:\n    events: [work.requested]\n", want: "is mapping, want sequence"},
-		{name: "retired output wrapper", raw: "pins:\n  outputs:\n    events: [work.completed]\n", want: "is mapping, want sequence"},
-		{name: "empty output list", raw: "pins:\n  outputs: []\n", want: "non-empty sequence"},
-		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    - event: work.requested\n", want: "must be a scalar text"},
-		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    - event: work.completed\n", want: "must be a scalar text"},
-		{name: "duplicate event", raw: "pins:\n  inputs: [work.requested, work.requested]\n", want: "declared more than once"},
-		{name: "retired read grant", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: "is mapping, want sequence"},
-		{name: "retired write grant", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: "is mapping, want sequence"},
-		{name: "unknown pin direction", raw: "pins:\n  ingress:\n    events: [work.requested]\n", want: "is not supported"},
-		{name: "unknown input field", raw: "pins:\n  inputs:\n    - event: work.requested\n      aliases: [work.requested]\n", want: `must be a scalar text`},
+		{name: "null inputs", raw: "inputs: null\n", want: "is null, want sequence"},
+		{name: "empty outputs", raw: "outputs: {}\n", want: "is empty_mapping, want sequence"},
+		{name: "retired input wrapper", raw: "inputs:\n  events: [work.requested]\n", want: "is mapping, want sequence"},
+		{name: "retired output wrapper", raw: "outputs:\n  events: [work.completed]\n", want: "is mapping, want sequence"},
+		{name: "empty output list", raw: "outputs: []\n", want: "non-empty sequence"},
+		{name: "optionless input mapping", raw: "inputs:\n  - event: work.requested\n", want: "must be a scalar text"},
+		{name: "optionless output mapping", raw: "outputs:\n  - event: work.completed\n", want: "must be a scalar text"},
+		{name: "duplicate event", raw: "inputs: [work.requested, work.requested]\n", want: "declared more than once"},
+		{name: "retired read grant", raw: "inputs:\n  reads: [entity.status, entity.status]\n", want: "is mapping, want sequence"},
+		{name: "retired write grant", raw: "outputs:\n  writes: [{field: entity.status}]\n", want: "is mapping, want sequence"},
+		{name: "unknown pin direction", raw: "ingress_events: [work.requested]\n", want: "is not supported"},
+		{name: "unknown input field", raw: "inputs:\n  - event: work.requested\n    aliases: [work.requested]\n", want: `must be a scalar text`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
@@ -2334,6 +2335,9 @@ writes:
 	}
 	if got := spec.Writes[0].Source(); got != "stage_one_result" {
 		t.Fatalf("Writes[0].Source() = %q", got)
+	}
+	if spec.Writes[0].SourceField != "stage_one_result" || spec.Writes[0].TargetField != "stage_one_result" {
+		t.Fatalf("scalar write did not lower to explicit source/target: %#v", spec.Writes[0])
 	}
 	if got := spec.Writes[1].Source(); got != "result" {
 		t.Fatalf("Writes[1].Source() = %q", got)
@@ -2976,25 +2980,6 @@ rules:
 	}
 }
 
-func TestEntityFieldDeclDecode_PreservesMaterializeFromProjection(t *testing.T) {
-	var field EntityFieldDecl
-	if err := decodeNodeTestYAML([]byte(`
-type: '[DimensionVerdict]'
-materialize_from: scoring-node.dimensions_received
-project:
-  dimension: source.dimension
-  score: source.score
-`), &field); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := field.MaterializeFrom; got != "scoring-node.dimensions_received" {
-		t.Fatalf("MaterializeFrom = %q", got)
-	}
-	if got := field.Project["dimension"]; got != "source.dimension" {
-		t.Fatalf("Project[dimension] = %#v", got)
-	}
-}
-
 func TestEntityFieldDeclDecode_PreservesIndexed(t *testing.T) {
 	var field EntityFieldDecl
 	if err := decodeNodeTestYAML([]byte(`
@@ -3029,40 +3014,6 @@ _unused_reader_reason: short
 `), &field)
 	if err == nil || !strings.Contains(err.Error(), "_unused_reader_reason must be at least 10 characters") {
 		t.Fatalf("yaml.Unmarshal error = %v, want _unused_reader_reason length error", err)
-	}
-}
-
-func TestAccumulateSpecDecode_PreservesDescriptionAndRejectsUnknownField(t *testing.T) {
-	var spec AccumulateSpec
-	if err := decodeNodeTestYAML([]byte(`
-into: dimensions_received
-description: all dimension receipts have arrived
-key: payload.dimension
-`), &spec); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := spec.Into; got != "dimensions_received" {
-		t.Fatalf("Into = %q", got)
-	}
-	if got := spec.Description; got != "all dimension receipts have arrived" {
-		t.Fatalf("Description = %q", got)
-	}
-	if spec.Key != "payload.dimension" || spec.KeyPath.Root != paths.RootPayload || len(spec.KeyPath.Segments) != 1 || spec.KeyPath.Segments[0] != "dimension" {
-		t.Fatalf("authored accumulator key = %q/%#v, want payload.dimension", spec.Key, spec.KeyPath)
-	}
-
-	err := decodeNodeTestYAML([]byte(`
-legacy_buffer: dimensions_received
-`), &spec)
-	if err == nil || !strings.Contains(err.Error(), `accumulate field "legacy_buffer" is not supported.`) {
-		t.Fatalf("yaml.Unmarshal error = %v, want typed accumulate field rejection", err)
-	}
-	diagnostic, ok := AsLoaderDiagnostic(err)
-	if !ok {
-		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
-	}
-	if !containsString(diagnostic.ValidOptions, "into") || containsString(diagnostic.ValidOptions, "on_complete") {
-		t.Fatalf("diagnostic valid options = %#v, want accumulate options", diagnostic.ValidOptions)
 	}
 }
 
@@ -3144,107 +3095,9 @@ emit:
 	}
 }
 
-// Historical test names remain in the proof census; current admission never
-// proposes a member-order-derived default or a codemod.
-func TestEnumTypeDeclDecode_RetiresSequenceFormWithTeachingCodemod(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte(`[low, medium, high]`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "must be a mapping") || strings.Contains(err.Error(), "default: low") {
-		t.Fatalf("sequence form error = %v, want current mapping-form rejection without an inferred default", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_RetiresScalarShorthandWithTeachingCodemod(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte(`fast`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "must be a mapping") || strings.Contains(err.Error(), "default: fast") {
-		t.Fatalf("scalar shorthand error = %v, want current mapping-form rejection without an inferred default", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_RejectsDuplicateKeys(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefault: low\ndefault: high\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), `duplicate effective YAML key "default"`) {
-		t.Fatalf("duplicate key error = %v, want duplicate-key rejection", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_UnknownFieldListsValidOptions(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefualt: low\n"), &decl)
-	if err == nil {
-		t.Fatal("unknown enum field accepted")
-	}
-	diagnostic, ok := AsLoaderDiagnostic(err)
-	if !ok {
-		t.Fatalf("unknown field error = %T %v, want LoaderDiagnostic", err, err)
-	}
-	if diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(diagnostic.Problem, "defualt") {
-		t.Fatalf("diagnostic = %#v", diagnostic)
-	}
-	options := strings.Join(diagnostic.ValidOptions, ",")
-	if !strings.Contains(options, "values") || !strings.Contains(options, "default") {
-		t.Fatalf("valid options = %v, want values and default", diagnostic.ValidOptions)
-	}
-}
-
-func TestEnumTypeDeclDecode_RequiresDefault(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, medium, high]\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), "requires an explicit default member") || strings.Contains(err.Error(), "default: low") {
-		t.Fatalf("missing default error = %v, want explicit-default rejection without an inferred default", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_RejectsNonMemberDefaultNamingMembers(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, medium, high]\ndefault: urgent\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), `default "urgent" is not a declared member`) || !strings.Contains(err.Error(), "low, medium, high") {
-		t.Fatalf("non-member default error = %v, want error naming the declared members", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_AcceptsCanonicalMappingForm(t *testing.T) {
-	var decl EnumTypeDecl
-	if err := decodeNodeTestYAML([]byte("values: [low, medium, high]\ndefault: medium\n"), &decl); err != nil {
-		t.Fatalf("canonical mapping form rejected: %v", err)
-	}
-	if !reflect.DeepEqual(decl.Values, []string{"low", "medium", "high"}) || decl.Default != "medium" {
-		t.Fatalf("decoded enum = %#v", decl)
-	}
-}
-
-func TestEnumTypeDeclDecode_EmptyScalarShorthandRequiresMappingForm(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte(`""`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "must be a mapping") {
-		t.Fatalf("empty scalar shorthand error = %v, want mapping-form guidance", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_NonScalarDefaultGetsAuthorMessage(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefault: [low]\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), "default must be a scalar member") {
-		t.Fatalf("non-scalar default error = %v, want author-facing scalar-member message", err)
-	}
-	if strings.Contains(err.Error(), "kind") {
-		t.Fatalf("non-scalar default leaked an internal yaml kind: %v", err)
-	}
-}
-
-func TestTypeCatalogDecode_RejectsNullEnumEntry(t *testing.T) {
-	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte("enums:\n  Mode:\n"), &catalog)
-	if err == nil || !strings.Contains(err.Error(), `enum Mode is declared without values`) {
-		t.Fatalf("null enum entry error = %v, want load-time teaching rejection", err)
-	}
-}
-
 func TestTypeCatalogDecode_RejectsEmptyEnumKey(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte("enums:\n  \"\":\n    values: [low]\n    default: low\n"), &catalog)
+	err := decodeNodeTestYAML([]byte(": [\"low\"]\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), "empty name") {
 		t.Fatalf("empty enum key error = %v, want empty-name rejection", err)
 	}
@@ -3252,16 +3105,8 @@ func TestTypeCatalogDecode_RejectsEmptyEnumKey(t *testing.T) {
 
 func TestTypeCatalogDecode_RejectsWhitespacePaddedEnumKey(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte("enums:\n  \" Mode\":\n    values: [low]\n    default: low\n"), &catalog)
+	err := decodeNodeTestYAML([]byte(" Mode: [\"low\"]\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
 		t.Fatalf("whitespace-padded enum key error = %v, want whitespace rejection", err)
-	}
-}
-
-func TestEnumTypeDeclValidate_SharedInvariantNondeterministicFree(t *testing.T) {
-	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte("enums:\n  zebra:\n  alpha:\n    values: [low]\n    default: low\n"), &catalog)
-	if err == nil || !strings.Contains(err.Error(), "enum zebra is declared without values") {
-		t.Fatalf("multi-enum validation error = %v, want sorted deterministic first error naming zebra", err)
 	}
 }

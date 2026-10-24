@@ -41,7 +41,7 @@ func TestA2JoinCompilerRejectsTransportInBothClosedOutcomes(t *testing.T) {
 			"whole payload":         {Emit: EmitSpec{Event: "closed", Fields: map[string]ExpressionValue{"value": CELExpression("payload")}}},
 			"until event":           {Emit: EmitSpec{Event: "closed", Fields: map[string]ExpressionValue{"value": CELExpression("event.id")}}},
 			"payload sugar":         {Emit: EmitSpec{Event: "closed", From: EmitFromPayload}},
-			"implicit write source": {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetField: "result"}}}},
+			"implicit write source": {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetField: "result", SourceField: "result"}}}},
 			"write value":           {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "entity.result", Value: RefExpression("payload.result")}}}},
 			"write key":             {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "entity.result", Value: LiteralExpression(1), Key: CELExpression("event.id")}}}},
 			"write index":           {DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetRef: "entity.result", Value: LiteralExpression(1), Index: CELExpression("payload.index")}}}},

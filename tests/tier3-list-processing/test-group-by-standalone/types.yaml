@@ -1,4 +1,3 @@
-types:
-  GroupItem:
-    name: text
-    category: text
+GroupItem:
+  name: text
+  category: text

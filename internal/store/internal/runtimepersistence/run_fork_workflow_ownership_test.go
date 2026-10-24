@@ -276,7 +276,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 	repo := canonicalrouting.RepoRoot(t)
 	root := t.TempDir()
 	for file, body := range map[string]string{
-		"schema.yaml":   "name: fork-workflow-ownership\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\npins:\n  inputs: [start.seeded, start.requested, start.closed]\n",
+		"schema.yaml":   "name: fork-workflow-ownership\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\ninputs: [start.seeded, start.requested, start.closed]\n",
 		"events.yaml":   "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n",
 		"entities.yaml": "root:\n  marker: text\n",
 		"nodes.yaml":    "controller:\n  start.seeded: {}\n  start.requested: {}\n  start.closed: {advances_to: done}\n",

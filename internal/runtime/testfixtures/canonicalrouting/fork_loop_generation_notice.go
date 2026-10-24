@@ -16,7 +16,7 @@ func CopyForkLoopAccumulator(t testing.TB, clearOnAdmit bool) string {
 	if clearOnAdmit {
 		applyClosedReplacement(t, nodes, "  review.requested:\n    accumulate:", "  review.requested:\n    clear: {targets: [accumulator_state]}\n    accumulate:")
 	}
-	writeClosedVariantFile(t, root, "review/types.yaml", "types:\n  Review:\n    revision_id: text\n    token: text\n")
+	writeClosedVariantFile(t, root, "review/types.yaml", "Review:\n  revision_id: text\n  token: text\n")
 	return root
 }
 
@@ -31,16 +31,15 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - work.requested
-    - root.closed
-    - review.retry
-    - review.closed
-  outputs:
-    - work.started
-    - review.retry
-    - review.closed
+inputs:
+  - work.requested
+  - root.closed
+  - review.retry
+  - review.closed
+outputs:
+  - work.started
+  - review.retry
+  - review.closed
 connect:
   - {event: work.started, from: ., to: review}
   - {event: review.retry, from: ., to: review}
@@ -69,11 +68,10 @@ loops:
     revision_field: revision_id
     max_attempts: 3
     escape: {advances_to: exhausted}
-pins:
-  inputs:
-    - work.started
-    - review.retry
-    - review.closed
+inputs:
+  - work.started
+  - review.retry
+  - review.closed
 `,
 		"review/entities.yaml": "work:\n  observed_revision: {type: text, initial: ''}\n  observed_token: {type: text, initial: ''}\n",
 		"review/events.yaml": `review.requested:

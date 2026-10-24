@@ -448,14 +448,12 @@ stages:
   queued: {}
   closed: {final: true}
 `,
-			TypesYAML: `
-types:
-  manifest:
-    component: text
-    owner:
-      type: text
-      equal_to: component
-    description: text
+			TypesYAML: `manifest:
+  component: text
+  owner:
+    type: text
+    equal_to: component
+  description: text
 `,
 			EntitiesYAML: `
 validation_case:
@@ -2009,19 +2007,17 @@ func TestEntityTools_BracketListTypeRefsAcrossConsumers(t *testing.T) {
 		Role:          "validator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	}
-	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "validation_case", `
-types:
-  Feature:
-    name: text
-  BrandCandidate:
-    name: text
-  MvpSpec:
-    core_features: [Feature]
-    out_of_scope: [text]
-  Brand:
-    alternatives: [BrandCandidate]
-  ValidationKit:
-    risk_flags: [text]
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "validation_case", `Feature:
+  name: text
+BrandCandidate:
+  name: text
+MvpSpec:
+  core_features: [Feature]
+  out_of_scope: [text]
+Brand:
+  alternatives: [BrandCandidate]
+ValidationKit:
+  risk_flags: [text]
 `, `
 validation_case:
   mvp_spec:
@@ -2788,17 +2784,15 @@ func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Exe
 
 func newEntityToolTestExecutorWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor) {
 	t.Helper()
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
-types:
-  Metadata:
-    region: text
-  Brief:
-    summary: text
-  Spec:
-    headline: text
-    approved: boolean
-  ValidationKit:
-    checklist: [text]
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `Metadata:
+  region: text
+Brief:
+  summary: text
+Spec:
+  headline: text
+  approved: boolean
+ValidationKit:
+  checklist: [text]
 `, `
 accounts:
   status: text
@@ -2836,15 +2830,13 @@ func newAnnotatedEntityToolExecutor(t *testing.T) (context.Context, *runtimetool
 		ID:            "tester",
 		Role:          "operator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
-	}, "validation", "validation", `
-types:
-  Brief:
-    summary: text
-  Spec:
-    headline: text
-    approved: boolean
-  ValidationKit:
-    checklist: [text]
+	}, "validation", "validation", `Brief:
+  summary: text
+Spec:
+  headline: text
+  approved: boolean
+ValidationKit:
+  checklist: [text]
 `, `
 validation:
   business_brief: Brief
@@ -2868,17 +2860,15 @@ func newEntityToolTestHarnessWithActor(t *testing.T, actor models.AgentConfig) (
 	if strings.TrimSpace(actor.Type) == "" {
 		actor.Type = "internal"
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
-types:
-  Metadata:
-    region: text
-  Brief:
-    summary: text
-  Spec:
-    headline: text
-    approved: boolean
-  ValidationKit:
-    checklist: [text]
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `Metadata:
+  region: text
+Brief:
+  summary: text
+Spec:
+  headline: text
+  approved: boolean
+ValidationKit:
+  checklist: [text]
 `, `
 accounts:
   status: text
@@ -3088,14 +3078,12 @@ stages:
   ready: {}
   closed: {final: true}
 `,
-			TypesYAML: `
-types:
-  business_brief:
-    summary: text
-    confidence: integer
-  mvp_spec:
-    problem_statement: text
-    technical_approach: text
+			TypesYAML: `business_brief:
+  summary: text
+  confidence: integer
+mvp_spec:
+  problem_statement: text
+  technical_approach: text
 `,
 			EntitiesYAML: `
 validation_case:

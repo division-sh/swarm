@@ -3,8 +3,7 @@ instance: member_id
 stages:
   waiting: {}
   complete: {final: true}
-pins:
-  inputs:
-    - item.requested
-  outputs:
-    - item.reported
+inputs:
+  - item.requested
+outputs:
+  - item.reported

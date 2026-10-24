@@ -1,9 +1,8 @@
 portfolio-collector:
   operating.reported:
     accumulate:
-      into: operating_reports
-      from: payload
-      key: payload.operating_id
+      target: operating_reports
+      key: operating_id
     data_accumulation:
       writes:
         - source_field: period_id

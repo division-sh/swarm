@@ -421,11 +421,10 @@ item:
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - item.created
-  outputs:
-    - evidence.recorded
+inputs:
+  - item.created
+outputs:
+  - evidence.recorded
 `)
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 control-plane:

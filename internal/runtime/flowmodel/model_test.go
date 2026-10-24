@@ -76,21 +76,21 @@ func TestResolvePolicyByID_WalksAncestorChain(t *testing.T) {
 
 func TestResolveRulesByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
 	root := &testNode{
-		ID: "root", Rules: RulesDocument{"root_set": {Criteria: &PolicyCriteriaSet{
-			Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "root.blocked"}},
-			Rules:   []PolicyCriteriaRule{{ID: "ROOT-1", Class: "hard", Text: "Root rule."}},
+		ID: "root", Rules: RulesDocument{"root_set": {Validation: &PolicyValidationSet{
+			Classes: map[string]PolicyValidationClass{"hard": {Disposition: "root.blocked"}},
+			Rules:   []PolicyValidationRule{{ID: "ROOT-1", Class: "hard", Text: "Root rule."}},
 		}},
-			"shared": {Criteria: &PolicyCriteriaSet{
-				Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "root.revise"}},
-				Rules:   []PolicyCriteriaRule{{ID: "ROOT-SHARED", Class: "soft", Text: "Root shared."}},
+			"shared": {Validation: &PolicyValidationSet{
+				Classes: map[string]PolicyValidationClass{"soft": {Disposition: "root.revise"}},
+				Rules:   []PolicyValidationRule{{ID: "ROOT-SHARED", Class: "soft", Text: "Root shared."}},
 			}}}, Children: []testNode{{
-			ID: "child", Rules: RulesDocument{"child_set": {Criteria: &PolicyCriteriaSet{
-				Classes: map[string]PolicyCriteriaClass{"allow": {Disposition: "none"}},
-				Rules:   []PolicyCriteriaRule{{ID: "CHILD-1", Class: "allow", Text: "Child rule."}},
+			ID: "child", Rules: RulesDocument{"child_set": {Validation: &PolicyValidationSet{
+				Classes: map[string]PolicyValidationClass{"allow": {Disposition: "none"}},
+				Rules:   []PolicyValidationRule{{ID: "CHILD-1", Class: "allow", Text: "Child rule."}},
 			}},
-				"shared": {Criteria: &PolicyCriteriaSet{
-					Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "child.blocked"}},
-					Rules:   []PolicyCriteriaRule{{ID: "CHILD-SHARED", Class: "hard", Text: "Child shared."}},
+				"shared": {Validation: &PolicyValidationSet{
+					Classes: map[string]PolicyValidationClass{"hard": {Disposition: "child.blocked"}},
+					Rules:   []PolicyValidationRule{{ID: "CHILD-SHARED", Class: "hard", Text: "Child shared."}},
 				}}},
 		}},
 	}
@@ -101,9 +101,9 @@ func TestResolveRulesByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
 			"child": &root.Children[0],
 		},
 	}
-	base := RulesDocument{"base_set": {Criteria: &PolicyCriteriaSet{
-		Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "base.revise"}},
-		Rules:   []PolicyCriteriaRule{{ID: "BASE-1", Class: "soft", Text: "Base rule."}},
+	base := RulesDocument{"base_set": {Validation: &PolicyValidationSet{
+		Classes: map[string]PolicyValidationClass{"soft": {Disposition: "base.revise"}},
+		Rules:   []PolicyValidationRule{{ID: "BASE-1", Class: "soft", Text: "Base rule."}},
 	}}}
 
 	got := ResolveRulesByID(
@@ -116,11 +116,11 @@ func TestResolveRulesByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
 	)
 
 	for _, name := range []string{"base_set", "root_set", "child_set", "shared"} {
-		if _, ok := got.Criteria(name); !ok {
-			t.Fatalf("merged criteria missing %q: %#v", name, got.CriteriaSets())
+		if _, ok := got.Validation(name); !ok {
+			t.Fatalf("merged criteria missing %q: %#v", name, got.ValidationSets())
 		}
 	}
-	if gotID := got["shared"].Criteria.Rules[0].ID; gotID != "CHILD-SHARED" {
+	if gotID := got["shared"].Validation.Rules[0].ID; gotID != "CHILD-SHARED" {
 		t.Fatalf("shared criteria rule = %q, want child override", gotID)
 	}
 }

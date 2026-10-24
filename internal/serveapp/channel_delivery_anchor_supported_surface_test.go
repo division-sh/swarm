@@ -519,7 +519,7 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 			}
 		}
 		if relative == "schema.yaml" {
-			pins := "pins:\n  inputs:\n    - work.requested\n    - effect.requested\n    - observer.requested\n"
+			pins := "inputs:\n  - work.requested\n  - effect.requested\n  - observer.requested\n"
 			outputs := "  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n"
 			if withNotice {
 				pins += "    - notice.requested\n"
@@ -530,7 +530,7 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 			if strings.Count(string(body), old) != 1 {
 				return fmt.Errorf("channel anchor fixture changed its exact pins/connect declaration")
 			}
-			body = []byte(strings.Replace(string(body), old, "pins:\n  inputs:\n    - work.requested\n    - effect.requested\n", 1))
+			body = []byte(strings.Replace(string(body), old, "inputs:\n  - work.requested\n  - effect.requested\n", 1))
 		}
 		return os.WriteFile(target, body, 0o600)
 	}); err != nil {
@@ -545,7 +545,7 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 		t.Fatalf("channel anchor fixture requires the isolated root declaration, got:\n%s", body)
 	}
 	var pins, connects strings.Builder
-	pins.WriteString("pins:\n  inputs:\n")
+	pins.WriteString("inputs:\n")
 	events := []string{"work.requested", "observer.requested", "effect.requested"}
 	if withNotice {
 		events = append(events, "notice.requested")

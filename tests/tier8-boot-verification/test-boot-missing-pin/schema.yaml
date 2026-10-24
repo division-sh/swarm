@@ -2,10 +2,9 @@ name: test-boot-missing-pin
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.requested
-    - task.result
+inputs:
+  - task.requested
+  - task.result
 connect:
   - event: task.result
     from: child

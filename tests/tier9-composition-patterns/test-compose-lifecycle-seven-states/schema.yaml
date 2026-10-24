@@ -6,13 +6,12 @@ stages:
   stable: {}
   winding_down: {}
   closed: {final: true}
-pins:
-  inputs:
-    - phase.init
-    - phase.activate
-    - phase.start
-    - phase.stabilize
-    - phase.wind_down
-    - phase.close
-  outputs:
-    - lifecycle.complete
+inputs:
+  - phase.init
+  - phase.activate
+  - phase.start
+  - phase.stabilize
+  - phase.wind_down
+  - phase.close
+outputs:
+  - lifecycle.complete

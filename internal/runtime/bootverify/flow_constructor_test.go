@@ -56,11 +56,11 @@ func TestFlowConstructorCatalogSupplyAdmission(t *testing.T) {
 		{"map", "", "map[text]text", "map[text]text", true},
 		{"nested map", "", "{type: \"[map[text]text]\"}", "{type: \"[map[text]text]\"}", true},
 		{"map value mismatch", "", "map[text]integer", "map[text]text", false},
-		{"enum", "enums:\n  Mode: {values: [low, high], default: low}\n", "Mode", "Mode", true},
-		{"unbounded enum supply", "enums:\n  Mode: {values: [low, high], default: low}\n", "Mode", "text", false},
-		{"enum map key", "enums:\n  Mode: {values: [low, high], default: low}\n", "map[Mode]text", "map[Mode]text", true},
-		{"unbounded map key", "enums:\n  Mode: {values: [low, high], default: low}\n", "map[Mode]text", "map[text]text", false},
-		{"record", "types:\n  Brief:\n    detail: text\n", "Brief", "Brief", true},
+		{"enum", "Mode: [\"low\", \"high\"]\n", "Mode", "Mode", true},
+		{"unbounded enum supply", "Mode: [\"low\", \"high\"]\n", "Mode", "text", false},
+		{"enum map key", "Mode: [\"low\", \"high\"]\n", "map[Mode]text", "map[Mode]text", true},
+		{"unbounded map key", "Mode: [\"low\", \"high\"]\n", "map[Mode]text", "map[text]text", false},
+		{"record", "Brief:\n  detail: text\n", "Brief", "Brief", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := constructorCatalogFixture(t, "  brief: "+tc.target+"\n", "  brief: "+tc.supplied+"\n", "", tc.catalog)

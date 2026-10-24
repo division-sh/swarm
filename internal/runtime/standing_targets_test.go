@@ -138,8 +138,7 @@ func TestA9DeclarationAncestryMayBeKeyed(t *testing.T) {
 	}
 }
 
-const constructorIngressSchema = `pins:
-  inputs: [inbound.constructor]
+const constructorIngressSchema = `inputs: [inbound.constructor]
 ingress:
   alias: constructor
   providers:

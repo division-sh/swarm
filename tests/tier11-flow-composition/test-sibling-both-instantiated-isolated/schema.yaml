@@ -1,8 +1,7 @@
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - start.all
-  outputs:
-    - all.done
+inputs:
+  - start.all
+outputs:
+  - all.done

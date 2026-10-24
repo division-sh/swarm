@@ -14,22 +14,6 @@ func (v PolicyValue) MarshalYAML() (any, error)            { return v.Value, nil
 func (p PolicyCriteriaParam) MarshalYAML() (any, error)    { return p.Value, nil }
 func (p PolicyCriteriaParam) MarshalJSON() ([]byte, error) { return json.Marshal(p.Value) }
 
-type PolicyCriteriaSet struct {
-	Classes map[string]PolicyCriteriaClass `yaml:"classes" json:"classes"`
-	Rules   []PolicyCriteriaRule           `yaml:"rules" json:"rules"`
-}
-
-type PolicyCriteriaClass struct {
-	Disposition string `yaml:"disposition" json:"disposition"`
-}
-
-type PolicyCriteriaRule struct {
-	ID     string                         `yaml:"id" json:"id"`
-	Class  string                         `yaml:"class" json:"class"`
-	Text   string                         `yaml:"text" json:"text"`
-	Params map[string]PolicyCriteriaParam `yaml:"params" json:"params,omitempty"`
-}
-
 type PolicyCriteriaParam struct {
 	Value any
 }

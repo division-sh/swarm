@@ -2,24 +2,23 @@ name: notify-all-children
 stages:
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - portfolio.opened
-    - portfolio.account.register.requested
-    - portfolio.accounts.register.requested
-    - portfolio.membership.seeded
-    - portfolio.notify.requested
-    - account.registered
-    - portfolio.close.requested
-    - portfolio.closed
-  outputs:
-    - portfolio.opened.forwarded
-    - portfolio.account.register.requested
-    - portfolio.accounts.register.requested
-    - portfolio.membership.seeded
-    - portfolio.notify.requested
-    - account.registered
-    - portfolio.close.forwarded
+inputs:
+  - portfolio.opened
+  - portfolio.account.register.requested
+  - portfolio.accounts.register.requested
+  - portfolio.membership.seeded
+  - portfolio.notify.requested
+  - account.registered
+  - portfolio.close.requested
+  - portfolio.closed
+outputs:
+  - portfolio.opened.forwarded
+  - portfolio.account.register.requested
+  - portfolio.accounts.register.requested
+  - portfolio.membership.seeded
+  - portfolio.notify.requested
+  - account.registered
+  - portfolio.close.forwarded
 connect:
   - {event: portfolio.opened.forwarded, from: ., to: portfolio, rename: portfolio.opened}
   - {event: portfolio.account.register.requested, from: ., to: portfolio}

@@ -273,7 +273,7 @@ func (b *WorkflowContractBundle) CompileFanOutHandlerPlans(node runtimeidentity.
 	if b == nil {
 		return fmt.Errorf("fan_out plans require a loaded contract bundle")
 	}
-	qualified, err := QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
+	qualified, err := b.compileHandlerWrites(node, eventType, handler)
 	if err != nil {
 		return err
 	}
@@ -309,7 +309,7 @@ func (b *WorkflowContractBundle) PrepareFanOutPlans() []FanOutPlanFailure {
 			continue
 		}
 		for eventType, handler := range record.Entry.EventHandlers {
-			qualified, err := QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
+			qualified, err := b.compileHandlerWrites(node, eventType, handler)
 			if err != nil {
 				b.fanOutPlanFailures = append(b.fanOutPlanFailures, FanOutPlanFailure{Node: node, EventType: eventType, Source: "handler", Detail: err.Error()})
 				continue

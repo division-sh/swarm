@@ -45,13 +45,15 @@ type selectedHandlerFanOutIntentCrash struct {
 
 func (p selectedHandlerFanOutIntentCrash) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
 	committed, err := p.WorkflowPersistenceOwner.CommitWorkflowEngineMutation(ctx, command)
-	if command.FanOutIntent != nil && committed.Committed && err == nil {
+	if len(command.FanOutIntents) != 0 && committed.Committed && err == nil {
 		if command.DeliverySuccess == nil || committed.DeliverySuccess == nil || !committed.DeliverySuccess.Same(command.DeliverySuccess.Claim) {
 			p.test.Fatal("intent checkpoint lacks its atomically acknowledged handler settlement")
 		}
 		// This is after the real native commit and before the adapter can notify
 		// the shared pump or finish the input's pipeline handoff.
-		p.checkpoint(ctx, command.FanOutIntent.Key)
+		for _, intent := range command.FanOutIntents {
+			p.checkpoint(ctx, intent.Key)
+		}
 	}
 	return committed, err
 }

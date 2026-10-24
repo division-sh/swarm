@@ -2,12 +2,11 @@ name: test-multi-gate-pipeline
 stages:
   pending: {}
   approved: {final: true}
-pins:
-  inputs:
-    - gate.g1_set
-    - gate.g2_set
-    - gate.g3_set
-    - approval.requested
-  outputs:
-    - approval.granted
-    - gate.set
+inputs:
+  - gate.g1_set
+  - gate.g2_set
+  - gate.g3_set
+  - approval.requested
+outputs:
+  - approval.granted
+  - gate.set

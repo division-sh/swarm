@@ -14,5 +14,4 @@ stages:
             note: {type: text, required: false}
           advances_to: done
   done: {final: true}
-pins:
-  inputs: [work.requested]
+inputs: [work.requested]

@@ -1,5 +1,4 @@
 name: test-chain-depth-limit
 stages: []
-pins:
-  inputs:
-    - chain.start
+inputs:
+  - chain.start

@@ -30,7 +30,7 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 					"scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n",
 				}
 				if keyed {
-					documents["schema.yaml"] = "name: root-construction\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n"
+					documents["schema.yaml"] = "name: root-construction\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n"
 					documents["events.yaml"] = "task.started:\n  request_id: text\n"
 					documents["entities.yaml"] = "request:\n  request_id: text\n"
 				}
@@ -73,13 +73,13 @@ func newEagerFlowConstructorFixture(t *testing.T, backend string) receiverConfig
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":                       "name: eager-construction\n",
-		"review/schema.yaml":                "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+		"review/schema.yaml":                "name: review\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
 		"review/entities.yaml":              "review_item:\n  request_id: text\n",
 		"review/events.yaml":                "task.started:\n",
 		"review/scout/schema.yaml":          "name: scout\nstages:\n  pending: {}\n",
 		"review/scout/detail/schema.yaml":   "name: detail\n",
 		"review/scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n",
-		"review/deferred/schema.yaml":       "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",
+		"review/deferred/schema.yaml":       "name: deferred\ninstance: job_id\ninputs:\n  - job.started\n",
 		"review/deferred/events.yaml":       "job.started:\n",
 		"review/deferred/entities.yaml":     "job:\n  job_id: text\n",
 	}, nil)

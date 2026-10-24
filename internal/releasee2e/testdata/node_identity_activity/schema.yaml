@@ -1,5 +1,4 @@
 name: activity-identity-control
 stages: []
-pins:
-  inputs:
-    - request
+inputs:
+  - request

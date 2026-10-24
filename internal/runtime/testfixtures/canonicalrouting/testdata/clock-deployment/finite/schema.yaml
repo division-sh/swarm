@@ -4,6 +4,5 @@ stages:
   done: {final: true}
 schedules:
   poll: {every: 250ms, emit: poll.tick}
-pins:
-  inputs: [start.requested]
-  outputs: [poll.tick]
+inputs: [start.requested]
+outputs: [poll.tick]

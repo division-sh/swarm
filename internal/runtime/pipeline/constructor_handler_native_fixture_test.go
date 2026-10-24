@@ -38,7 +38,7 @@ func nativeEmitPersistenceBundleForTest(t *testing.T) *runtimecontracts.Workflow
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: validation\nstages:\n  researching: {}\n  mvp_speccing: {}\n",
 		"entities.yaml": "test_entity:\n  business_brief: {type: BusinessBrief}\n",
-		"types.yaml":    "types:\n  BusinessBrief:\n    summary: text\n",
+		"types.yaml":    "BusinessBrief:\n  summary: text\n",
 		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested:\n",
 		"nodes.yaml":    "node-a:\n  research.completed:\n    advances_to: mvp_speccing\n",
 	})

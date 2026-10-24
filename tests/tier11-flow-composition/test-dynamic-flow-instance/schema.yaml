@@ -3,13 +3,12 @@ stages:
   pending: {}
   spawned: {}
   done: {final: true}
-pins:
-  inputs:
-    - spawn.requested
-    - assign.requested
-  outputs:
-    - work.assign
-    - worker.requested
+inputs:
+  - spawn.requested
+  - assign.requested
+outputs:
+  - work.assign
+  - worker.requested
 connect:
   - event: worker.requested
     from: .

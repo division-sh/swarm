@@ -3,10 +3,9 @@ stages:
   stage_a: {}
   stage_b: {}
   released: {final: true}
-pins:
-  inputs:
-    - step.a_done
-    - step.b_done
-    - step.c_done
-  outputs:
-    - release.ready
+inputs:
+  - step.a_done
+  - step.b_done
+  - step.c_done
+outputs:
+  - release.ready

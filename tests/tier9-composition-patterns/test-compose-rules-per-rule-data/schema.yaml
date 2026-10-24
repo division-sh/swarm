@@ -1,8 +1,7 @@
 stages:
   pending: {}
   resolved: {final: true}
-pins:
-  inputs:
-    - conflict.submitted
-  outputs:
-    - conflict.resolved
+inputs:
+  - conflict.submitted
+outputs:
+  - conflict.resolved

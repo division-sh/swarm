@@ -74,9 +74,8 @@ func newReceiverConfigActivationFixtureWithTimerAndCommitter(t *testing.T, backe
 instance: request_id
 stages:
   pending: {}
-pins:
-  inputs:
-    - task.create
+inputs:
+  - task.create
 `,
 		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
 		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n",

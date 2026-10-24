@@ -16,9 +16,8 @@ stages:
       outcomes:
         approve: {advances_to: done}
   done: {final: true}
-pins:
-  inputs:
-    - review.requested
+inputs:
+  - review.requested
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "review_item:\n  item_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "review.requested:\n  item_id: text\n")

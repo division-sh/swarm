@@ -29,8 +29,7 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 			if index != len(items)-1 {
 				return nil, nodeValueError(item, fmt.Errorf("DIALECT-RULES-DEFAULT: rules[%d] at %s has no predicate but is not the last row; rows after it are unreachable. Add a when/case/range, or move it last to make it the default branch.", index, item.Location()))
 			}
-			if strings.TrimSpace(row.AdvancesTo) == "" && row.Emit.EventType() == "" && !row.Emit.HasFields() && row.Activity.Tool == "" && !row.DataAccumulation.HasWrites() &&
-				(row.Compute == nil || row.Compute.Operation == ComputeOpUnknown) && row.FanOut == nil {
+			if !ruleHasAuthoredEffect(row) {
 				return nil, nodeValueError(item, fmt.Errorf("DIALECT-RULES-DEFAULT: rules[%d] at %s is empty; a default row must contain an authored effect. A block that matches nothing already succeeds and records no_match.", index, item.Location()))
 			}
 			row.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}
@@ -55,6 +54,11 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 		}
 	}
 	return rows, nil
+}
+
+func ruleHasAuthoredEffect(row HandlerRuleEntry) bool {
+	return strings.TrimSpace(row.AdvancesTo) != "" || row.Emit.EventType() != "" || row.Emit.HasFields() || row.Activity.Tool != "" || row.DataAccumulation.HasWrites() ||
+		(row.Compute != nil && row.Compute.Operation != ComputeOpUnknown) || row.FanOut != nil
 }
 
 func nodeRuleFieldOptions(context handlerRuleDecodeContext) map[string]struct{} {

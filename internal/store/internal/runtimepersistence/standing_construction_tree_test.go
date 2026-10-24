@@ -180,7 +180,7 @@ func TestStandingPreparationVerifiesCompleteRootTreeBothStores(t *testing.T) {
 					"service/detail/schema.yaml": "name: detail\n",
 					"receiver/schema.yaml":       "name: receiver\n",
 					"receiver/entities.yaml":     "receipt:\n  marker: {type: text, initial: unchanged}\n",
-					"deferred/schema.yaml":       "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",
+					"deferred/schema.yaml":       "name: deferred\ninstance: job_id\ninputs:\n  - job.started\n",
 					"deferred/entities.yaml":     "job:\n  job_id: text\n",
 					"deferred/events.yaml":       "job.started:\n  job_id: text\n",
 				}, nil)

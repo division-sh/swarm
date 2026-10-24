@@ -552,9 +552,6 @@ func catalogFactoringPlainText(t *testing.T) {
 		if got := compiledFileTextField(ResolvedCatalogField{TypeRef: tc.ref, Type: resolved}, catalog); got != tc.want {
 			t.Fatalf("file-text consumer %s = %v", tc.ref, got)
 		}
-		if got := criteriaCitationTypeAllowed(CatalogTypeReference{Type: tc.ref, Catalog: catalog}); got != (tc.want || tc.ref == "[Label]") {
-			t.Fatalf("citation consumer %s = %v", tc.ref, got)
-		}
 	}
 }
 
@@ -639,10 +636,10 @@ func catalogFactoringScopedBundle(t *testing.T) *WorkflowContractBundle {
 	root := t.TempDir()
 	for file, body := range map[string]string{
 		"schema.yaml":       "name: catalog-factoring\nstages: {done: {final: true}}\n",
-		"types.yaml":        "scalars: {Label: text}\ntypes:\n  Box:\n    value: Label\n",
+		"types.yaml":        "Box:\n  value: text\n",
 		"events.yaml":       "record.ready:\n  item: Box\n  items: [Box]\n",
 		"child/schema.yaml": "name: child\nstages: {done: {final: true}}\n",
-		"child/types.yaml":  "scalars: {Label: integer}\n",
+		"child/types.yaml":  "Box:\n  value: integer\n",
 		"child/events.yaml": "record.ready:\n  item: Box\n  items: [Box]\n",
 		"child/nodes.yaml":  "consumer:\n  record.ready: {}\n",
 	} {
@@ -670,7 +667,7 @@ func catalogFactoringEventField(t *testing.T) {
 		if field, _ := resolved.Field("value"); field.Type.Kind != tc.want {
 			t.Fatalf("wrong declaring catalog for %s: %#v", tc.flow, field)
 		}
-		ref.Catalog.Scalars["Label"] = ScalarTypeDecl{Base: "uuid"}
+		ref.Catalog.Types["Box"].Fields["value"] = TypeFieldSpec{Type: "uuid"}
 		fresh, found := ResolveEventFieldType(bundle, tc.flow, "record.ready", "item")
 		field, _ := catalogFactoringResolved(t, fresh.Type, fresh.Catalog).Field("value")
 		if !found || field.Type.Kind != tc.want {
@@ -695,7 +692,7 @@ func catalogFactoringNodeField(t *testing.T) {
 	if field.Type.Kind != CatalogTypeInteger {
 		t.Fatal("node lookup chose root declaration rather than its flow")
 	}
-	ref.Catalog.Scalars["Label"] = ScalarTypeDecl{Base: "uuid"}
+	ref.Catalog.Types["Box"].Fields["value"] = TypeFieldSpec{Type: "uuid"}
 	fresh, found := ResolveExecutableNodeEventFieldType(bundle, node, "record.ready", "item")
 	field, _ = catalogFactoringResolved(t, fresh.Type, fresh.Catalog).Field("value")
 	if !found || field.Type.Kind != CatalogTypeInteger {

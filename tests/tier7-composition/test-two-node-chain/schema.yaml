@@ -2,8 +2,7 @@ stages:
   pending: {}
   processing: {}
   complete: {final: true}
-pins:
-  inputs:
-    - task.started
-  outputs:
-    - task.finished
+inputs:
+  - task.started
+outputs:
+  - task.finished

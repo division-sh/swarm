@@ -1,12 +1,11 @@
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - pipeline.start
-    - micro.done
-  outputs:
-    - step.begin
+inputs:
+  - pipeline.start
+  - micro.done
+outputs:
+  - step.begin
 connect:
   - event: step.begin
     from: .

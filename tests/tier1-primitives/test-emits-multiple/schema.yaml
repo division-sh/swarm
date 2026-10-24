@@ -1,8 +1,7 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - item.received
-  outputs:
-    - item.processed
+inputs:
+  - item.received
+outputs:
+  - item.processed

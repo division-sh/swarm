@@ -9,7 +9,7 @@ import (
 func r3PolicyRulesBundle() *c.WorkflowContractBundle {
 	root := &c.FlowContractView{Path: "root", Paths: c.FlowContractPaths{FlowPath: "root"}, Policy: c.PolicyDocument{Values: map[string]c.PolicyValue{
 		"config": {Value: map[string]any{"parent_only": true, "nested": []any{map[string]any{"value": 1}}}}, "": {Value: false}, " spaced ": {Value: 0},
-	}}, Rules: c.RulesDocument{"review": {Criteria: &c.PolicyCriteriaSet{Rules: []c.PolicyCriteriaRule{{ID: "parent"}}}}}, Children: []c.FlowContractView{
+	}}, Rules: c.RulesDocument{"review": {Validation: &c.PolicyValidationSet{Rules: []c.PolicyValidationRule{{ID: "parent"}}}}}, Children: []c.FlowContractView{
 		{Path: "root/child", Paths: c.FlowContractPaths{FlowPath: "child"}, Policy: c.PolicyDocument{Values: map[string]c.PolicyValue{"config": {Value: map[string]any{"child_only": true}}}}, Rules: c.RulesDocument{"review": {Validation: &c.PolicyValidationSet{Rules: []c.PolicyValidationRule{{ID: "child"}}}}}},
 		{Path: "root/sibling", Paths: c.FlowContractPaths{FlowPath: "sibling"}},
 	}}
@@ -58,8 +58,8 @@ func TestR3PolicyImmutableCloneAndPreview(t *testing.T) {
 	if !ok {
 		t.Fatal("scope lookup failed")
 	}
-	scope.Rules["review"].Criteria.Rules[0].ID = "changed"
-	if bundle.FlowTree.Root.Rules["review"].Criteria.Rules[0].ID != "parent" {
+	scope.Rules["review"].Validation.Rules[0].ID = "changed"
+	if bundle.FlowTree.Root.Rules["review"].Validation.Rules[0].ID != "parent" {
 		t.Fatal("scope rule aliases declaration")
 	}
 	override := map[string]any{"": map[string]any{"nested": []any{map[string]any{"value": 3}}}, " spaced ": false}
@@ -72,8 +72,8 @@ func TestR3PolicyImmutableCloneAndPreview(t *testing.T) {
 	if previewValue.Values[" spaced "].Value != false || bundle.FlowTree.Root.Policy.Values[" spaced "].Value != 0 {
 		t.Fatal("exact key or original value changed")
 	}
-	preview.FlowTree.Root.Rules["review"].Criteria.Rules[0].ID = "changed"
-	if bundle.FlowTree.Root.Rules["review"].Criteria.Rules[0].ID != "parent" {
+	preview.FlowTree.Root.Rules["review"].Validation.Rules[0].ID = "changed"
+	if bundle.FlowTree.Root.Rules["review"].Validation.Rules[0].ID != "parent" {
 		t.Fatal("preview rule aliases original")
 	}
 }
@@ -82,13 +82,10 @@ func TestR3RuleLocalDuplicateAndWrongKindShadow(t *testing.T) {
 	bundle := r3PolicyRulesBundle()
 	source := Wrap(bundle)
 	rules := source.ResolvedRulesForFlow("child")
-	if _, ok := rules.Criteria("review"); ok {
-		t.Fatal("nearest wrong-kind bypassed through ancestor")
-	}
 	if set, ok := rules.Validation("review"); !ok || set.Rules[0].ID != "child" {
 		t.Fatal("nearest machine lost")
 	}
-	if set, ok := source.ResolvedRulesForFlow("sibling").Criteria("review"); !ok || set.Rules[0].ID != "parent" {
+	if set, ok := source.ResolvedRulesForFlow("sibling").Validation("review"); !ok || set.Rules[0].ID != "parent" {
 		t.Fatal("sibling selection changed")
 	}
 	rules["review"].Validation.Rules[0].ID = "changed"

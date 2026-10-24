@@ -1,6 +1,5 @@
 name: producer
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.ready
+inputs:
+  - work.requested
+outputs:
+  - work.ready

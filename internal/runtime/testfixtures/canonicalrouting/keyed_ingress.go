@@ -13,8 +13,7 @@ func CopyKeyedRootRawIngress(t testing.TB) string {
 		"schema.yaml": `name: keyed-shop
 instance: provider_event_id
 stages: []
-pins:
-  inputs: [account.opened]
+inputs: [account.opened]
 ingress:
   providers:
     - provider: partner
@@ -64,7 +63,7 @@ func CopyKeyedRootTelegramIngress(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `name: keyed-chat
 instance: conversation_reference
 stages: []
-pins: {inputs: [inbound.telegram, inbound.telegram.text_message]}
+inputs: [inbound.telegram, inbound.telegram.text_message]
 ingress:
   providers:
     - provider: telegram
@@ -101,17 +100,17 @@ func CopyNestedKeyedConnectionSelection(t testing.TB) string {
 	root := t.TempDir()
 	for label, body := range map[string]string{
 		"schema.yaml": `name: nested-construction
-pins: {inputs: [start]}
+inputs: [start]
 connect:
   - {event: start, from: ., to: parent, resolution: select-or-create, key_from: payload.parent_key}
   - {event: start, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.leaf_key}
 `,
 		"events.yaml":                      "start:\n  parent_key: text\n  leaf_key: text\n",
-		"parent/schema.yaml":               "name: parent\ninstance: id\npins: {inputs: [start]}\n",
+		"parent/schema.yaml":               "name: parent\ninstance: id\ninputs: [start]\n",
 		"parent/entities.yaml":             "parent_state:\n  id: text\n",
 		"parent/nodes.yaml":                "receiver:\n  start:\n    guard: payload.parent_key != ''\n",
 		"parent/middle/schema.yaml":        "name: middle\n",
-		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\npins: {inputs: [start]}\n",
+		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\ninputs: [start]\n",
 		"parent/middle/leaf/entities.yaml": "leaf_state:\n  id: text\n",
 		"parent/middle/leaf/nodes.yaml":    "receiver:\n  start:\n    guard: payload.leaf_key != ''\n",
 	} {
@@ -134,7 +133,7 @@ func CopyConnectionAncestorCandidates(t testing.TB, dependentEvent string, compe
 `
 	if competing {
 		edges += "  - {event: start, from: ., to: parent, rename: alternate, resolution: select-or-create, key_from: payload.leaf_key}\n"
-		writeClosedVariantFile(t, root, "parent/schema.yaml", "name: parent\ninstance: id\npins: {inputs: [start, alternate]}\n")
+		writeClosedVariantFile(t, root, "parent/schema.yaml", "name: parent\ninstance: id\ninputs: [start, alternate]\n")
 		writeClosedVariantFile(t, root, "parent/nodes.yaml", "receiver:\n  start:\n    guard: payload.parent_key != ''\n  alternate:\n    guard: payload.leaf_key != ''\n")
 	}
 	rename := ""
@@ -143,9 +142,9 @@ func CopyConnectionAncestorCandidates(t testing.TB, dependentEvent string, compe
 	}
 	edges += "  - {event: " + dependentEvent + ", from: ., to: parent/middle/leaf, " + rename + "resolution: select-or-create, key_from: payload.leaf_key}\n"
 	for label, body := range map[string]string{
-		"schema.yaml":          "name: construction-candidates\npins: {inputs: [start, other]}\nconnect:\n" + edges,
+		"schema.yaml":          "name: construction-candidates\ninputs: [start, other]\nconnect:\n" + edges,
 		"events.yaml":          "start:\n  parent_key: text\n  leaf_key: text\nother:\n  parent_key: text\n  leaf_key: text\n",
-		"worker/schema.yaml":   "name: worker\ninstance: id\npins: {inputs: [start]}\n",
+		"worker/schema.yaml":   "name: worker\ninstance: id\ninputs: [start]\n",
 		"worker/entities.yaml": "worker_state:\n  id: text\n",
 		"worker/nodes.yaml":    "receiver:\n  start:\n    guard: payload.leaf_key != ''\n",
 	} {
@@ -162,7 +161,7 @@ func CopyNestedKeyedRawIngress(t testing.TB) string {
 	for label, body := range map[string]string{
 		"schema.yaml": `name: nested-shop
 stages: []
-pins: {inputs: [account.opened]}
+inputs: [account.opened]
 ingress:
   providers:
     - provider: partner
@@ -178,11 +177,11 @@ connect:
   - {event: account.opened, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.provider}
 `,
 		"events.yaml":                      "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
-		"parent/schema.yaml":               "name: parent\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
+		"parent/schema.yaml":               "name: parent\ninstance: id\nstages: []\ninputs: [account.opened]\n",
 		"parent/entities.yaml":             "parent_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
 		"parent/nodes.yaml":                "receiver:\n  account.opened:\n    data_accumulation:\n      source_event: account.opened\n      writes: [{target_field: seen, value: entity.seen + 1}]\n",
 		"parent/middle/schema.yaml":        "name: middle\n",
-		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
+		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\nstages: []\ninputs: [account.opened]\n",
 		"parent/middle/leaf/entities.yaml": "leaf_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
 		"parent/middle/leaf/nodes.yaml":    "receiver:\n  account.opened:\n    data_accumulation:\n      source_event: account.opened\n      writes: [{target_field: seen, value: entity.seen + 1}]\n",
 	} {

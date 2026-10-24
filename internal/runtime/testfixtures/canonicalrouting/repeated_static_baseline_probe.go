@@ -11,11 +11,10 @@ func CopyRepeatedStaticBaselineProbe(t testing.TB) string {
 stages:
   waiting: {}
   active: {final: true}
-pins:
-  inputs:
-    - parent.seeded
-  outputs:
-    - work.requested
+inputs:
+  - parent.seeded
+outputs:
+  - work.requested
 connect:
   - {event: work.requested, from: ., to: producer}
   - {event: work.ready, from: producer, to: consumer}
@@ -34,11 +33,10 @@ connect:
 stages:
   waiting: {}
   active: {final: true}
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.ready
+inputs:
+  - work.requested
+outputs:
+  - work.ready
 `)
 	writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  work_id: text\n")

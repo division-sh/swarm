@@ -19,7 +19,7 @@ func TestOwnedMockClockLocalAgentConsumerBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopyClockDeployment(t, false)
 			for path, body := range map[string]string{
-				"schema.yaml":       "name: clock-agent\nstages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  outputs: [agent.observed]\n",
+				"schema.yaml":       "name: clock-agent\nstages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\noutputs: [agent.observed]\n",
 				"events.yaml":       "poll.tick:\nagent.observed:\n",
 				"agents.yaml":       "observer:\n  role: observer\n  intent: {inline: 'Observe the bare poll.tick event and emit agent.observed.'}\n  model: regular\n  subscriptions: [poll.tick]\n  emit_events: [agent.observed]\n  mock: {kind: python, module: mocks/observer.py}\n",
 				"mocks/observer.py": "def handle(input):\n    if input['tool_results']:\n        return {'text': 'Clock observed.'}\n    return {'calls': [{'name': 'emit_agent_observed', 'arguments': {}}]}\n",

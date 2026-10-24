@@ -1,7 +1,6 @@
 name: operating
 instance: operating_id
-pins:
-  inputs:
-    - operating.report.requested
-  outputs:
-    - operating.reported
+inputs:
+  - operating.report.requested
+outputs:
+  - operating.reported

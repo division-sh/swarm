@@ -221,7 +221,7 @@ func TestEventBusIdentityRouteAuthorityDominatesDuplicateExactSubscription(t *te
 func routeGenerationPublicationSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: route-generation-proof\npins:\n  inputs: [test.route_generation, test.route_generation_mutation, test.route_generation_ack]\n  outputs: [test.route_generation, test.route_generation_mutation, test.route_generation_ack]\n",
+		"schema.yaml": "name: route-generation-proof\ninputs: [test.route_generation, test.route_generation_mutation, test.route_generation_ack]\noutputs: [test.route_generation, test.route_generation_mutation, test.route_generation_ack]\n",
 		"events.yaml": "test.route_generation:\ntest.route_generation_mutation:\ntest.route_generation_ack:\n",
 	}))
 }
