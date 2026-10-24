@@ -33,35 +33,7 @@ func validateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result
 	}
 	if origin.Owner == runtimemanager.LifecycleDiagnosticNormal {
 		if hasBinding {
-			observe := sourceadmission.ObserveRetainedLiveHandoff
-			if historical {
-				observe = sourceadmission.ObserveHistoricalLiveHandoff
-			}
-			handedOff, err := observe(ctx, tx, result.Identity.RunID, result.ProcessBinding.BundleHash)
-			if err != nil || !handedOff {
-				return "", errors.Join(err, errors.New("selected-fork lifecycle diagnostic requires its execution origin or exact committed handoff"))
-			}
-			if !historical {
-				var raw []byte
-				if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, result.ProcessBinding.GenerationGrantID).Scan(&raw); err != nil {
-					return "", err
-				}
-				var grant startupownership.GrantEvidence
-				if err := canonicaljson.DecodeInto(raw, &grant); err != nil {
-					return "", err
-				}
-				expected := runtimemanager.ProcessExecutionBinding{
-					ProcessAuthorityID: grant.ProcessAuthorityID, ProcessOwnerID: grant.ProcessOwnerID, ProcessBootID: grant.ProcessBootID,
-					GenerationGrantID: grant.GrantID, BundleHash: grant.BundleHash,
-					RuntimeInstanceID: grant.RuntimeInstanceID, RuntimeGeneration: grant.RuntimeGeneration,
-				}
-				if !expected.Equal(result.ProcessBinding) {
-					return "", errors.New("live lifecycle diagnostic differs from its ordinary grant")
-				}
-				if err := generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, grant, result.ProcessBinding.BundleHash, sqlite); err != nil {
-					return "", err
-				}
-			}
+			return "", validateOrdinaryLifecycleHandoffTx(ctx, tx, result, historical, sqlite)
 		}
 		return "", nil
 	}
@@ -119,4 +91,35 @@ func validateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result
 		}
 	}
 	return bindingID, nil
+}
+
+func validateOrdinaryLifecycleHandoffTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical, sqlite bool) error {
+	observe := sourceadmission.ObserveRetainedLiveHandoff
+	if historical {
+		observe = sourceadmission.ObserveHistoricalLiveHandoff
+	}
+	handedOff, err := observe(ctx, tx, result.Identity.RunID, result.ProcessBinding.BundleHash)
+	if err != nil || !handedOff {
+		return errors.Join(err, errors.New("selected-fork lifecycle diagnostic requires its execution origin or exact committed handoff"))
+	}
+	if historical {
+		return nil
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, result.ProcessBinding.GenerationGrantID).Scan(&raw); err != nil {
+		return err
+	}
+	var grant startupownership.GrantEvidence
+	if err := canonicaljson.DecodeInto(raw, &grant); err != nil {
+		return err
+	}
+	expected := runtimemanager.ProcessExecutionBinding{
+		ProcessAuthorityID: grant.ProcessAuthorityID, ProcessOwnerID: grant.ProcessOwnerID, ProcessBootID: grant.ProcessBootID,
+		GenerationGrantID: grant.GrantID, BundleHash: grant.BundleHash,
+		RuntimeInstanceID: grant.RuntimeInstanceID, RuntimeGeneration: grant.RuntimeGeneration,
+	}
+	if !expected.Equal(result.ProcessBinding) {
+		return errors.New("live lifecycle diagnostic differs from its ordinary grant")
+	}
+	return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, grant, result.ProcessBinding.BundleHash, sqlite)
 }

@@ -931,17 +931,8 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 			return runtimeagenttopology.SourceSetCommitResult{}, err
 		}
 	}
-	if req.Operation == runtimeagenttopology.OperationInstallCompleteSourceSet {
-		if hasPrevious {
-			return runtimeagenttopology.SourceSetCommitResult{}, errors.New("complete source set is already installed")
-		}
-	} else if !hasPrevious || req.ExpectedRevision != previous.Revision {
-		return runtimeagenttopology.SourceSetCommitResult{}, errors.New("agent topology source-set predecessor changed")
-	}
-	if req.RequirePausedRemoval {
-		if err := requirePausedSourceRemoval(ctx, tx, previous, req.Plan, sqlite); err != nil {
-			return runtimeagenttopology.SourceSetCommitResult{}, err
-		}
+	if err := requireSourceSetPredecessor(ctx, tx, req, previous, hasPrevious, sqlite); err != nil {
+		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
 	changes, err := runtimeagenttopology.Diff(previous, req.Plan)
 	if err != nil {
@@ -966,6 +957,20 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 		}
 	}
 	return result, err
+}
+
+func requireSourceSetPredecessor(ctx context.Context, tx *sql.Tx, req runtimeagenttopology.SourceSetCommitRequest, previous runtimeagenttopology.SourceSetPlan, hasPrevious, sqlite bool) error {
+	if req.Operation == runtimeagenttopology.OperationInstallCompleteSourceSet {
+		if hasPrevious {
+			return errors.New("complete source set is already installed")
+		}
+	} else if !hasPrevious || req.ExpectedRevision != previous.Revision {
+		return errors.New("agent topology source-set predecessor changed")
+	}
+	if req.RequirePausedRemoval {
+		return requirePausedSourceRemoval(ctx, tx, previous, req.Plan, sqlite)
+	}
+	return nil
 }
 
 func requirePausedSourceRemoval(ctx context.Context, tx *sql.Tx, previous, next runtimeagenttopology.SourceSetPlan, sqlite bool) error {

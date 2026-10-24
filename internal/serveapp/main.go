@@ -951,6 +951,14 @@ func bindCompositionProcessCapability(ctx context.Context, lifecycle *activatedS
 	return runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
 }
 
+func recoverServeSelectedForkContexts(ctx context.Context, capabilities selectedAPICapabilities, rt *runtime.Runtime, environment runtimerunforkexecution.SelectedForkRecoveryEnvironment) error {
+	if capabilities.SelectedForkProcess == nil || rt == nil {
+		return nil
+	}
+	_, err := capabilities.SelectedForkProcess.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture), environment)
+	return err
+}
+
 func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) (exitCode int) {
 	repo, opts, cfgResult := req.Repo, req.Options, req.Config
 	publicListener := opts.PublicWebhookListener
@@ -1781,11 +1789,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	// A selected handoff needs a genuinely admitted ordinary target, not the
 	// prepared grant held before normal runtime startup.
-	if apiStoreCaps.SelectedForkProcess != nil && rt != nil {
-		if _, err := apiStoreCaps.SelectedForkProcess.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture), supervisor.selectedRecoveryEnvironment); err != nil {
-			presenter.fail(22, "selected_fork_recovery", err)
-			return 1
-		}
+	if err := recoverServeSelectedForkContexts(ctx, apiStoreCaps, rt, supervisor.selectedRecoveryEnvironment); err != nil {
+		presenter.fail(22, "selected_fork_recovery", err)
+		return 1
 	}
 	if rt != nil {
 		if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {

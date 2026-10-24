@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -42,18 +43,9 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 		return out, err
 	}
 	if found {
-		use, lookup, availability, err := req.LiveContexts.AcquireRun(ctx, live.RunID)
+		use, err := acquireLivePredecessor(ctx, req.LiveContexts, live)
 		if err != nil {
-			if use != nil {
-				err = errors.Join(err, use.Done())
-			}
 			return out, err
-		}
-		if !lookup.Loaded() || !availability.Available() || use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(live.Source) {
-			if use != nil {
-				finalErr = use.Done()
-			}
-			return out, errors.Join(finalErr, errors.New("live predecessor requires its exact admitted runtime"))
 		}
 		parked, parkCtx := use.Runtime(), use.WorkContext()
 		if live.Source.Matches(prepared.loadedSource.SourceArtifactFact) {
@@ -73,20 +65,9 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			acquire := req.AcquireLiveRuntime
 			paused := false
 			req.AcquireLiveRuntime = func(ctx context.Context, hash string) (*runtimepkg.RuntimeContextUse, error) {
-				if acquire == nil || parked.RunControl == nil {
-					return nil, errors.New("bundle swap requires its existing runtime and run-control owners")
-				}
-				// Materialization has revalidated the immutable plan, and selected
-				// dispatch has settled. Only now change its observed source status.
-				result, err := parked.RunControl.Pause(pauseCtx, runcontrol.TransitionRequest{RunID: live.RunID, Reason: "fork bundle swap", ControlledBy: "run.fork"})
-				paused = result.Status == runcontrol.StatusPaused
-				if err != nil {
-					return nil, err
-				}
-				if err := releaseUse(); err != nil {
-					return nil, err
-				}
-				return acquire(ctx, hash)
+				use, sourcePaused, err := pauseLiveSourceAndAcquire(ctx, pauseCtx, parked, live.RunID, hash, releaseUse, acquire)
+				paused = sourcePaused
+				return use, err
 			}
 			finalErr = execute(ctx)
 			finalErr = errors.Join(finalErr, releaseUse())
@@ -98,19 +79,58 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 		finalErr = execute(ctx)
 	}
 	if out.Activation.Activated {
-		use, lookup, _, err := req.LiveContexts.AcquireRun(context.WithoutCancel(ctx), out.Materialization.ForkRunID)
-		if err == nil && (use == nil || !lookup.Loaded()) {
-			err = errors.New("committed live fork requires its current ordinary runtime")
-		}
-		if err == nil {
-			err = use.Runtime().ReconcileLiveRun(use.WorkContext(), out.Materialization.ForkRunID)
-		}
+		finalErr = errors.Join(finalErr, reconcileCommittedLiveFork(context.WithoutCancel(ctx), req.LiveContexts, out.Materialization.ForkRunID))
+	}
+	return out, finalErr
+}
+
+func pauseLiveSourceAndAcquire(ctx, pauseCtx context.Context, parked *runtimepkg.Runtime, runID, hash string, release func() error, acquire func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)) (*runtimepkg.RuntimeContextUse, bool, error) {
+	if acquire == nil || parked.RunControl == nil {
+		return nil, false, errors.New("bundle swap requires its existing runtime and run-control owners")
+	}
+	// Materialization and selected dispatch have settled before this callback.
+	result, err := parked.RunControl.Pause(pauseCtx, runcontrol.TransitionRequest{RunID: runID, Reason: "fork bundle swap", ControlledBy: "run.fork"})
+	paused := result.Status == runcontrol.StatusPaused
+	if err != nil {
+		return nil, paused, err
+	}
+	if err := release(); err != nil {
+		return nil, paused, err
+	}
+	use, err := acquire(ctx, hash)
+	return use, paused, err
+}
+
+func acquireLivePredecessor(ctx context.Context, contexts *runtimepkg.RuntimeContextManager, live runlifecycle.LiveRun) (*runtimepkg.RuntimeContextUse, error) {
+	use, lookup, availability, err := contexts.AcquireRun(ctx, live.RunID)
+	if err != nil {
 		if use != nil {
 			err = errors.Join(err, use.Done())
 		}
-		finalErr = errors.Join(finalErr, err)
+		return nil, err
 	}
-	return out, finalErr
+	if !lookup.Loaded() || !availability.Available() || use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(live.Source) {
+		var cleanupErr error
+		if use != nil {
+			cleanupErr = use.Done()
+		}
+		return nil, errors.Join(cleanupErr, errors.New("live predecessor requires its exact admitted runtime"))
+	}
+	return use, nil
+}
+
+func reconcileCommittedLiveFork(ctx context.Context, contexts *runtimepkg.RuntimeContextManager, runID string) error {
+	use, lookup, _, err := contexts.AcquireRun(ctx, runID)
+	if err == nil && (use == nil || !lookup.Loaded()) {
+		err = errors.New("committed live fork requires its current ordinary runtime")
+	}
+	if err == nil {
+		err = use.Runtime().ReconcileLiveRun(use.WorkContext(), runID)
+	}
+	if use != nil {
+		err = errors.Join(err, use.Done())
+	}
+	return err
 }
 
 func (c selectedContractForkLocalRuntimeContainer) activatePrepared(p *PreparedSelectedFork, req SelectedContractExecutionRequest, result SelectedContractExecutionResult, diagnostic error) (SelectedContractExecutionResult, error) {

@@ -35,22 +35,8 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 	if err != nil || !exists {
 		return nil, errors.Join(err, errors.New("live target requires its committed source set"))
 	}
-	member := false
-	for _, source := range current.Sources {
-		member = member || source.BundleHash == bundleHash
-	}
-	if member {
-		pending, err := manager.PreparePendingSourceSetTransition(ctx, current)
-		if err != nil {
-			return nil, err
-		}
-		if err := pending.Commit(ctx, s.processCapability); err != nil {
-			return nil, err
-		}
-		use, lookup, err := manager.AcquireBundleHash(ctx, bundleHash)
-		if lookup.Loaded() || err != nil {
-			return use, err
-		}
+	if use, loaded, err := s.acquireCurrentLiveSource(ctx, manager, current, bundleHash); loaded || err != nil {
+		return use, err
 	}
 	request := requests[0]
 	loaded, err := loadServeRuntimeBundleFromArtifact(ctx, request.RepoRoot, request.Stores.sourceReader, bundleHash, request.PlatformPackBases, func(artifact *sourceartifact.AdmittedSourceArtifact, _ semanticview.Source) (*sourceartifact.RuntimeProjection, error) {
@@ -84,14 +70,7 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 	registered := false
 	defer func() {
 		if !retained {
-			if registered {
-				retErr = errors.Join(retErr, manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnavailable, s.shutdownOptions).ShutdownErr)
-			} else {
-				retErr = errors.Join(retErr, candidate.runtime.ShutdownWithOptions(s.shutdownOptions))
-			}
-			if candidate.workspaces != nil {
-				retErr = errors.Join(retErr, candidate.workspaces.ReleaseSourceProjection(context.WithoutCancel(ctx)))
-			}
+			retErr = errors.Join(retErr, s.discardLiveTarget(ctx, manager, bundleHash, candidate, registered))
 		}
 	}()
 	plan, err := compileServeSourceSetPlan([]serveRuntimeBundleContext{candidate})
@@ -102,40 +81,7 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	// This boundary is reached only for a missing bundle occurrence, never an
-	// ordinary pause. Joining the old occurrence also joins its agent processes.
-	for _, source := range current.Sources {
-		if result := manager.DeactivateBundleHashWithOptions(source.BundleHash, runtime.RuntimeContextCauseUnloaded, s.shutdownOptions); result.ShutdownErr != nil {
-			return nil, result.ShutdownErr
-		}
-	}
-	if s.stopRunStalled != nil {
-		s.stopRunStalled()
-		s.stopRunStalled = nil
-	}
-	if err := s.releaseResetProjections(context.WithoutCancel(ctx)); err != nil {
-		return nil, err
-	}
-	transition, err := manager.PrepareSourceSetTransition(ctx, plan)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := s.processCapability.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{
-		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan, RequirePausedRemoval: true,
-	}); err != nil {
-		// An uncertain commit cannot restore visibility of stale grants. A retry
-		// reads the committed head and rebuilds its exact ordinary occurrence.
-		transition.RetainForRetry()
-		return nil, err
-	}
-	if err := transition.Commit(ctx, s.processCapability); err != nil {
-		return nil, err
-	}
-	s.resetGeneration++
-	grant, err := s.processCapability.IssueGenerationGrant(ctx, startupownership.GrantRequest{
-		BundleHash: bundleHash, RuntimeInstanceID: request.RuntimeInstanceID,
-		RuntimeGeneration: s.resetGeneration, SourceSetRevision: plan.Revision,
-	})
+	grant, err := s.replaceLiveSourceSet(ctx, manager, current, plan, bundleHash, request.RuntimeInstanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +128,72 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 		err = fmt.Errorf("admitted live target is not loaded: %s", lookup.Cause)
 	}
 	return use, err
+}
+
+func (s *processLifecycleSupervisor) discardLiveTarget(ctx context.Context, manager *runtime.RuntimeContextManager, bundleHash string, candidate serveRuntimeBundleContext, registered bool) (err error) {
+	if registered {
+		err = manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnavailable, s.shutdownOptions).ShutdownErr
+	} else {
+		err = candidate.runtime.ShutdownWithOptions(s.shutdownOptions)
+	}
+	if candidate.workspaces != nil {
+		err = errors.Join(err, candidate.workspaces.ReleaseSourceProjection(context.WithoutCancel(ctx)))
+	}
+	return err
+}
+
+func (s *processLifecycleSupervisor) acquireCurrentLiveSource(ctx context.Context, manager *runtime.RuntimeContextManager, current agenttopology.SourceSetPlan, bundleHash string) (*runtime.RuntimeContextUse, bool, error) {
+	member := false
+	for _, source := range current.Sources {
+		member = member || source.BundleHash == bundleHash
+	}
+	if !member {
+		return nil, false, nil
+	}
+	pending, err := manager.PreparePendingSourceSetTransition(ctx, current)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := pending.Commit(ctx, s.processCapability); err != nil {
+		return nil, false, err
+	}
+	use, lookup, err := manager.AcquireBundleHash(ctx, bundleHash)
+	return use, lookup.Loaded(), err
+}
+
+func (s *processLifecycleSupervisor) replaceLiveSourceSet(ctx context.Context, manager *runtime.RuntimeContextManager, current, plan agenttopology.SourceSetPlan, bundleHash, runtimeInstanceID string) (startupownership.LiveGenerationGrant, error) {
+	// Only a bundle swap reaches this join; an ordinary pause keeps processes.
+	for _, source := range current.Sources {
+		if result := manager.DeactivateBundleHashWithOptions(source.BundleHash, runtime.RuntimeContextCauseUnloaded, s.shutdownOptions); result.ShutdownErr != nil {
+			return nil, result.ShutdownErr
+		}
+	}
+	if s.stopRunStalled != nil {
+		s.stopRunStalled()
+		s.stopRunStalled = nil
+	}
+	if err := s.releaseResetProjections(context.WithoutCancel(ctx)); err != nil {
+		return nil, err
+	}
+	transition, err := manager.PrepareSourceSetTransition(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.processCapability.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan, RequirePausedRemoval: true,
+	}); err != nil {
+		// An uncertain commit must keep stale grants withdrawn until re-observed.
+		transition.RetainForRetry()
+		return nil, err
+	}
+	if err := transition.Commit(ctx, s.processCapability); err != nil {
+		return nil, err
+	}
+	s.resetGeneration++
+	return s.processCapability.IssueGenerationGrant(ctx, startupownership.GrantRequest{
+		BundleHash: bundleHash, RuntimeInstanceID: runtimeInstanceID,
+		RuntimeGeneration: s.resetGeneration, SourceSetRevision: plan.Revision,
+	})
 }
 
 func (s *processLifecycleSupervisor) prepareLiveRunRuntime(ctx context.Context, runID string) (retErr error) {
