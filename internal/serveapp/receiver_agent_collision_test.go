@@ -196,7 +196,7 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 		t.Fatalf("public agent identity: %+v", detail)
 	}
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
+	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
 	if entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Fields["processed_count"] != float64(turns) {
 		t.Fatalf("public receiver state: %+v", entity)
 	}

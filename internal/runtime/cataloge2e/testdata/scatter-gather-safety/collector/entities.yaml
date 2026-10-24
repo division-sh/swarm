@@ -1,3 +1,0 @@
-collector_state:
-  batch_id: {type: text}
-  expected_item_ids: {type: "[text]"}

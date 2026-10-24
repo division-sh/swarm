@@ -118,7 +118,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			requireForkedSourceRefusal(t, "scenario import", err)
 			_, err = writer.ApplyEntityFieldMutation(ctx, pipeline.EntityFieldMutation{
 				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FlowID: "freeze", Owner: runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.sourceRun, Route: runtimeflowidentity.DeriveRoute("freeze", "domain")},
-				Mutation: entityruntime.Mutation{Target: "entity.account_id", Value: "changed"},
+				Mutation: entityruntime.Mutation{Target: "state.account_id", Value: "changed"},
 				Writer:   mutationlog.Writer{Type: "agent", ID: "source-freeze", HandlerStep: "save_entity_field"},
 			})
 			requireForkedSourceRefusal(t, "save entity field and mutation log", err)

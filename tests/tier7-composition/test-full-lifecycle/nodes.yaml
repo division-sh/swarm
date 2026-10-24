@@ -9,7 +9,7 @@ validation-node:
 
 completion-node:
   order.validated:
-    guard: _entity.gates.validation_passed == true
+    guard: state.validation_passed == true
     advances_to: complete
     emit:
       event: order.finalized

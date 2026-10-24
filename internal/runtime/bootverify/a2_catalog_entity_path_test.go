@@ -15,27 +15,27 @@ func TestA2CatalogEntityPathPreservesAdmittedLeafShapes(t *testing.T) {
 		name, path, kind, typeRef string
 		optional                  bool
 	}{
-		{name: "text", path: "entity.name", kind: "scalar", typeRef: "text"},
-		{name: "integer", path: "entity.total", kind: "scalar", typeRef: "integer"},
-		{name: "scalar alias", path: "entity.score", kind: "scalar", typeRef: "Score"},
-		{name: "enum", path: "entity.decision", kind: "enum", typeRef: "Decision"},
-		{name: "named record", path: "entity.profile", kind: "named", typeRef: "Profile"},
-		{name: "list", path: "entity.ids", kind: "list", typeRef: "[text]"},
-		{name: "list size", path: "entity.ids.size", kind: "scalar", typeRef: "integer"},
-		{name: "nested lists", path: "entity.groups", kind: "list", typeRef: "[[text]]"},
-		{name: "meaningful map", path: "entity.items", kind: "map", typeRef: "map[text][integer]"},
-		{name: "record values", path: "entity.records", kind: "map", typeRef: "map[text]Record"},
-		{name: "nested map values", path: "entity.by_region", kind: "map", typeRef: "map[text]map[text]Decision"},
-		{name: "record scalar", path: "entity.profile.name", kind: "scalar", typeRef: "text"},
-		{name: "optional record field", path: "entity.profile.note", kind: "scalar", typeRef: "text", optional: true},
-		{name: "record list", path: "entity.profile.ids", kind: "list", typeRef: "[integer]"},
-		{name: "record list size", path: "entity.profile.ids.size", kind: "scalar", typeRef: "integer"},
-		{name: "optional root map", path: "entity.optional_items", kind: "map", typeRef: "map[text][integer]", optional: true},
-		{name: "optional root list size", path: "entity.optional_ids.size", kind: "scalar", typeRef: "integer", optional: true},
-		{name: "record map", path: "entity.profile.items", kind: "map", typeRef: "map[text][integer]"},
-		{name: "optional ancestor scalar", path: "entity.profile.maybe.label", kind: "scalar", typeRef: "text", optional: true},
-		{name: "optional ancestor map", path: "entity.profile.maybe.items", kind: "map", typeRef: "map[text]Score", optional: true},
-		{name: "optional ancestor list size", path: "entity.profile.maybe.ids.size", kind: "scalar", typeRef: "integer", optional: true},
+		{name: "text", path: "state.name", kind: "scalar", typeRef: "text"},
+		{name: "integer", path: "state.total", kind: "scalar", typeRef: "integer"},
+		{name: "scalar alias", path: "state.score", kind: "scalar", typeRef: "Score"},
+		{name: "enum", path: "state.decision", kind: "enum", typeRef: "Decision"},
+		{name: "named record", path: "state.profile", kind: "named", typeRef: "Profile"},
+		{name: "list", path: "state.ids", kind: "list", typeRef: "[text]"},
+		{name: "list size", path: "state.ids.size", kind: "scalar", typeRef: "integer"},
+		{name: "nested lists", path: "state.groups", kind: "list", typeRef: "[[text]]"},
+		{name: "meaningful map", path: "state.items", kind: "map", typeRef: "map[text][integer]"},
+		{name: "record values", path: "state.records", kind: "map", typeRef: "map[text]Record"},
+		{name: "nested map values", path: "state.by_region", kind: "map", typeRef: "map[text]map[text]Decision"},
+		{name: "record scalar", path: "state.profile.name", kind: "scalar", typeRef: "text"},
+		{name: "optional record field", path: "state.profile.note", kind: "scalar", typeRef: "text", optional: true},
+		{name: "record list", path: "state.profile.ids", kind: "list", typeRef: "[integer]"},
+		{name: "record list size", path: "state.profile.ids.size", kind: "scalar", typeRef: "integer"},
+		{name: "optional root map", path: "state.optional_items", kind: "map", typeRef: "map[text][integer]", optional: true},
+		{name: "optional root list size", path: "state.optional_ids.size", kind: "scalar", typeRef: "integer", optional: true},
+		{name: "record map", path: "state.profile.items", kind: "map", typeRef: "map[text][integer]"},
+		{name: "optional ancestor scalar", path: "state.profile.maybe.label", kind: "scalar", typeRef: "text", optional: true},
+		{name: "optional ancestor map", path: "state.profile.maybe.items", kind: "map", typeRef: "map[text]Score", optional: true},
+		{name: "optional ancestor list size", path: "state.profile.maybe.ids.size", kind: "scalar", typeRef: "integer", optional: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := a2CatalogPathBundle()
@@ -61,18 +61,18 @@ func TestA2CatalogEntityPathRejectsMissingDeclaredTypes(t *testing.T) {
 	for _, tc := range []struct {
 		name, path, typeRef string
 	}{
-		{name: "empty root type", path: "entity.name", typeRef: ""},
-		{name: "unknown root type", path: "entity.name", typeRef: "Missing"},
-		{name: "empty scalar alias", path: "entity.name", typeRef: "Empty"},
-		{name: "empty list element alias", path: "entity.name", typeRef: "[Empty]"},
-		{name: "empty list element alias size", path: "entity.name.size", typeRef: "[Empty]"},
-		{name: "empty map value alias", path: "entity.name", typeRef: "map[text]Empty"},
-		{name: "cyclic scalar alias", path: "entity.name", typeRef: "Cycle"},
-		{name: "empty list element", path: "entity.name", typeRef: "[]"},
-		{name: "unknown list element", path: "entity.name.size", typeRef: "[Missing]"},
-		{name: "missing map value", path: "entity.name", typeRef: "map[text]"},
-		{name: "unknown map value", path: "entity.name", typeRef: "map[text]Missing"},
-		{name: "empty nested field", path: "entity.profile.blank", typeRef: "text"},
+		{name: "empty root type", path: "state.name", typeRef: ""},
+		{name: "unknown root type", path: "state.name", typeRef: "Missing"},
+		{name: "empty scalar alias", path: "state.name", typeRef: "Empty"},
+		{name: "empty list element alias", path: "state.name", typeRef: "[Empty]"},
+		{name: "empty list element alias size", path: "state.name.size", typeRef: "[Empty]"},
+		{name: "empty map value alias", path: "state.name", typeRef: "map[text]Empty"},
+		{name: "cyclic scalar alias", path: "state.name", typeRef: "Cycle"},
+		{name: "empty list element", path: "state.name", typeRef: "[]"},
+		{name: "unknown list element", path: "state.name.size", typeRef: "[Missing]"},
+		{name: "missing map value", path: "state.name", typeRef: "map[text]"},
+		{name: "unknown map value", path: "state.name", typeRef: "map[text]Missing"},
+		{name: "empty nested field", path: "state.profile.blank", typeRef: "text"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := a2CatalogPathBundle()
@@ -98,16 +98,16 @@ func TestA2CatalogEntityPathRejectsUnownedAndInvalidTraversal(t *testing.T) {
 	for _, tc := range []struct {
 		name, flow, path, diagnostic string
 	}{
-		{name: "unknown field", flow: ".", path: "entity.missing", diagnostic: "does not declare field"},
-		{name: "unknown nested field", flow: ".", path: "entity.profile.missing", diagnostic: "undeclared nested field"},
-		{name: "empty segment", flow: ".", path: "entity.profile..name", diagnostic: "empty segment"},
-		{name: "trailing segment", flow: ".", path: "entity.profile.", diagnostic: "empty segment"},
-		{name: "scalar traversal", flow: ".", path: "entity.name.value", diagnostic: "non-composite"},
-		{name: "list indexing", flow: ".", path: "entity.ids.0", diagnostic: "unsupported segment"},
-		{name: "list size is terminal", flow: ".", path: "entity.ids.size.value", diagnostic: "unsupported segment"},
-		{name: "map key is not a record field", flow: ".", path: "entity.items.A", diagnostic: "non-composite"},
-		{name: "map has no list size pseudo field", flow: ".", path: "entity.items.size", diagnostic: "non-composite"},
-		{name: "foreign flow cannot borrow root fields", flow: "unrelated", path: "entity.items", diagnostic: "no declared entity contract"},
+		{name: "unknown field", flow: ".", path: "state.missing", diagnostic: "does not declare field"},
+		{name: "unknown nested field", flow: ".", path: "state.profile.missing", diagnostic: "undeclared nested field"},
+		{name: "empty segment", flow: ".", path: "state.profile..name", diagnostic: "empty segment"},
+		{name: "trailing segment", flow: ".", path: "state.profile.", diagnostic: "empty segment"},
+		{name: "scalar traversal", flow: ".", path: "state.name.value", diagnostic: "non-composite"},
+		{name: "list indexing", flow: ".", path: "state.ids.0", diagnostic: "unsupported segment"},
+		{name: "list size is terminal", flow: ".", path: "state.ids.size.value", diagnostic: "unsupported segment"},
+		{name: "map key is not a record field", flow: ".", path: "state.items.A", diagnostic: "non-composite"},
+		{name: "map has no list size pseudo field", flow: ".", path: "state.items.size", diagnostic: "non-composite"},
+		{name: "foreign flow cannot borrow root fields", flow: "unrelated", path: "state.items", diagnostic: "no declared entity contract"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := a2CatalogPathBundle()
@@ -131,9 +131,9 @@ func TestA2CatalogEntityPathConsumersRetainMapOwner(t *testing.T) {
 		name, path, field, typeRef string
 		optional                   bool
 	}{
-		{name: "root map reader", path: "entity.items", field: "items", typeRef: "map[text][integer]"},
-		{name: "record map", path: "entity.profile.items", field: "profile", typeRef: "map[text][integer]"},
-		{name: "optional ancestor", path: "entity.profile.maybe.items", field: "profile", typeRef: "map[text]Score", optional: true},
+		{name: "root map reader", path: "state.items", field: "items", typeRef: "map[text][integer]"},
+		{name: "record map", path: "state.profile.items", field: "profile", typeRef: "map[text][integer]"},
+		{name: "optional ancestor", path: "state.profile.maybe.items", field: "profile", typeRef: "map[text]Score", optional: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := a2CatalogPathBundle()

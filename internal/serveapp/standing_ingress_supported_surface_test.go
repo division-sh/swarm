@@ -1818,10 +1818,10 @@ func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), stoppedSchema)
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "events.yaml"), "service.tick:\n")
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "nodes.yaml"), "hold:\n  service.tick:\n    guard: true\n")
-	baseEntities, err := os.ReadFile(filepath.Join(root, "telegram-ingress", "entities.yaml"))
+	baseEntities, err := os.ReadFile(filepath.Join(root, "telegram-ingress", "state.yaml"))
 	if err != nil {
 		t.Fatalf("read healthy standing flow entities: %v", err)
 	}
-	writeStandingCandidateFile(t, filepath.Join(flowDir, "entities.yaml"), string(baseEntities))
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "state.yaml"), string(baseEntities))
 	return root
 }

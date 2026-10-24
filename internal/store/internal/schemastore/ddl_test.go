@@ -47,50 +47,6 @@ func TestSchemaFieldTypeToDDLError(t *testing.T) {
 	}
 }
 
-func TestNodeStateFieldTypeToDDL_AllowsNamedTypesAsJSONB(t *testing.T) {
-	cases := map[string]string{
-		"DimensionScore":   "JSONB",
-		"[DimensionScore]": "JSONB",
-		"DimensionScore[]": "JSONB",
-		"text[]":           "TEXT[]",
-	}
-	for schemaType, wantDDL := range cases {
-		t.Run(schemaType, func(t *testing.T) {
-			got, err := NodeStateFieldTypeToDDL(schemaType)
-			if err != nil {
-				t.Fatalf("NodeStateFieldTypeToDDL(%q): %v", schemaType, err)
-			}
-			if got != wantDDL {
-				t.Fatalf("NodeStateFieldTypeToDDL(%q) = %q, want %q", schemaType, got, wantDDL)
-			}
-		})
-	}
-}
-
-func TestNodeStateFieldTypeToDDL_CanonicalListsPreservePhysicalTypes(t *testing.T) {
-	for _, tc := range []struct{ canonical, physical, ddl string }{
-		{"[text]", "text[]", "TEXT[]"},
-		{"[numeric(5,2)]", "numeric(5,2)[]", "NUMERIC(5,2)[]"},
-		{"[boolean]", "boolean[]", "BOOLEAN[]"},
-		{"[jsonb]", "jsonb[]", "JSONB[]"},
-		{"[uuid]", "uuid[]", "UUID[]"},
-		{"[DimensionScore]", "DimensionScore[]", "JSONB"},
-		{"numeric(5,2)", "numeric(5,2)", "NUMERIC(5,2)"},
-		{"jsonb", "jsonb", "JSONB"},
-	} {
-		t.Run(tc.canonical, func(t *testing.T) {
-			physical, err := NodeStateFieldTypeToDDL(tc.physical)
-			if err != nil || physical != tc.ddl {
-				t.Fatalf("internal physical type %q = %q, %v; want %q", tc.physical, physical, err, tc.ddl)
-			}
-			canonical, err := NodeStateFieldTypeToDDL(tc.canonical)
-			if err != nil || canonical != physical {
-				t.Fatalf("canonical type %q = %q, %v; want same physical type %q", tc.canonical, canonical, err, physical)
-			}
-		})
-	}
-}
-
 func TestGeneratePlatformTableDDLs(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {
@@ -389,64 +345,5 @@ func TestGeneratePlatformTableDDLs_OrdersAgentsBeforeIdentityDependents(t *testi
 	}
 	if plans[1].TableName != "agent_directive_operations" {
 		t.Fatalf("second table = %q, want agent_directive_operations", plans[1].TableName)
-	}
-}
-
-func TestGenerateNodeStateTableDDLs(t *testing.T) {
-	nodes := []runtimecontracts.ScopedNodeRecord{{
-		LogicalID: "processing-node",
-		Entry: runtimecontracts.SystemNodeContract{
-			StateTable: "processing_node_state",
-			StateSchema: runtimecontracts.NodeStateSchema{
-				Fields: []runtimecontracts.NodeStateField{
-					{Name: "attempts", Type: "integer"},
-					{Name: "last_error", Type: "text"},
-					{Name: "score", Type: "float"},
-					{Name: "dimensions_received", Type: "[DimensionScore]"},
-				},
-			},
-		},
-		Source: runtimecontracts.ContractItemSource{FlowPath: ".", Family: "node", File: "nodes.yaml"},
-	}}
-
-	plans, err := GenerateNodeStateTableDDLs(nodes)
-	if err != nil {
-		t.Fatalf("GenerateNodeStateTableDDLs: %v", err)
-	}
-	if len(plans) != 1 {
-		t.Fatalf("expected 1 state DDL plan, got %d", len(plans))
-	}
-	createStmt := plans[0].Statements[0]
-	if !strings.Contains(createStmt, `"entity_id" UUID NOT NULL`) {
-		t.Fatalf("expected entity_id column, got %q", createStmt)
-	}
-	if !strings.Contains(createStmt, `"node_id" TEXT NOT NULL`) {
-		t.Fatalf("expected node_id column, got %q", createStmt)
-	}
-	if !strings.Contains(createStmt, `"attempts" BIGINT`) || !strings.Contains(createStmt, `"last_error" TEXT`) || !strings.Contains(createStmt, `"score" DOUBLE PRECISION`) || !strings.Contains(createStmt, `"dimensions_received" JSONB`) {
-		t.Fatalf("expected state_schema fields, got %q", createStmt)
-	}
-	if !strings.Contains(createStmt, `PRIMARY KEY ("entity_id", "node_id")`) {
-		t.Fatalf("expected composite primary key, got %q", createStmt)
-	}
-}
-
-func TestGenerateNodeStateTableDDLs_RejectsPseudoTypes(t *testing.T) {
-	nodes := []runtimecontracts.ScopedNodeRecord{{
-		LogicalID: "processing-node",
-		Entry: runtimecontracts.SystemNodeContract{
-			StateTable: "processing_node_state",
-			StateSchema: runtimecontracts.NodeStateSchema{
-				Fields: []runtimecontracts.NodeStateField{
-					{Name: "received_items", Type: "dimension score receipts keyed by dimension name"},
-				},
-			},
-		},
-		Source: runtimecontracts.ContractItemSource{FlowPath: ".", Family: "node", File: "nodes.yaml"},
-	}}
-
-	_, err := GenerateNodeStateTableDDLs(nodes)
-	if err == nil || !strings.Contains(err.Error(), "not canonical") {
-		t.Fatalf("expected pseudo-type error, got %v", err)
 	}
 }

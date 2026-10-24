@@ -18,7 +18,7 @@ the verified `bundle_hash`, a fresh `idempotency_key`, and this payload:
 
 The root starts in `waiting` with empty `items`. Its real creation handler writes
 the payload map and enters `collecting`; that committed entry snapshots the map's
-lexical keys. Deferred fan-out reads the retained post-write `entity.items` and
+lexical keys. Deferred fan-out reads the retained post-write `state.items` and
 publishes each key with its integer-list value from the exact retained batch
 payload, index and count. This is the same map written by the batch handler,
 not a live entity reread or a separately authored membership list. Ordinary flat

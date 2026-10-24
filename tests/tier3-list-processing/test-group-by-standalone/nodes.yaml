@@ -3,7 +3,7 @@ group-node:
     group_by:
       items_from: payload.items
       key: category
-      store_as: entity.grouped
+      store_as: state.grouped
     emit:
       event: items.grouped
     advances_to: done

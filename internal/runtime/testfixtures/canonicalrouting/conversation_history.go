@@ -6,9 +6,9 @@ import "testing"
 // actual keyed constructor and declared advance. It has no agents or autonomous work.
 func ConversationForkConstructionDocuments() map[string]string {
 	return map[string]string{
-		"flow/schema.yaml":   "name: flow\ninstance: name\nstages:\n  draft: {}\n  after: {}\ninputs: [conversation.created]\n",
-		"flow/entities.yaml": "default:\n  name: text\n  current_state: {type: 'text?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  gates: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  accumulator: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  bookkeeping: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n",
-		"flow/nodes.yaml":    "advance:\n  conversation.created:\n    advances_to: after\n",
+		"flow/schema.yaml": "name: flow\ninstance: name\nstages:\n  draft: {}\n  after: {}\ninputs: [conversation.created]\n",
+		"flow/state.yaml":  "name: text\ncurrent_state: text?\ngates: json?\naccumulator: json?\nbookkeeping: json?\n",
+		"flow/nodes.yaml":  "advance:\n  conversation.created:\n    advances_to: after\n",
 	}
 }
 

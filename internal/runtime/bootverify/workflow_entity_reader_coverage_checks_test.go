@@ -64,7 +64,7 @@ func TestRun_GateContextCountsAsEntityReaderCoverage(t *testing.T) {
 		Stage:    "review",
 		Decision: "review_gate",
 		Context: map[string]runtimecontracts.ExpressionValue{
-			"resolution": {Kind: runtimecontracts.ExpressionKindCEL, CEL: "entity.resolution"},
+			"resolution": {Kind: runtimecontracts.ExpressionKindCEL, CEL: "state.resolution"},
 		},
 	}}
 

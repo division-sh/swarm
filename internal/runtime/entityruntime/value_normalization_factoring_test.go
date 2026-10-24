@@ -157,7 +157,7 @@ func TestEntityValueFactoringMapKeysAndContainedConsumer(t *testing.T) {
 	if got, err := NormalizeFieldValue(contract, "items", map[string]any{"open": 1, " open ": 2}); got != nil || err == nil || !strings.Contains(err.Error(), "duplicate normalized map key") {
 		t.Fatalf("normalized-key collision: got=%#v err=%v", got, err)
 	}
-	target, err := ResolveContainedOperationTarget(contract, "entity.items", ContainedOperationSet, true, false)
+	target, err := ResolveContainedOperationTarget(contract, "state.items", ContainedOperationSet, true, false)
 	if err != nil || target.MapKeyType != "Status" || target.MapValueType != "integer" || target.TargetType != "integer" {
 		t.Fatalf("MapTypeParts contained-operation consumer: target=%+v err=%v", target, err)
 	}
@@ -220,7 +220,7 @@ func TestEntityValueFactoringEqualityPresence(t *testing.T) {
 		{nil, ""}, {map[string]any{"left": "x", "right": "x"}, ""},
 		{map[string]any{"left": "x"}, "target is missing"},
 		{map[string]any{"right": "x"}, "source is missing"},
-		{map[string]any{"left": "x", "right": "y"}, "must equal entity.right"},
+		{map[string]any{"left": "x", "right": "y"}, "must equal state.right"},
 	} {
 		got, err := NormalizeState(contract, tc.values)
 		if tc.failure == "" {

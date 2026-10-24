@@ -39,17 +39,14 @@ instance: operating_id
 inputs:
   - opco.product_initialization_requested
 `,
-		"operating/entities.yaml": `operating:
-  operating_id:
-    type: uuid
-    immutable: true
+		"operating/state.yaml": `operating_id: uuid
 `,
 		"operating/events.yaml": `opco.product_initialization_requested:
   topic: text?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
   opco.product_initialization_requested:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `,
 	}
 	for relative, source := range files {
@@ -90,7 +87,7 @@ inputs:
   - root.ready
 `, "", "", `consumer-node:
   root.ready:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `)
 	return root
 }
@@ -109,7 +106,7 @@ func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
 	writeClosedVariantFile(t, root, "child/events.yaml", "root.ready:\n  entity_id: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `child-node:
   root.ready:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `)
 	return root
 }
@@ -189,7 +186,7 @@ connect:
 `, scoutPath))
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
   scout.completed:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, scoutPath, `name: scout
 outputs:
@@ -225,7 +222,7 @@ connect:
 	writeClosedVariantFile(t, root, "events.yaml", "work.ping:\n  turn: integer\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-boomerang:
   work.pong:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, "boomerang", `name: boomerang
 inputs:
@@ -234,7 +231,7 @@ outputs:
   - work.pong
 `, "work.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
   work.ping:
-    guard: _entity.id != ""
+    guard: instance.id != ""
 `)
 	return root
 }

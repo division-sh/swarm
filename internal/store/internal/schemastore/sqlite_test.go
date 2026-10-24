@@ -20,22 +20,6 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
-		LogicalID: "planner",
-		Entry: runtimecontracts.SystemNodeContract{
-			StateTable: "planner_state",
-			StateSchema: runtimecontracts.NodeStateSchema{
-				Fields: []runtimecontracts.NodeStateField{
-					{Name: "status", Type: "text"},
-					{Name: "snapshot", Type: "jsonb"},
-				},
-			},
-		},
-		Source: runtimecontracts.ContractItemSource{FlowPath: ".", Family: "node", File: "nodes.yaml"},
-	}})
-	if err != nil {
-		t.Fatalf("GenerateNodeStateTableDDLs: %v", err)
-	}
 	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	sqliteStore, err := NewSQLite(dbPath)
 	if err != nil {
@@ -48,7 +32,7 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	})
 	if err := sqliteStore.BootstrapSchema(ctx, SchemaBootstrapRequest{
 		PlatformPlans: platformPlans,
-		StatePlans:    statePlans,
+
 		Origin: RuntimeStoreOrigin{
 			SwarmVersion:    "sqlite-schema-test",
 			PlatformVersion: spec.Platform.Version,
@@ -61,7 +45,7 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 		t.Fatalf("sqlite bootstrap did not create file-backed db at %s: %v", dbPath, err)
 	}
 
-	for _, tableName := range append(platformTableNamesForSQLiteSchemaTest(), "planner_state", "deployment_channel_operations") {
+	for _, tableName := range append(platformTableNamesForSQLiteSchemaTest(), "deployment_channel_operations") {
 		if !sqliteTableExists(t, sqliteStore.backend.ConstructionHandle(), tableName) {
 			t.Fatalf("sqlite table %s missing after bootstrap", tableName)
 		}

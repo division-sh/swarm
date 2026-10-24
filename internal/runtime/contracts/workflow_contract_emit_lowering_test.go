@@ -11,7 +11,7 @@ func TestLowerEmitSpecFieldsLowersFromAndPreservesLiteralValues(t *testing.T) {
 	bundle := emitFieldLoweringTestBundle()
 	spec := EmitSpec{
 		Event: "account.bucketed",
-		From:  "entity",
+		From:  "state",
 		Fields: map[string]ExpressionValue{
 			"interest_score": LiteralExpression("payload"),
 			"tier":           CELExpression("payload.computed_tier"),
@@ -30,8 +30,8 @@ func TestLowerEmitSpecFieldsLowersFromAndPreservesLiteralValues(t *testing.T) {
 	if lowered.From != "" {
 		t.Fatalf("lowered From = %q, want empty canonical spec", lowered.From)
 	}
-	assertEmitCEL(t, lowered.Fields, "account_id", "entity.account_id")
-	assertEmitCEL(t, lowered.Fields, "bucket", "entity.bucket")
+	assertEmitCEL(t, lowered.Fields, "account_id", "state.account_id")
+	assertEmitCEL(t, lowered.Fields, "bucket", "state.bucket")
 	if got := lowered.Fields["interest_score"]; !got.HasLiteralValue() || got.Literal != "payload" {
 		t.Fatalf("interest_score = %#v, want literal payload", got)
 	}
@@ -42,7 +42,7 @@ func TestLowerEmitSpecFieldsExplicitFieldsWinAndOptionalsRemainExplicit(t *testi
 	bundle := emitFieldLoweringTestBundle()
 	spec := EmitSpec{
 		Event: "account.bucketed",
-		From:  "entity",
+		From:  "state",
 		Fields: map[string]ExpressionValue{
 			"bucket":         CELExpression(`"manual"`),
 			"interest_score": LiteralExpression("payload"),
@@ -58,7 +58,7 @@ func TestLowerEmitSpecFieldsExplicitFieldsWinAndOptionalsRemainExplicit(t *testi
 		t.Fatalf("LowerEmitSpecFields error: %v", err)
 	}
 
-	assertEmitCEL(t, lowered.Fields, "account_id", "entity.account_id")
+	assertEmitCEL(t, lowered.Fields, "account_id", "state.account_id")
 	assertEmitCEL(t, lowered.Fields, "bucket", `"manual"`)
 	if _, ok := lowered.Fields["tier"]; ok {
 		t.Fatalf("optional tier was auto-filled by emit.from: %#v", lowered.Fields)
@@ -72,6 +72,16 @@ func TestLowerEmitSpecFieldsFailsClosed(t *testing.T) {
 		want string
 	}{
 		{
+			name: "retired entity source",
+			spec: EmitSpec{Event: "account.bucketed", From: "entity"},
+			want: "use state or payload",
+		},
+		{
+			name: "retired metadata source",
+			spec: EmitSpec{Event: "account.bucketed", From: "_entity"},
+			want: "use state or payload",
+		},
+		{
 			name: "missing source field",
 			spec: EmitSpec{Event: "account.bucketed", From: "payload"},
 			want: "source payload does not declare it",
@@ -80,7 +90,7 @@ func TestLowerEmitSpecFieldsFailsClosed(t *testing.T) {
 			name: "undeclared output field",
 			spec: EmitSpec{
 				Event: "account.bucketed",
-				From:  "entity",
+				From:  "state",
 				Fields: map[string]ExpressionValue{
 					"extra": CELExpression("payload.interest_score"),
 				},
@@ -107,7 +117,7 @@ func TestEmitTargetIsStrictlyRetiredBeforeFieldLowering(t *testing.T) {
 	var spec EmitSpec
 	err := decodeNodeTestYAML([]byte(`
 event: account.bucketed
-from: entity
+from: state
 target:
   flow: account
   match:

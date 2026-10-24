@@ -26,7 +26,7 @@ func TestFanOutBarrierConsumesConstructedHeaderBothStores(t *testing.T) {
 				t.Run(backend+"/"+shape+"/"+cell, func(t *testing.T) {
 					files := map[string]string{"schema.yaml": "name: barrier-header\nstages:\n  work: {}\n"}
 					if shape == "fields" {
-						files["entities.yaml"] = "item:\n  label: text?\n  accumulator:\n    type: text?\n    initial: 'business-only'\n"
+						files["state.yaml"] = "item:\n  label: text?\n  accumulator:\n    type: text?\n    initial: 'business-only'\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 					base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)

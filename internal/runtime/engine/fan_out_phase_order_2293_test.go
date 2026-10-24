@@ -101,7 +101,7 @@ func Test2293HandlerFanOutContinuesThroughSelectionAndEffects(t *testing.T) {
 					bundle.RootEntities["subject"] = entity
 					executor.deps.Source = sourceWithFixtureStages(executor.deps.Source, ".", "pending", "pending", "handler_stage", "selected_stage")
 					executor.evaluator = contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
-						"entity.selected": func(base BaseContext) (bool, error) {
+						"state.selected": func(base BaseContext) (bool, error) {
 							return base.Entity.Raw()["selected"] == true && base.Computed.Raw()["temporary"] == 1, nil
 						},
 					}}
@@ -114,7 +114,7 @@ func Test2293HandlerFanOutContinuesThroughSelectionAndEffects(t *testing.T) {
 						}}},
 						Clear: &rc.ClearSpec{Targets: []string{"computed.temporary"}},
 					}
-					row := rc.HandlerRuleEntry{Condition: "entity.selected", AdvancesTo: "selected_stage"}
+					row := rc.HandlerRuleEntry{Condition: "state.selected", AdvancesTo: "selected_stage"}
 					wantEmits, wantActivities := 0, 0
 					if effect == "emit" {
 						row.Emit = rc.EmitSpec{Event: "item.ready", Fields: map[string]rc.ExpressionValue{
@@ -210,7 +210,7 @@ func Test2293HandlerAndSelectedFanOutKeepDistinctIntents(t *testing.T) {
 
 func TestReviewerD2293SelectedFanOutSourcePrecedesRuleWrites(t *testing.T) {
 	for _, replacement := range [][]any{{"new"}, {"new", "extra"}} {
-		executor, trigger, _, err := a2FanOutCollectionFixture(t, "entity.items", "[text]",
+		executor, trigger, _, err := a2FanOutCollectionFixture(t, "state.items", "[text]",
 			map[string]any{"items": []any{"old"}}, map[string]any{"items": []any{"old"}}, nil, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -218,7 +218,7 @@ func TestReviewerD2293SelectedFanOutSourcePrecedesRuleWrites(t *testing.T) {
 		executor.evaluator = stubEvaluator{bools: map[string]bool{"true": true}}
 		handler := rc.SystemNodeEventHandler{Rules: []rc.HandlerRuleEntry{{
 			Condition: "true",
-			FanOut: &rc.FanOutSpec{ItemsFrom: "entity.items", As: "key", Emit: rc.EmitSpec{
+			FanOut: &rc.FanOutSpec{ItemsFrom: "state.items", As: "key", Emit: rc.EmitSpec{
 				Event: "item.ready", Fields: map[string]rc.ExpressionValue{
 					"key": rc.CELExpression("key"), "index": rc.CELExpression("fan_out.index"), "count": rc.CELExpression("fan_out.count"),
 				},

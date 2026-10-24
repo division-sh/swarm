@@ -215,7 +215,7 @@ outputs:
 	writeFixtureFile(t, root+"/scoring/types.yaml", `ScoreBreakdown:
   total: numeric
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/state.yaml", `
 vertical:
   name: text
   review_count:
@@ -594,7 +594,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/state.yaml", `
 vertical:
   name: text
 campaign:
@@ -616,7 +616,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/entities.yaml", `
+	writeFixtureFile(t, root+"/state.yaml", `
 vertical:
   name: text
 campaign:
@@ -640,9 +640,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
-vertical:
-  name: text
+	writeFixtureFile(t, root+"/scoring/state.yaml", `name: text
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
@@ -661,9 +659,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/entities.yaml", `
-vertical:
-  name: text
+	writeFixtureFile(t, root+"/state.yaml", `name: text
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
@@ -683,9 +679,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
-vertical:
-  name: text
+	writeFixtureFile(t, root+"/scoring/state.yaml", `name: text
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))

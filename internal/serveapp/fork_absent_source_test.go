@@ -78,9 +78,9 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 				t.Fatalf("selected execution lost fork-local root ownership: %s %s", replayKind, replayRoute)
 			}
 			for method, params := range map[string]map[string]any{
-				"run.get":     {"run_id": fork.ForkRunID},
-				"event.list":  {"filter": map[string]any{"run_id": fork.ForkRunID}, "limit": 500},
-				"entity.list": {"run_id": fork.ForkRunID, "limit": 500},
+				"run.get":    {"run_id": fork.ForkRunID},
+				"event.list": {"filter": map[string]any{"run_id": fork.ForkRunID}, "limit": 500},
+				"state.list": {"run_id": fork.ForkRunID, "limit": 500},
 			} {
 				var result map[string]any
 				requireServedJSONRPCResult(t, rt.Endpoint, method, params, &result)

@@ -9,7 +9,7 @@ import (
 
 func TestFieldGrantAuthorityRetired(t *testing.T) {
 	for direction, key := range map[string]string{"inputs": "reads", "outputs": "writes"} {
-		for _, value := range []string{"null", "[]", "[entity.status]", "{status: text}"} {
+		for _, value := range []string{"null", "[]", "[state.status]", "{status: text}"} {
 			t.Run(direction+"/"+value, func(t *testing.T) {
 				body := fmt.Sprintf("name: grant-rejection\npins:\n  %s:\n    %s: %s\n", direction, key, value)
 				if _, err := admitSchemaFragment(body); err == nil || !strings.Contains(err.Error(), "schema.yaml:") {

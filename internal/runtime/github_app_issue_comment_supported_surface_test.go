@@ -347,7 +347,7 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
+			Condition: `instance.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
 			Activity: runtimecontracts.ActivitySpec{
 				ID:   "github_create_issue_comment",
 				Tool: "github.create_issue_comment",

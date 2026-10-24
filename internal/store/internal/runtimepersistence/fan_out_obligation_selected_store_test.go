@@ -2234,7 +2234,7 @@ func bindFanOutEntityRevision(t *testing.T, ctx context.Context, db *sql.DB, pos
 		t.Fatal(err)
 	}
 	capsule.EntityID = entityID
-	fixture.plan.ItemsFrom = "entity.items"
+	fixture.plan.ItemsFrom = "state.items"
 	plan := fanOutOwnerFixtureEvidence(t, fixture)
 	capsule.SourcePlanRef, capsule.SourceProjection = plan.Ref, plan.SemanticEvidence()
 	capsuleRaw, err := json.Marshal(capsule)

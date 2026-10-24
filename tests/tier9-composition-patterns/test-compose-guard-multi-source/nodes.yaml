@@ -1,7 +1,7 @@
 gatekeeper:
   candidate.submitted:
     rules:
-      - when: (has(entity.depth) && entity.depth <= policy.max_depth) && (has(entity.child_count) && entity.child_count < 2) && (payload.score >= policy.min_score) && (has(entity.flag_count) && entity.flag_count == 0) && (query_entities(name == payload.name).count == 0)
+      - when: (has(state.depth) && state.depth <= policy.max_depth) && (has(state.child_count) && state.child_count < 2) && (payload.score >= policy.min_score) && (has(state.flag_count) && state.flag_count == 0) && (query_entities(name == payload.name).count == 0)
         advances_to: accepted
         emit:
           event: candidate.accepted

@@ -13,11 +13,11 @@ hub-node:
     emit: {event: hub.work, fields: {hub_id: payload.hub_id}}
   hub.close: {advances_to: closed}
   hub.result:
-    guard: _entity.current_state == 'review'
+    guard: instance.stage == 'review'
     data_accumulation:
       writes:
         - {target_field: result, value: payload.value}
-        - {target_field: result_stage, value: _entity.current_state}
+        - {target_field: result_stage, value: instance.stage}
         - target_field: results
           value: |-
-            has(entity.results) ? entity.results + 1 : 1
+            has(state.results) ? state.results + 1 : 1

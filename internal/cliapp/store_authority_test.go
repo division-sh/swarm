@@ -297,7 +297,7 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 	defer selected.Close()
 	if err := selected.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
 		PlatformPlans: plans.Platform,
-		StatePlans:    plans.State,
+
 		Origin: store.RuntimeStoreOrigin{
 			SwarmVersion: "store-authority-test", PlatformVersion: bundle.Platform.Platform.Version, CreatedAt: time.Now().UTC(),
 		},

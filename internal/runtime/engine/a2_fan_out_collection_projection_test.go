@@ -54,7 +54,7 @@ func a2FanOutCollectionFixture(t *testing.T, sourcePath, typ string, payload, st
 }
 
 func TestA2FanOutMapProjectionAndTypedOrdinalAlias(t *testing.T) {
-	for _, source := range []string{"payload.items", "entity.items"} {
+	for _, source := range []string{"payload.items", "state.items"} {
 		t.Run(source, func(t *testing.T) {
 			value := map[string]any{"z": []any{4}, " a ": []any{1, 1}, "a": []any{2}}
 			exec, trigger, result, err := a2FanOutCollectionFixture(t, source, "map[text][integer]", map[string]any{"items": value}, map[string]any{"items": value}, nil, 0)
@@ -65,14 +65,14 @@ func TestA2FanOutMapProjectionAndTypedOrdinalAlias(t *testing.T) {
 			if request.Cardinality != 3 || request.Capsule.SourceProjection.ItemType.Kind != rc.CatalogTypeText {
 				t.Fatalf("wrong projection: %#v", request)
 			}
-			if source == "entity.items" {
+			if source == "state.items" {
 				if _, ok := request.Capsule.StateFields["items"]; ok {
 					t.Fatal("source duplicated into capsule")
 				}
 			}
 			now := time.Now().UTC()
 			intent := fanoutobligation.Intent{Request: request, Source: request.Source, Status: fanoutobligation.StatusOpen, NextChunkSize: 2, CreatedAt: now, UpdatedAt: now, Cursor: 1}
-			if source == "entity.items" {
+			if source == "state.items" {
 				intent.Source.MutationID = eventtest.UUID("immutable-source")
 			}
 			prepared, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)
@@ -108,11 +108,11 @@ func TestA2FanOutMapProjectionAndTypedOrdinalAlias(t *testing.T) {
 
 func TestA2FanOutSelectedPostWriteMapAndFailClosedSources(t *testing.T) {
 	replacement := map[string]any{"b": 2, "a": 1}
-	_, _, result, err := a2FanOutCollectionFixture(t, "entity.items", "map[text]integer", map[string]any{"items": replacement}, map[string]any{"items": map[string]any{"old": 9}}, []rc.WorkflowDataWrite{{TargetRef: "entity.items", Value: rc.LiteralExpression(replacement)}}, 0)
+	_, _, result, err := a2FanOutCollectionFixture(t, "state.items", "map[text]integer", map[string]any{"items": replacement}, map[string]any{"items": map[string]any{"old": 9}}, []rc.WorkflowDataWrite{{TargetRef: "state.items", Value: rc.LiteralExpression(replacement)}}, 0)
 	if err != nil || len(result.FanOutIntents) == 0 {
 		t.Fatalf("postwrite capture: %v", err)
 	}
-	if result.FanOutIntents[0].Cardinality != 2 || result.FanOutIntents[0].Capsule.SourceProjection.ItemsFrom != "entity.items" {
+	if result.FanOutIntents[0].Cardinality != 2 || result.FanOutIntents[0].Capsule.SourceProjection.ItemsFrom != "state.items" {
 		t.Fatal("captured prewrite map")
 	}
 	actual, marshalErr := json.Marshal(result.StateMutation.StateCarrier.Fields["items"])

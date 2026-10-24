@@ -95,7 +95,7 @@ inputs:
 outputs:
   - item.ready
 `,
-		"entities.yaml": "work:\n  items:\n    type: map[text][integer]\n    initial: {before: [999]}\n",
+		"state.yaml": "items: {\"before\":[999]}\n",
 		"events.yaml": `seed:
 batch.ready:
   items: map[text][integer]
@@ -113,7 +113,7 @@ item.ready:
     data_accumulation:
       writes: [{target_field: items, value: payload.items}]
     fan_out:
-      items_from: entity.items
+      items_from: state.items
       as: key
       emit:
         event: item.ready
@@ -464,7 +464,7 @@ func (p *a2MapFanOutExecution) compositeReceipt(t *testing.T, trigger events.Eve
 	var frozen []byte
 	switch r.source.Kind {
 	case fanoutobligation.SourceEntityField:
-		if r.source.RunID != p.runID || r.source.EntityID != p.runID || r.source.Field != "items" || r.plan.ItemsFrom != "entity.items" {
+		if r.source.RunID != p.runID || r.source.EntityID != p.runID || r.source.Field != "items" || r.plan.ItemsFrom != "state.items" {
 			t.Fatalf("writer did not retain its exact post-write field: %#v", r.source)
 		}
 		var err error
@@ -667,7 +667,7 @@ func (p *a2MapFanOutExecution) compositeContinuation(t *testing.T, pending gener
 func runA2MapToListDuplicateOrdinals(t *testing.T, selected gateRecoveryStoreCase) {
 	files := a2MapFanOutFiles(false)
 	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "    - item.ready\n", "    - item.ready\n    - leaf.ready\n", 1)
-	files["entities.yaml"] += `  leaf_results:
+	files["state.yaml"] += `  leaf_results:
     type: "[integer]"
     initial: []
 `
@@ -996,7 +996,7 @@ func runA2MapFanOutCompiledImmutableSource(t *testing.T, selected gateRecoverySt
 		t.Fatalf("claim compiled intent: found=%v err=%v", found, err)
 	}
 	if intent.Source.Kind != fanoutobligation.SourceEntityField || intent.Source.MutationID == "" || intent.Source.Field != "items" ||
-		intent.Request.Cardinality != len(keys) || intent.Request.Capsule.SourceProjection.ItemsFrom != "entity.items" || intent.Request.Capsule.Lineage.ParentEventID != trigger.ID() {
+		intent.Request.Cardinality != len(keys) || intent.Request.Capsule.SourceProjection.ItemsFrom != "state.items" || intent.Request.Capsule.Lineage.ParentEventID != trigger.ID() {
 		t.Fatalf("handler did not pin its post-write state revision: %#v", intent)
 	}
 	var frozen []byte

@@ -42,8 +42,6 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	},
 	"AdvancesTo": noHandlerExecutableReaders,
 	"Terminate":  noHandlerExecutableReaders,
-	"SetsGate":   noHandlerExecutableReaders,
-	"ClearGates": noHandlerExecutableReaders,
 	"DataAccumulation": func(out *[]WorkflowExecutableReader, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendDataAccumulationExecutableReaders(out, "data_accumulation", handler.DataAccumulation)
 	},
@@ -347,7 +345,7 @@ func appendJoinExecutableReaders(out *[]WorkflowExecutableReader, ctx executable
 	beforeMembers := len(*out)
 	membersFrom := join.Members.From
 	if field, statePath := strings.CutPrefix(strings.TrimSpace(membersFrom), "state."); statePath && len(runtimepaths.Parse(field).Segments) == 1 {
-		membersFrom = "entity." + field
+		membersFrom = "state." + field
 	}
 	appendExecutableReader(out, "join.members.from", membersFrom, phase)
 	for i := beforeMembers; i < len(*out); i++ {

@@ -9,7 +9,7 @@ import (
 
 func TestContainedOperationPresentationKeepsRuleContextAndOperands(t *testing.T) {
 	writes := []runtimecontracts.WorkflowDataWrite{{
-		Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "entity.audit_log",
+		Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "state.audit_log",
 		Value: runtimecontracts.RefExpression("payload.audit"),
 	}}
 	for _, tc := range []struct {

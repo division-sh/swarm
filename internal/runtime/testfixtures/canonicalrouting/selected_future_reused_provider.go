@@ -39,7 +39,7 @@ work.assigned:
     data_accumulation:
       source_event: work.finished
       writes:
-        - {target_field: counter, value: entity.counter + 1}
+        - {target_field: counter, value: state.counter + 1}
 `,
 		"work/schema.yaml": "name: work\ninstance: work_id\nstages:\n  pending: {}\n  done: {final: true}\ninputs: [work.assigned]\noutputs: [work.progress, work.finished]\n",
 

@@ -124,9 +124,6 @@ type checkerContext struct {
 	stateReachabilityLoaded   bool
 	stateReachabilityFindings []Finding
 
-	nodeStateSchemaLoaded   bool
-	nodeStateSchemaFindings []Finding
-
 	accumulatorProjectionLoaded   bool
 	accumulatorProjectionFindings []Finding
 	accumulatorSafetyLoaded       bool
@@ -179,9 +176,6 @@ type checkerContext struct {
 	timerLoaded   bool
 	timerFindings []Finding
 
-	gateSchemaLoaded   bool
-	gateSchemaFindings []Finding
-
 	inputPinLoaded   bool
 	inputPinFindings []Finding
 
@@ -206,7 +200,6 @@ var bootCheckRegistry = []Check{
 	{ID: "condition_policy_alignment", Mode: CheckSource, Severity: "error", Run: checkConditionPolicyAlignment},
 	{ID: "state_machine_coherence", Mode: CheckSource, Severity: "error", Run: checkStateMachineCoherence},
 	{ID: "semantic_drift_unreachable_state", Mode: CheckSource, Severity: "warning", Run: checkSemanticDriftUnreachableState},
-	{ID: "node_state_schema_typed_counterpart", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
 	{ID: "accumulator_entity_projection", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorEntityProjection},
 	{ID: "accumulator_handler_isolation", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorHandlerIsolation},
 	{ID: "accumulator_input_producer_path", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorInputProducerPath},
@@ -250,7 +243,6 @@ var bootCheckRegistry = []Check{
 	{ID: "event_runtime_wiring_validation", Mode: CheckSource, Severity: "error", Run: checkEventRuntimeWiringValidation},
 	{ID: "timer_validation", Mode: CheckSource, Severity: "error", Run: checkTimerValidation},
 	{ID: "clock_schedule_validation", Mode: CheckSource, Severity: "error", Run: checkClockScheduleValidation},
-	{ID: "gate_schema_validation", Mode: CheckSource, Severity: "error", Run: checkGateSchemaValidation},
 	{ID: "composition_connect_validation", Mode: CheckSource, Severity: "error", Run: checkCompositionConnectValidation},
 	{ID: "input_pin_wiring", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkInputPinWiring},
 	{ID: "pin_target_resolution", Mode: CheckSource, Severity: "error", Run: checkPinTargetResolution},
@@ -348,11 +340,8 @@ func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agent
 	return findings
 }
 
-func checkPayloadFieldCoverage(c *checkerContext) []Finding  { return c.payloadFieldCoverage() }
-func checkStateMachineCoherence(c *checkerContext) []Finding { return c.stateMachineCoherence() }
-func checkNodeStateSchemaTypedCounterpart(c *checkerContext) []Finding {
-	return c.nodeStateSchemaTypedCounterpart()
-}
+func checkPayloadFieldCoverage(c *checkerContext) []Finding       { return c.payloadFieldCoverage() }
+func checkStateMachineCoherence(c *checkerContext) []Finding      { return c.stateMachineCoherence() }
 func checkIntentResolution(c *checkerContext) []Finding           { return c.intentResolution() }
 func checkInvalidFieldDetection(c *checkerContext) []Finding      { return c.invalidFieldDetection() }
 func checkPolicyConflictDetection(c *checkerContext) []Finding    { return c.policyConflicts() }
@@ -1249,22 +1238,6 @@ func stringValueLocal(v any) string {
 		return typed
 	}
 	return ""
-}
-
-func gateNameLocal(v any) string {
-	switch typed := v.(type) {
-	case nil:
-		return ""
-	case runtimecontracts.GateSpec:
-		return strings.TrimSpace(typed.Name)
-	case *runtimecontracts.GateSpec:
-		if typed == nil {
-			return ""
-		}
-		return strings.TrimSpace(typed.Name)
-	default:
-		return strings.TrimSpace(stringValueLocal(v))
-	}
 }
 
 func handlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {

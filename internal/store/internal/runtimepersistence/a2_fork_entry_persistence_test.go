@@ -37,21 +37,21 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					opened := backend.open(t)
 					flowID, path := "owner", "owner/one"
 					files := map[string]string{
-						"schema.yaml":         "name: fork-entry-history\n",
-						"owner/schema.yaml":   "name: owner\ninstance: owner_key\nstages:\n  active: {}\ninputs:\n  - construct.requested\n",
-						"owner/entities.yaml": "review_item:\n  owner_key: text\n",
-						"owner/events.yaml":   "construct.requested:\n",
+						"schema.yaml":       "name: fork-entry-history\n",
+						"owner/schema.yaml": "name: owner\ninstance: owner_key\nstages:\n  active: {}\ninputs:\n  - construct.requested\n",
+						"owner/state.yaml":  "owner_key: text\n",
+						"owner/events.yaml": "construct.requested:\n",
 					}
 					if root {
 						flowID, path = ".", "."
 						files = map[string]string{
-							"schema.yaml":   "name: fork-entry-history\nstages:\n  active: {}\n",
-							"entities.yaml": "review_item:\n  owner_key: {type: text, initial: one}\n",
+							"schema.yaml": "name: fork-entry-history\nstages:\n  active: {}\n",
+							"state.yaml":  "owner_key: \"one\"\n",
 						}
 					}
-					entityFile, typeFile := "owner/entities.yaml", "owner/types.yaml"
+					entityFile, typeFile := "owner/state.yaml", "owner/types.yaml"
 					if root {
-						entityFile, typeFile = "entities.yaml", "types.yaml"
+						entityFile, typeFile = "state.yaml", "types.yaml"
 					}
 					files[entityFile] += "  items?: {type: '[BusinessItem]'}\n"
 					files[typeFile] = "BusinessItem:\n  id: text\n  event_id: text\n  payload: NestedBusinessItem\nNestedBusinessItem:\n  id: text\n"

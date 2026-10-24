@@ -49,7 +49,7 @@ type Kind string
 const (
 	KindInboundReceived    Kind = "inbound.received"
 	KindEventEmitted       Kind = "event.emitted"
-	KindEntityLifecycle    Kind = "entity.lifecycle"
+	KindEntityLifecycle    Kind = "state.lifecycle"
 	KindDeliveryLifecycle  Kind = "delivery.lifecycle"
 	KindDeadLetterRecorded Kind = "dead_letter.recorded"
 	KindActivityLifecycle  Kind = "activity.lifecycle"

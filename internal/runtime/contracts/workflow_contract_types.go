@@ -244,8 +244,6 @@ type HandlerTransitionSemantic struct {
 	Guard            *GuardSpec
 	AdvancesTo       string
 	Terminate        bool
-	SetsGate         *GateSpec
-	ClearGates       []string
 	DataAccumulation WorkflowDataAccumulation
 	Emit             EmitSpec
 	OnSuccess        HandlerOnSuccessSpec
@@ -599,10 +597,10 @@ func ValidateFanOutItemsSource(spec FanOutSpec) (paths.Path, error) {
 		return paths.Path{}, fmt.Errorf("fan_out.items_from is required")
 	}
 	if !path.HasExplicitRoot() {
-		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must use an explicit payload.* or entity.* root", raw)
+		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must use an explicit payload.* or state.* root", raw)
 	}
 	if path.Root != paths.RootPayload && path.Root != paths.RootEntity {
-		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must read a declared payload.* or entity.* collection", raw)
+		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must read a declared payload.* or state.* collection", raw)
 	}
 	if len(path.Segments) != 1 || strings.TrimSpace(path.Segments[0]) == "" {
 		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must reference exactly one declared top-level collection field", raw)
@@ -710,10 +708,6 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-type GateSpec struct {
-	Name  string `yaml:"name"`
-	Value any    `yaml:"value"`
-}
 type QuerySpec struct {
 	Source       string     `yaml:"source"`
 	SourcePath   paths.Path `yaml:"-"`
@@ -762,24 +756,6 @@ type EntitySchemaField struct {
 	Primary     bool   `yaml:"primary"`
 	Indexed     bool   `yaml:"indexed"`
 	Nullable    bool   `yaml:"nullable"`
-	Description string `yaml:"description"`
-}
-type NodeStateSchema struct {
-	Description string           `yaml:"description"`
-	Fields      []NodeStateField `yaml:"fields"`
-}
-type NodeGateStateSchema struct {
-	Description string          `yaml:"description"`
-	Gates       []NodeGateField `yaml:"gates"`
-	Storage     string          `yaml:"storage"`
-}
-type NodeStateField struct {
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type"`
-	Default any    `yaml:"default"`
-}
-type NodeGateField struct {
-	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
 }
 type RulesDocument = flowmodel.RulesDocument
@@ -1359,12 +1335,9 @@ func cloneEmitSpec(spec EmitSpec) EmitSpec {
 type SystemNodeContract struct {
 	Description      string                            `yaml:"description"`
 	Implementation   string                            `yaml:"-"`
-	StateTable       string                            `yaml:"state_table"`
 	IdempotencyTable string                            `yaml:"-"`
 	Timers           []WorkflowTimerContract           `yaml:"timers"`
 	EventHandlers    map[string]SystemNodeEventHandler `yaml:"-"`
-	StateSchema      NodeStateSchema                   `yaml:"state_schema"`
-	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
 type SystemNodeEventHandler struct {
 	Activity         ActivitySpec             `yaml:"activity"`
@@ -1375,8 +1348,6 @@ type SystemNodeEventHandler struct {
 	Guard            *GuardSpec               `yaml:"guard"`
 	AdvancesTo       string                   `yaml:"advances_to"`
 	Terminate        bool                     `yaml:"terminate" json:"terminate,omitempty"`
-	SetsGate         *GateSpec                `yaml:"sets_gate"`
-	ClearGates       []string                 `yaml:"clear_gates"`
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Condition        string                   `yaml:"condition"`
 	Logic            string                   `yaml:"logic"`

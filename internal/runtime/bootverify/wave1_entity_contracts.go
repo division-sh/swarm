@@ -25,9 +25,9 @@ type wave1ResolvedType struct {
 }
 
 var wave1PlatformEntityTypes = map[string]wave1ResolvedType{
-	"id":            {Kind: "scalar", Type: "uuid"},
-	"flow_instance": {Kind: "scalar", Type: "text"},
-	"current_state": {Kind: "scalar", Type: "text"},
+	"id":    {Kind: "scalar", Type: "text"},
+	"path":  {Kind: "scalar", Type: "text"},
+	"stage": {Kind: "scalar", Type: "text"},
 }
 
 func wave1EntityContractForFlow(source semanticview.Source, flowID string) wave1EntityContractView {
@@ -66,18 +66,18 @@ func wave1ResolveEntityPath(source semanticview.Source, flowID, ref string) (wav
 }
 
 func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref string) (wave1ResolvedType, string, error) {
-	ref = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), "entity."))
+	ref = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), "state."))
 	if ref == "" {
 		return wave1ResolvedType{}, "", fmt.Errorf("entity field path is required")
 	}
 	segments := strings.Split(ref, ".")
 	head := strings.TrimSpace(segments[0])
 	if head == "fan_out_count" {
-		return wave1ResolvedType{}, "", fmt.Errorf("entity.fan_out_count is platform bookkeeping; use the handler-local fan_out.count")
+		return wave1ResolvedType{}, "", fmt.Errorf("state.fan_out_count is platform bookkeeping; use the handler-local fan_out.count")
 	}
 	view := wave1EntityContractForFlow(source, flowID)
 	if !view.Defined {
-		return wave1ResolvedType{}, "", fmt.Errorf("flow %s has no declared entity contract for entity.%s", defaultFlowLabel(flowID), head)
+		return wave1ResolvedType{}, "", fmt.Errorf("flow %s has no declared entity contract for state.%s", defaultFlowLabel(flowID), head)
 	}
 	field, ok := view.Contract.Fields[head]
 	if !ok {
@@ -153,36 +153,27 @@ func wave1ResolvePlatformEntityPath(ref string) (wave1ResolvedType, error) {
 	}
 	segments := strings.Split(ref, ".")
 	head := strings.TrimSpace(segments[0])
-	if head == "gates" {
-		if len(segments) == 1 {
-			return wave1ResolvedType{Kind: "named", Type: "gates"}, nil
-		}
-		if len(segments) > 2 {
-			return wave1ResolvedType{}, fmt.Errorf("_entity.gates supports one gate name segment; got %q", ref)
-		}
-		return wave1ResolvedType{Kind: "scalar", Type: "boolean"}, nil
-	}
 	if resolved, ok := wave1PlatformEntityTypes[head]; ok {
 		if len(segments) > 1 {
-			return wave1ResolvedType{}, fmt.Errorf("_entity.%s is a platform scalar and does not support nested path %q", head, ref)
+			return wave1ResolvedType{}, fmt.Errorf("instance.%s is a platform scalar and does not support nested path %q", head, ref)
 		}
 		return resolved, nil
 	}
 	if platformcontext.EntityFieldUnsupported(head) {
-		return wave1ResolvedType{}, fmt.Errorf("_entity.%s is not exposed; supported _entity fields are id, current_state, flow_instance, and gates", head)
+		return wave1ResolvedType{}, fmt.Errorf("instance.%s is not exposed; supported fields are id, stage, and path", head)
 	}
-	return wave1ResolvedType{}, fmt.Errorf("_entity.%s is not a supported platform entity metadata field", head)
+	return wave1ResolvedType{}, fmt.Errorf("instance.%s is not a supported platform entity metadata field", head)
 }
 
 func legacyEntityMetadataDiagnostic(field string) string {
 	field = strings.TrimSpace(field)
 	switch field {
 	case "entity_id":
-		return "entity.entity_id is platform entity metadata; use _entity.id"
+		return "state.entity_id is platform entity metadata; use instance.id"
 	case "current_state", "flow_instance", "gates":
-		return fmt.Sprintf("entity.%s is platform entity metadata; use _entity.%s", field, field)
+		return fmt.Sprintf("state.%s is platform entity metadata; use instance.%s", field, field)
 	default:
-		return fmt.Sprintf("entity.%s is platform entity metadata and is not supported through entity.*", field)
+		return fmt.Sprintf("state.%s is platform entity metadata and is not supported through state.*", field)
 	}
 }
 

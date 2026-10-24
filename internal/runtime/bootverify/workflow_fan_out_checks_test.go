@@ -140,7 +140,7 @@ func TestRun_RejectsFanOutCountDependencyInPrecedingHandlerWrites(t *testing.T) 
 			name: "direct write",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
-					{TargetRef: "entity.line_items", Value: runtimecontracts.CELExpression("payload.line_items")},
+					{TargetRef: "state.line_items", Value: runtimecontracts.CELExpression("payload.line_items")},
 					{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}
 			},
@@ -149,7 +149,7 @@ func TestRun_RejectsFanOutCountDependencyInPrecedingHandlerWrites(t *testing.T) 
 			name: "contained write",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
-					{Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "entity.line_items", Value: runtimecontracts.LiteralExpression(map[string]any{"id": "later"})},
+					{Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "state.line_items", Value: runtimecontracts.LiteralExpression(map[string]any{"id": "later"})},
 					{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}
 			},
@@ -170,7 +170,7 @@ func TestRun_RejectsFanOutCountDependencyInPrecedingHandlerWrites(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := runtimecontracts.FanOutSpec{
-				ItemsFrom: "entity.line_items",
+				ItemsFrom: "state.line_items",
 				As:        "line_item",
 				Identity:  "line_item.id",
 				Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{

@@ -1613,9 +1613,9 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
 func proposedEffectProofBundleForMethod(t *testing.T, serverURL string, queueAfterProposal bool, method string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":   "name: support\nstages:\n  drafting: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "support.reply_drafted:\n  chat_id: text\n  text: text\n",
+		"schema.yaml": "name: support\nstages:\n  drafting: {}\n",
+
+		"events.yaml": "support.reply_drafted:\n  chat_id: text\n  text: text\n",
 		"nodes.yaml": `support:
   support.reply_drafted:
     activity:
@@ -1777,7 +1777,6 @@ stages:
       outcomes:
         approve:
 ` + outcome,
-		"entities.yaml": "test_entity: {}\n",
 	}
 	if !terminal {
 		files["events.yaml"] = "launch.approved:\n"

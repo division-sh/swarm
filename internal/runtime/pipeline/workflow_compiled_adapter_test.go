@@ -33,9 +33,9 @@ func compiledAdapterSource(t *testing.T, initialTimer ...bool) *contracts.Workfl
 func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initialTimer ...bool) *contracts.WorkflowContractBundle {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":   "name: adapter-proof\nstages:\n  ready: {}\n  Ready: {final: true}\n  working: {}\n  shared: {}\n  done: {final: true}\n" + killStages,
-		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "direct:\ninherited:\nrule:\ncomplete:\nself:\nwrite_only:\nfallback:\nemit_only:\nobserved:\nkill:\nreject:\ndiscard:\nguarded:\nguard_observed:\n  marker: text\n",
+		"schema.yaml": "name: adapter-proof\nstages:\n  ready: {}\n  Ready: {final: true}\n  working: {}\n  shared: {}\n  done: {final: true}\n" + killStages,
+		"state.yaml":  "marker: text\n",
+		"events.yaml": "direct:\ninherited:\nrule:\ncomplete:\nself:\nwrite_only:\nfallback:\nemit_only:\nobserved:\nkill:\nreject:\ndiscard:\nguarded:\nguard_observed:\n  marker: text\n",
 		"nodes.yaml": `router:
   direct:
     advances_to: done
@@ -110,9 +110,9 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
         emit: observed
         advances_to: done
     `,
-		"child/schema.yaml":   "name: child\ninstance: instance_key\nstages:\n  ready: {}\n  shared: {final: true}\n  foreign_only: {}\n  done: {final: true}\n  killed: {final: true}\n",
-		"child/entities.yaml": "test_entity:\n  marker: text\n  instance_key: text\n",
-		"child/events.yaml":   "direct:\nkill:\nguarded:\nguard_observed:\n  marker: text\n",
+		"child/schema.yaml": "name: child\ninstance: instance_key\nstages:\n  ready: {}\n  shared: {final: true}\n  foreign_only: {}\n  done: {final: true}\n  killed: {final: true}\n",
+		"child/state.yaml":  "marker: text\ninstance_key: text\n",
+		"child/events.yaml": "direct:\nkill:\nguarded:\nguard_observed:\n  marker: text\n",
 		"child/nodes.yaml": `router:
   direct:
     advances_to: done
@@ -940,10 +940,10 @@ func (f *compiledAdapterFixture) initialInstance(stage string) WorkflowInstance 
 func statelessCompiledAdapterSource(t *testing.T) *contracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: stateless-proof\n",
-		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "noop:\n",
-		"nodes.yaml":    "router:\n  noop: {}\n",
+		"schema.yaml": "name: stateless-proof\n",
+		"state.yaml":  "marker: text\n",
+		"events.yaml": "noop:\n",
+		"nodes.yaml":  "router:\n  noop: {}\n",
 	})
 }
 
@@ -984,12 +984,11 @@ func requireCompiledPreviewAgreement(t *testing.T, f *compiledAdapterFixture, ev
 	}
 	if !reflect.DeepEqual(preview.Metadata, result.PreviewMetadata) ||
 		!reflect.DeepEqual(preview.Computed, result.Outcome.Computed) || !slices.Equal(preview.Emits, result.Outcome.Emits) ||
-		!slices.Equal(preview.ActionsExecuted, result.Outcome.ActionsExecuted) || preview.SetsGate != result.Outcome.SetsGate ||
-		!slices.Equal(preview.ClearGates, result.Outcome.ClearGates) || preview.FanOutCount != result.Outcome.FanOutCount {
-		t.Fatalf("preview lost execution outputs: metadata=%#v/%#v computed=%#v/%#v emits=%#v/%#v actions=%#v/%#v gates=%s/%s clear=%#v/%#v fanout=%d/%d",
+		!slices.Equal(preview.ActionsExecuted, result.Outcome.ActionsExecuted) || preview.FanOutCount != result.Outcome.FanOutCount {
+		t.Fatalf("preview lost execution outputs: metadata=%#v/%#v computed=%#v/%#v emits=%#v/%#v actions=%#v/%#v fanout=%d/%d",
 			preview.Metadata, result.PreviewMetadata, preview.Computed, result.Outcome.Computed,
-			preview.Emits, result.Outcome.Emits, preview.ActionsExecuted, result.Outcome.ActionsExecuted, preview.SetsGate, result.Outcome.SetsGate,
-			preview.ClearGates, result.Outcome.ClearGates, preview.FanOutCount, result.Outcome.FanOutCount)
+			preview.Emits, result.Outcome.Emits, preview.ActionsExecuted, result.Outcome.ActionsExecuted,
+			preview.FanOutCount, result.Outcome.FanOutCount)
 	}
 	if preview.Metadata["marker"] != after.Fields["marker"] || f.bus.publishedCount() != len(preview.Emits) {
 		t.Fatal("preview outputs disagree with actual persistence or publication")
@@ -1166,10 +1165,10 @@ func VerifyNativeCompiledTransitionPreviewExecutionAgreementOnBothStoresForTest(
 		}
 		t.Run(backend+"/loop_escape", func(t *testing.T) {
 			loopBundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: loop-preview\nstages:\n  ready: {}\n  drafting: {}\n  review: {}\n  escaped: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 1\n    escape: {advances_to: escaped}\n",
-				"entities.yaml": "test_entity:\n  marker: text\n",
-				"events.yaml":   "start:\nadmit:\n  revision_id: text\nrepeat:\n  revision_id: text\n",
-				"nodes.yaml":    "router:\n  start:\n    loop: {start: revision, from: ready}\n    advances_to: drafting\n  admit:\n    loop: {admit: revision, from: drafting}\n    advances_to: review\n  repeat:\n    loop: {repeat: revision, from: review}\n    advances_to: drafting\n",
+				"schema.yaml": "name: loop-preview\nstages:\n  ready: {}\n  drafting: {}\n  review: {}\n  escaped: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 1\n    escape: {advances_to: escaped}\n",
+				"state.yaml":  "marker: text\n",
+				"events.yaml": "start:\nadmit:\n  revision_id: text\nrepeat:\n  revision_id: text\n",
+				"nodes.yaml":  "router:\n  start:\n    loop: {start: revision, from: ready}\n    advances_to: drafting\n  admit:\n    loop: {admit: revision, from: drafting}\n    advances_to: review\n  repeat:\n    loop: {repeat: revision, from: review}\n    advances_to: drafting\n",
 			})
 			f := newNativeCompiledAdapterFixture(t, backend, loopBundle, ".", "ready", true, open)
 			if _, err := f.executeExistingRecipient("start", f.event("start")); err != nil {

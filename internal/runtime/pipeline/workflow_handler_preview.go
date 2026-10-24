@@ -25,8 +25,6 @@ type HandlerPreview struct {
 	RuleID          string
 	RuleSelection   handlerselection.Observation
 	Transition      *workflowlifecycle.Transition
-	SetsGate        string
-	ClearGates      []string
 	FanOutCount     int
 	Computed        map[string]any
 }
@@ -112,8 +110,6 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	actions := []string(nil)
 	guards := []string(nil)
 	ruleID := ""
-	setsGate := ""
-	clearGates := []string(nil)
 	fanOutCount := 0
 	computed := map[string]any(nil)
 	status := HandlerOutcomeCompleted
@@ -124,8 +120,6 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		if fact, factErr := result.RuleSelection.ResolvedFact(); factErr == nil {
 			ruleID = strings.TrimSpace(fact.DisplayLabel())
 		}
-		setsGate = strings.TrimSpace(result.Outcome.SetsGate)
-		clearGates = append(clearGates, result.Outcome.ClearGates...)
 		fanOutCount = result.Outcome.FanOutCount
 		computed = cloneStringAnyMap(result.Outcome.Computed)
 	}
@@ -140,8 +134,6 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		RuleID:          ruleID,
 		RuleSelection:   result.RuleSelection,
 		Transition:      result.Transition,
-		SetsGate:        setsGate,
-		ClearGates:      clearGates,
 		FanOutCount:     fanOutCount,
 		Computed:        computed,
 	}, nil

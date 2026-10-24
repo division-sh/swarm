@@ -1727,12 +1727,12 @@ func readGoldenEntities(ctx context.Context, rpc *releaseRPCClient, runID string
 			Entities   []goldenEntitySummary `json:"entities"`
 			NextCursor string                `json:"next_cursor"`
 		}
-		if err := rpc.call(ctx, "entity.list", params, &page); err != nil {
+		if err := rpc.call(ctx, "state.list", params, &page); err != nil {
 			return all, err
 		}
 		for _, entity := range page.Entities {
 			if entity.EntityID == "" || entity.RunID != runID || seenEntities[entity.EntityID] {
-				return all, fmt.Errorf("entity.list returned malformed or duplicate row %#v", entity)
+				return all, fmt.Errorf("state.list returned malformed or duplicate row %#v", entity)
 			}
 			seenEntities[entity.EntityID] = true
 			all = append(all, entity)
@@ -1741,7 +1741,7 @@ func readGoldenEntities(ctx context.Context, rpc *releaseRPCClient, runID string
 			return all, nil
 		}
 		if seenCursors[page.NextCursor] {
-			return all, fmt.Errorf("entity.list repeated cursor %q", page.NextCursor)
+			return all, fmt.Errorf("state.list repeated cursor %q", page.NextCursor)
 		}
 		seenCursors[page.NextCursor] = true
 		cursor = page.NextCursor
@@ -1751,14 +1751,14 @@ func readGoldenEntities(ctx context.Context, rpc *releaseRPCClient, runID string
 func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, entities []goldenEntitySummary, candidateIDs []string) goldenEntitySet {
 	t.Helper()
 	if len(entities) != len(candidateIDs)+2 {
-		t.Fatalf("entity.list count = %d, want root, scout, and %d candidates: %#v", len(entities), len(candidateIDs), entities)
+		t.Fatalf("state.list count = %d, want root, scout, and %d candidates: %#v", len(entities), len(candidateIDs), entities)
 	}
 	result := goldenEntitySet{candidates: map[string]goldenEntitySummary{}}
 	seenEntityIDs := map[string]bool{}
 	seenFlowInstances := map[string]bool{}
 	for _, entity := range entities {
 		if entity.EntityID == "" || seenEntityIDs[entity.EntityID] {
-			t.Errorf("entity.list returned empty or duplicate entity identity %#v", entity)
+			t.Errorf("state.list returned empty or duplicate entity identity %#v", entity)
 		}
 		seenEntityIDs[entity.EntityID] = true
 		switch entity.EntityType {
@@ -1776,7 +1776,7 @@ func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 			var detail struct {
 				Fields map[string]any `json:"fields"`
 			}
-			if err := rpc.call(ctx, "entity.get", map[string]any{"entity_id": entity.EntityID, "run_id": runID}, &detail); err != nil {
+			if err := rpc.call(ctx, "state.get", map[string]any{"entity_id": entity.EntityID, "run_id": runID}, &detail); err != nil {
 				t.Fatal(err)
 			}
 			candidateID, _ := detail.Fields["candidate_id"].(string)
@@ -1792,11 +1792,11 @@ func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 			seenFlowInstances[entity.FlowInstance] = true
 			result.candidates[candidateID] = entity
 		default:
-			t.Errorf("entity.list returned unexpected entity type %#v", entity)
+			t.Errorf("state.list returned unexpected entity type %#v", entity)
 		}
 	}
 	if result.root.EntityID == "" || result.scout.EntityID == "" {
-		t.Errorf("entity.list has incomplete root/scout set: %#v", entities)
+		t.Errorf("state.list has incomplete root/scout set: %#v", entities)
 	}
 	for _, candidateID := range candidateIDs {
 		entity, ok := result.candidates[candidateID]
@@ -2160,7 +2160,7 @@ func assertGoldenJoinContinuation(t *testing.T, ctx context.Context, rpc *releas
 		Entity      goldenEntitySummary `json:"entity"`
 		Accumulated map[string]any      `json:"accumulated"`
 	}
-	if err := rpc.call(ctx, "entity.get", map[string]any{"run_id": completion.RunID, "entity_id": entities.root.EntityID}, &detail); err != nil {
+	if err := rpc.call(ctx, "state.get", map[string]any{"run_id": completion.RunID, "entity_id": entities.root.EntityID}, &detail); err != nil {
 		t.Fatal(err)
 	}
 	bucket, ok := detail.Accumulated["handler_joins:"+collectorNodeKey].(map[string]any)

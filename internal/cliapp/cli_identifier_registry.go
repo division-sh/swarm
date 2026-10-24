@@ -53,7 +53,7 @@ type cliIdentifierCandidateSource string
 const (
 	cliIdentifierSourceAgentList    cliIdentifierCandidateSource = "/v1/rpc agent.list"
 	cliIdentifierSourceRunList      cliIdentifierCandidateSource = "/v1/rpc run.list"
-	cliIdentifierSourceEntityList   cliIdentifierCandidateSource = "/v1/rpc entity.list"
+	cliIdentifierSourceEntityList   cliIdentifierCandidateSource = "/v1/rpc state.list"
 	cliIdentifierSourceEventList    cliIdentifierCandidateSource = "/v1/rpc event.list"
 	cliIdentifierSourceConversation cliIdentifierCandidateSource = "/v1/rpc conversation.list"
 	cliIdentifierSourceTurnList     cliIdentifierCandidateSource = "/v1/rpc conversation.list_turns"

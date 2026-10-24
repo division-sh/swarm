@@ -32,8 +32,6 @@ func TestEnginePreservationRejectsContradictoryExecution(t *testing.T) {
 	}{
 		{"none", func(*EngineMutation) {}},
 		{"advance", func(m *EngineMutation) { m.State.NextState = "done" }},
-		{"gate", func(m *EngineMutation) { m.State.SetGate = "ready" }},
-		{"clear", func(m *EngineMutation) { m.State.ClearGates = []string{"ready"} }},
 		{"write", func(m *EngineMutation) {
 			m.State.DataAccumulation = contracts.WorkflowDataAccumulation{SourceEvent: "other"}
 		}},

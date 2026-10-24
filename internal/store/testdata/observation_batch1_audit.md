@@ -166,7 +166,7 @@ and all18 named race roots remain pending a new server2 assignment.
 
 Chosen-class commitment: eliminate raw authority from these fixed observation
 owners and their enumerated shared consumers, not the full raw-test corpus.
-Achieved local closure: those seams canonicalized, pending tier/review gates.
+Achieved local closure: those seams canonicalized, pending tier/review state.
 Parent #2542/#2151 stays open: remaining setup/provider/activity/journal,
 pipeline/mutation/fault, fork/source/session/recovery, served/MCP/tool,
 getter/carrier/fake-protocol and integrated guards remain in existing batches.

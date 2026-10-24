@@ -315,7 +315,7 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.SetupScenarioEntities", []string{"s.CommitScenarioSetup(ctx, runtimebus.ScenarioSetupCommand{Setup: req})"}},
 		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.SetupScenarioEntities", []string{"s.CommitScenarioSetup(ctx, runtimebus.ScenarioSetupCommand{Setup: req})"}},
 		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.CommitScenarioSetup", []string{"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},
-		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.CommitScenarioSetup", []string{"attempt.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, entity.EntityID)"}},
+		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.CommitScenarioSetup", []string{"attempt.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, state.EntityID)"}},
 		{"runforkpersistence/run_fork_materializer.go", "materializeRunForkEntityState", []string{"attempt.AddFact(forkRunID, privaterunforkrevision.FamilyEntityMetadata, entityID)"}},
 		{"replycontext/owner.go", "createPostgresReplyContext", []string{
 			"record.Normalized()", "record.Validate()", "resolveReplyContextCreateConflict(record, existing, loadErr)",

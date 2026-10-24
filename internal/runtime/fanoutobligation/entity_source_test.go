@@ -12,7 +12,7 @@ func Test2293EntitySourceCaptureIsDetachedTransientAndRequired(t *testing.T) {
 	r := a2SourceProjectionRequest(t)
 	r.Capsule.EntityID = r.Key.RunID
 	r.Source = SourceRef{Kind: SourceEntityField, RunID: r.Key.RunID, EntityID: r.Capsule.EntityID, Field: "items"}
-	r.Capsule.SourceProjection.ItemsFrom = "entity.items"
+	r.Capsule.SourceProjection.ItemsFrom = "state.items"
 	var err error
 	r.PlanRef.SemanticDigest, err = canonicaljson.Hash(r.Capsule.SourceProjection)
 	if err != nil {

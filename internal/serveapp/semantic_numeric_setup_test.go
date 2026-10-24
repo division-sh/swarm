@@ -45,7 +45,7 @@ func TestScenarioSetupSemanticNumericParity(t *testing.T) {
 			var public struct {
 				Fields map[string]any `json:"fields"`
 			}
-			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": run, "entity_id": run}, &public)
+			requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": run, "entity_id": run}, &public)
 			if public.Fields["score"] != float64(5) {
 				t.Fatalf("public fields %#v", public)
 			}
@@ -57,7 +57,7 @@ func TestScenarioSetupSemanticNumericParity(t *testing.T) {
 			}
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, run, run, "done")
 			requireServedEntityReadback(t, rt.Endpoint, run, run, "done")
-			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": run, "entity_id": run}, &public)
+			requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": run, "entity_id": run}, &public)
 			if public.Fields["score"] != float64(10) {
 				t.Fatalf("republication lost numeric agreement: %#v", public)
 			}

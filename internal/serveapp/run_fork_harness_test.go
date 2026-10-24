@@ -138,7 +138,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	bootstrapRequest, err := schemaBootstrapRequest(platformSpec, platformPlans, nil)
+	bootstrapRequest, err := schemaBootstrapRequest(platformSpec, platformPlans)
 	if err != nil {
 		if out != nil {
 			fmt.Fprintf(out, "fork failed: prepare platform schema bootstrap: %v\n", err)

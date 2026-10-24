@@ -16,7 +16,7 @@ func TestProjectNodeComputeAndLoopValue(t *testing.T) {
       tiers:
         - {dimensions: [a, b], weight: 0.6}
         - {dimensions: [c], weight: 0.4}
-      store_as: entity.composite
+      store_as: state.composite
     loop: {start: revise, from: payload.revision}
 `))
 	if err != nil {

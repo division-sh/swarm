@@ -116,10 +116,10 @@ func VerifyWorkflowHandlerFailureDiagnosticPersistsOnBothStoresForTest(t *testin
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: diagnostic-handler\nstages:\n  ready: {}\n  done: {final: true}\n",
-				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "work.ready:\n",
-				"nodes.yaml":    "router:\n  work.ready: {advances_to: done}\n",
+				"schema.yaml": "name: diagnostic-handler\nstages:\n  ready: {}\n  done: {final: true}\n",
+
+				"events.yaml": "work.ready:\n",
+				"nodes.yaml":  "router:\n  work.ready: {advances_to: done}\n",
 			})
 			f := factory(t, backend, bundle)
 			ctx, pc := f.Context, f.Coordinator

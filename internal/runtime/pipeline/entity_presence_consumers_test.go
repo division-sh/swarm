@@ -17,9 +17,9 @@ func TestEntityPresenceAtGateConsumer(t *testing.T) {
 	})
 	for _, consumer := range []string{"gate"} {
 		for _, safe := range []bool{false, true} {
-			name, expr := consumer+"/unsafe", `entity.profile.note`
+			name, expr := consumer+"/unsafe", `state.profile.note`
 			if safe {
-				name, expr = consumer+"/decision", `entity.profile.?note.orValue("fallback")`
+				name, expr = consumer+"/decision", `state.profile.?note.orValue("fallback")`
 			}
 			t.Run(name, func(t *testing.T) {
 				fields := map[string]any{"profile": map[string]any{}}

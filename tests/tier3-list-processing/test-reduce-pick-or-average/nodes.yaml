@@ -3,7 +3,7 @@ reduce-node:
     reduce:
       items_from: payload.scores
       operation: pick_or_average
-      store_as: entity.result
+      store_as: state.result
     emit:
       event: scores.resolved
     advances_to: done

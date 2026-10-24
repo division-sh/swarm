@@ -96,7 +96,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 				t.Fatalf("exact config consumer route: %+v", d)
 			}
 			var public operatorread.OperatorEntityFull
-			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &public)
+			requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &public)
 			publicWant["processed_count"] = float64(1)
 			if public.Entity.RunID != seed.RunID || public.Entity.EntityID != entityID || public.Entity.FlowInstance != path || !reflect.DeepEqual(public.Fields, publicWant) {
 				t.Fatalf("final node/public readback lost initialized fields: %+v", public)

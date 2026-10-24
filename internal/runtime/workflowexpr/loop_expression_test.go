@@ -57,7 +57,7 @@ func TestJoinCapturedLoopExpressionMembers(t *testing.T) {
 	}
 	for _, expression := range []string{
 		"loop.flow_id", "loop.revision_field", "loop.unknown", "loop", `_loop.revision_id`,
-		`_loop["revision_id"]`, `loop["revision_id"]`, `loop[entity.field]`,
+		`_loop["revision_id"]`, `loop["revision_id"]`, `loop[state.field]`,
 		"payload.revision_id", "event.id", "policy.revision_id", "computed.revision_id",
 		`loop.attempt.startsWith("1")`, `loop.revision_id > 1`, `loop.max_attempts.unknown`,
 	} {

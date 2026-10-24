@@ -9,7 +9,7 @@ phase-one:
         emit: phase.advanced
 phase-two:
   phase.advanced:
-    guard: has(entity.batch_id) && entity.batch_id != ""
+    guard: has(state.batch_id) && state.batch_id != ""
     advances_to: done
     emit:
       event: task.done

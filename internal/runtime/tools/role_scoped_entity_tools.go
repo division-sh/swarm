@@ -133,7 +133,7 @@ func roleScopedEntityMutationInputSchema(contract entityruntime.Contract, path, 
 	whole := ObjectSchema(map[string]any{"op": setOp, "value": wholeValue}, "value")
 	props := map[string]any{"op": setOp, "value": map[string]any{}}
 	branches := []any{whole}
-	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "entity."+path, entityruntime.ContainedOperationAppend, false, false); err == nil {
+	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "state."+path, entityruntime.ContainedOperationAppend, false, false); err == nil {
 		item := entityContractJSONSchema(contract, target.ListItemType, map[string]struct{}{})
 		index := map[string]any{"type": "integer", "minimum": 0}
 		props["op"] = map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationSet, entityruntime.ContainedOperationAppend, entityruntime.ContainedOperationUpdate}}
@@ -143,7 +143,7 @@ func roleScopedEntityMutationInputSchema(contract entityruntime.Contract, path, 
 			ObjectSchema(map[string]any{"op": map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationUpdate}}, "index": index, "value": item}, "op", "index", "value"),
 		)
 	}
-	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "entity."+path, entityruntime.ContainedOperationSet, true, false); err == nil {
+	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "state."+path, entityruntime.ContainedOperationSet, true, false); err == nil {
 		key := entityContractJSONSchema(contract, target.MapKeyType, map[string]struct{}{})
 		key["minLength"] = 1
 		props["key"] = key
@@ -196,13 +196,13 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {
 	switch spec.Kind {
 	case roleScopedEntityToolReadWhole:
-		return fmt.Sprintf("Read the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.EntityType)
+		return fmt.Sprintf("Read the current turn %s state. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.EntityType)
 	case roleScopedEntityToolReadField:
-		return fmt.Sprintf("Read %s from the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		return fmt.Sprintf("Read %s from the current turn %s state. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
 	case roleScopedEntityToolSaveField:
-		return fmt.Sprintf("Save %s on the current turn %s entity. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		return fmt.Sprintf("Save %s on the current turn %s state. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
 	case roleScopedEntityToolUpdatePath:
-		return fmt.Sprintf("Update %s.%s on the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath, spec.EntityType)
+		return fmt.Sprintf("Update %s.%s on the current turn %s state. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath, spec.EntityType)
 	default:
 		return "Role-scoped entity tool."
 	}

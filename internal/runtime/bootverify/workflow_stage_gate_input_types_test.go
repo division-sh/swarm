@@ -10,7 +10,7 @@ import (
 )
 
 func TestStageGateContextValidationPreservesAdmittedLiteralKind(t *testing.T) {
-	for _, value := range []any{nil, false, 0, "", "hello", "entity.name", map[string]any{"name": "${entity.name}"}, []any{}} {
+	for _, value := range []any{nil, false, 0, "", "hello", "state.name", map[string]any{"name": "${state.name}"}, []any{}} {
 		if err := validateStageGateContextExpression(runtimecontracts.LiteralExpression(value), nil); err != nil {
 			t.Fatalf("literal %#v was reinterpreted as CEL: %v", value, err)
 		}
@@ -18,13 +18,13 @@ func TestStageGateContextValidationPreservesAdmittedLiteralKind(t *testing.T) {
 			t.Fatalf("literal %#v was counted as entity reference %q", value, text)
 		}
 	}
-	if text := stageGateExpressionText(runtimecontracts.CELExpression("entity.name")); text != "entity.name" {
+	if text := stageGateExpressionText(runtimecontracts.CELExpression("state.name")); text != "state.name" {
 		t.Fatalf("CEL context lost its reference: %q", text)
 	}
-	if err := validateStageGateContextExpression(runtimecontracts.CELExpression("entity.name"), nil); err == nil {
+	if err := validateStageGateContextExpression(runtimecontracts.CELExpression("state.name"), nil); err == nil {
 		t.Fatal("CEL entity read without structural owner was accepted")
 	}
-	if err := validateStageGateContextExpression(runtimecontracts.RefExpression("entity.name"), nil); err == nil {
+	if err := validateStageGateContextExpression(runtimecontracts.RefExpression("state.name"), nil); err == nil {
 		t.Fatal("unsupported ref gate context was accepted")
 	}
 }

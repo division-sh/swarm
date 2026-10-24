@@ -43,7 +43,7 @@ func AnnotateWorkflowEntityAssignmentReaders(node identity.ExecutableNode, event
 			var absent []string
 			for _, path := range reader.RequiredEntityPaths {
 				if !facts.Has(path) {
-					absent = append(absent, "entity."+path)
+					absent = append(absent, "state."+path)
 				}
 			}
 			if len(absent) != 0 {
@@ -58,12 +58,12 @@ func AnnotateWorkflowEntityAssignmentReaders(node identity.ExecutableNode, event
 		}
 		for _, path := range workflowexpr.RequiredEntityReferences(reader.Expression, reader.KnownPresence) {
 			if !missing[path] {
-				reader.KnownPresence = append(reader.KnownPresence, "entity."+path)
+				reader.KnownPresence = append(reader.KnownPresence, "state."+path)
 			}
 		}
 		if len(required) != 0 {
 			for i := range required {
-				required[i] = "entity." + required[i]
+				required[i] = "state." + required[i]
 			}
 			reader.AssignmentError = fmt.Sprintf("entity paths %s are not definitely assigned before %s; assign them on every reaching stage/outcome before this read, or explicitly decide absence with has/optional selection", strings.Join(required, ", "), point.Step)
 		}

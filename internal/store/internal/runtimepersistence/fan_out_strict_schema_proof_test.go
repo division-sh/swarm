@@ -63,7 +63,7 @@ func TestFanOutRetiredSchemaShapesRejectedUnchangedBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					request.StatePlans = generatedProbeStatePlans()
+
 					var incompatible *SchemaCompatibilityError
 					if err := bootstrap(ctx, request); !errors.As(err, &incompatible) {
 						t.Fatalf("retired fan-out shape admission = %v, want SchemaCompatibilityError", err)

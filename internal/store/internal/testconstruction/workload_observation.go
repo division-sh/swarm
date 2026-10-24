@@ -34,7 +34,7 @@ func OpenIssue2564WorkloadObservationForTest(ctx context.Context, backend, locat
 	if err != nil {
 		return nil, errors.Join(err, selected.Close())
 	}
-	if inspection.Fresh || len(inspection.MissingStateTables) != 0 {
+	if inspection.Fresh || len(inspection.MissingDeploymentTables) != 0 {
 		return nil, errors.Join(fmt.Errorf("H2 native observation requires the child's completed canonical boot"), selected.Close())
 	}
 	return &private.Issue2564WorkloadObservation{Reader: selected}, nil

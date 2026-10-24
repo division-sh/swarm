@@ -1,6 +1,6 @@
 root-dispatcher:
   pipeline.start:
-    guard: _entity.id != ""
+    guard: instance.id != ""
     emit: step.begin
 
 root-collector:

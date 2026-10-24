@@ -56,9 +56,6 @@ func resolveParsedRef(base BaseContext, state ExecutionState, ref paths.Path) (a
 		if ref.Root == paths.RootComputed {
 			return state.ComputedBucket().Lookup(ref)
 		}
-		if ref.Root == paths.RootGates {
-			return base.Gates.Lookup(ref)
-		}
 		return base.Lookup(ref)
 	}
 	return nil, false
@@ -126,8 +123,8 @@ func setParsedValuePath(target map[string]any, path paths.Path, value any) {
 func normalizeStateField(field string) string {
 	field = strings.TrimSpace(field)
 	switch {
-	case strings.HasPrefix(field, "entity."):
-		return strings.TrimSpace(strings.TrimPrefix(field, "entity."))
+	case strings.HasPrefix(field, "state."):
+		return strings.TrimSpace(strings.TrimPrefix(field, "state."))
 	case strings.HasPrefix(field, "metadata."):
 		return strings.TrimSpace(strings.TrimPrefix(field, "metadata."))
 	default:
@@ -318,7 +315,7 @@ type compiledExecutionCondition struct {
 
 func newExecutionScope(item any, payload, event, entity, platformEntity, policy map[string]any) (executionScope, error) {
 	projected, err := workflowexpr.ProjectCELValue(map[string]any{
-		"item": item, "payload": payload, "event": event, "entity": entity, "_entity": platformEntity, "policy": policy,
+		"item": item, "payload": payload, "event": event, "state": entity, "instance": platformEntity, "policy": policy,
 	})
 	if err != nil {
 		return executionScope{}, err
@@ -328,8 +325,8 @@ func newExecutionScope(item any, payload, event, entity, platformEntity, policy 
 		Item:           values["item"],
 		Payload:        executionProjectedMap(values["payload"]),
 		Event:          executionProjectedMap(values["event"]),
-		Entity:         executionProjectedMap(values["entity"]),
-		PlatformEntity: executionProjectedMap(values["_entity"]),
+		Entity:         executionProjectedMap(values["state"]),
+		PlatformEntity: executionProjectedMap(values["instance"]),
 		Policy:         executionProjectedMap(values["policy"]),
 	}, nil
 }
@@ -873,23 +870,6 @@ func sliceFromAny(value any) []any {
 		out := make([]any, 0, len(typed))
 		for _, item := range typed {
 			out = append(out, item)
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func stringSliceFromAny(raw any) []string {
-	switch typed := raw.(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if v := strings.TrimSpace(asString(item)); v != "" {
-				out = append(out, v)
-			}
 		}
 		return out
 	default:

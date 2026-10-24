@@ -68,10 +68,10 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 
 func listRetirementPublicSource() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: list-retirement\nstages:\n  ready: {}\n  done: {final: true}\ninputs: [proof.append, proof.finish]\n",
-		"types.yaml":    "ProbeItem:\n  name: text\n  tags: [text]\n",
-		"entities.yaml": "probe:\n  entries: {type: '[ProbeItem]', initial: []}\n  snapshots:\n    type: '[ProbeItem]'\n    materialize_from: collector.observed\n",
-		"events.yaml":   "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
+		"schema.yaml": "name: list-retirement\nstages:\n  ready: {}\n  done: {final: true}\ninputs: [proof.append, proof.finish]\n",
+		"types.yaml":  "ProbeItem:\n  name: text\n  tags: [text]\n",
+		"state.yaml":  "probe:\n  entries: {type: '[ProbeItem]', initial: []}\n  snapshots:\n    type: '[ProbeItem]'\n    materialize_from: collector.observed\n",
+		"events.yaml": "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
 		"nodes.yaml": `collector:
   state_schema:
     fields:
@@ -83,7 +83,7 @@ func listRetirementPublicSource() map[string]string {
     data_accumulation:
       writes:
         - op: append
-          target: entity.entries
+          target: state.entries
           value: payload
   proof.finish:
     advances_to: done
@@ -94,7 +94,7 @@ func listRetirementPublicSource() map[string]string {
 func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 	for _, field := range []struct{ file, original, prefix, element string }{
 		{"types.yaml", "    tags: [text]", "    tags: ", "text"},
-		{"entities.yaml", "  entries: {type: '[ProbeItem]', initial: []}", "  entries: ", "ProbeItem"},
+		{"state.yaml", "  entries: {type: '[ProbeItem]', initial: []}", "  entries: ", "ProbeItem"},
 		{"events.yaml", "  tags: [text]", "  tags: ", "text"},
 		{"nodes.yaml", "      observed: [ProbeItem]", "      observed: ", "ProbeItem"},
 	} {
@@ -139,10 +139,10 @@ func waitListRetirementFields(t *testing.T, endpoint, runID string, want []any) 
 	var observed operatorread.OperatorEntityFull
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 		var result operatorread.OperatorEntityListResult
-		requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID}, &result)
+		requireServedJSONRPCResult(t, endpoint, "state.list", map[string]any{"run_id": runID}, &result)
 		if len(result.Entities) == 1 {
 			entityID := result.Entities[0].EntityID
-			requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &observed)
+			requireServedJSONRPCResult(t, endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": entityID}, &observed)
 			if reflect.DeepEqual(observed.Fields["entries"], want) && reflect.DeepEqual(observed.Fields["snapshots"], want) {
 				return entityID
 			}

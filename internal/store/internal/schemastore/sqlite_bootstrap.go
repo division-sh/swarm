@@ -75,9 +75,6 @@ func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapReq
 	default:
 		return fmt.Errorf("unknown sqlite schema compatibility state %q", report.State)
 	}
-	if err := ensureSQLiteStatePlans(ctx, conn, request.StatePlans, diagnostic); err != nil {
-		return err
-	}
 	if err := ensureSQLiteStatePlans(ctx, conn, request.deploymentPlans, diagnostic); err != nil {
 		return err
 	}

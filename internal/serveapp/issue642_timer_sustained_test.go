@@ -42,19 +42,19 @@ func issue642SustainedTimerSource(t *testing.T) string {
     emit: {event: timer.armed}
   timer.check:
     rules:
-      - when: entity.tick_count == 1
+      - when: state.tick_count == 1
         advances_to: waiting
         emit: {event: timer.finished}
       - advances_to: waiting
     data_accumulation:
       writes:
         - target_field: tick_count
-          value: entity.tick_count + 1
+          value: state.tick_count + 1
   timer.finished:
     advances_to: checked
 `,
-		"entities.yaml": "test_entity:\n  tick_count: {type: integer, initial: 0}\n",
-		"events.yaml":   "timer.scheduled:\ntimer.check:\ntimer.armed:\ntimer.finished:\n",
+		"state.yaml":  "tick_count: 0\n",
+		"events.yaml": "timer.scheduled:\ntimer.check:\ntimer.armed:\ntimer.finished:\n",
 		"schema.yaml": `stages:
   waiting: {}
   checked: {final: true}

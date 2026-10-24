@@ -1306,106 +1306,6 @@ func TestRun_MapsConditionPayloadMismatchToNamedError(t *testing.T) {
 	}
 }
 
-func TestRun_MapsUnknownSetsGateToGateSchemaValidationError(t *testing.T) {
-	bundle := gateSchemaValidationBundle(t, runtimecontracts.NodeGateStateSchema{
-		Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
-	}, runtimecontracts.SystemNodeEventHandler{
-		SetsGate: &runtimecontracts.GateSpec{Name: "rejected", Value: true},
-	})
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "gate_schema_validation", "sets_gate rejected") {
-		t.Fatalf("expected gate_schema_validation error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_MapsMissingOrEmptyGateStateToGateSchemaValidationError(t *testing.T) {
-	cases := []struct {
-		name      string
-		gateState runtimecontracts.NodeGateStateSchema
-	}{
-		{name: "missing gate_state"},
-		{name: "empty gate_state", gateState: runtimecontracts.NodeGateStateSchema{Gates: []runtimecontracts.NodeGateField{}}},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := gateSchemaValidationBundle(t, tc.gateState, runtimecontracts.SystemNodeEventHandler{
-				SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
-			})
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if !reportContains(report.Errors(), "gate_schema_validation", "sets_gate approved") {
-				t.Fatalf("expected gate_schema_validation error, got %#v", report.Errors())
-			}
-		})
-	}
-}
-
-func TestRun_AllowsDeclaredSetsGateFromScalarAndStructuredForms(t *testing.T) {
-	cases := []struct {
-		name string
-		yaml string
-	}{
-		{
-			name: "scalar",
-			yaml: "sets_gate: approved\n",
-		},
-		{
-			name: "structured",
-			yaml: "sets_gate:\n  name: approved\n",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			handler := decodeGateSchemaHandler(t, tc.yaml)
-			bundle := gateSchemaValidationBundle(t, runtimecontracts.NodeGateStateSchema{
-				Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
-			}, handler)
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if reportContains(report.Errors(), "gate_schema_validation", "sets_gate approved") {
-				t.Fatalf("unexpected gate_schema_validation error, got %#v", report.Errors())
-			}
-		})
-	}
-}
-
-func TestRun_ValidatesHandlerSetsGateWhenRulesExist(t *testing.T) {
-	cases := []struct {
-		name      string
-		setsGate  string
-		wantError bool
-	}{
-		{name: "declared", setsGate: "approved"},
-		{name: "undeclared", setsGate: "rejected", wantError: true},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := gateSchemaValidationBundle(t, runtimecontracts.NodeGateStateSchema{
-				Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
-			}, runtimecontracts.SystemNodeEventHandler{
-				SetsGate: &runtimecontracts.GateSpec{Name: tc.setsGate, Value: true},
-				Rules: []runtimecontracts.HandlerRuleEntry{{
-					Condition: "",
-				}},
-			})
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			hasError := reportContains(report.Errors(), "gate_schema_validation", "sets_gate "+tc.setsGate)
-			if hasError != tc.wantError {
-				t.Fatalf("gate_schema_validation error = %v, want %v; errors: %#v", hasError, tc.wantError, report.Errors())
-			}
-		})
-	}
-}
-
 func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1709,7 +1609,7 @@ func TestRun_MapsUndeclaredNestedEntityWriteTargetToEntityWriteTargetComplianceE
 					"task.completed": {
 						Compute: &runtimecontracts.ComputeSpec{
 							Operation: runtimecontracts.ComputeOpCount,
-							StoreAs:   "entity.analysis.missing",
+							StoreAs:   "state.analysis.missing",
 						},
 					},
 				},
@@ -1722,7 +1622,7 @@ func TestRun_MapsUndeclaredNestedEntityWriteTargetToEntityWriteTargetComplianceE
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "entity_write_target_compliance", `entity.analysis.missing`) {
+	if !reportContains(report.Errors(), "entity_write_target_compliance", `state.analysis.missing`) {
 		t.Fatalf("expected nested entity_write_target_compliance error, got %#v", report.Errors())
 	}
 }
@@ -2188,7 +2088,7 @@ func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
 			"test-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
-						Guard: &runtimecontracts.GuardSpec{Check: "_entity.id =="},
+						Guard: &runtimecontracts.GuardSpec{Check: "instance.id =="},
 					},
 				},
 			},
@@ -2197,7 +2097,7 @@ func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
 
 	report := Run(context.Background(), source, Options{})
 
-	if !reportContains(report.Errors(), "condition_expression_validation", `CEL parse failed for "_entity.id =="`) {
+	if !reportContains(report.Errors(), "condition_expression_validation", `CEL parse failed for "instance.id =="`) {
 		t.Fatalf("expected CEL parse failure, got %#v", report.Errors())
 	}
 }
@@ -2355,7 +2255,7 @@ func TestRunCollectionItemConditionsUseSharedSourceOwner(t *testing.T) {
 		{
 			name: "direct entity",
 			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
-				ItemsFrom: "entity.items", Condition: "item.score > 5", StoreAs: "computed.filtered",
+				ItemsFrom: "state.items", Condition: "item.score > 5", StoreAs: "computed.filtered",
 			}},
 		},
 		{
@@ -2865,7 +2765,7 @@ func TestRun_LowersEmitFromBeforePayloadCompletenessAndExpressionValidation(t *t
 	handler := node.EventHandlers["scan.corpus_dispatch"]
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "market_research.scan_assigned",
-		From:  "entity",
+		From:  "state",
 		Fields: map[string]runtimecontracts.ExpressionValue{
 			"geography": runtimecontracts.CELExpression("payload.geography"),
 		},
@@ -2893,7 +2793,7 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 	handler := node.EventHandlers["scan.corpus_dispatch"]
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "market_research.scan_assigned",
-		From:  "entity",
+		From:  "state",
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		Condition: "",
@@ -2927,7 +2827,7 @@ func TestRun_ReportsEmitFromLoweringErrorsAsPayloadCompletenessFailures(t *testi
 	handler := node.EventHandlers["scan.corpus_dispatch"]
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "market_research.scan_assigned",
-		From:  "entity",
+		From:  "state",
 	}
 	node.EventHandlers["scan.corpus_dispatch"] = handler
 	bundle.Nodes["dispatcher"] = node
@@ -3750,12 +3650,12 @@ func addBootverifyAgentOwner(bundle *runtimecontracts.WorkflowContractBundle, fl
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.missing_score >= 70"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "state.missing_score >= 70"}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_score") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "state.missing_score") {
 		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -3763,13 +3663,13 @@ func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 func TestRun_AllowsGuardReferenceToDeclaredFieldEvenWhenHandlerClearsItLater(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.revision_count > 0"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "state.revision_count > 0"}
 	handler.Clear = &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -3777,7 +3677,7 @@ func TestRun_AllowsGuardReferenceToDeclaredFieldEvenWhenHandlerClearsItLater(t *
 func TestRun_RejectsGuardReferenceToSparseFieldEvenWhenSameHandlerWritesFieldLater(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.missing_score >= 70"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "state.missing_score >= 70"}
 	handler.DataAccumulation.Writes = append(handler.DataAccumulation.Writes, runtimecontracts.WorkflowDataWrite{
 		TargetField: "missing_score",
 		SourceField: "score",
@@ -3786,18 +3686,18 @@ func TestRun_RejectsGuardReferenceToSparseFieldEvenWhenSameHandlerWritesFieldLat
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_score") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "state.missing_score") {
 		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
 
 func TestQueryWriterUsesOnlyAdmittedTopLevelTarget(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
-		StoreAs: "entity.executed_rows",
+		StoreAs: "state.executed_rows",
 	}}
 
 	targets := wave1HandlerWriteTargets(identitytest.FlowNode(t, "flow", "node"), "event", handler)
-	if len(targets) != 1 || targets[0].Target != "entity.executed_rows" || targets[0].Kind != "handler.query" {
+	if len(targets) != 1 || targets[0].Target != "state.executed_rows" || targets[0].Kind != "handler.query" {
 		t.Fatalf("query write targets = %#v, want only top-level executed writer", targets)
 	}
 }
@@ -3808,18 +3708,18 @@ func TestRun_RejectsFilterReferenceToSparseFieldEvenWhenSameHandlerComputesField
 	handler.Filter = &runtimecontracts.FilterSpec{
 		Source:    "payload.items",
 		ItemsFrom: "payload.items",
-		Condition: "entity.missing_filtered_score >= 70",
-		StoreAs:   "entity.filtered_items",
+		Condition: "state.missing_filtered_score >= 70",
+		StoreAs:   "state.filtered_items",
 	}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "entity.missing_filtered_score",
+		StoreAs:   "state.missing_filtered_score",
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_filtered_score") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "state.missing_filtered_score") {
 		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -4130,10 +4030,7 @@ func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesForScopedDuplica
 
 	for _, flowID := range []string{"alpha", "beta"} {
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), `
-case:
-  business_brief:
-    type: text
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), `business_brief: text
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), `
 writer:
@@ -4172,14 +4069,14 @@ func TestRun_AllowsExpressionFieldReferenceForDeclaredFieldWrittenBySiblingStep(
 		},
 		{
 			TargetField: "adjusted_score",
-			Value:       runtimecontracts.CELExpression("entity.base_score + 1"),
+			Value:       runtimecontracts.CELExpression("state.base_score + 1"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.base_score") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -4189,10 +4086,10 @@ func TestRun_AllowsExpressionFieldReferenceForSelfTargetEntityUpdate(t *testing.
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.retry_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.retry_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
-	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.retry_count") {
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "state.retry_count") {
 		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
 	}
 }
@@ -4200,19 +4097,19 @@ func TestRun_AllowsExpressionFieldReferenceForSelfTargetEntityUpdate(t *testing.
 func TestRun_AllowsGuardReferenceToPersistedFieldEvenWhenHandlerWritesFieldLater(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.retry_count < 3"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "state.retry_count < 3"}
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
 		TargetField: "retry_count",
-		Value:       runtimecontracts.CELExpression("entity.retry_count + 1"),
+		Value:       runtimecontracts.CELExpression("state.retry_count + 1"),
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.retry_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.retry_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
-	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.retry_count") {
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "state.retry_count") {
 		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
 	}
 }
@@ -4222,9 +4119,9 @@ func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesField
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
 		TargetField: "revision_count",
-		Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
+		Value:       runtimecontracts.CELExpression("state.revision_count + 1"),
 	}}
-	handler.OnComplete = mustBootHandlerFixture(t, "on_complete:\n  - condition: entity.revision_count < 3\n").OnComplete
+	handler.OnComplete = mustBootHandlerFixture(t, "on_complete:\n  - condition: state.revision_count < 3\n").OnComplete
 	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
 	var err error
 	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(owner, eventType, handler)
@@ -4238,10 +4135,10 @@ func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesField
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
-	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
 	}
 }
@@ -4253,7 +4150,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
 	handler.CreateEntity = false
 	handler.Rules = mustBootHandlerFixture(t, `rules:
-  - when: entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""
+  - when: state.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""
 `).Rules
 	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
 	var err error
@@ -4268,7 +4165,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	if report.HasErrors() {
 		t.Fatalf("unexpected rule-condition errors, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected rule-condition entity reference error, got %#v", report.Errors())
 	}
 	if reportContains(report.Errors(), "condition_expression_validation", `event["source"].entity_id`) {
@@ -4370,13 +4267,13 @@ func TestRun_RejectsRuleConditionReferenceToUndeclaredEntityField(t *testing.T) 
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.missing_rule_score > 0",
+		Condition: "state.missing_rule_score > 0",
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_rule_score") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "state.missing_rule_score") {
 		t.Fatalf("expected undeclared rule-condition entity reference error, got %#v", report.Errors())
 	}
 }
@@ -4412,12 +4309,12 @@ func clearWave1ExpressionStaticCreateEntity(t *testing.T, bundle *runtimecontrac
 func TestRun_AllowsCreateEntityGuardReferenceToSchemaInitializedField(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "state.revision_count == 0"}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -4425,12 +4322,12 @@ func TestRun_AllowsCreateEntityGuardReferenceToSchemaInitializedField(t *testing
 func TestRun_AllowsSparsePresenceChecksWithoutInitializer(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "!has(entity.kill_reason)"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "!has(state.kill_reason)"}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.kill_reason") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.kill_reason") {
 		t.Fatalf("unexpected sparse-field validation error, got %#v", report.Errors())
 	}
 }
@@ -4438,12 +4335,12 @@ func TestRun_AllowsSparsePresenceChecksWithoutInitializer(t *testing.T) {
 func TestRun_AllowsHasGuardedTernaryReadWithoutInitializer(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: `has(entity.kill_reason) ? entity.kill_reason == "manual" : true`}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: `has(state.kill_reason) ? state.kill_reason == "manual" : true`}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.kill_reason") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.kill_reason") {
 		t.Fatalf("unexpected guarded ternary sparse-field validation error, got %#v", report.Errors())
 	}
 }
@@ -4451,7 +4348,7 @@ func TestRun_AllowsHasGuardedTernaryReadWithoutInitializer(t *testing.T) {
 func TestRun_AllowsCreateEntityGuardReferenceToDeclaredFieldEvenWhenSameHandlerAlsoWritesIt(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "state.revision_count == 0"}
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
 		TargetField: "revision_count",
 		Value:       runtimecontracts.LiteralExpression(0),
@@ -4460,7 +4357,7 @@ func TestRun_AllowsCreateEntityGuardReferenceToDeclaredFieldEvenWhenSameHandlerA
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -4475,14 +4372,14 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfSameHandlerTopLevelWrite(t *testin
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "testing.revision_count_read",
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
+			"revision_count": runtimecontracts.CELExpression("state.revision_count"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -4491,7 +4388,7 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleWrite
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "_entity.id != null",
+		Condition: "instance.id != null",
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
 				TargetField: "revision_count",
@@ -4502,14 +4399,14 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleWrite
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "testing.revision_count_read",
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
+			"revision_count": runtimecontracts.CELExpression("state.revision_count"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -4518,23 +4415,23 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleCompu
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "_entity.id != null",
+		Condition: "instance.id != null",
 		Compute: &runtimecontracts.ComputeSpec{
 			Operation: runtimecontracts.ComputeOpCount,
-			StoreAs:   "entity.revision_count",
+			StoreAs:   "state.revision_count",
 		},
 	}}
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "testing.revision_count_read",
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
+			"revision_count": runtimecontracts.CELExpression("state.revision_count"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -4544,10 +4441,10 @@ func TestRun_AllowsCreateEntityEmitFieldReadWhenRuleAlsoWritesUnconditionallyAva
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "entity.revision_count",
+		StoreAs:   "state.revision_count",
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "_entity.id != null",
+		Condition: "instance.id != null",
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
 				TargetField: "revision_count",
@@ -4558,14 +4455,14 @@ func TestRun_AllowsCreateEntityEmitFieldReadWhenRuleAlsoWritesUnconditionallyAva
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "testing.revision_count_read",
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
+			"revision_count": runtimecontracts.CELExpression("state.revision_count"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.revision_count") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
 }
@@ -4576,18 +4473,18 @@ func TestRun_RejectsReadBeforeAssignmentDespiteLaterWrite(t *testing.T) {
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
 		{
 			TargetField: "base_score",
-			Value:       runtimecontracts.CELExpression("entity.base_score + 1.0"),
+			Value:       runtimecontracts.CELExpression("state.base_score + 1.0"),
 		},
 		{
 			TargetField: "adjusted_score",
-			Value:       runtimecontracts.CELExpression("entity.base_score + 1.0"),
+			Value:       runtimecontracts.CELExpression("state.base_score + 1.0"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score are not definitely assigned") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "state.base_score are not definitely assigned") {
 		t.Fatalf("missing read-before-assignment rejection, got %#v", report.Errors())
 	}
 }
@@ -4595,15 +4492,15 @@ func TestRun_RejectsReadBeforeAssignmentDespiteLaterWrite(t *testing.T) {
 func TestRun_RejectsUndeclaredFieldReadEvenWhenSiblingWriteAlsoExists(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.missing_retry_count < 3"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "state.missing_retry_count < 3"}
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
 		{
 			TargetField: "missing_retry_count",
-			Value:       runtimecontracts.CELExpression("entity.missing_retry_count + 1"),
+			Value:       runtimecontracts.CELExpression("state.missing_retry_count + 1"),
 		},
 		{
 			TargetField: "missing_adjusted_score",
-			Value:       runtimecontracts.CELExpression("entity.missing_retry_count + entity.missing_base_score"),
+			Value:       runtimecontracts.CELExpression("state.missing_retry_count + state.missing_base_score"),
 		},
 		{
 			TargetField: "missing_base_score",
@@ -4614,10 +4511,10 @@ func TestRun_RejectsUndeclaredFieldReadEvenWhenSiblingWriteAlsoExists(t *testing
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_retry_count") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "state.missing_retry_count") {
 		t.Fatalf("expected undeclared-field guard error, got %#v", report.Errors())
 	}
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_base_score") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "state.missing_base_score") {
 		t.Fatalf("expected undeclared sibling-read error, got %#v", report.Errors())
 	}
 }
@@ -4636,13 +4533,13 @@ func TestRun_RejectsTopLevelDataReadProvedOnlyByConditionalRule(t *testing.T) {
 	}}
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
 		TargetField: "adjusted_score",
-		Value:       runtimecontracts.CELExpression("entity.base_score + 1"),
+		Value:       runtimecontracts.CELExpression("state.base_score + 1"),
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "state.base_score") {
 		t.Fatalf("expected unassigned branch-only read rejection, got %#v", report.Errors())
 	}
 }
@@ -4652,9 +4549,9 @@ func TestRun_SuppressesExpressionFieldReferenceFindingWhenComputeMakesFieldAvail
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "entity.composite_score",
+		StoreAs:   "state.composite_score",
 	}
-	handler.OnComplete = mustBootHandlerFixture(t, "on_complete:\n  - condition: entity.composite_score >= 0\n").OnComplete
+	handler.OnComplete = mustBootHandlerFixture(t, "on_complete:\n  - condition: state.composite_score >= 0\n").OnComplete
 	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
 	var err error
 	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(owner, eventType, handler)
@@ -4665,10 +4562,10 @@ func TestRun_SuppressesExpressionFieldReferenceFindingWhenComputeMakesFieldAvail
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.composite_score") {
+	if reportContains(report.Errors(), "expression_field_reference_validation", "state.composite_score") {
 		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
-	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.composite_score") {
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "state.composite_score") {
 		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
 	}
 }
@@ -4680,7 +4577,7 @@ func TestRun_RejectsCreateEntityAccumulateWhenDynamicComputeProofWouldOtherwiseW
 	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "entity.composite_score",
+		StoreAs:   "state.composite_score",
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
@@ -4698,7 +4595,7 @@ func TestRun_RejectsCreateEntityAccumulateWithoutFiniteCompletionSemantics(t *te
 	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "entity.composite_score",
+		StoreAs:   "state.composite_score",
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
@@ -4971,7 +4868,7 @@ func TestRun_RejectsPlatformEntityDataAccumulationWriteTarget(t *testing.T) {
 					"item.received": {
 						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 							Writes: []runtimecontracts.WorkflowDataWrite{{
-								TargetPathRef: "_entity.current_state",
+								TargetPathRef: "instance.stage",
 								Value:         runtimecontracts.CELExpression(`"done"`),
 							}},
 						},
@@ -4983,7 +4880,7 @@ func TestRun_RejectsPlatformEntityDataAccumulationWriteTarget(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "entity_write_target_compliance", "_entity.current_state") ||
+	if !reportContains(report.Errors(), "entity_write_target_compliance", "instance.stage") ||
 		!reportContains(report.Errors(), "entity_write_target_compliance", "read-only platform entity metadata") {
 		t.Fatalf("expected platform entity data_accumulation write target error, got %#v", report.Errors())
 	}
@@ -5004,7 +4901,7 @@ func TestRun_RejectsPlatformEntityStoreAsWriteTarget(t *testing.T) {
 					"item.received": {
 						Count: &runtimecontracts.CountSpec{
 							Source:  "payload.items",
-							StoreAs: "_entity.current_state",
+							StoreAs: "instance.stage",
 						},
 					},
 				},
@@ -5014,7 +4911,7 @@ func TestRun_RejectsPlatformEntityStoreAsWriteTarget(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "entity_write_target_compliance", "_entity.current_state") ||
+	if !reportContains(report.Errors(), "entity_write_target_compliance", "instance.stage") ||
 		!reportContains(report.Errors(), "entity_write_target_compliance", "read-only platform entity metadata") {
 		t.Fatalf("expected platform entity store_as write target error, got %#v", report.Errors())
 	}
@@ -5831,13 +5728,8 @@ opco.spend_requested:
   vertical_id: string
   amount_usd: number
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "entities.yaml"), `
-opco_budget:
-  vertical_id:
-    type: text
-  spent_usd:
-    type: number
-    initial: 0
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "state.yaml"), `vertical_id: text
+spent_usd: 0
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "nodes.yaml"), treasuryNodes)
 	return root
@@ -5859,7 +5751,7 @@ func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
 
 func isOptionalBootverifyDeclarationFile(path string) bool {
 	switch filepath.Base(path) {
-	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+	case "agents.yaml", "state.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
 		return true
 	default:
 		return false
@@ -5876,9 +5768,7 @@ func loadAgentMemoryValidationFixture(t *testing.T, fixtureRoot string) semantic
 func writeAgentMemoryValidationFixture(t *testing.T, rootAgents, flowSchema, flowAgents string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), `item_id: string
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-memory-validation\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
@@ -5908,9 +5798,7 @@ func writePackageBackedAgentMemoryValidationFixture(t *testing.T, flowSchema, pa
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), `item_id: string
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-memory-validation\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
@@ -6025,9 +5913,7 @@ func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), `item_id: string
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: pin-ambiguity\n")
 
@@ -6102,9 +5988,7 @@ stages:
   review: {}
   done: {final: true}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
-ticket: {}
-`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "state.yaml"), ``)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 ticket.opened:
   entity_id: string
@@ -6141,9 +6025,7 @@ func writeStagedLifecycleFixture(t *testing.T, schema string) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: staged-lifecycle\n")
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), schema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
-ticket: {}
-`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "state.yaml"), ``)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 ticket.opened:
   entity_id: string
@@ -6177,10 +6059,7 @@ func writeWave1RootReaderCoverageFixture(t *testing.T) string {
 	root := t.TempDir()
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-root-reader-coverage\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-case:
-  priority:
-    type: integer
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), `priority: integer
 `)
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
@@ -6190,7 +6069,7 @@ stages:
 inputs:
   - task.assigned
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "case:\n  local: text\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "local: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
 task.assigned:
   entity_id: string
@@ -6198,7 +6077,7 @@ task.assigned:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 reader:
   task.assigned:
-    guard: entity.priority >= 0
+    guard: state.priority >= 0
     advances_to: done
 `)
 
@@ -6221,7 +6100,7 @@ stages:
   idle: {}
   done: {final: true}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), entitiesYAML)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), entitiesYAML)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), agentsYAML)
 	if strings.TrimSpace(promptText) == "" {
 		promptText = "Write the fields authorized by the contract.\n"
@@ -6479,43 +6358,6 @@ func writeOptionalBootverifyFixtureFile(t *testing.T, path, contents string) {
 		contents += "\n"
 	}
 	writeBootverifyFixtureFile(t, path, contents)
-}
-
-func gateSchemaValidationBundle(t testing.TB, gateState runtimecontracts.NodeGateStateSchema, handler runtimecontracts.SystemNodeEventHandler) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	const (
-		nodeID    = "validate-task"
-		eventType = "task.requested"
-	)
-	node := runtimecontracts.SystemNodeContract{
-
-		GateState: gateState,
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			eventType: handler,
-		},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventType: {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			nodeID: node,
-		},
-	}
-	bundle.Platform.Platform.Name = "swarm"
-	bundle.Platform.Platform.Version = "test"
-	bundle.Semantics.HandlerTransitions = []runtimecontracts.HandlerTransitionSemantic{{
-		ID:        nodeID + ":" + eventType,
-		Node:      identitytest.RootNode(t, nodeID),
-		EventType: eventType,
-		SetsGate:  handler.SetsGate,
-	}}
-	return bundle
-}
-
-func decodeGateSchemaHandler(t *testing.T, raw string) runtimecontracts.SystemNodeEventHandler {
-	t.Helper()
-	return mustBootHandlerFixture(t, raw)
 }
 
 func reportContains(items []Finding, checkID, contains string) bool {

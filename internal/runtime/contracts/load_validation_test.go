@@ -297,30 +297,6 @@ worker:
 	}
 }
 
-func TestLoadWorkflowContractBundleAllowsPublicNodeStateTable(t *testing.T) {
-	repoRoot := contractRepoRoot(t)
-	root := t.TempDir()
-	writeFieldReconciliationBundle(t, root, "", `
-worker:
-  state_table: worker_state
-  state_schema:
-    fields:
-      count:
-        type: integer
-`)
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	node, ok := bundle.Nodes["worker"]
-	if !ok {
-		t.Fatalf("worker node missing: %#v", bundle.Nodes)
-	}
-	if got, want := strings.TrimSpace(node.StateTable), "worker_state"; got != want {
-		t.Fatalf("StateTable = %q, want %q", got, want)
-	}
-}
-
 func TestLoadWorkflowContractBundleRejectsRetiredTimerDurationAlias(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()

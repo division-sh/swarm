@@ -110,7 +110,7 @@ func issue2564H2CommittedStageEvidence(t *testing.T, rt issue2564H2Fixture, runI
 func issue2564H2ValidateRule(selection storetest.HandlerSelectionStorageEvidence, index int) error {
 	display := "rules[1]: default"
 	if index == 0 {
-		display = "rules[0]: when _entity.current_state == 's1'"
+		display = "rules[0]: when instance.stage == 's1'"
 	} else if index != 1 {
 		return fmt.Errorf("H2 counter effect has no admitted selection row %d", index)
 	}
@@ -161,7 +161,7 @@ func TestIssue2564H2CommitStageRejectsWrongEvidence(t *testing.T) {
 			case "wrong_rule":
 				probe.SemanticPath = `nodes["hub-node"].handlers["hub.bump"].rules[0]`
 			case "wrong_display":
-				probe.DisplayLabel = "rules[0]: when _entity.current_state == 's1'"
+				probe.DisplayLabel = "rules[0]: when instance.stage == 's1'"
 			case "wrong_context":
 				probe.Context = "transition"
 			case "wrong_flow":

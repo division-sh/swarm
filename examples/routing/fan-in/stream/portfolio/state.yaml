@@ -1,0 +1,4 @@
+operating_reports: [OperatingReport]
+period_id: text
+reports: {}
+last_revenue: integer

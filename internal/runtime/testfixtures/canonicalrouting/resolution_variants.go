@@ -73,7 +73,7 @@ func CopyIntegerTemplateCreateThenSelectSameEvent(t testing.TB) string {
 	for range 2 {
 		applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"), "account_id: text", "account_id: integer")
 	}
-	applyClosedReplacement(t, filepath.Join(root, "account/entities.yaml"), "type: text", "type: integer")
+	applyClosedReplacement(t, filepath.Join(root, "account/state.yaml"), "type: text", "type: integer")
 	return root
 }
 
@@ -111,7 +111,7 @@ func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState s
 	applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"),
 		"        account_id: payload.account_id\n",
 		"        account_id: payload.account_id\n        score: payload.score\n        decision: payload.decision\n")
-	applyClosedReplacement(t, filepath.Join(root, "account", "entities.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "account", "state.yaml"),
 		"    _unused_reason: receiver instance identity\n",
 		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "account", "nodes.yaml"),
@@ -159,12 +159,12 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	case SelectResolutionExtraAggregation:
 		applyClosedReplacement(t, edgeSchema, selectedEdge, selectedEdge+"    aggregation: stream\n")
 	case SelectResolutionEntityTypeMismatch:
-		applyClosedReplacement(t, filepath.Join(root, "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "account", "state.yaml"), "    type: text\n", "    type: integer\n")
 	case SelectResolutionSourceTypeMismatchWithoutCarryType:
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
 	case SelectResolutionNumberSourceToIntegerReceiver:
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: number\n")
-		applyClosedReplacement(t, filepath.Join(root, "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "account", "state.yaml"), "    type: text\n", "    type: integer\n")
 	default:
 		t.Fatalf("unsupported select resolution invalidity %d", opts.Invalidity)
 	}
@@ -268,14 +268,14 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 		if opts.Mint == CreateMintPayload {
 			applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: integer\n")
 		} else {
-			applyClosedReplacement(t, filepath.Join(root, "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
+			applyClosedReplacement(t, filepath.Join(root, "validator", "state.yaml"), "    type: uuid\n", "    type: integer\n")
 		}
 	case CreateResolutionNumberSourceToIntegerReceiver:
 		if opts.Mint != CreateMintPayload {
 			t.Fatal("number-to-integer create fixture requires payload minting")
 		}
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: number\n")
-		applyClosedReplacement(t, filepath.Join(root, "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "validator", "state.yaml"), "    type: uuid\n", "    type: integer\n")
 	default:
 		t.Fatalf("unsupported create resolution invalidity %d", opts.Invalidity)
 	}

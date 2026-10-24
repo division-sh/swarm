@@ -16,7 +16,7 @@ inputs:
 outputs:
   - ack
 `)
-	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  marker: text\n")
+	writeClosedVariantFile(t, root, "state.yaml", "marker: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", `seed:
 select:
 selected:
@@ -30,14 +30,14 @@ ack:
       writes: [{target_field: marker, value: "first"}]
 select:
   select:
-    guard: has(entity.marker)
+    guard: has(state.marker)
     rules:
-      - when: entity.marker == 'first'
+      - when: state.marker == 'first'
         emit: {event: selected, fields: {marker: "first"}}
-      - when: entity.marker == 'second'
+      - when: state.marker == 'second'
         emit: {event: selected, fields: {marker: "second"}}
     data_accumulation:
-      writes: [{target_field: marker, value: entity.marker}]
+      writes: [{target_field: marker, value: state.marker}]
 final:
   selected:
     emit: {event: ack, fields: {marker: payload.marker}}

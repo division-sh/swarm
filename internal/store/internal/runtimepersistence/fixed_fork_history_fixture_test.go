@@ -112,10 +112,10 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		eventSchema += "  matrix: boolean?\n  items: json?\n"
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
-		"schema.yaml":           "name: fixed-fork-history\n",
-		flow + "/schema.yaml":   fmt.Sprintf("name: %s\ninstance: %s\nstages:\n  %s: {}\n  done: {final: true}\npins:\n  inputs: [%s]\n", flow, keyField, stage, input),
-		flow + "/entities.yaml": declarations.String(),
-		flow + "/events.yaml":   eventSchema,
+		"schema.yaml":         "name: fixed-fork-history\n",
+		flow + "/schema.yaml": fmt.Sprintf("name: %s\ninstance: %s\nstages:\n  %s: {}\n  done: {final: true}\npins:\n  inputs: [%s]\n", flow, keyField, stage, input),
+		flow + "/state.yaml":  declarations.String(),
+		flow + "/events.yaml": eventSchema,
 	})
 	ctx := correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{

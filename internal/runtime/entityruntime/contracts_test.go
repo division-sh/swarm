@@ -123,7 +123,7 @@ func TestNormalizeFieldValueIsTypeValidationNotAssignmentProof(t *testing.T) {
 		if _, err := NormalizeFieldValue(contract, field, "deploy"); err != nil {
 			t.Fatalf("NormalizeFieldValue(%s): %v", field, err)
 		}
-		if _, err := ApplyMutations(contract, nil, []Mutation{{Target: "entity." + field, Value: "deploy"}}); err == nil {
+		if _, err := ApplyMutations(contract, nil, []Mutation{{Target: "state." + field, Value: "deploy"}}); err == nil {
 			t.Fatalf("mutation of %s bypassed final-candidate equality", field)
 		}
 	}
@@ -360,7 +360,7 @@ func TestContainedOperationTarget_ResolvesTypedMapAndListOperations(t *testing.T
 		},
 	}
 
-	target, err := ResolveContainedOperationTarget(contract, "entity.verticals.active_jobs", string(ContainedOperationAppend), true, false)
+	target, err := ResolveContainedOperationTarget(contract, "state.verticals.active_jobs", string(ContainedOperationAppend), true, false)
 	if err != nil {
 		t.Fatalf("ResolveContainedOperationTarget(map append): %v", err)
 	}
@@ -375,7 +375,7 @@ func TestContainedOperationTarget_ResolvesTypedMapAndListOperations(t *testing.T
 		t.Fatalf("value = %#v", value)
 	}
 
-	listTarget, err := ResolveContainedOperationTarget(contract, "entity.queue", string(ContainedOperationUpdate), false, true)
+	listTarget, err := ResolveContainedOperationTarget(contract, "state.queue", string(ContainedOperationUpdate), false, true)
 	if err != nil {
 		t.Fatalf("ResolveContainedOperationTarget(list update): %v", err)
 	}
@@ -402,10 +402,10 @@ func TestContainedOperationTarget_FailsClosedForDynamicPathAndWrongShape(t *test
 		},
 	}
 
-	if _, err := ResolveContainedOperationTarget(contract, "entity.verticals[payload.vertical_id]", string(ContainedOperationSet), true, false); err == nil {
+	if _, err := ResolveContainedOperationTarget(contract, "state.verticals[payload.vertical_id]", string(ContainedOperationSet), true, false); err == nil {
 		t.Fatal("dynamic bracket target resolved; want fail-closed rejection")
 	}
-	target, err := ResolveContainedOperationTarget(contract, "entity.verticals", string(ContainedOperationSet), true, false)
+	target, err := ResolveContainedOperationTarget(contract, "state.verticals", string(ContainedOperationSet), true, false)
 	if err != nil {
 		t.Fatalf("ResolveContainedOperationTarget(map set): %v", err)
 	}
@@ -434,7 +434,7 @@ func TestContainedOperationTarget_RejectsSetOrMergeIndex(t *testing.T) {
 
 	for _, op := range []string{ContainedOperationSet, ContainedOperationMerge} {
 		t.Run(op, func(t *testing.T) {
-			_, err := ResolveContainedOperationTarget(contract, "entity.verticals", op, true, true)
+			_, err := ResolveContainedOperationTarget(contract, "state.verticals", op, true, true)
 			if err == nil {
 				t.Fatalf("ResolveContainedOperationTarget(%s with index) = nil, want fail-closed rejection", op)
 			}

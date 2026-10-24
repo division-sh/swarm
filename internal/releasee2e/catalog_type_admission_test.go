@@ -49,8 +49,8 @@ const admissionPublicNodes = `complete-task:
         - lookup
         - enums
         - uuids
-        - {op: merge, target: entity.lookup, key: '2', value: {note: 'merged'}}
-        - {op: set, target: entity.lookup, key: '10', value: {id: 'ten'}}
+        - {op: merge, target: state.lookup, key: '2', value: {note: 'merged'}}
+        - {op: set, target: state.lookup, key: '10', value: {id: 'ten'}}
     advances_to: collecting
     fan_out:
       items_from: payload.lookup
@@ -81,7 +81,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(source, "schema.yaml"), "stages:\n  pending: {}\n  collecting: {}\n  done: {final: true}\ninputs: [task.requested]\n")
 			fields := "  labels: [Label]\n  lookup: map[Label]Item\n  enums: map[Status]Item\n  uuids: map[ID]Item\n"
 			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n"+fields+"key.observed:\n  member_id: Label\n")
-			writeReleaseFile(t, filepath.Join(source, "entities.yaml"), "test_entity:\n  labels: [Label]\n  lookup: {type: 'map[Label]Item', initial: {}}\n  enums: map[Status]Item\n  uuids: map[ID]Item\n")
+			writeReleaseFile(t, filepath.Join(source, "state.yaml"), "labels: [Label]\nlookup: {}\nenums: map[Status]Item\nuuids: map[ID]Item\n")
 			writeReleaseFile(t, filepath.Join(source, "nodes.yaml"), admissionPublicNodes)
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
@@ -150,7 +150,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 				t.Fatalf("public fan-out lost exact lexical key order: %v; events=%+v\n%s", keys, events, process.output.String())
 			}
 			var entity map[string]any
-			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "state.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
 			stateFields, ok := entity["fields"].(map[string]any)
@@ -172,7 +172,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 				t.Fatalf("restart source identity changed: %s != %s", got, hash)
 			}
 			entity = nil
-			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "state.get", map[string]any{"entity_id": published.RunID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
 			after, _ := json.Marshal(entity)
@@ -264,7 +264,7 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(source, "types.yaml"), "scalars:\n  Label: text\n")
 			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "account.requested:\n  account_id: Label\n")
 			writeReleaseFile(t, filepath.Join(source, "producer/events.yaml"), "account.ready:\n  key: account_id\n  account_id: Label\n")
-			writeReleaseFile(t, filepath.Join(source, "account/entities.yaml"), "account_state:\n  account_id: {type: Label, _unused_reason: receiver instance identity}\n")
+			writeReleaseFile(t, filepath.Join(source, "account/state.yaml"), "account_id: Label\n")
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
 				store = goldenPostgresStore(t, dsn)
@@ -320,7 +320,7 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 				t.Fatalf("alias template route lost exact acquisition/payload: %+v", routed)
 			}
 			var entity map[string]any
-			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "state.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatalf("alias template identity readback: %+v %v", entity, err)
 			}
 			summary, ok := entity["entity"].(map[string]any)
@@ -336,7 +336,7 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 				t.Fatalf("alias template restart: %v\n%s", err, process.output.String())
 			}
 			entity = nil
-			if err := process.rpc.call(ctx, "entity.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "state.get", map[string]any{"entity_id": target.EntityID, "run_id": published.RunID}, &entity); err != nil {
 				t.Fatal(err)
 			}
 			after, _ := json.Marshal(entity)

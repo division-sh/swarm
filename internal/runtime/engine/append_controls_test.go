@@ -43,7 +43,7 @@ func TestExecutor_GenericAppendReferenceControls(t *testing.T) {
 				State: testStateSnapshot("active", map[string]any{"entries": []any{"before"}}, nil, nil),
 				Handler: contracts.SystemNodeEventHandler{DataAccumulation: contracts.WorkflowDataAccumulation{
 					Writes: []contracts.WorkflowDataWrite{{
-						Operation: contracts.WorkflowDataOperationAppend, TargetRef: "entity.entries",
+						Operation: contracts.WorkflowDataOperationAppend, TargetRef: "state.entries",
 						Value: contracts.RefExpression(tc.ref),
 					}},
 				}},

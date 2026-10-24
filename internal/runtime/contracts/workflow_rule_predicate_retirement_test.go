@@ -193,7 +193,7 @@ func TestRulePredicateContextsRemainDistinct(t *testing.T) {
 func TestBundleAdmissionRejectsRetiredRulePredicateAndCompilesWhen(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: rule-predicate-proof\n")
-	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), "proof: {}\n")
+	writeFixtureFile(t, filepath.Join(root, "state.yaml"), "")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n")
 	nodes := filepath.Join(root, "nodes.yaml")
 	writeFixtureFile(t, nodes, "worker:\n  proof.requested:\n    rules:\n      - condition: 'true'\n      - emit: proof.requested\n")

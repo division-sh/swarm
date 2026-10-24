@@ -21,8 +21,8 @@ inputs:
 outputs:
   - item.processed
 `,
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "item.received:\n  entity_id: uuid\nitem.processed:\n",
+
+		"events.yaml": "item.received:\n  entity_id: uuid\nitem.processed:\n",
 		"nodes.yaml": `test-node:
   item.received:
     advances_to: processed

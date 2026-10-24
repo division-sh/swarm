@@ -140,6 +140,9 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	if context == "agent" && key == "criteria" {
 		remediation = "criteria is not an agent key; put agent instructions in intent, and use a validate row for machine-checked rules."
 	}
+	if (context == "handler" && (key == "sets_gate" || key == "clear_gates")) || (context == "node" && key == "gate_state") {
+		remediation = "Declare an ordinary boolean field in state.yaml and write it explicitly with data_accumulation; there is no separate gate state."
+	}
 	if context == "event payload field" && key == "citation" {
 		remediation = "citation is not an event field key; declare ordinary payload data and use a validate row for machine-checked rules."
 	}
@@ -151,7 +154,7 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 			remediation = "indexed is a state-field option, not an event-field option."
 		}
 	}
-	if context == "type field" || context == "entity field" {
+	if context == "type field" || context == "entity field" || context == "state field" {
 		switch key {
 		case "description", "pattern", "length", "range", "equal_to", "immutable", "citation":
 			remediation = "A field is its type or {type: <type>, indexed: true} on state only; put prose in a YAML comment. Authored refinements and citations are not supported; use a validate row for machine-checked rules."
@@ -159,6 +162,8 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 			remediation = "The accumulate target is the collected list; a differently shaped list is a second field written by op: append with an explicit value."
 		case "indexed":
 			remediation = "indexed is a state-field option, not a record-field option."
+		case "initial", "_unused_reason", "_unused_reader_reason":
+			remediation = "These state-field mappings are retired; write the initial value as a literal directly under the field, or a plain type for an unassigned field."
 		}
 	}
 	if key == "_description" {

@@ -228,7 +228,7 @@ func TestAdmittedSemanticDigestRetainsRedactedConsumedValues(t *testing.T) {
 }
 
 func TestNormalizedEventManifestRejectsHostileProjectionSyntax(t *testing.T) {
-	for _, path := range []string{"$.message.text", "message..text", "payload.message.text", "entity.id", "message[0].text", "message.text == 'x'"} {
+	for _, path := range []string{"$.message.text", "message..text", "payload.message.text", "state.id", "message[0].text", "message.text == 'x'"} {
 		t.Run(path, func(t *testing.T) {
 			manifest := normalizedEventTestManifest()
 			field := manifest.NormalizedEvents[0].Fields["text"]

@@ -2,11 +2,11 @@ worker-node:
   flow.spawned:
     guard: payload.worker_id != ''
     rules:
-      - when: _entity.current_state == 'awaiting_spawned'
+      - when: instance.stage == 'awaiting_spawned'
         advances_to: complete
       - advances_to: awaiting_observed
   worker.observed:
     rules:
-      - when: _entity.current_state == 'awaiting_observed'
+      - when: instance.stage == 'awaiting_observed'
         advances_to: complete
       - advances_to: awaiting_spawned

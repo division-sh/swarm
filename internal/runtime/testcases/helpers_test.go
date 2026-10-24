@@ -70,13 +70,6 @@ func genericExecutableNode(t testing.TB, bundle *runtimecontracts.WorkflowContra
 	return match
 }
 
-func gateName(spec *runtimecontracts.GateSpec) string {
-	if spec == nil {
-		return ""
-	}
-	return strings.TrimSpace(spec.Name)
-}
-
 func stringSet(values []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(values))
 	for _, value := range values {

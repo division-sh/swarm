@@ -295,7 +295,7 @@ func requireA2PortfolioKeyedEntity(t *testing.T, rt servedControlProofRuntime, r
 		}
 	}
 	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 100}, &list)
+	requireServedJSONRPCResult(t, rt.Endpoint, "state.list", map[string]any{"run_id": runID, "limit": 100}, &list)
 	if list.NextCursor != "" {
 		t.Fatalf("small portfolio keyed readback unexpectedly paginated: %+v", list)
 	}
@@ -323,7 +323,7 @@ func requireA2PortfolioKeyedEntity(t *testing.T, rt servedControlProofRuntime, r
 func requireA2PortfolioEntity(t *testing.T, rt servedControlProofRuntime, runID, path string) operatorread.OperatorEntityFull {
 	t.Helper()
 	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 100}, &list)
+	requireServedJSONRPCResult(t, rt.Endpoint, "state.list", map[string]any{"run_id": runID, "limit": 100}, &list)
 	var matches []operatorread.OperatorEntitySummary
 	for _, entity := range list.Entities {
 		if entity.FlowInstance == path {
@@ -334,7 +334,7 @@ func requireA2PortfolioEntity(t *testing.T, rt servedControlProofRuntime, runID,
 		t.Fatalf("exact public portfolio entity %s: matches=%+v list=%+v", path, matches, list)
 	}
 	var full operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": matches[0].EntityID}, &full)
+	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": matches[0].EntityID}, &full)
 	if !reflect.DeepEqual(matches[0], full.Entity) {
 		t.Fatalf("portfolio entity list/get disagree: summary=%+v full=%+v", matches[0], full)
 	}
@@ -521,7 +521,7 @@ func waitA2PortfolioComplete(t *testing.T, rt servedControlProofRuntime, runID, 
 	var period operatorread.OperatorEntityFull
 	for time.Now().Before(deadline) {
 		// Two independent list/get snapshots cannot require revision equality while completion is running.
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": flowidentity.EntityID(path)}, &period)
+		requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": flowidentity.EntityID(path)}, &period)
 		if period.Entity.RunID != runID || period.Entity.FlowInstance != path || period.Entity.EntityID != flowidentity.EntityID(path) {
 			t.Fatalf("completion poll lost the exact receiver: %+v, want %s/%s", period.Entity, runID, path)
 		}

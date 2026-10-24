@@ -87,10 +87,10 @@ coordinator_state:
 	if !typed || diagnostic.Code != "contract_loader.invalid_type_reference" {
 		t.Fatalf("unresolved contained type lost typed admission refusal: %v", err)
 	}
-	if diagnostic.Location.File != "coordinator/entities.yaml" || diagnostic.Location.YAMLPath != "entity coordinator_state.verticals" {
+	if diagnostic.Location.File != "coordinator/state.yaml" || diagnostic.Location.YAMLPath != "entity coordinator_state.verticals" {
 		t.Fatalf("unresolved contained type lost exact source location: %+v", diagnostic.Location)
 	}
-	if !strings.Contains(err.Error(), `coordinator/entities.yaml: entity coordinator_state.verticals: unknown catalog type "MissingType"`) {
+	if !strings.Contains(err.Error(), `coordinator/state.yaml: entity coordinator_state.verticals: unknown catalog type "MissingType"`) {
 		t.Fatalf("unresolved contained type lost source and cause: %v", err)
 	}
 }
@@ -123,7 +123,7 @@ coordinator-node:
     data_accumulation:
       writes:
         - op: set
-          target: entity.verticals[payload.vertical_id]
+          target: state.verticals[payload.vertical_id]
           key: payload.vertical_id
           value:
             status: "active"
@@ -185,12 +185,12 @@ coordinator_state:
 coordinator-node:
   job.received:
     group_by:
-      items_from: entity.verticals
+      items_from: state.verticals
       key: status
       store_as: metadata.grouped
 `,
 			wantKind:   "entity_read.group_by.items_from",
-			wantTarget: "entity.verticals",
+			wantTarget: "state.verticals",
 		},
 		{
 			name: "join state membership",
@@ -210,7 +210,7 @@ coordinator-node:
       on_complete: {advances_to: done}
 `,
 			wantKind:   "entity_read.join.members.from",
-			wantTarget: "entity.members",
+			wantTarget: "state.members",
 		},
 	}
 
@@ -240,7 +240,7 @@ inputs:
 			if matched == nil {
 				t.Fatalf("demands = %#v, want kind %q target %q with exact scoped provenance", demands, tc.wantKind, tc.wantTarget)
 			}
-			if got := matched.Field; got != strings.TrimPrefix(tc.wantTarget, "entity.") {
+			if got := matched.Field; got != strings.TrimPrefix(tc.wantTarget, "state.") {
 				t.Fatalf("scoped reader field = %q, want exact target field", got)
 			}
 		})
@@ -278,12 +278,12 @@ coordinator-node:
   job.received:
     query:
       source: payload.job
-      select: [entity.verticals]
+      select: [state.verticals]
       store_as: metadata.selected
 `)
 
 	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
-		if demand.Target == "entity.verticals" || demand.Field == "verticals" {
+		if demand.Target == "state.verticals" || demand.Field == "verticals" {
 			t.Fatalf("literal query selector created singleton coordinator demand: %#v", demand)
 		}
 	}
@@ -299,7 +299,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 			name: "filter predicate",
 			operator: `filter:
         source: payload.job
-        predicate: entity.verticals
+        predicate: state.verticals
         condition: |-
                      true
         store_as: metadata.filtered`,
@@ -311,14 +311,14 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         source: payload.job
         operation: count
         params:
-          value: entity.verticals
+          value: state.verticals
         store_as: metadata.reduced`,
 			rejection: `reduce field "params"`,
 		},
 		{
 			name: "filter source shadowed by items from",
 			operator: `filter:
-        source: entity.verticals
+        source: state.verticals
         items_from: payload.job
         condition: |-
                      true
@@ -327,7 +327,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 		{
 			name: "reduce source shadowed by items from",
 			operator: `reduce:
-        source: entity.verticals
+        source: state.verticals
         items_from: payload.job
         operation: count
         store_as: metadata.reduced`,
@@ -335,14 +335,14 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 		{
 			name: "count source shadowed by items from",
 			operator: `count:
-        source: entity.verticals
+        source: state.verticals
         items_from: payload.job
         store_as: metadata.counted`,
 		},
 		{
 			name: "guard check shadowed by checks",
 			operator: `guard:
-        check: entity.verticals
+        check: state.verticals
         checks:
           - id: ready
             check: payload.job != null`,
@@ -351,7 +351,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 		{
 			name: "nested query row",
 			operator: `query:
-        - source: entity.verticals
+        - source: state.verticals
           store_as: metadata.rows`,
 			rejection: "must be a mapping, got sequence",
 		},
@@ -361,7 +361,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         id: coordinator_node_job_received_review
         tool: review
         approval:
-          decision: entity.release`,
+          decision: state.release`,
 		},
 		{
 			name: "on complete activity input",
@@ -371,7 +371,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
           activity:
             tool: review
             input:
-              value: entity.verticals`,
+              value: state.verticals`,
 			rejection: "on_complete.activity is unsupported",
 		},
 	}
@@ -406,7 +406,7 @@ coordinator-node:
 `)
 
 			for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
-				if demand.Target == "entity.verticals" || demand.Field == "verticals" {
+				if demand.Target == "state.verticals" || demand.Field == "verticals" {
 					t.Fatalf("unevaluated field created singleton coordinator demand: %#v", demand)
 				}
 			}
@@ -418,7 +418,7 @@ func TestBuildSingletonCoordinatorDemandProjection_TreatsLoopFromAsStageIdentifi
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 stages:
-  entity.verticals: {}
+  state.verticals: {}
   review: {}
   exhausted: {final: true}
 loops:
@@ -437,16 +437,16 @@ coordinator_state:
 `, "", `
 coordinator-node:
   job.received:
-    loop: {start: revision, from: entity.verticals}
+    loop: {start: revision, from: state.verticals}
     advances_to: review
 `)
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if findingContainsAll(report.Errors(), "expression_field_reference_validation", "loop.from", "entity.verticals") {
+	if findingContainsAll(report.Errors(), "expression_field_reference_validation", "loop.from", "state.verticals") {
 		t.Fatalf("literal loop source stage failed expression validation: %#v", report.Errors())
 	}
 
 	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
-		if demand.Target == "entity.verticals" || demand.Field == "verticals" {
+		if demand.Target == "state.verticals" || demand.Field == "verticals" {
 			t.Fatalf("literal loop source stage created singleton coordinator demand: %#v", demand)
 		}
 	}
@@ -536,7 +536,7 @@ func writeSingletonCoordinatorFixtureRoot(t *testing.T, flowSchema, flowEntities
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-fixture\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), singletonCoordinatorTypesYAML())
-	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "state.yaml"), strings.TrimSpace(flowEntities)+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "events.yaml"), `
 job.received:
   vertical_id: text

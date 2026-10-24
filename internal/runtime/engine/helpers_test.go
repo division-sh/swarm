@@ -28,15 +28,15 @@ func TestResolveRefRequiresExplicitScope(t *testing.T) {
 	}
 
 	cases := map[string]any{
-		"payload.score":         7,
-		"payload.nested.value":  "x",
-		"metadata.status":       "ready",
-		"entity.status":         "ready",
-		"_entity.current_state": "reviewing",
-		"policy.mode":           "strict",
-		"accumulated.count":     2,
-		"fan_out.item":          "fan",
-		"computed.grade":        "A",
+		"payload.score":        7,
+		"payload.nested.value": "x",
+		"metadata.status":      "ready",
+		"state.status":         "ready",
+		"instance.stage":       "reviewing",
+		"policy.mode":          "strict",
+		"accumulated.count":    2,
+		"fan_out.item":         "fan",
+		"computed.grade":       "A",
 	}
 	for ref, want := range cases {
 		if got := resolveRef(base, state, ref); got != want {
@@ -61,7 +61,7 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 	transformed, err := emitFieldsPayload(base, state, runtimecontracts.EmitSpec{
 		Fields: map[string]runtimecontracts.ExpressionValue{
 			"nested.score":   runtimecontracts.CELExpression("payload.score"),
-			"nested.state":   runtimecontracts.CELExpression("_entity.current_state"),
+			"nested.state":   runtimecontracts.CELExpression("instance.stage"),
 			"nested.path":    runtimecontracts.CELExpression("computed.template_path"),
 			"literal.string": runtimecontracts.CELExpression(`"hello"`),
 			"explicit.ref":   runtimecontracts.RefExpression("payload.score"),
@@ -216,7 +216,7 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 	spec := runtimecontracts.WorkflowDataAccumulation{
 		SourceEvent: "task.completed",
 		Writes: []runtimecontracts.WorkflowDataWrite{
-			{TargetField: "entity.score", SourceField: "score"},
+			{TargetField: "state.score", SourceField: "score"},
 			{TargetField: "status", SourceField: "nested.value"},
 			{TargetField: "literal", Value: runtimecontracts.LiteralExpression("fixed")},
 			{TargetField: "dispatch_count", Value: runtimecontracts.CELExpression("fan_out.count")},
@@ -291,11 +291,11 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 	spec := runtimecontracts.WorkflowDataAccumulation{
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{
-				TargetField: "entity.dimensions_requested",
+				TargetField: "state.dimensions_requested",
 				Value:       runtimecontracts.CELExpression("policy.scoring_dimensions"),
 			},
 			{
-				TargetField: "entity.scoring_rubric",
+				TargetField: "state.scoring_rubric",
 				Value:       runtimecontracts.CELExpression("'corpus_rubric'"),
 			},
 		},
@@ -325,8 +325,8 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 	spec := runtimecontracts.WorkflowDataAccumulation{
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{
-				TargetField: "entity.revision_count",
-				Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
+				TargetField: "state.revision_count",
+				Value:       runtimecontracts.CELExpression("state.revision_count + 1"),
 			},
 		},
 	}
@@ -355,7 +355,7 @@ func TestApplyDataAccumulationToState_WritesNestedTargetPath(t *testing.T) {
 	spec := runtimecontracts.WorkflowDataAccumulation{
 		Writes: []runtimecontracts.WorkflowDataWrite{{
 			SourceField:   "summary",
-			TargetPathRef: "entity.analysis.summary",
+			TargetPathRef: "state.analysis.summary",
 		}},
 	}
 
@@ -383,8 +383,8 @@ func TestApplyDataAccumulationToState_FailsClosedOnCELRuntimeError(t *testing.T)
 	spec := runtimecontracts.WorkflowDataAccumulation{
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{
-				TargetField: "entity.revision_count",
-				Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
+				TargetField: "state.revision_count",
+				Value:       runtimecontracts.CELExpression("state.revision_count + 1"),
 			},
 		},
 	}
@@ -393,7 +393,7 @@ func TestApplyDataAccumulationToState_FailsClosedOnCELRuntimeError(t *testing.T)
 	if err == nil {
 		t.Fatal("expected data accumulation CEL runtime error")
 	}
-	if !strings.Contains(err.Error(), "data_accumulation target entity.revision_count") {
+	if !strings.Contains(err.Error(), "data_accumulation target state.revision_count") {
 		t.Fatalf("error = %v, want data_accumulation target context", err)
 	}
 	if _, exists := state.StateCarrier.Fields["revision_count"]; exists {
@@ -513,7 +513,7 @@ func TestComputeValue(t *testing.T) {
 	}
 	value, err = computeValue(acc, nil, &runtimecontracts.ComputeSpec{
 		Operation:   runtimecontracts.ComputeOpWeightedAverage,
-		StoreAs:     "entity.composite",
+		StoreAs:     "state.composite",
 		ValueField:  "score",
 		WeightField: "weight",
 	})

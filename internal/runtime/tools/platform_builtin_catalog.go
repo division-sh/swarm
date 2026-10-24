@@ -236,7 +236,7 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 		},
 		"save_entity_field": {
 			Category:    "entity_persistence",
-			Description: "Write a single declared field or dotted subfield path on an entity.",
+			Description: "Write a single declared field or dotted subfield path on an state.",
 			InputSchema: ObjectSchema(map[string]any{
 				"flow_instance": existingEntityFlowInstanceSchema(),
 				"entity_id":     map[string]any{"type": "string"},
@@ -391,7 +391,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 	if len(fieldEnum) > 0 {
 		entries["save_entity_field"] = builtinToolDraft{
 			Category:    "entity_persistence",
-			Description: "Write a single declared field or dotted subfield path on an entity.",
+			Description: "Write a single declared field or dotted subfield path on an state.",
 			InputSchema: ObjectSchema(map[string]any{
 				"flow_instance": existingEntityFlowInstanceSchema(),
 				"entity_id":     map[string]any{"type": "string"},

@@ -2,8 +2,11 @@ package contracts
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+var catalogNumericTypePattern = regexp.MustCompile(`(?i)^numeric\(\s*(\d+)\s*,\s*(\d+)\s*\)$`)
 
 func catalogReferenceError(problem string) error {
 	return NewExpectedShapeDiagnostic("contract_loader.invalid_type_reference", "", problem, "Declare a supported, nonrecursive catalog type.", ErrInvalidField)
@@ -26,7 +29,7 @@ func retiredCatalogListSpelling(typeRef string) error {
 	if item == "" {
 		item = "T"
 	}
-	if nodeStateNumericTypePattern.MatchString(item) {
+	if catalogNumericTypePattern.MatchString(item) {
 		return catalogReferenceError(fmt.Sprintf("type reference %q is retired; use one plain block-sequence field value, for example amounts:\n  - %s (YAML [%s] has two items)", typeRef, item, item))
 	}
 	return catalogReferenceError(fmt.Sprintf("type reference %q is retired; use [%s]", typeRef, item))

@@ -146,8 +146,8 @@ func workflowConditionRecognizedRoots(context WorkflowConditionContext) []string
 	roots := []string{
 		"payload",
 		"event",
-		"entity",
-		"_entity",
+		"state",
+		"instance",
 		"policy",
 		"query_entities",
 	}

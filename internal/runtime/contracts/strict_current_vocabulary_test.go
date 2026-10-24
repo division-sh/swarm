@@ -22,10 +22,9 @@ func TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges(t *testi
 		keys               []string
 		admit              func(yamlsource.Document) error
 	}{
-		{"handler", "nodes.yaml", handler, []string{"condition", "logic", "from", "dedup_by", "action", "select_entity", "select_or_create_entity", "branch", "emits", "payload_transform", "on_below_threshold", "on_dedup", "on_pass"}, admitNodes},
+		{"handler", "nodes.yaml", handler, []string{"condition", "logic", "from", "dedup_by", "action", "select_entity", "select_or_create_entity", "branch", "emits", "payload_transform", "on_below_threshold", "on_dedup", "on_pass", "sets_gate", "clear_gates"}, admitNodes},
 		{"rules", "nodes.yaml", fmt.Sprintf(handler, "rules: [{%s}]"), []string{"condition", "action", "element_id", "emits", "payload_transform", "switch", "threshold", "policy", "temporal", "join", "loop", "collection", "schedule"}, admitNodes},
 		{"on_success", "nodes.yaml", fmt.Sprintf(handler, "on_success: {%s}"), []string{"action"}, admitNodes},
-		{"sets_gate", "nodes.yaml", fmt.Sprintf(handler, "sets_gate: {%s}"), []string{"value"}, admitNodes},
 		{"timer", "nodes.yaml", "worker: {timers: [{%s}]}\n", []string{"delay_seconds", "delay_minutes", "delay_hours", "delay_days"}, admitNodes},
 		{"emit", "nodes.yaml", fmt.Sprintf(handler, "emit: {%s}"), []string{"target", "broadcast"}, admitNodes},
 		{"fan_out", "nodes.yaml", fmt.Sprintf(handler, "fan_out: {%s}"), []string{"element_id", "target", "emit_per_item", "emit_mapping"}, admitNodes},
@@ -114,7 +113,7 @@ func TestCurrentVocabularyDiagnosticsAcrossDeclarationFamilies(t *testing.T) {
 		{"agents.yaml", "worker: {intent: {inline: business intent}, modle: typo}\n", "modle", "model", func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tools.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},
 		{"types.yaml", "Item: {value: {type: text, typ: text}}\n", "typ", "type", func(d yamlsource.Document) error { _, err := projectTypeCatalogDocument(d.Root()); return err }},
-		{"entities.yaml", "Item: {value: {type: text, typ: text}}\n", "typ", "type", func(d yamlsource.Document) error { _, err := projectEntityContractsDocument(d.Root()); return err }},
+		{"state.yaml", "Item: {value: {type: text, typ: text}}\n", "typ", "type", func(d yamlsource.Document) error { _, err := projectEntityContractsDocument(d.Root()); return err }},
 		{"events.yaml", "work.ready: {value: {type: text, typ: text}}\n", "typ", "type", func(d yamlsource.Document) error { _, err := admitEventCatalogDocument(d); return err }},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
@@ -151,7 +150,7 @@ func TestCurrentVocabularyDiskDiagnosticsPreserveSource(t *testing.T) {
 		load       func(string) error
 	}{
 		{"types.yaml", "Item: {value: {type: text, typ: text}}\n", func(path string) error { _, err := loadOptionalTypeDeclarations(path); return err }},
-		{"entities.yaml", "Item: {value: {type: text, typ: text}}\n", func(path string) error { _, err := loadOptionalEntityDeclarations(path); return err }},
+		{"state.yaml", "Item: {value: {type: text, typ: text}}\n", func(path string) error { _, err := loadOptionalEntityDeclarations(path); return err }},
 		{"events.yaml", "work.ready: {value: {type: text, typ: text}}\n", func(path string) error { _, err := loadOptionalEventCatalog(path); return err }},
 	} {
 		t.Run(tc.file, func(t *testing.T) {

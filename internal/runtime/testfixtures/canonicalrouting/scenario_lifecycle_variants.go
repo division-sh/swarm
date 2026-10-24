@@ -47,7 +47,7 @@ func InstallNovelAuthoredScenarioLifecycle(t testing.TB, root string) {
 		"fulfillment.requested:\n", ScenarioFixtureCloseEvent+":\nfulfillment.requested:\n")
 	applyClosedReplacement(t, filepath.Join(root, "fulfillment/schema.yaml"),
 		"inputs: [fulfillment.requested]", "inputs: [fulfillment.requested, "+ScenarioFixtureCloseEvent+"]")
-	writeClosedVariantFile(t, root, "entities.yaml", "scenario_state: {}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "")
 	writeClosedVariantFile(t, root, "nodes.yaml", `close-scenario:
   fulfillment.close_requested: {advances_to: done}
 `)

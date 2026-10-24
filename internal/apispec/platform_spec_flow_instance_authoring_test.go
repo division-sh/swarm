@@ -123,7 +123,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	primaryEntity := mustMappingValue(t, authoring, "primary_entity_model")
 	assertScalarValue(t, mustMappingValue(t, primaryEntity, "status"), "merge_bearing_contract_behavior")
 	assertScalarValue(t, mustMappingValue(t, primaryEntity, "implementation_tracker"), "#1539")
-	assertScalarValue(t, mustMappingValue(t, primaryEntity, "declaration_surface"), "exactly one flow-owned entities.yaml entry; root entities.yaml uses the same resolver when present")
+	assertScalarValue(t, mustMappingValue(t, primaryEntity, "declaration_surface"), "exactly one flow-owned state.yaml entry; root state.yaml uses the same resolver when present")
 	assertScalarValue(t, mustMappingValue(t, primaryEntity, "canonical_code_owner"), "internal/runtime/contracts.WorkflowContractBundle.ResolveRootPrimaryEntity / ResolveFlowPrimaryEntity")
 	assertScalarContains(t, mustMappingValue(t, primaryEntity, "single_entity_rule"), "exactly one entity type")
 	assertScalarContains(t, mustMappingValue(t, primaryEntity, "single_entity_rule"), "schema.yaml entity")

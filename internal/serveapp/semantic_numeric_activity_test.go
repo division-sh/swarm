@@ -209,7 +209,7 @@ func requireNumericMockForkOutput(t *testing.T, rt servedControlProofRuntime, ru
 		t.Fatal(err)
 	}
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": run, "entity_id": entityID}, &entity)
+	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": run, "entity_id": entityID}, &entity)
 	if entity.Fields["score"] != float64(24) {
 		t.Fatalf("selected mock arithmetic: %+v", entity.Fields)
 	}

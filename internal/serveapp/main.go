@@ -2872,7 +2872,7 @@ func initializeStateStores(ctx context.Context, schema store.SchemaBootstrapper,
 	if err != nil {
 		return "", err
 	}
-	request, err := schemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+	request, err := schemaBootstrapRequest(bundle.Platform, plans.Platform)
 	if err != nil {
 		return "", err
 	}
@@ -2891,7 +2891,7 @@ func initializeServePlatformStateStores(ctx context.Context, schema store.Schema
 	if err != nil {
 		return "", fmt.Errorf("platform-owned tables: %w", err)
 	}
-	request, err := schemaBootstrapRequest(spec, plans, nil)
+	request, err := schemaBootstrapRequest(spec, plans)
 	if err != nil {
 		return "", err
 	}
@@ -2913,8 +2913,8 @@ func initializeLoadedServeRuntimeStateStores(ctx context.Context, schema store.S
 	return summaries, nil
 }
 
-func schemaBootstrapRequest(spec runtimecontracts.PlatformSpecDocument, platformPlans, statePlans []store.SchemaTableDDL) (store.SchemaBootstrapRequest, error) {
-	return cliapp.SchemaBootstrapRequest(spec, platformPlans, statePlans)
+func schemaBootstrapRequest(spec runtimecontracts.PlatformSpecDocument, platformPlans []store.SchemaTableDDL) (store.SchemaBootstrapRequest, error) {
+	return cliapp.SchemaBootstrapRequest(spec, platformPlans)
 }
 
 func ensureServeSchemaTables(ctx context.Context, schema store.SchemaBootstrapper, request store.SchemaBootstrapRequest) error {

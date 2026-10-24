@@ -160,7 +160,7 @@ func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
 		"integer": runtimecontracts.CatalogTypeInteger, "decimal": runtimecontracts.CatalogTypeNumber, "exponent": runtimecontracts.CatalogTypeNumber,
 	})
 	matched, err := newWorkflowExpressionEvaluator().EvalBoolWithOptions(
-		"entity.integer + 1 == 76 && double(entity.decimal) + 1.0 == 76.0 && double(entity.exponent) + 1.0 == 76.0",
+		"state.integer + 1 == 76 && double(state.decimal) + 1.0 == 76.0 && double(state.exponent) + 1.0 == 76.0",
 		workflowExpressionContext{Entity: instance.Fields}, workflowexpr.ValueExpressionOptions{EntityType: &entityType},
 	)
 	if err != nil || !matched {
@@ -200,7 +200,7 @@ func TestWorkflowStateWriterPreservesNativeWholeDoubleForCELArithmetic(t *testin
 		Kind: runtimecontracts.CatalogTypeList, Element: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeNumber},
 	}})
 	matched, err := newWorkflowExpressionEvaluator().EvalBoolWithOptions(
-		"entity.integer + 1 == 76 && double(entity.double) + 1.0 == 76.0 && double(entity.nested[?0].value()) + 1.0 == 76.0 && double(entity.nested[?1].value()) + 1.0 == 76.0",
+		"state.integer + 1 == 76 && double(state.double) + 1.0 == 76.0 && double(state.nested[?0].value()) + 1.0 == 76.0 && double(state.nested[?1].value()) + 1.0 == 76.0",
 		workflowExpressionContext{Entity: fields}, workflowexpr.ValueExpressionOptions{EntityType: &entityType},
 	)
 	if err != nil || !matched {

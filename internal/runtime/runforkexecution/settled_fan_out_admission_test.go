@@ -55,8 +55,8 @@ func TestSelectedContractSettledFanOutHistoryRetainsOriginalPlan(t *testing.T) {
 	ref := compiled.Ref
 	ref.BundleHash = "original-artifact"
 	sourceRef := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, Field: strings.TrimPrefix(compiled.ItemsFrom, "payload.")}
-	if strings.HasPrefix(compiled.ItemsFrom, "entity.") {
-		sourceRef.Kind, sourceRef.Field = fanoutobligation.SourceEntityField, strings.TrimPrefix(compiled.ItemsFrom, "entity.")
+	if strings.HasPrefix(compiled.ItemsFrom, "state.") {
+		sourceRef.Kind, sourceRef.Field = fanoutobligation.SourceEntityField, strings.TrimPrefix(compiled.ItemsFrom, "state.")
 	}
 	obligation := selectedFanOutHistoryFixture(t, compiled, ref, sourceRef, compiled.SemanticEvidence())
 	obligation.Intent.Status, obligation.Intent.Cursor = fanoutobligation.StatusClosed, 1

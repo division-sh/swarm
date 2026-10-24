@@ -352,9 +352,9 @@ func issue2564M25Bundle(t *testing.T, serverURL, success string, ruleActivity bo
 		activity = "rules:\n      - when: payload.url != ''\n        activity:\n          id: scanner_source_requested_source_scrape\n          tool: source_scrape\n          input: {url: payload.url}"
 	}
 	return loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":   "name: issue2564-m25\nstages: {pending: {}}\n",
-		"entities.yaml": "test_entity:\n  local: {type: integer, initial: 0}\n  folded: {type: integer, initial: 0}\n  received: {type: integer, initial: 0}\n  title: text\n",
-		"events.yaml":   "source.requested: {url: text}\n",
+		"schema.yaml": "name: issue2564-m25\nstages: {pending: {}}\n",
+		"state.yaml":  "local: 0\nfolded: 0\nreceived: 0\ntitle: text\n",
+		"events.yaml": "source.requested: {url: text}\n",
 		"nodes.yaml": fmt.Sprintf(`scanner:
   source.requested:
     %s
@@ -365,8 +365,8 @@ consumer:
         data_accumulation:
           writes:
             - {target_field: title, value: payload.result.title}
-            - {target_field: folded, value: entity.local + 1}
-            - {target_field: received, value: entity.received + 1}
+            - {target_field: folded, value: state.local + 1}
+            - {target_field: received, value: state.received + 1}
       - data_accumulation:
           writes:
             - {target_field: title, value: 'unexpected result'}

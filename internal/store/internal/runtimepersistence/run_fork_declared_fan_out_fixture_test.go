@@ -67,7 +67,7 @@ func seedDeclaredNumericForkFanOutFixture(t *testing.T, backend string, fixture 
 func seedDeclaredEntityForkFanOutFixture(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time) (context.Context, fanOutOwnerFixture) {
 	t.Helper()
 	root := canonicalrouting.CopyForkFanOutCarrier(t, false, false)
-	if err := os.WriteFile(filepath.Join(root, "entities.yaml"), []byte("root:\n  items: {type: '[text]', initial: []}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "state.yaml"), []byte("items: [text]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	nodesPath := filepath.Join(root, "nodes.yaml")
@@ -78,7 +78,7 @@ func seedDeclaredEntityForkFanOutFixture(t *testing.T, backend string, fixture a
 	if strings.Count(string(nodes), "items_from: payload.items") != 1 {
 		t.Fatal("entity source fixture requires exactly one payload source site")
 	}
-	if err := os.WriteFile(nodesPath, []byte(strings.Replace(string(nodes), "items_from: payload.items", "items_from: entity.items", 1)), 0o644); err != nil {
+	if err := os.WriteFile(nodesPath, []byte(strings.Replace(string(nodes), "items_from: payload.items", "items_from: state.items", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	items := make([]string, cardinality)
@@ -182,7 +182,7 @@ func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fi
 			SourcePlanRef: plans[0].Ref, SourceProjection: plans[0].SemanticEvidence(),
 			HandlerEventKey: "items.ready", CurrentState: record.CurrentState, ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger)},
 	}
-	if plans[0].ItemsFrom == "entity.items" {
+	if plans[0].ItemsFrom == "state.items" {
 		request.Source = fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEntityField, RunID: runID, EntityID: runID, Field: "items"}
 	}
 	record.ExpectedState, record.ExpectedRevision, record.UpdatedAt = record.CurrentState, currentRevision, at

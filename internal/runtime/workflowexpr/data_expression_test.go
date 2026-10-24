@@ -336,12 +336,12 @@ func TestR2GeneratedCELLexicalFormsValidate(t *testing.T) {
 
 func TestEvalValueExpression_RequiresExplicitPresenceCheckOnMissingField(t *testing.T) {
 	entityType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "kill_reason", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}}}
-	for _, expression := range []string{`entity.kill_reason == null`, `null == entity.kill_reason`, `entity.kill_reason != null`, `null != entity.kill_reason`} {
+	for _, expression := range []string{`state.kill_reason == null`, `null == state.kill_reason`, `state.kill_reason != null`, `null != state.kill_reason`} {
 		if _, err := EvalValueExpressionWithOptions(expression, ValueContext{Entity: map[string]any{}}, ValueExpressionOptions{EntityType: &entityType}); err == nil {
 			t.Fatalf("missing field silently rewritten into null comparison: %s", expression)
 		}
 	}
-	value, err := EvalValueExpressionWithOptions(`!has(entity.kill_reason)`, ValueContext{
+	value, err := EvalValueExpressionWithOptions(`!has(state.kill_reason)`, ValueContext{
 		Entity: map[string]any{},
 	}, ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
@@ -369,7 +369,7 @@ func TestEvalValueExpression_AllowsComputedNamespace(t *testing.T) {
 }
 
 func TestEvalValueExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
-	_, err := EvalValueExpression(`entity.revision_count + 1`, ValueContext{
+	_, err := EvalValueExpression(`state.revision_count + 1`, ValueContext{
 		Entity: map[string]any{},
 	})
 	if err == nil {
@@ -692,6 +692,8 @@ func TestValidateValueExpression_RejectsLegacyEventReceiverProjections(t *testin
 		`event['flow_instance']`,
 		`event["entity_id"] == "ent-1"`,
 		`event[payload.key]`,
+		`event.current_state`,
+		`event["current_state"]`,
 	} {
 		t.Run(expression, func(t *testing.T) {
 			err := ValidateValueExpression(expression)
@@ -748,7 +750,7 @@ func TestEventReferences_OnlyMatchesRootEventContext(t *testing.T) {
 		},
 		{
 			name:       "nested platform entity event object",
-			expression: `_entity.event.flow_instance`,
+			expression: `instance.event.flow_instance`,
 			want:       nil,
 		},
 		{
@@ -832,9 +834,7 @@ func TestValidateValueExpression_AllowsNestedAuthorEventFields(t *testing.T) {
 	for _, expression := range []string{
 		`payload.event.entity_id`,
 		`payload.event.flow_instance == "flow-1"`,
-		`_entity.event.flow_instance`,
 		`payload.event.entity_id == event.source.entity_id`,
-		`_entity.event["flow_instance"]`,
 	} {
 		t.Run(expression, func(t *testing.T) {
 			opts := ValueExpressionOptions{}
@@ -886,7 +886,7 @@ func TestValidateValueExpression_AllowsSupportedEventContextRefs(t *testing.T) {
 		`event.source_event_id`,
 		`event.emitted_at`,
 		`event.trigger_event_type`,
-		`event.current_state`,
+		`instance.stage`,
 		`event.run_id`,
 		`event.scope`,
 	} {
@@ -988,10 +988,10 @@ func TestValidateValueExpression_RejectsRetiredFanOutItem(t *testing.T) {
 }
 
 func TestExpressionReferencesEntity_IgnoresStringLiterals(t *testing.T) {
-	if ExpressionReferencesEntity(`payload.reason == "entity.kill_reason"`) {
+	if ExpressionReferencesEntity(`payload.reason == "state.kill_reason"`) {
 		t.Fatal("expected quoted entity reference text to be ignored")
 	}
-	if !ExpressionReferencesEntity(`has(entity.kill_reason) ? entity.kill_reason : payload.reason`) {
+	if !ExpressionReferencesEntity(`has(state.kill_reason) ? state.kill_reason : payload.reason`) {
 		t.Fatal("expected real entity reference to be detected")
 	}
 }

@@ -1,4 +1,0 @@
-core:
-  level:
-    type: integer
-    _unused_reason: preseeded guard proof field

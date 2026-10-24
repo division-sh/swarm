@@ -7,11 +7,11 @@ node-a:
     data_accumulation:
       writes:
         - op: clear
-          target: entity.revision_count
+          target: state.revision_count
         - op: clear
-          target: entity.dedup_key
+          target: state.dedup_key
         - op: clear
-          target: entity.accumulated_count
+          target: state.accumulated_count
   work.kill:
     rules:
       - when: false

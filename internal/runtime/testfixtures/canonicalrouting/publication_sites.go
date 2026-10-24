@@ -157,7 +157,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		writeClosedVariantFile(t, root, "source/events.yaml", eventSchemas)
 		writeClosedVariantFile(t, root, "source/nodes.yaml", handlers+local+wildcard)
 		if mode == "template" {
-			writeClosedVariantFile(t, root, "source/entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
+			writeClosedVariantFile(t, root, "source/state.yaml", "case_id: text\n")
 		}
 	}
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\ninputs:\n"+outputPins)

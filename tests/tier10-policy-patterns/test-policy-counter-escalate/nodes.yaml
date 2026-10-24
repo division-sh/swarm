@@ -1,9 +1,9 @@
 processor:
   attempt.requested:
     rules:
-      - when: has(entity.attempt_count) && entity.attempt_count < policy.max_attempts
+      - when: has(state.attempt_count) && state.attempt_count < policy.max_attempts
         data_accumulation:
           writes:
             - target_field: attempt_count
-              value: entity.attempt_count + 1
+              value: state.attempt_count + 1
       - emit: attempt.limit_hit

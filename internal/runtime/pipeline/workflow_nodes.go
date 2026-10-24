@@ -35,7 +35,6 @@ type WorkflowNode struct {
 	Timers           []string
 	ExecutionType    string
 	Implementation   string
-	StateTable       string
 	IdempotencyTable string
 }
 
@@ -229,7 +228,6 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 			Timers:           workflowNodeTimerIDs(entry.Timers),
 			ExecutionType:    runtimecontracts.EffectiveSystemNodeExecutionType(entry),
 			Implementation:   strings.TrimSpace(entry.Implementation),
-			StateTable:       strings.TrimSpace(entry.StateTable),
 			IdempotencyTable: strings.TrimSpace(entry.IdempotencyTable),
 		})
 	}

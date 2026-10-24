@@ -61,14 +61,14 @@ func TestExecutorReevaluatesOnlyUncommittedStateContention(t *testing.T) {
 				owner.cancel = cancel
 			}
 			source := sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending")
-			executor, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: repo, MutationOwner: owner, Locker: &executionBoundaryLocker{}}, nil)
+			executor, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: repo, MutationOwner: owner, Locker: &executionBoundaryLocker{}}, stubEvaluator{bools: map[string]bool{"true": true}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			result, err := executor.ExecuteSemanticFixture(ctx, ExecutionRequest{
 				EntityID: "entity-1", Node: testFlowExecutableNode(t, "flow-1", "node-1"),
 				Event:   eventtest.RunCreatingRootIngress("evt-contention", "task.completed", "test", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-				Handler: runtimecontracts.SystemNodeEventHandler{SetsGate: &runtimecontracts.GateSpec{Name: "ready"}},
+				Handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "true"}},
 			})
 			if owner.calls != tc.wantCalls {
 				t.Fatalf("calls=%d want=%d err=%v", owner.calls, tc.wantCalls, err)

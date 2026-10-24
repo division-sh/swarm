@@ -506,7 +506,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 			}
 		}
 		files[alias+"/schema.yaml"] = "name: " + alias + "\nstages: []\n" + imports + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\ningress:\n  alias: " + alias + "\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing." + alias + "}\n"
-		files[alias+"/entities.yaml"] = "service: {}\n"
+		files[alias+"/state.yaml"] = "service: {}\n"
 		files[alias+"/nodes.yaml"] = nodes
 		if scenario.noLocalConsumers {
 			delete(files, alias+"/nodes.yaml")
@@ -556,10 +556,10 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		}
 		files["schema.yaml"] = files["alpha/schema.yaml"] + "connect:\n" + strings.ReplaceAll(connections, "from: alpha,", "from: .,")
 		files["nodes.yaml"] = files["alpha/nodes.yaml"]
-		files["entities.yaml"] = files["alpha/entities.yaml"]
+		files["state.yaml"] = files["alpha/state.yaml"]
 		delete(files, "alpha/schema.yaml")
 		delete(files, "alpha/nodes.yaml")
-		delete(files, "alpha/entities.yaml")
+		delete(files, "alpha/state.yaml")
 	}
 	for path, body := range files {
 		target := filepath.Join(root, path)

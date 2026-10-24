@@ -44,7 +44,7 @@ func armedArrivalFixture(t *testing.T) string {
 	t.Helper()
 	flowID := os.Getenv(publishedJoinFlowEnv)
 	root := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
-	path := filepath.Join(root, flowID, "entities.yaml")
+	path := filepath.Join(root, flowID, "state.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

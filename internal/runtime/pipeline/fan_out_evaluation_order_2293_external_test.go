@@ -42,14 +42,14 @@ func Test2293SelectedFanOutRetainsEvaluationSourceAcrossRuleWriteBothStores(t *t
 				files := a2MapFanOutFiles(false)
 				files["events.yaml"] += "\nhistory.cut:\n"
 				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "    - seed\n", "    - seed\n    - history.cut\n", 1)
-				files["entities.yaml"] = "work:\n  items:\n    type: '[text]?'\n    initial: " + a2OrderYAMLJSON(t, original) + "\n"
+				files["state.yaml"] = "work:\n  items:\n    type: '[text]?'\n    initial: " + a2OrderYAMLJSON(t, original) + "\n"
 				files["nodes.yaml"] = `writer:
   seed: {}
   batch.ready:
     rules:
-      - when: has(entity.items)
+      - when: has(state.items)
         fan_out:
-          items_from: entity.items
+          items_from: state.items
           as: key
           emit:
             event: item.ready
@@ -61,7 +61,7 @@ func Test2293SelectedFanOutRetainsEvaluationSourceAcrossRuleWriteBothStores(t *t
                 [7]
 `
 				if after == "removed" {
-					files["nodes.yaml"] += "          data_accumulation:\n            writes:\n              - op: clear\n                target: entity.items\n"
+					files["nodes.yaml"] += "          data_accumulation:\n            writes:\n              - op: clear\n                target: state.items\n"
 				} else {
 					files["nodes.yaml"] += "          data_accumulation:\n            writes:\n              - target_field: items\n                value: " + a2OrderYAMLJSON(t, final) + "\n"
 				}
@@ -179,13 +179,13 @@ func Test2293HandlerAndSelectedEntityFanOutKeepIndependentHistoryBothStores(t *t
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
 		t.Run(backend.name, func(t *testing.T) {
 			files := a2MapFanOutFiles(false)
-			files["entities.yaml"] = "work:\n  items: {type: '[text]?', initial: [first]}\n  other_items: {type: '[text]', initial: [second]}\n"
+			files["state.yaml"] = "work:\n  items: {type: '[text]?', initial: [first]}\n  other_items: {type: '[text]', initial: [second]}\n"
 			files["nodes.yaml"] = `writer:
   seed: {}
   batch.ready:
-    guard: {id: source_present, check: has(entity.items), on_fail: reject}
+    guard: {id: source_present, check: has(state.items), on_fail: reject}
     fan_out:
-      items_from: entity.items
+      items_from: state.items
       as: key
       emit:
         event: item.ready
@@ -196,9 +196,9 @@ func Test2293HandlerAndSelectedEntityFanOutKeepIndependentHistoryBothStores(t *t
           result: >-
             [7]
     rules:
-      - when: has(entity.items)
+      - when: has(state.items)
         fan_out:
-          items_from: entity.other_items
+          items_from: state.other_items
           as: key
           emit:
             event: item.ready
@@ -211,7 +211,7 @@ func Test2293HandlerAndSelectedEntityFanOutKeepIndependentHistoryBothStores(t *t
         data_accumulation:
           writes:
             - op: clear
-              target: entity.items
+              target: state.items
             - target_field: other_items
               value: ["final"]
 `

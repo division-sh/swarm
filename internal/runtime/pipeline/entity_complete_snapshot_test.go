@@ -14,15 +14,15 @@ import (
 
 func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "stages:\n  active: {}\n",
-		"entities.yaml": "test_entity:\n  revision_count: integer?\n",
-		"events.yaml":   "work.clear:\n",
+		"schema.yaml": "stages:\n  active: {}\n",
+		"state.yaml":  "revision_count: integer?\n",
+		"events.yaml": "work.clear:\n",
 		"nodes.yaml": `node-a:
   work.clear:
     data_accumulation:
       writes:
         - op: clear
-          target: entity.revision_count
+          target: state.revision_count
 `,
 	})
 	fixture := open(t, source)
@@ -82,20 +82,20 @@ func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open
 
 func VerifySelectedHandlerSparsePresenceWriteAndEmitBothStoresForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "stages:\n  active: {}\n",
-		"entities.yaml": "test_entity:\n  kill_reason: text?\n  observed_absence: boolean?\n",
-		"events.yaml":   "work.ready:\nwork.emitted:\n  observed_absence: boolean\n",
+		"schema.yaml": "stages:\n  active: {}\n",
+		"state.yaml":  "kill_reason: text?\nobserved_absence: boolean?\n",
+		"events.yaml": "work.ready:\nwork.emitted:\n  observed_absence: boolean\n",
 		"nodes.yaml": `node-a:
   work.ready:
     data_accumulation:
       writes:
         - target_field: observed_absence
           value: |-
-                   !has(entity.kill_reason)
+                   !has(state.kill_reason)
     emit:
       event: work.emitted
       fields:
-        observed_absence: entity.observed_absence
+        observed_absence: state.observed_absence
 `,
 	})
 	fixture := open(t, source)
@@ -131,7 +131,7 @@ func VerifySelectedHandlerSparseEqualityMutationsBothStoresForTest(t *testing.T,
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 				"schema.yaml": "stages:\n  active: {}\n",
-				"entities.yaml": `test_entity:
+				"state.yaml": `test_entity:
   left: text?
   right:
     type: text?
@@ -146,14 +146,14 @@ func VerifySelectedHandlerSparseEqualityMutationsBothStoresForTest(t *testing.T,
           value: |-
                    'new'
         - target_field: right
-          value: entity.left
+          value: state.left
   work.clear:
     data_accumulation:
       writes:
         - op: clear
-          target: entity.left
+          target: state.left
         - op: clear
-          target: entity.right
+          target: state.right
 `,
 			})
 			fixture := open(t, source)

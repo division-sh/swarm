@@ -19,7 +19,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -993,7 +992,7 @@ func TestExecutor_ValidateRequestRejectsPlatformEntityWriteTargets(t *testing.T)
 		"data accumulation": {
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
-					TargetPathRef: "_entity.current_state",
+					TargetPathRef: "instance.stage",
 					Value:         runtimecontracts.CELExpression(`"done"`),
 				}},
 			},
@@ -1001,7 +1000,7 @@ func TestExecutor_ValidateRequestRejectsPlatformEntityWriteTargets(t *testing.T)
 		"shared store_as": {
 			Count: &runtimecontracts.CountSpec{
 				Source:  "payload.items",
-				StoreAs: "_entity.current_state",
+				StoreAs: "instance.stage",
 			},
 		},
 	}
@@ -1116,12 +1115,12 @@ func TestExecutionScopeResolveOperand_AllowsPlatformEntityRoot(t *testing.T) {
 		t.Fatalf("newExecutionScope error: %v", err)
 	}
 
-	got, err := scope.resolveOperand("_entity.id", executionOperandDefaultNone)
+	got, err := scope.resolveOperand("instance.id", executionOperandDefaultNone)
 	if err != nil {
-		t.Fatalf("resolveOperand(_entity.id) error: %v", err)
+		t.Fatalf("resolveOperand(instance.id) error: %v", err)
 	}
 	if got != "platform-id" {
-		t.Fatalf("resolveOperand(_entity.id) = %#v, want platform-id", got)
+		t.Fatalf("resolveOperand(instance.id) = %#v, want platform-id", got)
 	}
 }
 
@@ -1241,34 +1240,6 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 	}
 	if got, want := order, []string{"lock", "load"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
-	}
-}
-
-func TestExecutor_StepOrderIsStable(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	steps := exec.Steps()
-	if len(steps) != 22 {
-		t.Fatalf("step count = %d, want 22", len(steps))
-	}
-	if steps[0] != StepLoop || steps[1] != StepClearGates || steps[len(steps)-1] != StepClear {
-		t.Fatalf("unexpected step order: %v", steps)
-	}
-	if steps[6] != StepFilter {
-		t.Fatalf("expected filter at index 6, got order %v", steps)
-	}
-	if steps[17] != StepProjection {
-		t.Fatalf("expected projection after data_writes at index 17, got order %v", steps)
-	}
-	if steps[20] != StepActivity {
-		t.Fatalf("expected activity after emits at index 20, got order %v", steps)
 	}
 }
 
@@ -1398,9 +1369,7 @@ func accumulatorProjectionTestSource(t testing.TB) semanticview.Source {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scoring-node": {
-				StateSchema: runtimecontracts.NodeStateSchema{
-					Fields: []runtimecontracts.NodeStateField{{Name: "dimensions_received", Type: "[DimensionScore]"}},
-				},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"score.dimension_complete": {
 						Accumulate: &runtimecontracts.AccumulateSpec{Into: "dimensions_received"},
@@ -1431,164 +1400,6 @@ func accumulatorProjectionTestSource(t testing.TB) semanticview.Source {
 	}), ".", "pending", "pending")
 }
 
-func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t *testing.T) {
-	source := accumulatorProjectionTestSource(t)
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        source,
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:    "dimensions_received",
-			Key:     "payload.dimension",
-			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
-		},
-		Emit: runtimecontracts.EmitSpec{
-			Event: "vertical.scored",
-			Fields: map[string]runtimecontracts.ExpressionValue{
-				"scores": runtimecontracts.RefExpression("entity.scores"),
-			},
-		},
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		ExecutionFlowID: identity.NormalizeFlowID("."),
-		EntityID:        "entity-1",
-		Node:            testRootExecutableNode(t, "scoring-node"),
-		Event: eventtest.RunCreatingRootIngress("evt-1",
-			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-
-		Handler: handler,
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	scores, ok := result.StateMutation.Fields["scores"].([]any)
-	if !ok || len(scores) != 1 {
-		t.Fatalf("projected scores = %#v", result.StateMutation.Fields["scores"])
-	}
-	score, ok := scores[0].(map[string]any)
-	if !ok {
-		t.Fatalf("projected score item = %#v", scores[0])
-	}
-	if _, exists := score["event_id"]; exists {
-		t.Fatalf("projected score leaked accumulator metadata: %#v", score)
-	}
-	if _, exists := score["vertical_id"]; exists {
-		t.Fatalf("projected score leaked payload extra field: %#v", score)
-	}
-	if got := score["dimension"]; got != "market" {
-		t.Fatalf("projected dimension = %#v", got)
-	}
-	summaries, ok := result.StateMutation.Fields["summary"].([]any)
-	if !ok || len(summaries) != 1 {
-		t.Fatalf("projected summary = %#v", result.StateMutation.Fields["summary"])
-	}
-	summary, ok := summaries[0].(map[string]any)
-	if !ok {
-		t.Fatalf("projected summary item = %#v", summaries[0])
-	}
-	if got := summary["confidence"]; got != "medium" {
-		t.Fatalf("projected summary confidence = %#v", got)
-	}
-	if got := summary["source"]; got != "scoring-node" {
-		t.Fatalf("projected summary literal source = %#v", got)
-	}
-	if len(result.EmitIntents) != 1 {
-		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
-	}
-	var emitted map[string]any
-	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &emitted); err != nil {
-		t.Fatalf("emit payload json: %v", err)
-	}
-	emittedScores, ok := emitted["scores"].([]any)
-	if !ok || len(emittedScores) != 1 {
-		t.Fatalf("emit payload scores = %#v", emitted["scores"])
-	}
-}
-
-func TestAccumulatorProjection_OmitsAbsentOptionalNamedFields(t *testing.T) {
-	binding := accprojection.Binding{
-		SourceType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
-			{Name: "id", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
-			{Name: "note", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
-		}},
-		TargetType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
-			{Name: "id", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
-			{Name: "note", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
-			{Name: "summary", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
-		}},
-		Project: map[string]any{
-			"id":   "source.id",
-			"note": "source.note",
-		},
-	}
-	typed, err := accumulatorTypedView(binding, map[string]any{"id": "item-1"})
-	if err != nil {
-		t.Fatalf("accumulatorTypedView: %v", err)
-	}
-	if !reflect.DeepEqual(typed, map[string]any{"id": "item-1"}) {
-		t.Fatalf("typed view = %#v, want absent optional field omitted", typed)
-	}
-
-	projected, err := (&Executor{}).projectAccumulatorItem(nil, binding, typed)
-	if err != nil {
-		t.Fatalf("projectAccumulatorItem: %v", err)
-	}
-	if !reflect.DeepEqual(projected, map[string]any{"id": "item-1"}) {
-		t.Fatalf("projected item = %#v, want absent optional fields omitted", projected)
-	}
-}
-
-func TestAccumulatorTypedView_RejectsAbsentRequiredNamedField(t *testing.T) {
-	_, err := accumulatorTypedView(accprojection.Binding{
-		SourceType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
-			{Name: "id", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
-		}},
-	}, map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), `missing required typed-view field "id"`) {
-		t.Fatalf("error = %v, want missing required field", err)
-	}
-}
-
-func TestExecutor_AccumulatorProjectionMaterializesWithoutOnComplete(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, nil)
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:    "dimensions_received",
-			Key:     "payload.dimension",
-			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
-		},
-		Emit: runtimecontracts.EmitSpec{
-			Event: "vertical.scored",
-			Fields: map[string]runtimecontracts.ExpressionValue{
-				"scores": runtimecontracts.RefExpression("entity.scores"),
-			},
-		},
-	}
-	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
-	score := requireProjectedScore(t, result, "scores")
-	if got := score["dimension"]; got != "market" {
-		t.Fatalf("projected dimension = %#v", got)
-	}
-	if len(result.EmitIntents) != 1 {
-		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
-	}
-	var emitted map[string]any
-	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &emitted); err != nil {
-		t.Fatalf("emit payload json: %v", err)
-	}
-	emittedScores, ok := emitted["scores"].([]any)
-	if !ok || len(emittedScores) != 1 {
-		t.Fatalf("emit payload scores = %#v", emitted["scores"])
-	}
-}
-
 func TestExecutor_AuthoredEmptyRuleCannotReachSelection(t *testing.T) {
 	for _, tc := range []struct{ raw, code string }{
 		{"rules:\n  - {}\n", "DIALECT-RULES-DEFAULT"},
@@ -1602,103 +1413,6 @@ func TestExecutor_AuthoredEmptyRuleCannotReachSelection(t *testing.T) {
 		if len(handler.Rules) != 0 || len(handler.OnComplete) != 0 {
 			t.Fatalf("rejected authored row reached executable handler: %#v", handler)
 		}
-	}
-}
-
-func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, nil)
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:    "dimensions_received",
-			Key:     "payload.dimension",
-			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
-		},
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{{
-				TargetField: "entity.handler_marker",
-				Value:       runtimecontracts.LiteralExpression("top-level"),
-			}},
-		},
-		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: "",
-			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-				Writes: []runtimecontracts.WorkflowDataWrite{{
-					TargetField: "entity.rule_marker",
-					Value:       runtimecontracts.LiteralExpression("rule"),
-				}},
-			},
-			Emit: runtimecontracts.EmitSpec{
-				Event: "vertical.scored",
-				Fields: map[string]runtimecontracts.ExpressionValue{
-					"scores":         runtimecontracts.RefExpression("entity.scores"),
-					"handler_marker": runtimecontracts.RefExpression("entity.handler_marker"),
-					"rule_marker":    runtimecontracts.RefExpression("entity.rule_marker"),
-				},
-			},
-		}},
-	}
-	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
-	requireProjectedScore(t, result, "scores")
-	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[0]" {
-		t.Fatalf("display = %q, want rules[0]", got)
-	}
-	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextRules || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
-		t.Fatalf("selected rules fact = %#v", result.HandlerRuleSelection)
-	}
-	if got := result.StateMutation.Fields["handler_marker"]; got != "top-level" {
-		t.Fatalf("handler_marker = %#v, want top-level", got)
-	}
-	if got := result.StateMutation.Fields["rule_marker"]; got != "rule" {
-		t.Fatalf("rule_marker = %#v, want rule", got)
-	}
-	if len(result.EmitIntents) != 1 {
-		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
-	}
-	var emitted map[string]any
-	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &emitted); err != nil {
-		t.Fatalf("emit payload json: %v", err)
-	}
-	if emittedScores, ok := emitted["scores"].([]any); !ok || len(emittedScores) != 1 {
-		t.Fatalf("emit payload scores = %#v", emitted["scores"])
-	}
-	if got := emitted["handler_marker"]; got != "top-level" {
-		t.Fatalf("emit handler_marker = %#v, want top-level", got)
-	}
-	if got := emitted["rule_marker"]; got != "rule" {
-		t.Fatalf("emit rule_marker = %#v, want rule", got)
-	}
-}
-
-func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, stubEvaluator{bools: map[string]bool{
-		"payload.score > 100": false,
-	}})
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:    "dimensions_received",
-			Key:     "payload.dimension",
-			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
-		},
-		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: "payload.score > 100",
-			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-				Writes: []runtimecontracts.WorkflowDataWrite{{
-					TargetField: "entity.rule_marker",
-					Value:       runtimecontracts.LiteralExpression("unexpected"),
-				}},
-			},
-		}},
-	}
-	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
-	requireProjectedScore(t, result, "scores")
-	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != "" {
-		t.Fatalf("selection display = %q, want empty when rules do not match", got)
-	}
-	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextRules || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionNoMatch || requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
-		t.Fatalf("no-match rules fact = %#v", result.HandlerRuleSelection)
-	}
-	if _, ok := result.StateMutation.Fields["rule_marker"]; ok {
-		t.Fatalf("rule_marker unexpectedly written: %#v", result.StateMutation.Fields)
 	}
 }
 
@@ -1794,130 +1508,6 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 	}
 }
 
-func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitFields(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, nil)
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:    "dimensions_received",
-			Key:     "payload.dimension",
-			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
-		},
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{{
-				TargetField: "entity.handler_marker",
-				Value:       runtimecontracts.LiteralExpression("top-level"),
-			}},
-		},
-		FanOut: &runtimecontracts.FanOutSpec{
-			ItemsFrom: "payload.targets",
-			As:        "target_item",
-			Identity:  "target_item",
-			Emit: runtimecontracts.EmitSpec{
-				Event: "vertical.scored",
-				Fields: map[string]runtimecontracts.ExpressionValue{
-					"handler_marker": runtimecontracts.RefExpression("entity.handler_marker"),
-					"scores":         runtimecontracts.RefExpression("entity.scores"),
-					"target":         runtimecontracts.CELExpression("target_item"),
-				},
-			},
-		},
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		ExecutionFlowID: identity.NormalizeFlowID("."),
-		EntityID:        "entity-1",
-		Node:            testRootExecutableNode(t, "scoring-node"),
-		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-accumulator"),
-			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high","targets":["agent-a"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: handler,
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	requireProjectedScore(t, result, "scores")
-	if result.Status != OutcomeFannedOut {
-		t.Fatalf("Status = %q, want %q", result.Status, OutcomeFannedOut)
-	}
-	if got := result.StateMutation.Fields["handler_marker"]; got != "top-level" {
-		t.Fatalf("handler_marker state mutation = %#v, want top-level", got)
-	}
-	if len(result.EmitIntents) != 0 {
-		t.Fatalf("trigger transaction created eager fan-out emits: %#v", result.EmitIntents)
-	}
-	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 1 {
-		t.Fatalf("durable fan-out intent = %#v, want cardinality 1", result.FanOutIntents)
-	}
-	if got := result.FanOutIntents[0].Capsule.StateFields["handler_marker"]; got != "top-level" {
-		t.Fatalf("fan-out capsule handler_marker = %#v, want top-level", got)
-	}
-	if scores, ok := result.FanOutIntents[0].Capsule.Entity["scores"].([]any); !ok || len(scores) != 1 {
-		t.Fatalf("fan-out capsule projected scores = %#v, want one score", result.FanOutIntents[0].Capsule.Entity["scores"])
-	}
-}
-
-func TestExecutor_AccumulatorProjectionBindsEntityFanOutSourceAfterProjection(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, nil)
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:    "dimensions_received",
-			Key:     "payload.dimension",
-			KeyPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
-		},
-		FanOut: &runtimecontracts.FanOutSpec{
-			ItemsFrom: "entity.scores",
-			As:        "score_item",
-			Identity:  "score_item.dimension",
-			Emit: runtimecontracts.EmitSpec{
-				Event: "vertical.scored",
-				Fields: map[string]runtimecontracts.ExpressionValue{
-					"dimension": runtimecontracts.CELExpression("score_item.dimension"),
-				},
-			},
-		},
-	}
-	node := testRootExecutableNode(t, "scoring-node")
-	qualified, err := completeSemanticFixtureHandlerRuleIdentity(node, "score.dimension_complete", handler)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bundle, ok := semanticview.Bundle(exec.deps.Source)
-	if !ok || bundle == nil {
-		t.Fatal("fan-out source has no contract bundle")
-	}
-	if err := bundle.CompileFanOutHandlerPlans(node, "score.dimension_complete", qualified); err != nil {
-		t.Fatal(err)
-	}
-	plans := bundle.FanOutPlansForHandler(node, "score.dimension_complete")
-	if len(plans) != 1 {
-		t.Fatalf("compiled fan-out plans = %d, want 1", len(plans))
-	}
-	if plans[0].ItemsFrom != "entity.scores" {
-		t.Fatal("compiled fan-out plan lost its exact state-list source")
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		ExecutionFlowID: identity.NormalizeFlowID("."),
-		EntityID:        identity.NormalizeEntityID("00000000-0000-4000-8000-000000002276"),
-		Node:            node,
-		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-projected-source"),
-			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: handler,
-		State:   testStateSnapshot("pending", map[string]any{"scores": []any{}}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	requireProjectedScore(t, result, "scores")
-	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 1 {
-		t.Fatalf("projected fan-out intent = %#v, want cardinality 1", result.FanOutIntents)
-	}
-	if result.FanOutIntents[0].Source.Kind != "entity_field_revision" || result.FanOutIntents[0].Source.Field != "scores" {
-		t.Fatalf("projected fan-out source = %#v", result.FanOutIntents[0].Source)
-	}
-	if _, copied := result.FanOutIntents[0].Capsule.Entity["scores"]; copied {
-		t.Fatalf("projected source was redundantly copied into capsule: %#v", result.FanOutIntents[0].Capsule.Entity)
-	}
-}
-
 func newAccumulatorProjectionTestExecutor(t *testing.T, evaluator Evaluator) *Executor {
 	t.Helper()
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -1966,57 +1556,6 @@ func requireProjectedScore(t *testing.T, result ExecutionResult, field string) m
 		t.Fatalf("projected score leaked payload extra field: %#v", score)
 	}
 	return score
-}
-
-func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *testing.T) {
-	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        source,
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	scoringNode := testFlowExecutableNode(t, "scoring", "scoring-node")
-	handler, ok := source.ExecutableNodeEventHandler(scoringNode, "scoring/score.dimension_complete")
-	if !ok {
-		t.Fatal("expected qualified runtime event to resolve to authored local handler")
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     scoringNode,
-		Event: eventtest.RunCreatingRootIngress("evt-1",
-			"scoring/score.dimension_complete", "", "", json.RawMessage(`{"dimension":"market","score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-
-		HandlerEventKey: "score.dimension_complete",
-		Handler:         handler,
-		State:           testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef(scoringNode, "score.dimension_complete")); !ok {
-		t.Fatalf("logical accumulator bucket missing from state mutation: %#v", result.StateMutation.StateCarrier.StateBuckets)
-	}
-	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef(scoringNode, "scoring/score.dimension_complete")); ok {
-		t.Fatalf("concrete runtime event bucket survived in state mutation: %#v", result.StateMutation.StateCarrier.StateBuckets)
-	}
-	scores, ok := result.StateMutation.Fields["scores"].([]any)
-	if !ok || len(scores) != 1 {
-		t.Fatalf("projected scores = %#v", result.StateMutation.Fields["scores"])
-	}
-	score, ok := scores[0].(map[string]any)
-	if !ok {
-		t.Fatalf("projected score item = %#v", scores[0])
-	}
-	if got := score["dimension"]; got != "market" {
-		t.Fatalf("projected dimension = %#v", got)
-	}
-	if _, exists := score["event_type"]; exists {
-		t.Fatalf("projected score leaked accumulator metadata: %#v", score)
-	}
 }
 
 func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEvents(t *testing.T) {
@@ -2462,7 +2001,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation: runtimecontracts.ComputeOpCount,
-				StoreAs:   "entity.component_count",
+				StoreAs:   "state.component_count",
 			},
 		},
 		State: state,
@@ -3091,11 +2630,11 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 		Into:  "computed.validation.count_match",
 		Input: map[string]string{
 			"payload_count": "payload.count",
-			"entity_count":  "entity.expected_count",
+			"entity_count":  "state.expected_count",
 		},
 		InputPaths: map[string]runtimepaths.Path{
 			"payload_count": runtimepaths.Parse("payload.count"),
-			"entity_count":  runtimepaths.Parse("entity.expected_count"),
+			"entity_count":  runtimepaths.Parse("state.expected_count"),
 		},
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
@@ -3146,36 +2685,6 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 	}
 	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rules[1]: when computed.validation.count_match.valid == true" {
 		t.Fatalf("selected display = %q, want count validity predicate at rules[1]", got)
-	}
-}
-
-func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotResolveAtRuntime(t *testing.T) {
-	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        source,
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	scoringNode := testFlowExecutableNode(t, "scoring", "scoring-node")
-	handler, ok := source.ExecutableNodeEventHandler(scoringNode, "scoring/score.dimension_complete")
-	if !ok {
-		t.Fatal("expected qualified runtime event to resolve to authored local handler")
-	}
-	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     scoringNode,
-		Event: eventtest.RunCreatingRootIngress("evt-1",
-			"scoring/score.unregistered_dimension_complete", "", "", json.RawMessage(`{"dimension":"market","score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-
-		Handler: handler,
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err == nil || !strings.Contains(err.Error(), "runtime_invariant_violation") {
-		t.Fatalf("Execute error = %v, want runtime_invariant_violation", err)
 	}
 }
 
@@ -3677,7 +3186,6 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
-			ClearGates: []string{"gate_a"},
 			Emit:       runtimecontracts.EmitSpec{Event: "task.recorded"},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -3696,9 +3204,6 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	}
 	if result.ChainDepth != 1 || len(result.EmitIntents) != 1 {
 		t.Fatalf("emit chain depth wrong: depth=%d intents=%d", result.ChainDepth, len(result.EmitIntents))
-	}
-	if !reflect.DeepEqual(repo.mutation.ClearGates, []string{"gate_a"}) {
-		t.Fatalf("clear gates mutation = %#v", repo.mutation.ClearGates)
 	}
 	if got := result.ActionsExecuted; !reflect.DeepEqual(got, []string{
 		"record_state_change",
@@ -3746,27 +3251,27 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
-				StoreAs: "entity.query_rows",
+				StoreAs: "state.query_rows",
 			},
 			Filter: &runtimecontracts.FilterSpec{
-				ItemsFrom: "entity.query_rows",
+				ItemsFrom: "state.query_rows",
 				Condition: "item.score > 50",
-				StoreAs:   "entity.filtered",
+				StoreAs:   "state.filtered",
 			},
 			Reduce: &runtimecontracts.ReduceSpec{
-				ItemsFrom: "entity.filtered",
+				ItemsFrom: "state.filtered",
 				Operation: "sum",
-				StoreAs:   "entity.total",
+				StoreAs:   "state.total",
 			},
 			Count: &runtimecontracts.CountSpec{
-				ItemsFrom: "entity.filtered",
+				ItemsFrom: "state.filtered",
 				Condition: "item.active == true",
-				StoreAs:   "entity.active_count",
+				StoreAs:   "state.active_count",
 			},
 			Clear: &runtimecontracts.ClearSpec{
 				Targets: []string{"accumulator_state"},
 			},
-			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{Operation: "clear", TargetRef: "entity.dedup_key"}}},
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{Operation: "clear", TargetRef: "state.dedup_key"}}},
 			AdvancesTo:       "done",
 		},
 		State: initial,
@@ -3820,7 +3325,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 				Source:  "payload.items",
 				GroupBy: "item.status",
 				Count:   true,
-				StoreAs: "entity.grouped",
+				StoreAs: "state.grouped",
 			},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -3856,7 +3361,7 @@ func TestExecutorOrdinaryEventPayloadPreservesIntegerForCELArithmetic(t *testing
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 			Source:  "payload.items",
 			Filter:  "item.integer + 1 == 76 && double(item.decimal) + 1.0 == 76.0 && double(item.exponent) + 1.0 == 76.0",
-			StoreAs: "entity.matches",
+			StoreAs: "state.matches",
 		}},
 		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
 	})
@@ -4289,8 +3794,8 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
-				Filter:  "item.score > payload.score && item.score > entity.score && item.score > policy.score",
-				StoreAs: "entity.query_rows",
+				Filter:  "item.score > payload.score && item.score > state.score && item.score > policy.score",
+				StoreAs: "state.query_rows",
 			},
 		},
 		State: testStateSnapshot("pending", map[string]any{"score": 4}, nil, map[string]map[string]any{}),
@@ -4326,7 +3831,7 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 			Filter: &runtimecontracts.FilterSpec{
 				ItemsFrom: "payload.items",
 				Condition: "score > 5",
-				StoreAs:   "entity.filtered",
+				StoreAs:   "state.filtered",
 			},
 		},
 		State: testStateSnapshot("pending", map[string]any{"score": 4}, nil, map[string]map[string]any{}),
@@ -4357,9 +3862,9 @@ func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
 		HandlerEventKey: "filter.requested",
 		Event:           eventtest.RunCreatingRootIngress("evt-entity-filter", "filter.requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
-			ItemsFrom: "entity.items",
+			ItemsFrom: "state.items",
 			Condition: "item.score > 5",
-			StoreAs:   "entity.filtered",
+			StoreAs:   "state.filtered",
 		}},
 		State: testStateSnapshot("pending", map[string]any{
 			"items": []any{map[string]any{"score": 7}, map[string]any{"score": 3}},
@@ -4536,47 +4041,6 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 	}
 	if result.NextState != "default" {
 		t.Fatalf("NextState = %q, want handler-level default", result.NextState)
-	}
-}
-
-func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, stubEvaluator{bools: map[string]bool{
-		"payload.score > 5": true,
-	}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
-			Rules: []runtimecontracts.HandlerRuleEntry{{
-				Condition: "payload.score > 5",
-			}},
-		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rules[0]: when payload.score > 5" {
-		t.Fatalf("display = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
-	}
-	if result.SetsGate != "approved" {
-		t.Fatalf("SetsGate = %q, want handler-level gate with matched rule", result.SetsGate)
-	}
-	if result.StateMutation.SetGate != "approved" {
-		t.Fatalf("StateMutation.SetGate = %q, want approved", result.StateMutation.SetGate)
-	}
-	if got := result.StateMutation.Gates["approved"]; !got {
-		t.Fatalf("StateMutation.Gates[approved] = %v, want true", got)
 	}
 }
 
@@ -4811,7 +4275,7 @@ func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{
 				Event: "account.bucketed",
-				From:  "entity",
+				From:  "state",
 				Fields: map[string]runtimecontracts.ExpressionValue{
 					"interest_score": runtimecontracts.CELExpression("payload.interest_score"),
 					"tier":           runtimecontracts.CELExpression("payload.computed_tier"),
@@ -4857,7 +4321,7 @@ func TestExecutor_EmitFromLoweringRequiresCanonicalBundleAtRuntime(t *testing.T)
 	exec := &Executor{}
 	_, err := exec.lowerEmitSpecForFrame(&executionFrame{}, "handler.emit", runtimecontracts.EmitSpec{
 		Event: "account.bucketed",
-		From:  "entity",
+		From:  "state",
 	})
 	if err == nil || !strings.Contains(err.Error(), "runtime has no contract source for canonical lowering") {
 		t.Fatalf("lowerEmitSpecForFrame error = %v, want missing contract source failure", err)
@@ -5142,7 +4606,7 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
-					TargetField: "entity.final_source",
+					TargetField: "state.final_source",
 					Value:       runtimecontracts.LiteralExpression("handler"),
 				}},
 			},
@@ -5150,10 +4614,10 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 				Condition: "payload.score > 5",
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 					Writes: []runtimecontracts.WorkflowDataWrite{{
-						TargetField: "entity.final_source",
+						TargetField: "state.final_source",
 						Value:       runtimecontracts.LiteralExpression("rule"),
 					}, {
-						TargetField: "entity.rule_only",
+						TargetField: "state.rule_only",
 						Value:       runtimecontracts.LiteralExpression("applied"),
 					}},
 				},
@@ -5182,7 +4646,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
-		`entity.branch_target == "handler"`: func(base BaseContext) (bool, error) {
+		`state.branch_target == "handler"`: func(base BaseContext) (bool, error) {
 			return base.Entity.Raw()["branch_target"] == "handler", nil
 		},
 	}})
@@ -5201,7 +4665,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 				}},
 			},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				Condition: `entity.branch_target == "handler"`,
+				Condition: `state.branch_target == "handler"`,
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 					Writes: []runtimecontracts.WorkflowDataWrite{{
 						TargetField: "rule_selected",
@@ -5236,7 +4700,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
-		`entity.branch_target == "handler"`: func(base BaseContext) (bool, error) {
+		`state.branch_target == "handler"`: func(base BaseContext) (bool, error) {
 			return base.Entity.Raw()["branch_target"] == "handler", nil
 		},
 	}})
@@ -5255,7 +4719,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 				}},
 			},
 			OnComplete: []runtimecontracts.HandlerRuleEntry{{
-				Condition: `entity.branch_target == "handler"`,
+				Condition: `state.branch_target == "handler"`,
 				Emit:      runtimecontracts.EmitSpec{Event: "branch.selected"},
 			}},
 		},
@@ -5692,7 +5156,7 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 			"gem_score":      runtimecontracts.CELExpression("company.gem_score"),
 			"batch_count":    runtimecontracts.CELExpression("payload.batch_count"),
 			"exponent_score": runtimecontracts.CELExpression("company.exponent_score"),
-			"eligible":       runtimecontracts.CELExpression("entity.threshold >= 70"),
+			"eligible":       runtimecontracts.CELExpression("state.threshold >= 70"),
 		}},
 	}}
 	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", handler)
@@ -5835,16 +5299,16 @@ func TestExecutor_FanOutCountPreservesRuleThenTopLevelWriteSnapshots(t *testing.
 		Event:           eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-count-order"), "task.completed", "", "", json.RawMessage(`{"enabled":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetRef: "entity.top_count", Value: runtimecontracts.CELExpression("fan_out.count")},
-				{TargetRef: "entity.top_saw_rule", Value: runtimecontracts.CELExpression("entity.rule_count")},
+				{TargetRef: "state.top_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+				{TargetRef: "state.top_saw_rule", Value: runtimecontracts.CELExpression("state.rule_count")},
 			}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
 				Condition: "payload.enabled",
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-					{TargetRef: "entity.rule_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+					{TargetRef: "state.rule_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}},
 				FanOut: &runtimecontracts.FanOutSpec{
-					ItemsFrom: "entity.items", As: "fan_item", Identity: "fan_item",
+					ItemsFrom: "state.items", As: "fan_item", Identity: "fan_item",
 					Emit: runtimecontracts.EmitSpec{Event: "item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
 						"item": runtimecontracts.CELExpression("fan_item"),
 					}},
@@ -5887,10 +5351,10 @@ func TestExecutor_FanOutEntitySourceBindsAfterSameHandlerMutation(t *testing.T) 
 		Event:           eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-post-write-source"), "task.completed", "", "", json.RawMessage(`{"replacement":["new-a","new-b","new-c"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{
-				TargetRef: "entity.items", Value: runtimecontracts.CELExpression("payload.replacement"),
+				TargetRef: "state.items", Value: runtimecontracts.CELExpression("payload.replacement"),
 			}}},
 			FanOut: &runtimecontracts.FanOutSpec{
-				ItemsFrom: "entity.items", As: "fan_item", Identity: "fan_item",
+				ItemsFrom: "state.items", As: "fan_item", Identity: "fan_item",
 				Emit: runtimecontracts.EmitSpec{Event: "item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
 					"item": runtimecontracts.CELExpression("fan_item"),
 				}},
@@ -6166,7 +5630,7 @@ func TestSelectedFanOutPlanIgnoresContradictoryRawHandlerSpec(t *testing.T) {
 	}
 	frame := &executionFrame{req: ExecutionRequest{
 		Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
-			ItemsFrom: "entity.hostile", Identity: "hostile", Emit: runtimecontracts.EmitSpec{Event: "hostile.requested"},
+			ItemsFrom: "state.hostile", Identity: "hostile", Emit: runtimecontracts.EmitSpec{Event: "hostile.requested"},
 		}},
 		FanOutPlans: []runtimecontracts.FanOutCompiledPlan{canonical},
 	}}
@@ -6222,9 +5686,9 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 					Emit: runtimecontracts.EmitSpec{
 						Event: "scoring.requested",
 						Fields: map[string]runtimecontracts.ExpressionValue{
-							"vertical_name":        runtimecontracts.CELExpression("entity.name"),
-							"rubric":               runtimecontracts.CELExpression("entity.scoring_rubric"),
-							"dimensions_requested": runtimecontracts.CELExpression("entity.dimensions_requested"),
+							"vertical_name":        runtimecontracts.CELExpression("state.name"),
+							"rubric":               runtimecontracts.CELExpression("state.scoring_rubric"),
+							"dimensions_requested": runtimecontracts.CELExpression("state.dimensions_requested"),
 							"discovery_context":    runtimecontracts.CELExpression("payload.discovery_context"),
 						},
 					},
@@ -6920,7 +6384,7 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
 					SourceField:   "summary",
-					TargetPathRef: "entity.analysis.summary",
+					TargetPathRef: "state.analysis.summary",
 				}},
 			},
 		},
@@ -6977,7 +6441,7 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 				Writes: []runtimecontracts.WorkflowDataWrite{
 					{
 						Operation: runtimecontracts.WorkflowDataOperationSet,
-						TargetRef: "entity.verticals",
+						TargetRef: "state.verticals",
 						Key:       runtimecontracts.LiteralExpression("north"),
 						Value: runtimecontracts.LiteralExpression(map[string]any{
 							"status":      "active",
@@ -6986,7 +6450,7 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 					},
 					{
 						Operation: runtimecontracts.WorkflowDataOperationMerge,
-						TargetRef: "entity.verticals",
+						TargetRef: "state.verticals",
 						Key:       runtimecontracts.LiteralExpression("north"),
 						Value: runtimecontracts.LiteralExpression(map[string]any{
 							"status": "busy",
@@ -6994,24 +6458,24 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 					},
 					{
 						Operation: runtimecontracts.WorkflowDataOperationAppend,
-						TargetRef: "entity.verticals.active_jobs",
+						TargetRef: "state.verticals.active_jobs",
 						Key:       runtimecontracts.RefExpression("payload.vertical_id"),
 						Value:     runtimecontracts.RefExpression("payload.job"),
 					},
 					{
 						Operation: runtimecontracts.WorkflowDataOperationUpdate,
-						TargetRef: "entity.tags",
+						TargetRef: "state.tags",
 						Index:     runtimecontracts.LiteralExpression(1),
 						Value:     runtimecontracts.LiteralExpression("gold"),
 					},
 					{
 						Operation: runtimecontracts.WorkflowDataOperationAppend,
-						TargetRef: "entity.tags",
+						TargetRef: "state.tags",
 						Value:     runtimecontracts.LiteralExpression("vip"),
 					},
 					{
 						Operation: runtimecontracts.WorkflowDataOperationDelete,
-						TargetRef: "entity.verticals",
+						TargetRef: "state.verticals",
 						Key:       runtimecontracts.LiteralExpression("obsolete"),
 					},
 				},
@@ -7090,7 +6554,7 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 				Writes: []runtimecontracts.WorkflowDataWrite{
 					{
 						Operation: runtimecontracts.WorkflowDataOperationSet,
-						TargetRef: "entity.verticals",
+						TargetRef: "state.verticals",
 						Key:       runtimecontracts.RefExpression("payload.vertical_id"),
 						Value: runtimecontracts.LiteralExpression(map[string]any{
 							"status":      "active",
@@ -7099,7 +6563,7 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 					},
 					{
 						Operation: runtimecontracts.WorkflowDataOperationAppend,
-						TargetRef: "entity.verticals.active_jobs",
+						TargetRef: "state.verticals.active_jobs",
 						Key:       runtimecontracts.RefExpression("payload.vertical_id"),
 						Value:     runtimecontracts.RefExpression("payload.job"),
 					},
@@ -7154,7 +6618,7 @@ func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *test
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
 					Operation: runtimecontracts.WorkflowDataOperationDelete,
-					TargetRef: "entity.verticals",
+					TargetRef: "state.verticals",
 					Key:       runtimecontracts.LiteralExpression("missing"),
 				}},
 			},
@@ -7198,7 +6662,7 @@ func TestExecutor_DataAccumulationRejectsContainedSetOrMergeIndex(t *testing.T) 
 					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 						Writes: []runtimecontracts.WorkflowDataWrite{{
 							Operation: tc.op,
-							TargetRef: "entity.verticals",
+							TargetRef: "state.verticals",
 							Key:       runtimecontracts.LiteralExpression("north"),
 							Index:     runtimecontracts.LiteralExpression(0),
 							Value: runtimecontracts.LiteralExpression(map[string]any{
@@ -7238,7 +6702,7 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation: runtimecontracts.ComputeOpCount,
-				StoreAs:   "entity.analysis.missing",
+				StoreAs:   "state.analysis.missing",
 			},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -7249,7 +6713,7 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 	if !strings.Contains(err.Error(), "invalid config") {
 		t.Fatalf("error = %v, want invalid config", err)
 	}
-	if !strings.Contains(err.Error(), "entity.analysis.missing") {
+	if !strings.Contains(err.Error(), "state.analysis.missing") {
 		t.Fatalf("error = %v, want target path context", err)
 	}
 }
@@ -7278,7 +6742,7 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 		Node:            testRootExecutableNode(t, "node-1"),
 		Event:           eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{Operation: "clear", TargetRef: "entity.analysis.summary"}}},
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{Operation: "clear", TargetRef: "state.analysis.summary"}}},
 		},
 		State: stored,
 	})
@@ -7525,7 +6989,7 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 			GroupBy: &runtimecontracts.GroupBySpec{
 				ItemsFrom: "payload.items",
 				Key:       "category",
-				StoreAs:   "entity.grouped",
+				StoreAs:   "state.grouped",
 			},
 			AdvancesTo: "done",
 		},
@@ -7568,7 +7032,7 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 			GroupBy: &runtimecontracts.GroupBySpec{
 				ItemsFrom: "payload.items",
 				Key:       "category",
-				StoreAs:   "entity.grouped",
+				StoreAs:   "state.grouped",
 			},
 			AdvancesTo: "done",
 		},
@@ -7594,76 +7058,6 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 	}
 	if _, ok := grouped["policy"]; ok {
 		t.Fatalf("grouped metadata unexpectedly used policy scope: %#v", grouped)
-	}
-}
-
-func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			ClearGates: []string{"*"},
-		},
-		State: StateSnapshot{
-			StateCarrier: NewStateCarrier(map[string]any{"note": "keep"}, map[string]bool{"gate_a": true, "gate_b": true}, nil),
-		},
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if got := result.ClearGates; !reflect.DeepEqual(got, []string{"gate_a", "gate_b"}) {
-		t.Fatalf("ClearGates = %#v", got)
-	}
-	if result.StateMutation.Gates["gate_a"] != false || result.StateMutation.Gates["gate_b"] != false {
-		t.Fatalf("typed gates not cleared: %#v", result.StateMutation.Gates)
-	}
-	if result.StateMutation.Gates["gate_a"] != false || result.StateMutation.Gates["gate_b"] != false {
-		t.Fatalf("typed gate state not cleared: %#v", result.StateMutation.Gates)
-	}
-	if result.StateMutation.Fields["note"] != "keep" {
-		t.Fatalf("non-gate metadata changed: %#v", result.StateMutation.Fields)
-	}
-}
-
-func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
-		"_entity.gates.review == false": func(base BaseContext) (bool, error) {
-			return base.Gates.Raw()["review"] == false, nil
-		},
-	}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			ClearGates: []string{"review"},
-			Guard:      &runtimecontracts.GuardSpec{Check: "_entity.gates.review == false"},
-		},
-		State: StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"review": true}, nil)},
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if result.Status != OutcomeCompleted {
-		t.Fatalf("Status = %q", result.Status)
 	}
 }
 
@@ -7727,7 +7121,7 @@ outputs:
   dimension: text
   score: integer
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "state.yaml"), `
 vertical:
   scores:
     type: "[DimensionScore]"
@@ -7753,7 +7147,7 @@ scoring-node:
     emit:
       event: vertical.scored
       fields:
-        scores: entity.scores
+        scores: state.scores
   state_schema:
     fields:
       dimensions_received: [DimensionScore]
@@ -7787,9 +7181,7 @@ Job:
   id: text
   title: text
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "entities.yaml"), `
-coordinator_state:
-  verticals: map[text]VerticalState
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "state.yaml"), `verticals: map[text]VerticalState
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "events.yaml"), `
 job.received:

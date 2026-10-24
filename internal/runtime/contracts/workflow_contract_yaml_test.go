@@ -159,8 +159,8 @@ stages:
     gate:
       decision: launch_review
       context:
-        staging: entity.staging_url
-        qa_summary: entity.qa_summary
+        staging: state.staging_url
+        qa_summary: state.qa_summary
       outcomes:
         approve:
           advances_to: operating
@@ -190,7 +190,7 @@ stages:
 	if plan.Title != "Launch review" || plan.Outcomes["approve"].Label != "Approve" || plan.Outcomes["reject"].Input["feedback"].Label != "Feedback" {
 		t.Fatalf("gate copy must derive uniformly from the decision/verdict/input keys: %#v", plan)
 	}
-	if got := plan.Context["staging"]; got.Kind != ExpressionKindCEL || got.CEL != "entity.staging_url" {
+	if got := plan.Context["staging"]; got.Kind != ExpressionKindCEL || got.CEL != "state.staging_url" {
 		t.Fatalf("context staging = %#v", got)
 	}
 	if got := plan.Outcomes["reject"].Input["feedback"]; got.Type != "text" || !got.Required {
@@ -812,7 +812,7 @@ func TestHandlerRuleEntryDecode_RejectsLegacyComputeExpressionShorthand(t *testi
 	var rule HandlerRuleEntry
 	err := decodeNodeTestYAML([]byte(`
 compute:
-  store_as: entity.composite
+  store_as: state.composite
   expression: "weighted_average(accumulated.scores, accumulated.weights)"
 `), &rule)
 	if err == nil || !strings.Contains(err.Error(), `compute field "expression" is not supported.`) {
@@ -885,7 +885,7 @@ func TestSystemNodeEventHandlerDecode_LowersPolicySheetSelectionRows(t *testing.
 	var handler SystemNodeEventHandler
 	if err := decodeNodeTestYAML([]byte(`
 rules:
-  - when: payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max
+  - when: payload.spec_revision > state.last_cto_reviewed_revision && state.revision_count >= policy.inner_revision_max
     advances_to: cto_review
   - case:
       selector: payload.mode
@@ -896,14 +896,14 @@ rules:
       equals: [quick, repository]
     emit: scan.quick_repo_requested
   - range:
-      value: entity.spend_ratio
+      value: state.spend_ratio
       gte: policy.warning_pct / 100
       lt: policy.throttle_pct / 100
       monotonicity:
         - policy.warning_pct / 100 <= policy.throttle_pct / 100 <= 1.0
     emit: treasury.warning_recorded
   - range:
-      value: entity.spend_ratio
+      value: state.spend_ratio
       gte: policy.throttle_pct / 100
       lt: 1.0
       monotonicity:
@@ -917,11 +917,11 @@ rules:
 		t.Fatalf("rules len = %d, want %d", got, want)
 	}
 	wantConditions := []string{
-		"payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max",
+		"payload.spec_revision > state.last_cto_reviewed_revision && state.revision_count >= policy.inner_revision_max",
 		`payload.mode == "deep"`,
 		`payload.mode == "quick" && payload.target == "repository"`,
-		`entity.spend_ratio >= policy.warning_pct / 100 && entity.spend_ratio < policy.throttle_pct / 100`,
-		`entity.spend_ratio >= policy.throttle_pct / 100 && entity.spend_ratio < 1.0`,
+		`state.spend_ratio >= policy.warning_pct / 100 && state.spend_ratio < policy.throttle_pct / 100`,
+		`state.spend_ratio >= policy.throttle_pct / 100 && state.spend_ratio < 1.0`,
 		"",
 	}
 	wantKinds := []PolicySheetRowKind{
@@ -1204,7 +1204,7 @@ rules:
 			body: `
 rules:
   - range:
-      value: entity.spend_ratio
+      value: state.spend_ratio
       gte: payload.warning_ratio
     advances_to: warning
   - advances_to: fallback
@@ -1216,7 +1216,7 @@ rules:
 			body: `
 rules:
   - range:
-      value: entity.spend_ratio
+      value: state.spend_ratio
       gte: policy.warning_ratio
       lt: policy.throttle_ratio
     advances_to: warning
@@ -1229,13 +1229,13 @@ rules:
 			body: `
 rules:
   - range:
-      value: entity.spend_ratio
+      value: state.spend_ratio
       gte: policy.warning_ratio
       monotonicity:
         - policy.warning_ratio <= policy.throttle_ratio <= 1.0
     advances_to: warning
   - range:
-      value: entity.spend_ratio
+      value: state.spend_ratio
       gte: policy.throttle_ratio
       monotonicity:
         - policy.warning_ratio <= policy.throttle_ratio <= 1.0
@@ -1287,7 +1287,7 @@ rules:
       entries:
         - key: service
           value: templates/service/go
-      into: entity.template_path
+      into: state.template_path
       default: fail
 `,
 			contains: "computed.*",
@@ -1313,7 +1313,7 @@ rules:
 			body: `
 rules:
   - lookup:
-      on: entity.kind
+      on: state.kind
       entries:
         - key: service
           value: templates/service/go
@@ -1373,7 +1373,7 @@ rules:
       module: structured_renderer
       input:
         component: payload.component
-      into: entity.rendered_bundle
+      into: state.rendered_bundle
 `,
 			contains: "computed.*",
 		},
@@ -1639,7 +1639,7 @@ func TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := decodeNodeTestYAML([]byte(`
 clear:
-  target: entity.summary
+  target: state.summary
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "targets") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED clear.target rejection", err)
@@ -1651,7 +1651,7 @@ func TestSystemNodeEventHandlerDecode_PreservesCanonicalClearTargets(t *testing.
 	if err := decodeNodeTestYAML([]byte(`
 clear:
   targets:
-    - entity.summary
+    - state.summary
     - pending_dedup
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -1667,7 +1667,7 @@ func TestHandlerRuleEntryDecode_AcceptsSpecComputeMetadataFields(t *testing.T) {
 compute:
   operation: pick_or_average
   description: choose the strongest score
-  store_as: entity.composite
+  store_as: state.composite
   keys:
     numeric_keys: [score]
 `), &rule); err != nil {
@@ -1697,7 +1697,7 @@ func TestHandlerRuleEntryDecode_AcceptsPickOrAverageOperation(t *testing.T) {
 	if err := decodeNodeTestYAML([]byte(`
 compute:
   operation: pick_or_average
-  store_as: entity.composite
+  store_as: state.composite
   keys:
     numeric_keys: [score]
 `), &rule); err != nil {
@@ -1716,7 +1716,7 @@ func TestHandlerRuleEntryDecode_RejectsWeightedSumOperation(t *testing.T) {
 	err := decodeNodeTestYAML([]byte(`
 compute:
   operation: weighted_sum
-  store_as: entity.composite
+  store_as: state.composite
   keys:
     numeric_keys: [score]
 `), &rule)
@@ -1819,8 +1819,8 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		{name: "optionless input mapping", raw: "inputs:\n  - event: work.requested\n", want: "must be a scalar text"},
 		{name: "optionless output mapping", raw: "outputs:\n  - event: work.completed\n", want: "must be a scalar text"},
 		{name: "duplicate event", raw: "inputs: [work.requested, work.requested]\n", want: "declared more than once"},
-		{name: "retired read grant", raw: "inputs:\n  reads: [entity.status, entity.status]\n", want: "is mapping, want sequence"},
-		{name: "retired write grant", raw: "outputs:\n  writes: [{field: entity.status}]\n", want: "is mapping, want sequence"},
+		{name: "retired read grant", raw: "inputs:\n  reads: [state.status, state.status]\n", want: "is mapping, want sequence"},
+		{name: "retired write grant", raw: "outputs:\n  writes: [{field: state.status}]\n", want: "is mapping, want sequence"},
 		{name: "unknown pin direction", raw: "ingress_events: [work.requested]\n", want: "is not supported"},
 		{name: "unknown input field", raw: "inputs:\n  - event: work.requested\n    aliases: [work.requested]\n", want: `must be a scalar text`},
 	} {
@@ -1889,29 +1889,19 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T) {
 	var node SystemNodeContract
 	if err := decodeNodeTestYAML([]byte(`
-state_table: worker_state
-state_schema:
-  fields:
-    count:
-      type: integer
 timers:
   - event: timer.task.timeout
     delay: 1m
-gate_state:
-  ready: Worker is ready
 task.requested:
   advances_to: done
 `), &node); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got, want := strings.TrimSpace(node.StateTable), "worker_state"; got != want {
-		t.Fatalf("StateTable = %q, want %q", got, want)
-	}
 	if _, ok := node.EventHandlers["task.requested"]; !ok {
 		t.Fatalf("task.requested handler missing: %#v", node.EventHandlers)
 	}
-	if len(node.StateSchema.Fields) != 1 {
-		t.Fatalf("StateSchema fields = %#v, want one field", node.StateSchema.Fields)
+	if len(node.Timers) != 1 || node.Timers[0].Event != "timer.task.timeout" {
+		t.Fatalf("Timers = %#v, want task timeout", node.Timers)
 	}
 }
 
@@ -2248,7 +2238,7 @@ func TestGroupBySpecDecode_HydratesPaths(t *testing.T) {
 	if err := decodeNodeTestYAML([]byte(`
 items_from: payload.items
 key: category
-store_as: entity.grouped
+store_as: state.grouped
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2258,7 +2248,7 @@ store_as: entity.grouped
 	if got := spec.Key; got != "category" {
 		t.Fatalf("Key = %q", got)
 	}
-	if got := spec.StoreAs; got != "entity.grouped" {
+	if got := spec.StoreAs; got != "state.grouped" {
 		t.Fatalf("StoreAs = %q", got)
 	}
 }
@@ -2297,7 +2287,7 @@ writes:
   - target_field: dispatch_count
     value: fan_out.count
   - target_field: score_expr
-    value: entity.score + 1
+    value: state.score + 1
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2322,7 +2312,7 @@ writes:
 	if got := spec.Writes[3].Value.CEL; got != "fan_out.count" {
 		t.Fatalf("Writes[3].Value.CEL = %q", got)
 	}
-	if got := spec.Writes[4].Value.CEL; got != "entity.score + 1" {
+	if got := spec.Writes[4].Value.CEL; got != "state.score + 1" {
 		t.Fatalf("Writes[4].Value.CEL = %q", got)
 	}
 }
@@ -2332,11 +2322,11 @@ func TestWorkflowDataWriteDecode_PreservesContainedOperationForms(t *testing.T) 
 	if err := decodeNodeTestYAML([]byte(`
 writes:
   - op: append
-    target: entity.verticals.active_jobs
+    target: state.verticals.active_jobs
     key: payload.vertical_id
     value: payload.job
   - op: update
-    target: entity.queue
+    target: state.queue
     index: 0
     value: "reviewed"
 `), &spec); err != nil {
@@ -2352,7 +2342,7 @@ writes:
 	if got := appendWrite.Operation; got != WorkflowDataOperationAppend {
 		t.Fatalf("Operation = %q, want append", got)
 	}
-	if got := appendWrite.Target(); got != "entity.verticals.active_jobs" {
+	if got := appendWrite.Target(); got != "state.verticals.active_jobs" {
 		t.Fatalf("Target() = %q", got)
 	}
 	if got := appendWrite.Key.CEL; got != "payload.vertical_id" {
@@ -2375,8 +2365,8 @@ func TestWorkflowDataWriteDecode_RejectsAmbiguousContainedOperationShape(t *test
 	err := decodeNodeTestYAML([]byte(`
 writes:
   - op: append
-    target_path: entity.verticals.active_jobs
-    target: entity.verticals.active_jobs
+    target_path: state.verticals.active_jobs
+    target: state.verticals.active_jobs
     key: "north"
     value: "job-1"
 `), &spec)
@@ -2402,7 +2392,7 @@ func TestWorkflowDataWriteDecode_RejectsContainedSetOrMergeIndex(t *testing.T) {
 			err := decodeNodeTestYAML([]byte(fmt.Sprintf(`
 writes:
   - op: %s
-    target: entity.verticals
+    target: state.verticals
     key: north
     index: 0
     value:
@@ -2422,17 +2412,17 @@ func TestWorkflowDataWriteDecode_PreservesTargetPathAuthoring(t *testing.T) {
 	var write WorkflowDataWrite
 	if err := decodeNodeTestYAML([]byte(`
 source_field: summary
-target_path: entity.analysis.summary
+target_path: state.analysis.summary
 `), &write); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := write.Source(); got != "summary" {
 		t.Fatalf("Source() = %q", got)
 	}
-	if got := write.Target(); got != "entity.analysis.summary" {
+	if got := write.Target(); got != "state.analysis.summary" {
 		t.Fatalf("Target() = %q", got)
 	}
-	if got := write.TargetPath.String(); got != "entity.analysis.summary" {
+	if got := write.TargetPath.String(); got != "state.analysis.summary" {
 		t.Fatalf("TargetPath = %q", got)
 	}
 }
@@ -2442,7 +2432,7 @@ func TestWorkflowDataWriteDecode_RejectsConflictingTargetFieldAndTargetPath(t *t
 	err := decodeNodeTestYAML([]byte(`
 source_field: summary
 target_field: analysis
-target_path: entity.analysis.summary
+target_path: state.analysis.summary
 `), &write)
 	if err == nil {
 		t.Fatal("expected conflicting target_field/target_path error")
@@ -2516,7 +2506,7 @@ compute:
   tiers:
     - dimensions: [build_complexity]
       weight: 1
-  store_as: entity.composite_score
+  store_as: state.composite_score
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), "keys.dimension_key") {
 		t.Fatalf("yaml.Unmarshal error = %v, want keys.dimension_key error", err)
@@ -2533,7 +2523,7 @@ compute:
   tiers:
     - dimensions: [build_complexity]
       weight: 1
-  store_as: entity.composite_score
+  store_as: state.composite_score
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), "keys.score_keys") {
 		t.Fatalf("yaml.Unmarshal error = %v, want keys.score_keys error", err)
@@ -2581,7 +2571,7 @@ dimensions_requested:
 func TestExpressionValueDecode_RetiresExpressionAliasInMappingForm(t *testing.T) {
 	var expr ExpressionValue
 	err := decodeNodeTestYAML([]byte(`
-expression: entity.score + 1
+expression: state.score + 1
 `), &expr)
 	if err == nil || !strings.Contains(err.Error(), "unsupported expression value") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retirement", err)
@@ -2637,7 +2627,7 @@ fields:
 func TestAccumulateSpecDecode_RejectsUnknownFieldWithCanonicalOptions(t *testing.T) {
 	var spec AccumulateSpec
 	err := decodeNodeTestYAML([]byte(`
-into: entity.items
+into: state.items
 source: payload.items
 `), &spec)
 	if err == nil {
@@ -2737,7 +2727,7 @@ func TestSystemNodeEventHandlerDecode_AllowsRulesEmitTemplateSpecialization(t *t
 emit:
   event: account.bucketed
   fields:
-    account_id: entity.id
+    account_id: state.id
     score: payload.score
 rules:
   - when: payload.score >= 80
@@ -3054,7 +3044,7 @@ func TestEmitSpecDecode_RejectsEveryRetiredProducerRoutingFieldOnPresence(t *tes
 func TestFanOutDecode_RejectsRetiredAllowFanoutInNestedEmit(t *testing.T) {
 	var spec FanOutSpec
 	err := decodeNodeTestSnippet(t, canonicalrouting.NewParserSnippet(t, `
-items_from: entity.account_ids
+items_from: state.account_ids
 as: account_id
 emit:
   event: account.notify.requested

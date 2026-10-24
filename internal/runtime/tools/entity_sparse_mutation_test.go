@@ -573,11 +573,11 @@ writer:
 			before := read()
 			otherSource := semanticview.Wrap(loadWave1EntityToolBundle(t, actor, "other", "work", "", "work:\n  label: text?\n"))
 			for _, update := range []pipeline.EntityFieldMutation{
-				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.token", Value: "changed"}},
-				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.left", Value: "unpaired"}},
-				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.label", Value: nil}},
-				{Mutation: entityruntime.Mutation{Target: "entity.label", Value: "unbound"}},
-				{Source: otherSource, Mutation: entityruntime.Mutation{Target: "entity.label", Value: "wrong source"}},
+				{Source: source, Mutation: entityruntime.Mutation{Target: "state.token", Value: "changed"}},
+				{Source: source, Mutation: entityruntime.Mutation{Target: "state.left", Value: "unpaired"}},
+				{Source: source, Mutation: entityruntime.Mutation{Target: "state.label", Value: nil}},
+				{Mutation: entityruntime.Mutation{Target: "state.label", Value: "unbound"}},
+				{Source: otherSource, Mutation: entityruntime.Mutation{Target: "state.label", Value: "wrong source"}},
 			} {
 				update.RunID, update.EntityID = runID, entityID
 				update.Owner, update.FlowID = owner, "work"

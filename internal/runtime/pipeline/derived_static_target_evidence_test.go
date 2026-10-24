@@ -85,7 +85,7 @@ func TestDerivedStaticTargetRequiresCanonicalInstanceEvidence(t *testing.T) {
 		"schema.yaml":                 "name: derived-target\n",
 		"parent/schema.yaml":          "name: parent\ninstance: parent_id\ninputs: [parent.created]\n",
 		"parent/events.yaml":          "parent.created:\n  parent_id: text\n",
-		"parent/entities.yaml":        "parent:\n  parent_id: text\n",
+		"parent/state.yaml":           "parent_id: text\n",
 		"parent/receiver/schema.yaml": "name: receiver\ninputs: [work.started]\n",
 		"parent/receiver/events.yaml": "work.started:\n",
 		"parent/receiver/nodes.yaml":  "receiver-node:\n  work.started: {}\n",

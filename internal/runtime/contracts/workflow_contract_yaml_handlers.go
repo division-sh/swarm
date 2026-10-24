@@ -49,8 +49,6 @@ var handlerFieldOptions = map[string]struct{}{
 	"guard":             {},
 	"advances_to":       {},
 	"terminate":         {},
-	"sets_gate":         {},
-	"clear_gates":       {},
 	"data_accumulation": {},
 	"loop":              {},
 	"on_complete":       {},

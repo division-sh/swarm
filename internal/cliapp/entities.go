@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	entityListMethod      = "entity.list"
-	entityGetMethod       = "entity.get"
-	entityAggregateMethod = "entity.aggregate"
+	entityListMethod      = "state.list"
+	entityGetMethod       = "state.get"
+	entityAggregateMethod = "state.aggregate"
 )
 
 type entityListCommandOptions struct {
@@ -299,7 +299,7 @@ func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID s
 			return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
 		}
 	}
-	if err := validateEntityFullResult("entity.get result", result); err != nil {
+	if err := validateEntityFullResult("state.get result", result); err != nil {
 		return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
 	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
@@ -456,10 +456,10 @@ func validateEntityGroupBy(groupBy string) error {
 
 func validateEntityListResult(result entityListResult) error {
 	if result.Entities == nil {
-		return fmt.Errorf("malformed entity.list result: entities is required")
+		return fmt.Errorf("malformed state.list result: entities is required")
 	}
 	for i, entity := range result.Entities {
-		if err := validateEntitySummary(fmt.Sprintf("entity.list result: entities[%d]", i), entity); err != nil {
+		if err := validateEntitySummary(fmt.Sprintf("state.list result: entities[%d]", i), entity); err != nil {
 			return err
 		}
 	}
@@ -567,14 +567,14 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 
 func validateEntityAggregateResult(result entityAggregateResult) error {
 	if result.Counts == nil {
-		return fmt.Errorf("malformed entity.aggregate result: counts is required")
+		return fmt.Errorf("malformed state.aggregate result: counts is required")
 	}
 	if result.AbsentCount == nil || *result.AbsentCount < 0 {
-		return fmt.Errorf("malformed entity.aggregate result: absent_count must be a non-negative integer")
+		return fmt.Errorf("malformed state.aggregate result: absent_count must be a non-negative integer")
 	}
 	for key, count := range result.Counts {
 		if count < 0 {
-			return fmt.Errorf("malformed entity.aggregate result: counts[%q] must be non-negative", key)
+			return fmt.Errorf("malformed state.aggregate result: counts[%q] must be non-negative", key)
 		}
 	}
 	return nil

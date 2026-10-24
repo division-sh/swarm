@@ -452,7 +452,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 	t.Helper()
 	commentHandler := runtimecontracts.SystemNodeEventHandler{
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
+			Condition: `instance.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
 			Activity: runtimecontracts.ActivitySpec{
 				ID:   "github_create_issue_comment",
 				Tool: "github.create_issue_comment",
@@ -467,7 +467,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 		}},
 	}
 	createIssueHandler := runtimecontracts.SystemNodeEventHandler{
-		Rules: []runtimecontracts.HandlerRuleEntry{{Condition: `_entity.id != ""`,
+		Rules: []runtimecontracts.HandlerRuleEntry{{Condition: `instance.id != ""`,
 			Activity: runtimecontracts.ActivitySpec{
 				ID:   "github_create_issue",
 				Tool: "github.create_issue",
@@ -482,7 +482,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 		}},
 	}
 	addLabelsHandler := runtimecontracts.SystemNodeEventHandler{
-		Rules: []runtimecontracts.HandlerRuleEntry{{Condition: `_entity.id != ""`,
+		Rules: []runtimecontracts.HandlerRuleEntry{{Condition: `instance.id != ""`,
 			Activity: runtimecontracts.ActivitySpec{
 				ID:   "github_add_labels_to_issue",
 				Tool: "github.add_labels_to_issue",

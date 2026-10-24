@@ -17,7 +17,7 @@ func TestProjectNodeDataAccumulationValue(t *testing.T) {
         - target_field: dispatch_count
           value: payload.count
         - op: clear
-          target: entity.old_value
+          target: state.old_value
 `))
 	if err != nil {
 		t.Fatal(err)

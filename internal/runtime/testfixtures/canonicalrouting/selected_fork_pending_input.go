@@ -42,10 +42,10 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 	}
 	for _, scope := range scopes {
 		files := map[string]string{
-			"schema.yaml":   "name: fork-input\nstages:\n  ready: {}\n  done: {final: true}\ninputs:\n  - work.seeded\n  - " + eventName + "\n",
-			"events.yaml":   "work.seeded:\n  seed: boolean\n" + eventName + ":\n  token: " + tokenType + "\n",
-			"entities.yaml": "work: {}\n",
-			"nodes.yaml":    "controller:\n" + eventName + "]\n  work.seeded:\n    advances_to: ready\n    " + eventName + ":\n      advances_to: done\n",
+			"schema.yaml": "name: fork-input\nstages:\n  ready: {}\n  done: {final: true}\ninputs:\n  - work.seeded\n  - " + eventName + "\n",
+			"events.yaml": "work.seeded:\n  seed: boolean\n" + eventName + ":\n  token: " + tokenType + "\n",
+
+			"nodes.yaml": "controller:\n" + eventName + "]\n  work.seeded:\n    advances_to: ready\n    " + eventName + ":\n      advances_to: done\n",
 		}
 		if scope == "" {
 			switch variant {
@@ -77,12 +77,12 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 	}
 	if variant == PendingInputMixedCompletion {
 		writeClosedVariantFile(t, root, "a_finished/schema.yaml", "name: finished\nstages:\n  ready: {}\n  done: {final: true}\ninputs:\n  - work.seeded\n  - work.first\n")
-		writeClosedVariantFile(t, root, "a_finished/entities.yaml", "work: {}\n")
+		writeClosedVariantFile(t, root, "a_finished/state.yaml", "")
 		writeClosedVariantFile(t, root, "a_finished/nodes.yaml", "controller:\n  work.seeded:\n    advances_to: ready\n  work.first:\n    advances_to: done\n")
 	}
 	if variant == PendingInputConnectedSiblings {
 		writeClosedVariantFile(t, root, "on_demand/schema.yaml", "name: on_demand\ninstance: token\nstages:\n  ready: {}\n  done: {final: true}\ninputs:\n  - work.first\n")
-		writeClosedVariantFile(t, root, "on_demand/entities.yaml", "work:\n  token: {type: text, indexed: true, _unused_reason: receiver instance identity}\n")
+		writeClosedVariantFile(t, root, "on_demand/state.yaml", "token: {type: text, indexed: true}\n")
 		writeClosedVariantFile(t, root, "on_demand/nodes.yaml", "controller:\n  work.first:\n    advances_to: done\n")
 	}
 	return root
@@ -94,10 +94,10 @@ func CopySelectedInputValidationProbe(t testing.TB) string {
 	for name, body := range map[string]string{
 		"schema.yaml":       "name: selected-input\ninputs:\n  - thing.created\n",
 		"events.yaml":       "thing.created:\n",
-		"nodes.yaml":        "worker:\n  thing.created:\n    guard: _entity.id != \"\"\n",
+		"nodes.yaml":        "worker:\n  thing.created:\n    guard: instance.id != \"\"\n",
 		"child/schema.yaml": "name: child\ninputs:\n  - thing.created\n",
 		"child/events.yaml": "thing.created:\n",
-		"child/nodes.yaml":  "worker:\n  thing.created:\n    guard: _entity.id != \"\"\n",
+		"child/nodes.yaml":  "worker:\n  thing.created:\n    guard: instance.id != \"\"\n",
 	} {
 		writeClosedVariantFile(t, root, name, body)
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 func TestLeadReviewEntityNestedOptional(t *testing.T) {
-	for _, expr := range []string{`entity.profile.note != ""`, `has(entity.profile.note) && entity.profile.note != ""`, `entity.profile.?note.orValue("") != ""`} {
+	for _, expr := range []string{`state.profile.note != ""`, `has(state.profile.note) && state.profile.note != ""`, `state.profile.?note.orValue("") != ""`} {
 		t.Run(expr, func(t *testing.T) {
 			source := collectionItemSemanticsSource(rc.SystemNodeEventHandler{Guard: &rc.GuardSpec{Check: expr}})
 			bundle, _ := semanticview.Bundle(source)
@@ -30,10 +30,10 @@ func TestLeadReviewEntityNestedOptional(t *testing.T) {
 					found = true
 				}
 			}
-			if expr == `entity.profile.note != ""` && !found {
+			if expr == `state.profile.note != ""` && !found {
 				t.Errorf("boot admitted undecided optional named-record field under entity; allErrors=%d", len(report.Errors()))
 			}
-			if expr == `entity.profile.?note.orValue("") != ""` && len(report.Errors()) > 0 {
+			if expr == `state.profile.?note.orValue("") != ""` && len(report.Errors()) > 0 {
 				t.Error("stock optional decision rejected by field-path interpreter")
 			}
 		})

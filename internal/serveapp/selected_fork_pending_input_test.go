@@ -244,14 +244,14 @@ func assertNoUnselectedTargetActivation(t *testing.T, rt servedControlProofRunti
 func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime, runID string, wantDone int) {
 	t.Helper()
 	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID}, &list)
+	requireServedJSONRPCResult(t, rt.Endpoint, "state.list", map[string]any{"run_id": runID}, &list)
 	if len(list.Entities) != 2 {
 		t.Fatalf("public entity census: %+v", list)
 	}
 	done := 0
 	for _, entity := range list.Entities {
 		var full operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
+		requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
 		if entity.RunID != runID || !reflect.DeepEqual(entity, full.Entity) {
 			t.Fatal("public input result lost exact run/entity identity")
 		}

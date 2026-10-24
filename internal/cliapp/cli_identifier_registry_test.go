@@ -685,7 +685,7 @@ func TestCLIIdentifierScopedEntityPrefixUsesRunScope(t *testing.T) {
 			writeJSONRPCResult(t, w, request.ID, validEntityFullResult("entity-alpha"))
 		case entityListMethod:
 			if request.Params["run_id"] != "run-full" {
-				t.Fatalf("entity.list run_id=%v", request.Params["run_id"])
+				t.Fatalf("state.list run_id=%v", request.Params["run_id"])
 			}
 			if request.Params["cursor"] == nil {
 				writeJSONRPCResult(t, w, request.ID, map[string]any{
@@ -706,7 +706,7 @@ func TestCLIIdentifierScopedEntityPrefixUsesRunScope(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if got, want := strings.Join(methods, ","), "entity.get,entity.list,entity.list,entity.get"; got != want {
+	if got, want := strings.Join(methods, ","), "state.get,state.list,state.list,state.get"; got != want {
 		t.Fatalf("methods=%s, want %s", got, want)
 	}
 }
@@ -730,7 +730,7 @@ func TestCLIIdentifierUnscopedEntityDoesNotEnumerate(t *testing.T) {
 	if code != cliExitNotFound {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
-	if got, want := strings.Join(methods, ","), "entity.get"; got != want {
+	if got, want := strings.Join(methods, ","), "state.get"; got != want {
 		t.Fatalf("methods=%s, want %s", got, want)
 	}
 }

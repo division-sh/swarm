@@ -127,7 +127,7 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 		t.Fatalf("provider-initialized typed config=%#v, want %#v", config, want)
 	}
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
+	requireServedJSONRPCResult(t, rt.Endpoint, "state.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 	wantFields := map[string]any{"conversation_reference": "2307", "text": "direct initialization", "provider_message_reference": float64(7), "enabled": false}
 	if entity.Entity.RunID != seed.RunID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || !reflect.DeepEqual(entity.Fields, wantFields) {
 		t.Fatalf("real child did not consume typed initialization: %+v", entity)

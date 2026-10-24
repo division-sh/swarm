@@ -32,7 +32,7 @@ registry-intake:
 registry-finalize:
   assessment.reported:
     rules:
-      - when: _entity.current_state == 'investigating'
+      - when: instance.stage == 'investigating'
         data_accumulation:
           writes:
             - source_field: match_score
@@ -44,7 +44,7 @@ registry-finalize:
         advances_to: assessed
   investigation.timed_out:
     rules:
-      - when: _entity.current_state == 'investigating'
+      - when: instance.stage == 'investigating'
         data_accumulation:
           writes:
             - target_field: match_score

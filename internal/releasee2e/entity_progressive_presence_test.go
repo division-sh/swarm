@@ -165,32 +165,32 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 
 func writePresenceLastFieldFixture(t *testing.T, root string) {
 	t.Helper()
-	writeReleaseFile(t, filepath.Join(root, "entities.yaml"), "work:\n  review_note:\n    type: text?\n    initial: seeded\n")
+	writeReleaseFile(t, filepath.Join(root, "state.yaml"), "review_note: \"seeded\"\n")
 	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), `owner:
   work.opened:
     advances_to: assess
   work.annotated:
-    guard: _entity.current_state == 'assess'
+    guard: instance.stage == 'assess'
     data_accumulation:
       writes: [review_note]
   work.assessed:
-    guard: _entity.current_state == 'assess'
+    guard: instance.stage == 'assess'
     advances_to: consume
     emit: {event: work.consume}
   work.consume:
-    guard: _entity.current_state == 'consume'
+    guard: instance.stage == 'consume'
     data_accumulation:
       writes:
         - op: clear
-          target: entity.review_note
+          target: state.review_note
     emit:
       event: work.completed
       fields:
         business_brief: "An assessed brief"
         attempt_count: 1
-        note_supplied: has(entity.review_note)
+        note_supplied: has(state.review_note)
   work.completed:
-    guard: _entity.current_state == 'consume' && !payload.note_supplied && !has(entity.review_note)
+    guard: instance.stage == 'consume' && !payload.note_supplied && !has(state.review_note)
     advances_to: done
 `)
 }
@@ -232,7 +232,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				EntityID string `json:"entity_id"`
 			} `json:"entities"`
 		}
-		if err := process.rpc.call(ctx, "entity.list", map[string]any{"run_id": runID, "type": "work"}, &list); err != nil {
+		if err := process.rpc.call(ctx, "state.list", map[string]any{"run_id": runID, "type": "work"}, &list); err != nil {
 			t.Fatal(err)
 		}
 		if len(list.Entities) > 1 {
@@ -246,7 +246,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				Fields map[string]any `json:"fields"`
 			}
 			id := list.Entities[0].EntityID
-			if err := process.rpc.call(ctx, "entity.get", map[string]any{"run_id": runID, "entity_id": id}, &entity); err != nil {
+			if err := process.rpc.call(ctx, "state.get", map[string]any{"run_id": runID, "entity_id": id}, &entity); err != nil {
 				t.Fatal(err)
 			}
 			last = entity
@@ -254,7 +254,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				var aggregate struct {
 					Counts map[string]int `json:"counts"`
 				}
-				if err := process.rpc.call(ctx, "entity.aggregate", map[string]any{"run_id": runID, "type": "work", "group_by": "current_state"}, &aggregate); err != nil {
+				if err := process.rpc.call(ctx, "state.aggregate", map[string]any{"run_id": runID, "type": "work", "group_by": "current_state"}, &aggregate); err != nil {
 					t.Fatal(err)
 				}
 				if !reflect.DeepEqual(aggregate.Counts, map[string]int{stage: 1}) {
