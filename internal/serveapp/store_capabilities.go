@@ -106,6 +106,8 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 		executor := apiv1.SelectedContractRunForkExecutor{
 			ExecuteSelectedContractRunFork: family.Execute,
 			SourceLoader:                   loader,
+			RuntimeContexts:                req.RuntimeContextManager,
+			LiveRuns:                       owner.LiveRuns(),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config: req.Config, ExecutionPosture: req.ExecutionPosture,
 				EntityStore: deps.ToolEntityStore, HumanTaskStore: deps.HumanTaskStore,

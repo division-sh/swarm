@@ -1,9 +1,7 @@
 package cliapp
 
 import (
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -17,7 +15,7 @@ import (
 
 const (
 	runForkMethod       = "run.fork"
-	runForkCommandShape = "swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]"
+	runForkCommandShape = "swarm run fork <source-run-id> [--source <directory>] [--at-start | --publication <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]"
 )
 
 type forkCommandOptions struct {
@@ -26,6 +24,7 @@ type forkCommandOptions struct {
 
 	source            string
 	atEvent           string
+	publication       string
 	atStart           bool
 	allowSourceFreeze bool
 	idempotencyKey    string
@@ -33,6 +32,7 @@ type forkCommandOptions struct {
 
 	sourceSet         bool
 	atEventSet        bool
+	publicationSet    bool
 	atStartSet        bool
 	idempotencyKeySet bool
 }
@@ -64,6 +64,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			forkOpts.sourceSet = cmd.Flags().Changed("source")
 			forkOpts.atEventSet = cmd.Flags().Changed("at-event")
+			forkOpts.publicationSet = cmd.Flags().Changed("publication")
 			forkOpts.atStartSet = cmd.Flags().Changed("at-start")
 			forkOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
 			if err := forkOpts.output.validate(); err != nil {
@@ -75,9 +76,11 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	argcount.SetDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().StringVar(&forkOpts.source, "source", "", "Select a target source directory already served into the selected store; defaults to the source run")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
+	cmd.Flags().StringVar(&forkOpts.publication, "publication", "", "Re-apply this source event publication's inputs")
 	cmd.Flags().BoolVar(&forkOpts.atStart, "at-start", false, "Fork at the original committed run start, before creating ingress; mutually exclusive with --at-event")
 	cmd.Flags().StringArrayVar(&forkOpts.pins, "pin", nil, "Exact data version override: name@vN or name@ResourceVersionID (repeatable)")
 	cmd.Flags().BoolVar(&forkOpts.allowSourceFreeze, "allow-source-freeze", false, "Allow permanent source freeze if it has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Omit and decline the prompt to cancel")
+	_ = cmd.Flags().MarkDeprecated("allow-source-freeze", "fork switches the live run and pauses its predecessor without permanent freezing")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &forkOpts.output)
@@ -135,19 +138,6 @@ func runForkCommand(ctx context.Context, out, errOut io.Writer, opts forkCommand
 		params["bundle_hash"] = bundleHash
 		params["data_pin_overrides"] = overrides
 	}
-	if !opts.allowSourceFreeze {
-		sourceRunID, _ := params["source_run_id"].(string)
-		run, err := runCommandGet(ctx, client, sourceRunID)
-		if err != nil {
-			return returnCLIAPIError(errOut, err, runForkAPIErrorClassifier())
-		}
-		if runForkSourceStatusActive(run.Status) {
-			if err := requireRunForkSourceFreezeConfirmation(opts.apiOptions, sourceRunID, errOut); err != nil {
-				return err
-			}
-			params["allow_source_freeze"] = true
-		}
-	}
 	var result runForkResult
 	if err := client.call(ctx, runForkMethod, params, &result); err != nil {
 		return returnCLIAPIError(errOut, err, runForkAPIErrorClassifier())
@@ -168,6 +158,16 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		return nil, err
 	}
 	params := map[string]any{"source_run_id": sourceRunID}
+	if opts.publication != "" || opts.publicationSet {
+		if opts.atStart || opts.atStartSet || opts.atEvent != "" || opts.atEventSet {
+			return nil, fmt.Errorf("--publication, --at-start and --at-event are mutually exclusive")
+		}
+		publication, err := validateRunForkUUIDValue("--publication event id", opts.publication)
+		if err != nil {
+			return nil, err
+		}
+		params["fork_event_id"] = publication
+	}
 	if (opts.atStartSet || opts.atStart) && (opts.atEventSet || opts.atEvent != "") {
 		return nil, fmt.Errorf("--at-start and --at-event are mutually exclusive")
 	}
@@ -206,36 +206,6 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		params["idempotency_key"] = idempotencyKey
 	}
 	return params, nil
-}
-
-func runForkSourceStatusActive(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "running", "paused", "live":
-		return true
-	default:
-		return false
-	}
-}
-
-func requireRunForkSourceFreezeConfirmation(opts rootCommandOptions, sourceRunID string, errOut io.Writer) error {
-	if !controlStdinIsTerminal(opts) {
-		return returnCLIValidationError(errOut, fmt.Errorf("run %s is active; pass --allow-source-freeze to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started", sourceRunID))
-	}
-	fmt.Fprintf(errOut, "WARNING: run %s will be permanently frozen if it has not advanced beyond the fork point. A frozen source cannot resume. An advanced source stays independently live.\n", sourceRunID)
-	fmt.Fprint(errOut, "Allow source freeze and create the fork? [y/N] (No cancels without starting a fork) ")
-	input := opts.input
-	if input == nil {
-		input = strings.NewReader("")
-	}
-	line, err := bufio.NewReader(input).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return returnCLIValidationError(errOut, fmt.Errorf("read confirmation: %w", err))
-	}
-	answer := strings.ToLower(strings.TrimSpace(line))
-	if answer != "y" && answer != "yes" {
-		return returnCLIValidationError(errOut, fmt.Errorf("aborted; run fork was not started"))
-	}
-	return nil
 }
 
 func runForkAPIErrorClassifier() cliAPIErrorClassifier {

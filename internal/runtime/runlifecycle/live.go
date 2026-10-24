@@ -30,6 +30,7 @@ type LiveRun struct {
 
 type LiveRunReader interface {
 	LoadLiveRun(context.Context, LiveRunScope) (LiveRun, bool, error)
+	LoadRunLiveScope(context.Context, string) (LiveRunScope, error)
 }
 
 type LiveRunConflictError struct {

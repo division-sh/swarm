@@ -21153,6 +21153,10 @@ platform_tables:
           effects, author activity, and candidate absorption atomically. Local runtime quiescence is
           observational only and cannot derive or write completed.
         completion_candidate:
+          live_run_disposition: >
+            A live run is retained rather than completed by instance quiescence. A completion-candidate request
+            returns retained_live without installing a due time or changing run terminality. Publication,
+            delivery and effect settlement still commit their exact native receipts.
           canonical_owner: internal/runtime/runlifecycle domain and generation-owned executor plus private PostgreSQL and SQLite selected-store adapters
           execution_scope: >
             The existing executor admits either a normal runtime occurrence and bundle scope, or an exact selected-fork
@@ -32519,7 +32523,7 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     run_fork:
-      command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --publication <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented_public_cli_consumer
@@ -32531,15 +32535,19 @@ cli_specification:
         `--source <directory>` computes an exact already-stored target identity without uploading or serving it.
         Default fork and pin selection follow the source run, not health. Missing target source refuses before freeze
         or mutation and teaches serving the directory first. `--bundle-hash` and draft `--bundle` are retired.
-        `--at-event` is an explicit fork-event selector only.
-        A currently running or paused source requires `--allow-source-freeze`; this authorizes the operation to
-        permanently freeze a source that has not advanced beyond the fork point. A frozen source cannot resume.
-        The selected source-advanced branch-divergence path preserves the source as an independently live branch.
-        Help text, the interactive warning, and the non-TTY teaching error state both outcomes and the alternative:
-        withhold permission (decline the default-No prompt) to cancel without starting a fork.
-        An interactive TTY may obtain the same explicit conditional authorization. Non-TTY callers must pass the flag.
+        With no selector, the fork uses the latest committed state_revision and re-applies no input.
+        --publication currently accepts an event ID; --at-event retains its exact event-point selection.
+        Feed-ID publication policy remains held for the user's ruling and is not implemented by this arm.
+        Fork selects the child as the live run and pauses whichever sibling is currently live for the exact flow,
+        including when the source is an older paused sibling. Several forks at one point are allowed.
+        No source-freeze confirmation is required; --allow-source-freeze is deprecated.
+        The selected store owns the deployment and runs(flow_path) WHERE status='live' is the unique selector.
+        Selected synchronous publication must settle under the selected grant. After exact actor self-release,
+        one mutation attempt closes the selected executor, pauses/selects and transfers only acknowledged,
+        parked continuations. Fresh ordinary authority must prove the committed handoff before execution.
+        A failed switch rolls back all handoff writes; settled provider work and uncertain attempts never redispatch.
         The old --confirm-source-freeze and confirm_source_freeze spellings are rejected, never aliased.
-        Terminal sources fail closed without a confirmation ceremony. The result reports the actual source outcome
+        The result reports the actual source outcome
         through required source_frozen and source_run_status fields.
         The CLI validates source_run_id and fork_event_id as currently UUID-shaped runtime IDs before calling the
         handler, calls /v1/rpc run.fork exactly once, and renders only server-owned fork results.

@@ -31,13 +31,33 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 				t.Fatal("run.start lacks exact acknowledged initial publication evidence")
 			}
 			initialEventID := receipt.RunCreation.EventID
+			defer func() {
+				if !t.Failed() {
+					return
+				}
+				rows, err := rt.DB.Query(`SELECT delivery_id,status,reason_code,CAST(failure AS TEXT) FROM event_deliveries WHERE run_id=$1`, started.RunID)
+				if err != nil {
+					t.Logf("failed-root delivery read: %v", err)
+					return
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var id, status string
+					var reason, failure any
+					if err := rows.Scan(&id, &status, &reason, &failure); err != nil {
+						t.Log(err)
+						return
+					}
+					t.Logf("delivery=%s status=%s reason=%v failure=%v", id, status, reason, failure)
+				}
+			}()
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "run_id": started.RunID, "event_name": "item.processed",
 				"payload": map[string]any{"item_id": "review"}, "idempotency_key": "root-source-ingress",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-			requireServedRunStatus(t, rt.Endpoint, started.RunID, "completed")
+			requireServedRunStatus(t, rt.Endpoint, started.RunID, "live")
 			var kind, sourceRoute string
 			if err := rt.DB.QueryRow(`SELECT routing_source_kind, CAST(source_route AS TEXT) FROM events WHERE event_id=$1`, published.EventID).Scan(&kind, &sourceRoute); err != nil {
 				t.Fatal(err)
@@ -53,14 +73,15 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
-			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "allow_source_freeze": true, "idempotency_key": "root-source-fork"}
+			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "idempotency_key": "root-source-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.ExecutedEventCount != 0 || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
+			if fork.ExecutedEventCount != 1 || fork.ForkRunStatus != "live" || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
 				t.Fatalf("fork result: %+v", fork)
 			}
 			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, published.EventID)
-			requireServedRunStatus(t, rt.Endpoint, fork.ForkRunID, "completed")
+			requireServedRunStatus(t, rt.Endpoint, fork.ForkRunID, "live")
+			requireServedRunStatus(t, rt.Endpoint, started.RunID, "paused")
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {

@@ -19,6 +19,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
@@ -26,7 +27,7 @@ import (
 
 type eventCommitTxStore interface {
 	standaloneCompletionOwner() standaloneCompletionCapability
-	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
+	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement, runlifecycle.LiveRunScope) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	RequireWorkflowJoinAdmissionTx(context.Context, *sql.Tx, []runtimepipeline.WorkflowJoinAdmissionFence) error
 	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
@@ -112,7 +113,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if err := req.ValidatePreparedEvent(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.attempt, req.Event, req.RouteSettlement)
+	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.attempt, req.Event, req.RouteSettlement, runlifecycle.LiveRunScope{})
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -236,7 +237,7 @@ func commitSelectedForkEvent(
 	result := runtimebus.CommittedSelectedForkEvent{}
 	committer := sqlPublishCommitter{attempt: attempt, store: store}
 	var err error
-	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, attempt, req.Commit.Event, req.Commit.RouteSettlement)
+	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, attempt, req.Commit.Event, req.Commit.RouteSettlement, runlifecycle.LiveRunScope{})
 	if err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
@@ -638,7 +639,19 @@ func commitValidatedPublicationSQL(
 			return runtimebus.CommittedPublication{}, err
 		}
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, request.Event, request.RouteSettlement)
+	var scope runlifecycle.LiveRunScope
+	if request.Event.RunDisposition() == events.AdmittedRunCreateAuthorized {
+		for _, activation := range command.Activations {
+			if activation.Identity.EntityID == request.Event.Event().RunID() {
+				scope = runlifecycle.LiveRunScope{FlowPath: activation.Identity.TemplateID}
+				if err := scope.Validate(); err != nil {
+					return runtimebus.CommittedPublication{}, err
+				}
+				break
+			}
+		}
+	}
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, request.Event, request.RouteSettlement, scope)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
@@ -720,7 +733,7 @@ func commitRuntimeLogEventTx(ctx context.Context, store eventCommitTxStore, atte
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
+	return store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement, runlifecycle.LiveRunScope{})
 }
 
 func (s *EventPostgresOwner) CommitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {

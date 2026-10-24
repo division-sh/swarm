@@ -299,6 +299,7 @@ type RuntimeContextUse struct {
 	runtime          *Runtime
 	lease            *worklifetime.Lease
 	leases           []*worklifetime.Lease
+	grant            *runtimestartupownership.GrantEvidence
 	releaseAdmission func()
 	once             sync.Once
 }
@@ -314,13 +315,16 @@ func (u *RuntimeContextUse) WorkContext() context.Context {
 	if u == nil {
 		return context.Background()
 	}
+	ctx := context.Background()
 	if len(u.leases) > 0 {
-		return u.leases[len(u.leases)-1].Context()
+		ctx = u.leases[len(u.leases)-1].Context()
+	} else if u.lease != nil {
+		ctx = u.lease.Context()
 	}
-	if u.lease == nil {
-		return context.Background()
+	if u.grant != nil {
+		ctx = runtimestartupownership.WithGenerationGrantEvidence(ctx, *u.grant)
 	}
-	return u.lease.Context()
+	return ctx
 }
 
 func (u *RuntimeContextUse) Done() error {
@@ -393,6 +397,7 @@ type RuntimeContextManager struct {
 	mu                         sync.RWMutex
 	sourceSetMu                sync.Mutex
 	availability               RunBundleAvailabilityReader
+	liveRuns                   runtimerunlifecycle.LiveRunReader
 	contexts                   map[string]*runtimeContextEntry
 	order                      []string
 	primaryBundleHash          string
@@ -449,8 +454,10 @@ func NewRuntimeContextManager(availability RunBundleAvailabilityReader, contexts
 }
 
 func newRuntimeContextManagerState(availability RunBundleAvailabilityReader) *RuntimeContextManager {
+	liveRuns, _ := availability.(runtimerunlifecycle.LiveRunReader)
 	return &RuntimeContextManager{
 		availability:               availability,
+		liveRuns:                   liveRuns,
 		contexts:                   map[string]*runtimeContextEntry{},
 		suppressedStandingServices: map[string]struct{}{},
 	}
@@ -1510,7 +1517,18 @@ func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *r
 		releaseAdmission()
 		return nil, fmt.Errorf("admit runtime context use: %w", err)
 	}
-	return &RuntimeContextUse{Context: *entry.context, runtime: entry.runtime, lease: lease, releaseAdmission: releaseAdmission}, nil
+	use := &RuntimeContextUse{Context: *entry.context, runtime: entry.runtime, lease: lease, releaseAdmission: releaseAdmission}
+	entry.runtime.lifecycleMu.Lock()
+	grant := entry.runtime.startupGrant
+	entry.runtime.lifecycleMu.Unlock()
+	if grant != nil {
+		evidence, err := grant.Evidence()
+		if err != nil {
+			return nil, errors.Join(err, use.Done())
+		}
+		use.grant = &evidence
+	}
+	return use, nil
 }
 
 func (m *RuntimeContextManager) AcquireBundleHash(ctx context.Context, bundleHash string) (*RuntimeContextUse, RuntimeContextLookup, error) {
@@ -2761,6 +2779,18 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 			}
 			lookup := RuntimeIngressContextLookup{Target: target, Found: true, AliasFound: true, State: entry.state, Cause: entry.cause}
 			lookup.authorIngress = declaredAuthorIngress(entry.runtime, entry.context, target)
+			if m.liveRuns != nil {
+				live, found, err := m.liveRuns.LoadLiveRun(ctx, runtimerunlifecycle.LiveRunScope{FlowPath: target.FlowPath})
+				if err != nil {
+					return nil, lookup, err
+				}
+				if !found || !live.Source.Matches(entry.context.SourceArtifactFact) {
+					lookup.State, lookup.Cause = RuntimeContextStateUnloaded, RuntimeContextCauseNotLoaded
+					return nil, lookup, nil
+				}
+				target.RunID = live.RunID
+				lookup.Target = target
+			}
 			if lookup.State == "" {
 				lookup.State = RuntimeContextStateLoaded
 			}

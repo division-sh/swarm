@@ -103,6 +103,7 @@ func commitDeploymentRunCreationTx(
 		startedAt := runtimerunlifecycle.CanonicalTimestamp(root.Plan.OccurredAt)
 		disposition, err := writer.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
 			RunID: command.RunID, Origin: runtimerunlifecycle.DeploymentRunOrigin(), Source: fact, StartedAt: startedAt,
+			LiveScope: runtimerunlifecycle.LiveRunScope{FlowPath: root.Plan.Identity.TemplateID},
 		})
 		if err != nil {
 			return err
@@ -117,7 +118,7 @@ func commitDeploymentRunCreationTx(
 		if err != nil {
 			return fmt.Errorf("construct deployment root tree: %w", err)
 		}
-		result.Record, err = storedurabledata.CompleteRunCreationTx(owner, ctx, tx, &plan, "", "running")
+		result.Record, err = storedurabledata.CompleteRunCreationTx(owner, ctx, tx, &plan, "", "live")
 		if err != nil {
 			return err
 		}

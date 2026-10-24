@@ -85,7 +85,7 @@ func executeRunStart(ctx context.Context, req Request, opts EventPublicationOpti
 		atomicAPICompletion:            true,
 		publishError:                   runStartEventPublishError,
 		buildCompletion: func(_ context.Context, _ EventPublicationOptions, params eventPublicationParams) (any, string, error) {
-			return runStartResult{RunID: params.RunID, Status: "running", DataBinding: durabledata.DataBinding{State: "none"}}, params.RunID, nil
+			return runStartResult{RunID: params.RunID, Status: "live", DataBinding: durabledata.DataBinding{State: "none"}}, params.RunID, nil
 		},
 	}
 	completion, _, err := executeOperatorEventPublication(ctx, req, opts, now, cfg)

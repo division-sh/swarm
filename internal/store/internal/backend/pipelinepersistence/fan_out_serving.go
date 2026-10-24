@@ -292,7 +292,7 @@ const fanOutExecutionReasonSQL = `CASE
 	WHEN b.binding_id IS NOT NULL AND g.grant_id IS NULL THEN 'selected_fork_reserved'
 	WHEN g.grant_id IS NULL THEN 'runtime_unregistered'
 	WHEN r.bundle_hash<>i.bundle_hash THEN 'run_not_owned'
-	WHEN r.status<>'running' THEN 'run_' || r.status
+	WHEN r.status NOT IN ('running','live') THEN 'run_' || r.status
 	WHEN c.control_status IN ('paused','stopped') THEN 'run_' || c.control_status
 	ELSE 'eligible' END`
 
@@ -427,7 +427,7 @@ func fanOutRunAcceptsTurnTx(ctx context.Context, tx *sql.Tx, grant startupowners
 	if err := tx.QueryRowContext(ctx, `SELECT r.status,COALESCE(c.control_status,'') FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&status, &control); err != nil {
 		return false, err
 	}
-	return (status == "running" || (!newTurn && status == "paused")) && control != "stopped" && (!newTurn || control != "paused"), nil
+	return (status == "running" || status == "live" || (!newTurn && status == "paused")) && control != "stopped" && (!newTurn || control != "paused"), nil
 }
 
 func observeFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmission, grant startupownership.GrantEvidence, postgres bool, claim fanoutobligation.Claim, now func() time.Time) (fanoutobligation.Intent, error) {
