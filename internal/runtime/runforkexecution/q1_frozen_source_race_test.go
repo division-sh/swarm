@@ -32,6 +32,7 @@ type q1FreezeBetweenTransactions struct {
 	completeMu       sync.Mutex
 	completeOrder    []int
 	secondFirst      bool
+	observed         [2]bool
 	releaseSecond    chan struct{}
 	refused          atomic.Int32
 }
@@ -52,47 +53,65 @@ func (p *q1FreezeBetweenTransactions) MaterializeRunForkForSelectedContractExecu
 	if err != nil {
 		return result, selectedMaterializationCommitTestError{value: result, cause: err}
 	}
+	p.completeMu.Lock()
+	p.children[index] = result.ForkRunID
+	p.completeMu.Unlock()
+	return result, nil
+}
+
+// Observe the committed response after its native command has released the
+// process lock, so the other genuine materialization can make progress.
+func (p *q1FreezeBetweenTransactions) RequireRunForkSelectedContractBinding(ctx context.Context, runID string) (runfork.RunForkSelectedContractBinding, error) {
+	p.completeMu.Lock()
+	index := -1
+	for i, child := range p.children {
+		if child == runID && !p.observed[i] {
+			index, p.observed[i] = i, true
+			break
+		}
+	}
+	p.completeMu.Unlock()
+	if index < 0 {
+		return p.SelectedContractForkLifecycle.RequireRunForkSelectedContractBinding(ctx, runID)
+	}
 	if index == 0 && p.secondFirst {
 		select {
 		case <-p.completed[1]:
 		case <-ctx.Done():
-			return result, selectedMaterializationCommitTestError{value: result, cause: ctx.Err()}
+			return runfork.RunForkSelectedContractBinding{}, ctx.Err()
 		}
 	}
 	p.completeMu.Lock()
-	p.children[index] = result.ForkRunID
 	p.completeOrder = append(p.completeOrder, index)
 	close(p.completed[index])
 	if len(p.completeOrder) == len(p.children) {
 		close(p.allReady)
 	}
 	p.completeMu.Unlock()
-	return result, nil
-}
-
-func (p *q1FreezeBetweenTransactions) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	// Both native materializations must publish their identities before either
-	// activation selects its role, including reversed completion order.
 	select {
 	case <-p.allReady:
 	case <-ctx.Done():
-		return runfork.RunForkActivation{}, ctx.Err()
+		return runfork.RunForkSelectedContractBinding{}, ctx.Err()
 	}
 	ready := p.allReady
-	if req.ForkRunID != p.children[0] {
+	if index == 1 {
 		ready = p.releaseSecond
 	}
 	select {
 	case <-ready:
-		if req.ForkRunID == p.children[1] {
-			if err := p.rejectCrossedAttachment(ctx, req); err != nil {
-				return runfork.RunForkActivation{}, err
-			}
-		}
-		return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+		return p.SelectedContractForkLifecycle.RequireRunForkSelectedContractBinding(ctx, runID)
 	case <-ctx.Done():
-		return runfork.RunForkActivation{}, ctx.Err()
+		return runfork.RunForkSelectedContractBinding{}, ctx.Err()
 	}
+}
+
+func (p *q1FreezeBetweenTransactions) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	if req.ForkRunID == p.children[1] {
+		if err := p.rejectCrossedAttachment(ctx, req); err != nil {
+			return runfork.RunForkActivation{}, err
+		}
+	}
+	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
 }
 
 func (p *q1FreezeBetweenTransactions) rejectCrossedAttachment(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) error {
