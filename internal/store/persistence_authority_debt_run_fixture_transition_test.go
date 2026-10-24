@@ -17,7 +17,7 @@ const debtSelectedFixtureComposedCurrentSHA256 = "cdb196a9aeb5f87d51e656249b6bb5
 const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
-const debtSelectedFixtureLandedCollectorTo = "f6de132bfc26b4ab30133dedb26e1fa67d5cac5f00920179c311ebd3bed69eb3"
+const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
 
 func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]authorityDebtSite) {
 	old, current := debtControlSet(), debtControlSet()
@@ -42,6 +42,9 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		if failures := authorityDebtRatchet(after, before, before, before); len(failures) != 0 {
 			t.Fatal(failures)
 		}
+		if failures := authorityDebtRatchet(after, before, before, after); len(failures) != 0 {
+			t.Fatal("landed selected source must preserve all five baseline occurrences:", failures)
+		}
 		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
 			t.Fatal("reverse original-owner signature continuation admitted")
 		}
@@ -64,6 +67,7 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		{"forward-refresh", current, old, old, old, true},
 		{"forward-refreshed", current, current, old, old, true},
 		{"landed-inert", current, current, current, current, true},
+		{"unreviewed-landed-unrefreshed", current, old, old, current, false},
 		{"reverse", old, old, current, current, false},
 		{"old-source-resurrection", old, old, old, current, false},
 		{"foreign-source", current, current, old, debtControlSet(), false},
