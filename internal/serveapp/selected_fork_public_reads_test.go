@@ -36,7 +36,20 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 		Runs []operatorread.RunHeader `json:"runs"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": hash}, &runs)
-	if len(runs.Runs) != 1 || !reflect.DeepEqual(runs.Runs[0], get.Run) {
+	matches := 0
+	for _, run := range runs.Runs {
+		if run.RunID != runID {
+			if run.Origin.EventType() != "platform.boot" || run.EntityCount != 0 || run.Failure != nil {
+				t.Fatalf("target run list includes an unrelated execution: %+v", run)
+			}
+			continue
+		}
+		matches++
+		if !reflect.DeepEqual(run, get.Run) {
+			t.Fatalf("target run list replaced its exact child: %+v / %+v", run, get.Run)
+		}
+	}
+	if matches != 1 {
 		t.Fatalf("unloaded target absent or replaced in run list: %+v", runs)
 	}
 	var agents operatorread.OperatorAgentListResult
