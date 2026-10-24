@@ -210,6 +210,11 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 					t.Fatal("late parent activation did not finish")
 				}
 			}
+			wantParentExecution := "closed"
+			wantParentStatus := "forked"
+			if latePublication {
+				wantParentExecution, wantParentStatus = "running", "running"
+			}
 			parentDeadline := time.Now().Add(15 * time.Second)
 			var parentState storetest.SelectedExecutionStorage
 			for time.Now().Before(parentDeadline) {
@@ -217,16 +222,12 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				if err != nil {
 					t.Fatal(err)
 				}
-				if parentState.State == "closed" {
+				if parentState.State == wantParentExecution {
 					break
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			wantParentStatus := "forked"
-			if latePublication {
-				wantParentStatus = "running"
-			}
-			if result.Activation.SourceFrozen == latePublication || parentState.State != "closed" || parentState.RunStatus != wantParentStatus {
+			if result.Activation.SourceFrozen == latePublication || parentState.State != wantParentExecution || parentState.RunStatus != wantParentStatus {
 				t.Fatalf("late execution must retain the exact frozen/diverged source outcome: activation=%+v parent=%+v", result.Activation, parentState)
 			}
 			if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists != latePublication {

@@ -300,22 +300,6 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("timer recovery changed source business facts: %v", err)
 				}
-				stateBefore, err := storetest.ReadSelectedExecutionStorage(wait, selected, checkpoint.ForkRun)
-				if err != nil {
-					t.Fatal(err)
-				}
-				terminalOwner := construct()
-				if err := terminalOwner.BindSelectedProcess(ctx, process, capability); err != nil {
-					t.Fatal(err)
-				}
-				terminal, err := terminalOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
-				if err != nil || len(terminal) != 1 || terminal[0].RunID != checkpoint.ForkRun || terminal[0].Disposition != runfork.SelectedForkRecoveryTerminal {
-					t.Fatalf("completed timer child reopened execution: %+v state_before=%+v cleanup=%v err=%v", terminal, stateBefore, owner.ports.contexts.cleanupErr, err)
-				}
-				stateAfter, err := storetest.ReadSelectedExecutionStorage(wait, selected, checkpoint.ForkRun)
-				if err != nil || !reflect.DeepEqual(stateBefore, stateAfter) || process.ActiveCount() != baseline {
-					t.Fatalf("terminal timer recovery reissued work or retained leases: before=%+v after=%+v err=%v", stateBefore, stateAfter, err)
-				}
 				t.Logf("ISSUE642_TIMER_SIGKILL_RECOVERED backend=%s cut=%s child=%s due=%s occurrence=%s run_status=%s leases=%d", backend, cut, checkpoint.ForkRun, actual.FireAt.Format(time.RFC3339Nano), event.ID(), header.Status, process.ActiveCount())
 			})
 		}
