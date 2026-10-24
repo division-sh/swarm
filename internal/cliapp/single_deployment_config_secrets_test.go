@@ -116,10 +116,14 @@ func TestSingleDeploymentConfigSecretsExplicitProviderCredentialReadback(t *test
 			}
 			code, stdout, stderr = executeRootCommandWithInput(context.Background(), root, append(prefix, "list", "--present", "--json"), "")
 			var listed secretsListResult
-			if err := json.Unmarshal([]byte(stdout), &listed); err != nil || code != 0 || len(listed.Secrets) != 1 {
+			if err := json.Unmarshal([]byte(stdout), &listed); err != nil || code != 0 || len(listed.Secrets) != 2 {
 				t.Fatalf("list readback: code=%d result=%+v error=%v stdout=%s stderr=%s", code, listed, err, stdout, stderr)
 			}
-			record := listed.Secrets[0]
+			inventory := listed.Secrets[0]
+			if inventory.Key != profile.key || !inventory.Present || inventory.Source != "env" || inventory.Writable || !inventory.Shadowed || len(inventory.RequiredBy) != 0 {
+				t.Fatalf("environment inventory readback=%+v", inventory)
+			}
+			record := listed.Secrets[1]
 			if record.Key != profile.key || !record.Present || record.Source != "file" || !record.Writable || len(record.RequiredBy) != 1 || record.RequiredBy[0] != (secretRequirement{Kind: "provider", Name: profile.backend}) {
 				t.Fatalf("file-backed provider readback=%+v", record)
 			}
