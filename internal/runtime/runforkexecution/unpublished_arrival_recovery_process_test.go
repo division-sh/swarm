@@ -156,7 +156,6 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				ctx := runForkTestContext(t)
-				ctx = originalSelectedFixtureContext(t, ctx, selected)
 				loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
 				operations := selected.(interface {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
@@ -190,6 +189,7 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("read-only pending inspection mutated retained evidence: %v", err)
 				}
+				ctx = originalSelectedFixtureContext(t, ctx, selected)
 				capability := selectedContractTestProcessCapability(t, ctx, selected)
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				owner := construct()
