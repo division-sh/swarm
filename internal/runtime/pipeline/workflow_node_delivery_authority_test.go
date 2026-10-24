@@ -477,6 +477,10 @@ func VerifyNativeWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParityForTest(t
 			if len(outcomes) != 1 || outcomes[0].Outcome != "retry_scheduled" {
 				t.Fatalf("node delivery outcomes = %#v, want retry_scheduled after first attempt", outcomes)
 			}
+			committedRetry := outcomes[0]
+			if committedRetry.RetryEligibleAt == nil || !committedRetry.RetryEligibleAt.Equal(snapshot.NextEligibleAt) {
+				t.Fatalf("committed retry decision differs from the original wake: %+v / %+v", committedRetry, snapshot)
+			}
 
 			handled, err = pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 			if err != nil {
@@ -517,6 +521,9 @@ func VerifyNativeWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParityForTest(t
 			}
 			if len(outcomes) != 2 || outcomes[0].Outcome != "retry_scheduled" || outcomes[1].Outcome != string(runtimedelivery.StatusDelivered) {
 				t.Fatalf("delivered retry outcomes = %#v, want retry_scheduled then delivered", outcomes)
+			}
+			if !reflect.DeepEqual(outcomes[0], committedRetry) {
+				t.Fatalf("making the fixture eligible changed its committed retry decision: before=%+v after=%+v", committedRetry, outcomes[0])
 			}
 		})
 	}

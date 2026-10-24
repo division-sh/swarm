@@ -16,6 +16,7 @@ special_packages:
 - github.com/division-sh/swarm/internal/runtime/contracts
 - github.com/division-sh/swarm/internal/runtime/bus
 - github.com/division-sh/swarm/internal/runtime/deliverycontinuation
+- github.com/division-sh/swarm/internal/runtime/runforkexecution
 - github.com/division-sh/swarm/internal/runtime/llm
 - github.com/division-sh/swarm/internal/runtime/pipeline
 - github.com/division-sh/swarm/internal/serveapp
@@ -59,6 +60,9 @@ profiles:
     - pipeline-activation
     - pipeline-timer-join
     - pipeline-rest
+    - runfork-execution-rest
+    - runfork-execution-642-a-r
+    - runfork-execution-642-s-z
   lifecycle:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
@@ -131,6 +135,9 @@ profiles:
     - pipeline-activation
     - pipeline-timer-join
     - pipeline-rest
+    - runfork-execution-rest
+    - runfork-execution-642-a-r
+    - runfork-execution-642-s-z
   full:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
@@ -218,6 +225,9 @@ profiles:
     - pipeline-activation
     - pipeline-timer-join
     - pipeline-rest
+    - runfork-execution-rest
+    - runfork-execution-642-a-r
+    - runfork-execution-642-s-z
 units:
   source-contract-guards:
     preflight_fast: true
@@ -281,6 +291,29 @@ units:
       - postgres/missing_sibling/shutdown_false
       - postgres/missing_source/shutdown_true
       - postgres/missing_sibling/shutdown_true
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  # Master 40015353191: this package took 511s, including two 63s claim-fencing
+  # roots. Keep every whole root in the same tiers, split under the 240s target.
+  runfork-execution-rest:
+    packages: [github.com/division-sh/swarm/internal/runtime/runforkexecution]
+    run: '^(Test($|[^I].*|I($|[^s].*|s($|[^s].*|s($|[^u].*|u($|[^e].*|e($|[^6].*|6($|[^4].*|4($|[^2].*))))))))|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  runfork-execution-642-a-r:
+    packages: [github.com/division-sh/swarm/internal/runtime/runforkexecution]
+    run: '^TestIssue642[A-R].*$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  runfork-execution-642-s-z:
+    packages: [github.com/division-sh/swarm/internal/runtime/runforkexecution]
+    run: '^TestIssue642($|[^A-R].*)$'
+    required_children:
+      TestIssue642SelectedHandlerFanOutExpiredClaimFencesPredecessorBothStores: [sqlite, postgres]
+      TestIssue642SelectedHandlerFanOutLiveSuccessorClaimFencingBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

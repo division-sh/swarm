@@ -11,6 +11,18 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
+func MakeManagerRetryEligibleForTest(ctx context.Context, selected any, event events.Event, route events.DeliveryRoute) error {
+	if err := events.ValidatePersistentEvent(event); err != nil {
+		return err
+	}
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return err
+	}
+	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return delivery.MakeManagerRetryEligibleTx(ctx, tx, event, route)
+	})
+}
+
 func WaitManagerRetryDecisionForTest(ctx context.Context, selected any, event events.Event, route events.DeliveryRoute) error {
 	if err := events.ValidatePersistentEvent(event); err != nil {
 		return err
