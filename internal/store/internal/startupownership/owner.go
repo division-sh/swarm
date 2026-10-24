@@ -331,10 +331,10 @@ func (s *postgresSession) InspectRunExecutionOwnership(ctx context.Context, evid
 func (s *postgresSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
-	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.lease.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		transactiontest.Mark(txctx, transactiontest.SourceSetLoad)
 		var err error
-		plan, exists, err = loadSourceSetTx(txctx, tx, false)
+		plan, exists, err = loadSourceSetModeTx(txctx, tx, false, false)
 		return err
 	})
 	return plan, exists, err
