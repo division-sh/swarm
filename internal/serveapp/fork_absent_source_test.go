@@ -31,26 +31,6 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 				t.Fatal("run.start lacks exact acknowledged initial publication evidence")
 			}
 			initialEventID := receipt.RunCreation.EventID
-			defer func() {
-				if !t.Failed() {
-					return
-				}
-				rows, err := rt.DB.Query(`SELECT delivery_id,status,reason_code,CAST(failure AS TEXT) FROM event_deliveries WHERE run_id=$1`, started.RunID)
-				if err != nil {
-					t.Logf("failed-root delivery read: %v", err)
-					return
-				}
-				defer rows.Close()
-				for rows.Next() {
-					var id, status string
-					var reason, failure any
-					if err := rows.Scan(&id, &status, &reason, &failure); err != nil {
-						t.Log(err)
-						return
-					}
-					t.Logf("delivery=%s status=%s reason=%v failure=%v", id, status, reason, failure)
-				}
-			}()
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "run_id": started.RunID, "event_name": "item.processed",
@@ -73,6 +53,12 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
+			requireSourceConserved := func() {
+				t.Helper()
+				if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
+					t.Fatal("live switching changed source business state")
+				}
+			}
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "idempotency_key": "root-source-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
@@ -84,9 +70,10 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			requireServedRunStatus(t, rt.Endpoint, started.RunID, "paused")
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
-				t.Fatal("repeated fork changed the result or source business state")
+			if !reflect.DeepEqual(fork, replay) {
+				t.Fatal("repeated fork changed the result")
 			}
+			requireSourceConserved()
 			refusal := requireServedJSONRPCError(t, rt.Endpoint, "run.continue", map[string]any{"run_id": started.RunID})
 			if refusal.Data["code"] != apiv1.RunFlowAlreadyLiveCode {
 				t.Fatalf("continue did not name its live sibling: %+v", refusal)
@@ -104,9 +91,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			}
 			requireServedRunStatus(t, rt.Endpoint, fork.ForkRunID, "paused")
 			requireServedRunStatus(t, rt.Endpoint, sibling.ForkRunID, "live")
-			if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
-				t.Fatal("live switching changed source business state")
-			}
+			requireSourceConserved()
 			var latest apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
 				"source_run_id": sibling.ForkRunID, "idempotency_key": "root-latest-state-fork",
