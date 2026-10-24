@@ -78,6 +78,7 @@ func proveMaterializedTargetLookup(t *testing.T, selected materializedTargetTest
 		t.Fatal(bindErr)
 	}
 	bundle, _ := semanticview.Bundle(loaded.Source)
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash()})
 	root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 	constructMaterializedTarget(t, ctx, selected, loaded, root, "")

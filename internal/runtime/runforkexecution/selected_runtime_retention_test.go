@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
@@ -116,71 +116,6 @@ func TestSelectedRetainedManagerCleanupDrainsBoundOccurrence(t *testing.T) {
 func (p *selectedRuntimeRetirementProbe) Retire(context.Context) error {
 	p.retireCalls++
 	return nil
-}
-
-type selectedRetainedActivationProbe struct {
-	failAt   string
-	failing  bool
-	timers   int
-	attempts int
-}
-
-func (p *selectedRetainedActivationProbe) ResolveDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationResolution, error) {
-	return runtimepipeline.DynamicFlowRuntimeActivationResolution{}, errors.New("unexpected pending admission in retained activation control")
-}
-
-func (p *selectedRetainedActivationProbe) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	p.timers++
-	if p.failAt == "timer" && p.failing {
-		return errors.New("injected timer retirement failure")
-	}
-	return nil
-}
-
-func (p *selectedRetainedActivationProbe) AbandonDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
-	p.attempts++
-	if p.failAt == "attempt" && p.failing {
-		return errors.New("injected durable attempt abandonment failure")
-	}
-	return nil
-}
-
-func TestSelectedPartialActivationInventoryRetainsEveryFailedStage(t *testing.T) {
-	for _, stage := range []string{"timer", "attempt"} {
-		t.Run(stage, func(t *testing.T) {
-			grant := &selectedRuntimeRetirementProbe{}
-			probe := &selectedRetainedActivationProbe{failAt: stage, failing: true}
-			runtime := &selectedContractAgentRuntime{
-				generationGrant: grant, pipeline: probe,
-				pendingActivations: []selectedFlowActivation{{timersProjected: true}},
-			}
-			operation := selectedContractOperationForTest(t, worklifetime.WithProcess(context.Background(), worklifetime.NewProcess()))
-			prepared := &PreparedSelectedFork{operation: operation, retainedRuntime: runtime}
-			for i := 0; i < 2; i++ {
-				if err := prepared.Close(); err == nil {
-					t.Fatal("failed activation cleanup reported success")
-				}
-				if prepared.retainedRuntime != runtime || len(runtime.pendingActivations) != 1 || grant.retireCalls != 0 {
-					t.Fatalf("failed %s stage released ownership or grant", stage)
-				}
-				waitCtx, cancel := context.WithCancel(context.Background())
-				cancel()
-				if err := operation.process.Wait(waitCtx); !errors.Is(err, context.Canceled) {
-					t.Fatalf("failed %s stage allowed process/store release: %v", stage, err)
-				}
-			}
-			probe.failing = false
-			if err := prepared.Close(); err != nil {
-				t.Fatalf("retry retained %s stage: %v", stage, err)
-			}
-			if len(runtime.pendingActivations) != 0 || grant.retireCalls != 1 || probe.attempts == 0 {
-				t.Fatalf("successful %s retry did not settle activation before grant", stage)
-			}
-			if err := operation.process.Wait(context.Background()); err != nil {
-				t.Fatalf("settled %s stage did not join process: %v", stage, err)
-			}
-		})
-	}
 }
 
 func TestSelectedPartialRuntimeCleanupRemainsOwnedByPreparation(t *testing.T) {

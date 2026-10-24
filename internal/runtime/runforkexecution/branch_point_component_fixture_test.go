@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"testing"
 	"time"
 
@@ -208,6 +209,7 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 		t.Fatal(err)
 	}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
 		BundleHash: fact.BundleHash(), StartedAt: at,
@@ -337,6 +339,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 		t.Fatal(err)
 	}
 	bootstrap := uuid.NewString()
+	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: bootstrap, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, BundleHash: catalog.BundleHash})
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: bootstrap, Selection: testContractSelection()})
