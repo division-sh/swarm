@@ -91,7 +91,7 @@ func TestChannelSigningFallbackPublicRefusalBothStores(t *testing.T) {
 							var reserved channelOnboardingJourneyReadback
 							telegramIdentities := 0
 							for _, row := range rows {
-								if row.Identity.Interface.ChannelPackID == "provider.telegram.hitl_channel" {
+								if row.Identity.Interface.ChannelPackID == "telegram" {
 									telegramIdentities++
 									reserved = row
 								}

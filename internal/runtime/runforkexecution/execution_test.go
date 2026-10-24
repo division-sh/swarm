@@ -3247,7 +3247,11 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err := foreignOwner.BindSelectedProcess(ctx, process, processCapability); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := foreignOwner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); !errors.Is(err, runtimestartupownership.ErrProcessNotCurrent) {
+	if _, err := foreignOwner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
+		SourceLoader: loader,
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability, ExecutionPosture: executionposture.Live,
+			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}}},
+	}); !errors.Is(err, runtimestartupownership.ErrProcessNotCurrent) {
 		t.Fatalf("foreign store borrowed native process permission: %v", err)
 	}
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)

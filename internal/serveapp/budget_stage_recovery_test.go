@@ -13,7 +13,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -30,7 +29,6 @@ type stageRecoverySelectedStore interface {
 	sourceArtifactReader
 	sourceartifactfixture.Writer
 	EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
-	SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
 }
 
 type countedStageRecoveryStore struct {
@@ -118,16 +116,6 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 					initial = "pending"
 				}
 				seedStageRecoveryFlowInstance(t, ctx, db, backend, runs[i], entityID, initial, i != 2)
-				createCtx := runtimecorrelation.WithRunID(runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), runs[i])
-				createCtx = runtimecorrelation.WithRootAdmission(createCtx, roots[i].Admission())
-				if _, err := selected.SetupScenarioEntities(createCtx, runtimepipeline.ScenarioSetupRequest{
-					RunID: runs[i], CreatedAt: time.Now().UTC(),
-					Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
-						Alias: "retained", EntityID: entityID, FlowInstance: "child", EntityType: "item",
-					}},
-				}); err != nil {
-					t.Fatalf("create retained entity %d: %v", i, err)
-				}
 			}
 			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[0].Admission().Reference())
 			if err != nil {
