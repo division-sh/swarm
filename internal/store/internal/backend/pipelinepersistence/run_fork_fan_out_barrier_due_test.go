@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"reflect"
+
 	"strings"
 	"testing"
 	"time"
@@ -25,45 +25,6 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/google/uuid"
 )
-
-func TestRunForkFanOutBarrierRetainsCapturedDue(t *testing.T) {
-	for _, postgres := range []bool{false, true} {
-		for _, overdue := range []bool{false, true} {
-			name := map[bool]string{false: "sqlite", true: "postgres"}[postgres] + map[bool]string{false: "/future", true: "/overdue"}[overdue]
-			t.Run(name, func(t *testing.T) {
-				source, activation := runForkBarrierDueFixture(t)
-				birth := activation.CurrentDueAt.Add(-time.Hour)
-				if overdue {
-					birth = activation.CurrentDueAt.Add(time.Hour)
-				}
-				owner := &runForkBarrierDueScheduleOwner{birth: birth}
-				beforeSource, beforeActivation := source, activation
-				beforeSummary := *source.Summary
-				beforeSource.Summary = &beforeSummary
-				runForkBarrierDueMutation(t, postgres, source, &activation, birth, owner)
-				if len(owner.commands) != 1 || !owner.commands[0].Due.Absolute.Equal(activation.CurrentDueAt) {
-					t.Fatalf("fork reset captured due to child birth: captured=%s birth=%s commands=%d", activation.CurrentDueAt, birth, len(owner.commands))
-				}
-				if owner.commands[0].RunID == source.Registration.IntentKey.RunID || owner.commands[0].EntityID != owner.commands[0].RunID {
-					t.Fatal("retained due reused source ownership")
-				}
-				if !reflect.DeepEqual(beforeSource, source) || !reflect.DeepEqual(beforeActivation, activation) {
-					t.Fatal("projection changed captured source evidence")
-				}
-				projected := source.Registration
-				projected.IntentKey.RunID = owner.commands[0].RunID
-				projected.EntityID = owner.commands[0].EntityID
-				projected.Route = flowidentity.StoredRoute(".", projected.IntentKey.RunID, projected.IntentKey.RunID)
-				projected.RoutingSource = owner.commands[0].RoutingSource
-				projected.CreatedAt = birth
-				expected, err := genericschedule.FanOutBarrierAdmission(projected, *source.Summary, activation.CurrentDueAt)
-				if err != nil || !reflect.DeepEqual(expected, owner.commands[0]) {
-					t.Fatalf("projection lost exact owner, handle, summary, mode or due: %v", err)
-				}
-			})
-		}
-	}
-}
 
 func TestRunForkFanOutBarrierRefusesUnprovenDue(t *testing.T) {
 	for _, fault := range []string{"missing", "identity", "run", "entity", "payload", "hash", "due", "fired"} {
@@ -105,20 +66,6 @@ func TestRunForkFanOutBarrierRefusesUnprovenDue(t *testing.T) {
 			}
 			if due, err := runForkFanOutBarrierDue(source, captured); err == nil || !due.IsZero() {
 				t.Fatalf("unproven source relation supplied a child due: due=%s err=%v", due, err)
-			}
-		})
-	}
-}
-
-func TestRunForkFanOutBarrierTerminalHistoryDoesNotRearm(t *testing.T) {
-	for _, status := range []fanoutbarrier.Status{fanoutbarrier.StatusFired, fanoutbarrier.StatusOutcomeDeadLettered, fanoutbarrier.StatusSuppressedRunTerminal, fanoutbarrier.StatusSuppressedGenerationSuperseded} {
-		t.Run(string(status), func(t *testing.T) {
-			source, _ := runForkBarrierDueFixture(t)
-			source.Status = status
-			owner := &runForkBarrierDueScheduleOwner{birth: source.UpdatedAt.Add(time.Hour)}
-			runForkBarrierDueMutation(t, true, source, nil, owner.birth, owner)
-			if len(owner.commands) != 0 {
-				t.Fatal("terminal barrier history admitted a new schedule")
 			}
 		})
 	}

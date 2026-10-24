@@ -19,6 +19,7 @@ func TestSelectedDeploymentResourceWaitObservationsKeepExactRunBothStores(t *tes
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			active, sibling := seedDeliveryRecoveryClaim(t, fixture, ctx), seedDeliveryRecoveryClaim(t, fixture, ctx)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, active, 2)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, sibling, 1)

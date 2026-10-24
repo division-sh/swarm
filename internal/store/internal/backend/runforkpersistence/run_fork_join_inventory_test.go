@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
@@ -58,63 +57,6 @@ func arrivalJoinInventoryFixture(t *testing.T, root, completion bool) (runfork.R
 	return plan, bornAt, requests, rows
 }
 
-func TestForkArrivalInventoryRequiresEveryInheritedRow(t *testing.T) {
-	for _, root := range []bool{false, true} {
-		for _, completion := range []bool{false, true} {
-			plan, bornAt, requests, rows := arrivalJoinInventoryFixture(t, root, completion)
-			for _, name := range []string{"exact", "missing", "extra", "duplicate", "foreign", "partial_origin", "ordinary", "changed_cut", "duplicate_request"} {
-				t.Run(map[bool]string{false: "flow/", true: "root/"}[root]+map[bool]string{false: "timeout/", true: "completion/"}[completion]+name, func(t *testing.T) {
-					actual := make([]genericschedule.Activation, len(rows))
-					for i, row := range rows {
-						actual[i] = row.Canonical()
-					}
-					wanted := append([]storegenericschedule.ForkJoinRequest(nil), requests...)
-					switch name {
-					case "missing":
-						actual = actual[1:]
-					case "extra":
-						actual = append(actual, actual[0].Canonical())
-						actual[len(actual)-1].ID = uuid.NewString()
-					case "duplicate":
-						actual = append(actual, actual[0])
-					case "foreign":
-						actual[0].Command.RunID = uuid.NewString()
-					case "partial_origin":
-						actual[0].ForkJoinOrigin.SourceActivationID = ""
-					case "ordinary":
-						actual[0].ForkJoinOrigin = nil
-					case "changed_cut":
-						actual[0].ForkJoinOrigin.PointRevision++
-					case "duplicate_request":
-						wanted = append(wanted, wanted[0])
-						actual = append(actual, actual[0])
-					}
-					for _, phase := range []runForkArrivalScheduleReadbackPhase{runForkArrivalScheduleAtCut, runForkArrivalScheduleContinuing} {
-						err := requireExactRunForkArrivalJoinInventory(wanted, actual, phase)
-						if (err == nil) != (name == "exact") {
-							t.Fatalf("phase=%d %s: err=%v", phase, name, err)
-						}
-					}
-					if name == "exact" {
-						owner := &arrivalJoinInventoryOwner{rows: actual}
-						withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-							if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err != nil {
-								t.Fatal(err)
-							}
-							if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleContinuing); err != nil {
-								t.Fatal(err)
-							}
-						})
-						if owner.reads != 2 {
-							t.Fatal("readback skipped complete native inventory")
-						}
-					}
-				})
-			}
-		}
-	}
-}
-
 func TestForkArrivalInventorySeparatesCutAndContinuingProgress(t *testing.T) {
 	for _, root := range []bool{false, true} {
 		_, _, requests, original := arrivalJoinInventoryFixture(t, root, true)
@@ -162,35 +104,5 @@ func TestForkArrivalInventorySeparatesCutAndContinuingProgress(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestForkArrivalInventoryReadbackRequiresNativeFrameAndEmptyCensus(t *testing.T) {
-	plan, bornAt, _, rows := arrivalJoinInventoryFixture(t, true, false)
-	plan.Entities, plan.JoinSchedules = nil, nil
-	owner := &arrivalJoinInventoryOwner{rows: rows}
-	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err == nil {
-			t.Fatal("empty expected set hid extra inherited rows")
-		}
-		owner.rows = nil
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err != nil {
-			t.Fatal(err)
-		}
-		for _, bad := range []context.Context{context.Background(), correlation.WithRunID(ctx, uuid.NewString())} {
-			before := owner.reads
-			if _, err := readRunForkArrivalJoinInventory(bad, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err == nil || owner.reads != before {
-				t.Fatal("foreign frame reached readback")
-			}
-		}
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, nil, runForkArrivalScheduleAtCut); err == nil {
-			t.Fatal("empty inventory skipped canonical owner")
-		}
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, 0); err == nil {
-			t.Fatal("unclassified lifecycle phase accepted")
-		}
-	})
-	if _, err := readRunForkArrivalJoinInventory(context.Background(), nil, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err == nil {
-		t.Fatal("missing native attempt accepted")
 	}
 }

@@ -479,6 +479,10 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 		t.Fatal(err)
 	}
 	successor := selectedPreparationProcessForTest(t, fixture.store)
+	ctx, err = startupownership.WithProcessMutationAuthority(testAuthorActivityContextForBundle(fixture.request.DeclarationPlan.BundleHash), successor)
+	if err != nil {
+		t.Fatal(err)
+	}
 	process, err := successor.Evidence()
 	if err != nil {
 		t.Fatal(err)

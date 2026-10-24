@@ -61,6 +61,10 @@ func TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBot
 			if err != nil {
 				t.Fatal(err)
 			}
+			ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+			if err != nil {
+				t.Fatal(err)
+			}
 			journal, err := startupownership.CaptureActivityJournal(ctx, grant, evidence)
 			if err != nil {
 				t.Fatal(err)

@@ -86,6 +86,10 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+		if err != nil {
+			t.Fatal(err)
+		}
 		reusePermanentCohortProcess(t, opened.store, process)
 		observer := &selectedCopiedExecutionObserver{SelectedContractRuntimeExecutionLifecycle: opened.store.(runforkexecution.SelectedContractRuntimeExecutionLifecycle)}
 		gate := selectedStoreActivationGateForTest(t, ctx, opened.store, observer)

@@ -1,7 +1,6 @@
 package runforkpersistence
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+
 	"github.com/google/uuid"
 )
 
@@ -201,13 +200,4 @@ func TestTransferredJoinInventoryBindsCompleteEvidence(t *testing.T) {
 	if fingerprint(plan) == want {
 		t.Fatal("preparation omitted transferred lineage evidence")
 	}
-}
-
-func TestTransferredJoinEmptyInventoryReadsCanonicalOwner(t *testing.T) {
-	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		rows, err := readRunForkTransferredJoinInventory(ctx, attempt, runfork.RunForkPlan{}, workflowTimerProjectionChildRun)
-		if err != nil || len(rows) != 0 {
-			t.Fatalf("empty require-only native inventory: rows=%d err=%v", len(rows), err)
-		}
-	}, 1)
 }

@@ -132,6 +132,7 @@ func c4RequireAbsentCreation(t *testing.T, ctx context.Context, selected any, ru
 // The claim and descriptor are acquired before the test arms its creation cut.
 func c4CommitCreatingPublication(t *testing.T, ctx context.Context, selected any, admitted events.AdmittedEvent, arm func()) (bus.CommittedPublication, error) {
 	t.Helper()
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	ctx, releaseCatalog, err := semanticEventFixtureContext(ctx, selected, admitted.Event())
 	if err != nil {
 		t.Fatal(err)
@@ -271,6 +272,7 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				if err := sourceartifactfixture.Ensure(ctx, selected.(sourceartifactfixture.Writer)); err != nil {
 					t.Fatal(err)
 				}
@@ -694,6 +696,7 @@ func c4RunCreationCrashChild(t *testing.T) {
 	}
 	fixture, _ := openPipelineCrashStore(t, backend, location, p16CommitConnector{connector})
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	if err := sourceartifactfixture.Ensure(ctx, fixture.store.(sourceartifactfixture.Writer)); err != nil {
 		t.Fatal(err)
 	}
@@ -995,6 +998,7 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
 				ctx = testAuthorActivityContextForBundle(command.RunCreation.BundleHash)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				owner = selected.(bus.DeploymentRunCreationCommitOwner)
 				if !committed {
 					c4RequireAbsentCreation(t, ctx, selected, runID)
@@ -1041,6 +1045,7 @@ func TestC4F35EventForkStartNativeRetryBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			initial := eventtest.RunCreatingRootIngress(uuid.NewString(), "c4.fork.source", "ingress", "", []byte(`{}`), 0,
 				runID, "", events.EventEnvelope{}, time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC))
@@ -1105,6 +1110,7 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 				setup := testAuthorActivityContextForBundle(bundleHash)
 				fact := sourceartifactfixture.RequireArtifact(t, setup, selected.(sourceartifactfixture.Writer), artifact)
 				ctx := testAuthorActivityRuntimeContext()
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				workflow := newWorkflowTestCoordinator(t, db, pipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 				flowPath := "c4-standing/" + backend
 				candidate := pipeline.StandingServiceCandidate{BindingEnabled: true,
@@ -1184,6 +1190,7 @@ func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (conte
 		files["nested/schema.yaml"] = "name: nested\n"
 	}
 	f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
+	f.ctx = originalStoreFixtureContext(t, f.ctx, selected)
 	data := selected.(interface {
 		EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 		ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)

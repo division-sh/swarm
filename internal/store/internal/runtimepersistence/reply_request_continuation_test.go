@@ -19,7 +19,8 @@ func TestIssue642ReplyRequestContinuationRechecksNativeRowBothStores(t *testing.
 	}{{"sqlite", setupSQLiteReplyContextStoreTest}, {"postgres", setupPostgresReplyContextStoreTest}} {
 		t.Run(backend.name, func(t *testing.T) {
 			store, seed := backend.setup(t)
-			ctx, run, request, answer, rollbackRequest := context.Background(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			ctx, run, request, answer, rollbackRequest := testAuthorActivityContext(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			if err := seed(ctx, run, request, answer, rollbackRequest); err != nil {
 				t.Fatal(err)
 			}
