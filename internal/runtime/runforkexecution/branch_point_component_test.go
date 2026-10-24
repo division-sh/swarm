@@ -332,6 +332,9 @@ func proveQ1BranchPointAtomicity(t *testing.T, backend string, kind runfork.RunF
 		build = q1StateOnlyGateComponentSource
 	}
 	ctx, request, advance := build(t, owner)
+	if kind == runfork.RunForkPointDeploymentRevision && status == "running" {
+		status = string(runlifecycle.StateLive)
+	}
 	attachment := q1StageBranchPointComponent(t, ctx, request)
 	advance()
 	if status == "cancelled" {
