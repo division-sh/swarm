@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -938,6 +939,31 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				var event map[string]any
 				requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "event.get", map[string]any{"event_id": card.DecisionEventID}, &event)
 				t.Logf("R12 paused channel decision delivery: %v", event)
+				anchor, err := card.Anchor.StageGate()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var before operatorread.OperatorEntityFull
+				params := map[string]any{"run_id": card.RunID, "entity_id": anchor.EntityID}
+				requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "entity.get", params, &before)
+				if before.Entity.CurrentState == nil || *before.Entity.CurrentState != anchor.Stage {
+					t.Fatalf("paused card consumer advanced before continue: %+v", before)
+				}
+				t.Logf("R12 plain-pause consumer before continue: entity=%s state=%s", anchor.EntityID, *before.Entity.CurrentState)
+				requireServedOKJSONRPC(t, endpoint+"/v1/rpc", "run.continue", map[string]any{"run_id": card.RunID, "idempotency_key": "R12-channel-continue"})
+				resumeDeadline := time.Now().Add(15 * time.Second)
+				for {
+					var after operatorread.OperatorEntityFull
+					requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "entity.get", params, &after)
+					if after.Entity.CurrentState != nil && *after.Entity.CurrentState == "done" {
+						t.Logf("R12 plain-pause consumer after continue: entity=%s state=%s decision_event=%s", anchor.EntityID, *after.Entity.CurrentState, card.DecisionEventID)
+						break
+					}
+					if time.Now().After(resumeDeadline) {
+						t.Fatalf("plain-pause answer did not reach consumer after continue: %+v", after)
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
 			}
 			if scenario == "verdict_ack_loss" {
 				time.Sleep(2300 * time.Millisecond)
