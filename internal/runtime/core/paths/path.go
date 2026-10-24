@@ -18,6 +18,7 @@ const (
 	RootPlatformEntity
 	RootPolicy
 	RootMetadata
+	_ // Retired gate namespace; preserve the remaining serialized root values.
 	RootAccumulated
 	RootFanOut
 	RootJoin
