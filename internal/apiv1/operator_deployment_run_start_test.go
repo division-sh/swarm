@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -58,10 +56,6 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			registration.Release()
 		})
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
-		planningContext, err := bus.AdmitSourceArtifactFact(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
 		versions := make(map[string]durabledata.VersionID)
 
 		for _, tc := range []struct {
@@ -97,7 +91,6 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 				if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
 					t.Fatalf("feed-only created %d intents, want 1", got)
 				}
-				measureW4FeedPublicationCut(t, fixture, planningContext, runID)
 				query := "SELECT cardinality, status FROM fan_out_intents WHERE run_id = ?"
 				if _, postgres := fixture.primary.(*store.PostgresStore); postgres {
 					query = "SELECT cardinality, status FROM fan_out_intents WHERE run_id = $1::uuid"
@@ -188,7 +181,6 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 0 {
 				t.Fatalf("multi-pin run created %d initial events", got)
 			}
-			measureW4FeedPublicationCut(t, fixture, planningContext, runID)
 		})
 		t.Run("one invalid pin rejects the whole run", func(t *testing.T) {
 			runID := uuid.NewString()
@@ -235,103 +227,8 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
 				t.Fatalf("event-plus-feed intents = %d, want 1", got)
 			}
-			receipt, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
-			if err != nil || receipt.Summary.EventID == "" {
-				t.Fatalf("publication measurement lacks its immutable input receipt: %+v err=%v", receipt, err)
-			}
-			eventID := receipt.Summary.EventID
-			plan, err := fixture.reconstructed.(interface {
-				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-			}).PlanRunFork(planningContext, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
-			if err != nil {
-				t.Fatal(err)
-			}
-			input, present := plan.HistoricalInputPublication(eventID)
-			if !present {
-				t.Fatal("event cut lost the original admitted input")
-			}
-			pendingIDs := make(map[string]bool)
-			for _, work := range plan.PendingWork {
-				pendingIDs[work.EventID] = true
-			}
-			inputJSON, _ := json.Marshal(input.Coordinates())
-			pendingJSON, _ := json.Marshal(plan.PendingWork)
-			t.Logf("W4_EVENT_MEASURE run=%s event=%s revision=%d pending_equals_input=%v input=%s pending=%s", runID, eventID, plan.ForkPoint.Revision, len(pendingIDs) == 1 && pendingIDs[eventID], inputJSON, pendingJSON)
-		})
-		t.Run("multiple fused imports publication measurement", func(t *testing.T) {
-			runID := uuid.NewString()
-			data := map[string]any{"imports": []any{
-				dataRunFusedImport(uuid.NewString(), scanRef, durabledata.VersionHead(versions[scanRef.Key()]), []byte("{\"topic\":\"measurement\"}\n")),
-				dataRunFusedImport(uuid.NewString(), scoreRef, durabledata.VersionHead(versions[scoreRef.Key()]), []byte("{\"label\":\"measurement\"}\n")),
-			}, "pins": []any{}}
-			response := rpcCall(t, handler, deploymentRunStartBody(runID, uuid.NewString(), bundleHash, data))
-			if response.Error != nil {
-				t.Fatalf("multi-import measurement: %+v", response.Error)
-			}
-			measureW4FeedPublicationCut(t, fixture, planningContext, runID)
 		})
 	})
-}
-
-func measureW4FeedPublicationCut(t *testing.T, fixture dataRunLifecycleFixture, ctx context.Context, runID string) {
-	t.Helper()
-	rows, err := fixture.db.QueryContext(ctx, `SELECT revision,fact FROM run_fork_fact_revisions
-		WHERE run_id=$1 AND family='fan_out_obligations' AND present ORDER BY revision,fact_key`, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	first := make(map[string]int64)
-	revisions := make(map[string][]int64)
-	for rows.Next() {
-		var revision int64
-		var raw []byte
-		if err := rows.Scan(&revision, &raw); err != nil {
-			t.Fatal(err)
-		}
-		var fact struct {
-			Kind   string `json:"fact_kind"`
-			Origin string `json:"origin_kind"`
-			FeedID string `json:"deployment_feed_id"`
-		}
-		if err := json.Unmarshal(raw, &fact); err != nil {
-			t.Fatal(err)
-		}
-		if fact.Kind != "intent" || fact.Origin != "deployment" {
-			continue
-		}
-		if first[fact.FeedID] == 0 {
-			first[fact.FeedID] = revision
-		}
-		revisions[fact.FeedID] = append(revisions[fact.FeedID], revision)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if len(first) == 0 {
-		t.Fatal("publication measurement found no admitted feed fact")
-	}
-	planner := fixture.reconstructed.(interface {
-		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-	})
-	for feedID, revision := range first {
-		point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: revision}
-		plan, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, ResolvedPoint: &point})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var feeds []string
-		for _, obligation := range plan.FanOutObligations {
-			if id := obligation.Intent.Request.Key.DeploymentFeedID; id != "" {
-				feeds = append(feeds, id)
-			}
-		}
-		sort.Strings(feeds)
-		t.Logf("W4_FEED_MEASURE run=%s named_feed=%s first_revision=%d feed_fact_revisions=%v reconstructed_feeds=%v", runID, feedID, revision, revisions[feedID], feeds)
-	}
 }
 
 func TestRunStartRejectsDeclaredFeedWithoutInputPinBeforeMutation(t *testing.T) {
