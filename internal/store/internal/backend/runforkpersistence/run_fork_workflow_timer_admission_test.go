@@ -1,20 +1,16 @@
 package runforkpersistence
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
+
 	"reflect"
-	"strings"
+
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -194,54 +190,4 @@ func TestRunForkWorkflowTimerHistoryProspectiveCertificateIsExactAndStillBlocked
 	if allowed, err := runForkTimerHistoryMaterializable(plan); err != nil || !allowed {
 		t.Fatalf("row ordering changed canonical inventory: allowed=%t err=%v", allowed, err)
 	}
-}
-
-// This is a SQLmock frame proof, not native PostgreSQL/SQLite timer persistence.
-func withWorkflowTimerReadbackAttempt(t *testing.T, check func(context.Context, *mutationprotocol.Attempt), transferReads ...int) {
-	t.Helper()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	backend, err := postgresbackend.New(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectBegin()
-	for _, count := range transferReads {
-		for i := 0; i < count; i++ {
-			mock.ExpectQuery(`SELECT CAST\(entity_id AS TEXT\), instance_path, flow_template, accumulator FROM flow_instances WHERE run_id=\$1`).WithArgs(workflowTimerProjectionChildRun).
-				WillReturnRows(sqlmock.NewRows([]string{"entity_id", "instance_path", "flow_template", "accumulator"}))
-		}
-	}
-	mock.ExpectRollback()
-	rollback := errors.New("workflow timer readback unit rollback")
-	ctx := correlation.WithRunID(context.Background(), workflowTimerProjectionChildRun)
-	result := mutationprotocol.RunPostgres(ctx, backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil,
-		func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			check(ctx, attempt)
-			return struct{}{}, rollback
-		})
-	if result.Acknowledged() || !errors.Is(result.Err(), rollback) {
-		t.Fatalf("unit frame outcome: acknowledged=%t err=%v", result.Acknowledged(), result.Err())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func assertWorkflowTimerAppliedDisposition(t *testing.T, admission runfork.RunForkReplayResumeAdmission, want string) {
-	t.Helper()
-	for _, disposition := range admission.Dispositions {
-		if disposition.Fact != runfork.RunForkReplayResumeFactTimerHistory {
-			continue
-		}
-		if disposition.Owner != runForkTimerReadbackOwner || !strings.HasPrefix(disposition.Classification, runForkTimerAppliedPrefix) ||
-			disposition.Disposition != want || disposition.BlockerCode != "" {
-			t.Fatalf("incorrect applied disposition: %+v", disposition)
-		}
-		return
-	}
-	t.Fatal("applied timer disposition missing")
 }

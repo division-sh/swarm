@@ -127,6 +127,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 	}
 	runID := uuid.NewString()
 	ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, t.Context(), fact), runID))
+	ctx = originalPipelineFixtureContext(t, ctx, selected.events)
 	at := runlifecycle.CanonicalTimestamp(time.Now().UTC())
 	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash(), StartedAt: at,
