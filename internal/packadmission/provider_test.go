@@ -91,6 +91,12 @@ func TestS1ProviderDirectoryAdmissionReturnsNoPartialDefinition(t *testing.T) {
 		{"trigger", "trigger.yaml", "event_name:", "unknown_field:"},
 		{"connector", "connector.yaml", "handler_type: http", "handler_type: unknown"},
 		{"channel structural reference", "channel.yaml", "tool: send_message", "tool: missing"},
+		{"event capability drift", "manifest.yaml", "[raw, text_message]", "[raw, foreign]"},
+		{"qualified event capability", "manifest.yaml", "[raw, text_message]", "[inbound.team-bot.raw, inbound.team-bot.text_message]"},
+		{"action capability drift", "manifest.yaml", "[send_message]", "[missing]"},
+		{"duplicate action capability", "manifest.yaml", "[send_message]", "[send_message, send_message]"},
+		{"qualified action capability", "manifest.yaml", "[send_message]", "[team-bot.send_message]"},
+		{"secret capability drift", "manifest.yaml", "can: {", "can: {verify_secret: webhook_signing_secret, "},
 		{"platform", "manifest.yaml", "platform_version: '*'", "platform_version: '>=99.0.0'"},
 	} {
 		t.Run(cell.name, func(t *testing.T) {

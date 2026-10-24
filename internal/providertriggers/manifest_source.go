@@ -3,6 +3,7 @@ package providertriggers
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +47,8 @@ func AdmitBody(body packartifact.ProviderBody) (Manifest, error) {
 	if capabilities, present := body.Metadata().Capabilities(); present && definition.Transport == packs.ChannelTransportSession && capabilities.Can.VerifySecret != "" {
 		return Manifest{}, triggerSourceError(root, "verify_secret is forbidden by transport: session in trigger.yaml")
 	}
+	local := definition
+	local.NormalizedEvents = slices.Clone(definition.NormalizedEvents)
 	definition.Provider = body.ProviderKey()
 	if err := qualifyTriggerBodyNames(root, &definition); err != nil {
 		return Manifest{}, err
@@ -54,8 +57,33 @@ func AdmitBody(body packartifact.ProviderBody) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	if err := validateTriggerBodyCapabilities(body, local); err != nil {
+		return Manifest{}, err
+	}
 	manifest.value.providerBody = body
 	return manifest, nil
+}
+
+func validateTriggerBodyCapabilities(body packartifact.ProviderBody, definition manifestDefinition) error {
+	capabilities, _ := body.Metadata().Capabilities()
+	expected := []string{definition.EventName.Literal}
+	if definition.EventName.Template != "" {
+		expected[0] = definition.EventName.Template
+	}
+	for _, event := range definition.NormalizedEvents {
+		expected = append(expected, event.Event)
+	}
+	declared := slices.Clone(capabilities.Can.EmitEvents)
+	slices.Sort(expected)
+	slices.Sort(declared)
+	secret := ""
+	if definition.Secret.Required {
+		secret = "webhook_signing_secret"
+	}
+	if !slices.Equal(declared, expected) || capabilities.Can.VerifySecret != secret {
+		return triggerSourceError(body.SourceValue(), "manifest capabilities emit_events and verify_secret must exactly match trigger.yaml short event and secret roles")
+	}
+	return nil
 }
 
 func freezeTriggerManifest(definition manifestDefinition, root yamlsource.Value, body []byte) (Manifest, error) {

@@ -78,6 +78,7 @@ func TestSignedFormProjectionBindsBothContentViews(t *testing.T) {
 
 func signedFormContentFixture(t *testing.T, normalized bool) (InboundAdmissionPlan, Request) {
 	t.Helper()
+	emitted := "[raw]"
 	body := `payload_source: form
 secret: {required: true}
 signature: {type: hmac_sha1, header: X-Twilio-Signature, signed_payload: url_plus_sorted_form, encoding: base64}
@@ -87,6 +88,7 @@ event_name: {literal: raw}
 ack: {mode: durable_before_dispatch}
 `
 	if normalized {
+		emitted = "[raw, message]"
 		body += `normalized_events:
   - event: message
     fields:
@@ -96,7 +98,7 @@ ack: {mode: durable_before_dispatch}
 `
 	}
 	provider, err := s1LoadProviderMembers("twilio", map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n"),
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {verify_secret: webhook_signing_secret, emit_events: " + emitted + "}, cannot: [execute code]}\n"),
 		"trigger.yaml":  []byte(body),
 	})
 	if err != nil {
@@ -261,7 +263,7 @@ normalized_events:
 ack: {mode: durable_before_dispatch}
 `
 	provider, err := s1LoadProviderMembers("twilio", map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n"),
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {verify_secret: webhook_signing_secret, emit_events: [raw, message]}, cannot: [execute code]}\n"),
 		"trigger.yaml":  []byte(body),
 	})
 	if err != nil {

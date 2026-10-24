@@ -27,8 +27,12 @@ func (f triggerFixture) admit() (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	metadata, err := f.metadata()
+	if err != nil {
+		return Manifest{}, err
+	}
 	provider, err := s1LoadProviderMembers(key, map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n"),
+		"manifest.yaml": metadata,
 		"trigger.yaml":  body,
 	})
 	if err != nil {
@@ -36,6 +40,21 @@ func (f triggerFixture) admit() (Manifest, error) {
 	}
 	trigger, _ := provider.Body(packmodel.BodyTrigger)
 	return AdmitBody(trigger)
+}
+
+func (f triggerFixture) metadata() ([]byte, error) {
+	events := []string{f.EventName.Literal}
+	if f.EventName.Template != "" {
+		events[0] = f.EventName.Template
+	}
+	for _, event := range f.NormalizedEvents {
+		events = append(events, event.Event)
+	}
+	can := packmodel.CanCapabilities{EmitEvents: events}
+	if f.Secret.Required {
+		can.VerifySecret = "webhook_signing_secret"
+	}
+	return yaml.Marshal(map[string]any{"version": "1.0.0", "platform_version": "*", "capabilities": packmodel.Capabilities{Can: can, Cannot: []string{"execute code"}}})
 }
 
 func (f triggerFixture) Validate() error {

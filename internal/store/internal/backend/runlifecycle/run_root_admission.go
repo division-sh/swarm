@@ -30,7 +30,9 @@ func loadRunRootReference(ctx context.Context, queryer rowQueryer, runID string,
 	return reference, nil
 }
 
-func loadRunRootedSourceTx(ctx context.Context, tx *sql.Tx, runID string, postgres bool) (sourceartifact.RootedSource, error) {
+// LoadRunRootedSourceTx restores the exact run/root pair inside an existing
+// native snapshot; it performs no discovery or write admission.
+func LoadRunRootedSourceTx(ctx context.Context, tx *sql.Tx, runID string, postgres bool) (sourceartifact.RootedSource, error) {
 	reference, err := loadRunRootReference(ctx, tx, runID, postgres)
 	if err != nil {
 		return sourceartifact.RootedSource{}, err
@@ -43,7 +45,7 @@ func loadRunRootedSourceTx(ctx context.Context, tx *sql.Tx, runID string, postgr
 func (s *RunLifecyclePostgresOwner) LoadRunRootedSource(ctx context.Context, runID string) (sourceartifact.RootedSource, error) {
 	var source sourceartifact.RootedSource
 	err := s.runRead(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
-		source, err = loadRunRootedSourceTx(ctx, tx, runID, true)
+		source, err = LoadRunRootedSourceTx(ctx, tx, runID, true)
 		return err
 	})
 	if err = errors.Join(err, ctx.Err()); err != nil {
@@ -55,7 +57,7 @@ func (s *RunLifecyclePostgresOwner) LoadRunRootedSource(ctx context.Context, run
 func (s *RunLifecycleSQLiteOwner) LoadRunRootedSource(ctx context.Context, runID string) (sourceartifact.RootedSource, error) {
 	var source sourceartifact.RootedSource
 	err := s.runRead(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
-		source, err = loadRunRootedSourceTx(ctx, tx, runID, false)
+		source, err = LoadRunRootedSourceTx(ctx, tx, runID, false)
 		return err
 	})
 	if err = errors.Join(err, ctx.Err()); err != nil {

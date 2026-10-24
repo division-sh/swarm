@@ -279,6 +279,7 @@ func TestS1ConnectorBodyGenerationReferencesDeclaredShortTools(t *testing.T) {
 
 func TestS1ConnectorBodyAliasesAndHeaderRemainSourceOwned(t *testing.T) {
 	members := s1ConnectorDirectoryMembers()
+	members["manifest.yaml"] = bytes.Replace(members["manifest.yaml"], []byte("[send_message]"), []byte("[send_message, send_copy]"), 1)
 	members["connector.yaml"] = bytes.Replace(members["connector.yaml"], []byte("send_message:\n"), []byte("send_message: &operation\n"), 1)
 	members["connector.yaml"] = append(members["connector.yaml"], []byte("  send_copy: *operation\n")...)
 	body := s1CapturedConnectorBody(t, "team-bot", members)

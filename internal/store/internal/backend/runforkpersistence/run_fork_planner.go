@@ -302,6 +302,9 @@ func planRunForkSnapshotWithActivityOrigins(
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
+	if err := retainFanOutExecutionSources(ctx, tx, snapshot, fanOutObligations, postgres); err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 	plan.FanOutObligations = fanOutObligations
 	plan.FanOutObligationCount = len(fanOutObligations)
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {

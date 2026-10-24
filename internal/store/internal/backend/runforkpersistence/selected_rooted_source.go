@@ -23,7 +23,7 @@ func (s *RunForkPostgresOwner) LoadSelectedForkRootedSource(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		source, err = loadSelectedForkRootedSourceTx(ctx, tx, snapshot, true)
+		source, err = loadSelectedForkRootedSourceTx(ctx, tx, snapshot.RunID, snapshot.Origin, snapshot.RootReference, true)
 		return err
 	})
 	if err = errors.Join(err, ctx.Err()); err != nil {
@@ -42,7 +42,7 @@ func (s *RunForkSQLiteOwner) LoadSelectedForkRootedSource(ctx context.Context, f
 		if err != nil {
 			return err
 		}
-		source, err = loadSelectedForkRootedSourceTx(ctx, tx, snapshot, false)
+		source, err = loadSelectedForkRootedSourceTx(ctx, tx, snapshot.RunID, snapshot.Origin, snapshot.RootReference, false)
 		return err
 	})
 	if err = errors.Join(err, ctx.Err()); err != nil {
@@ -51,8 +51,8 @@ func (s *RunForkSQLiteOwner) LoadSelectedForkRootedSource(ctx context.Context, f
 	return source, nil
 }
 
-func loadSelectedForkRootedSourceTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, postgres bool) (sourceartifact.RootedSource, error) {
-	binding, err := loadRunForkSelectedContractBinding(ctx, tx, snapshot.RunID)
+func loadSelectedForkRootedSourceTx(ctx context.Context, tx *sql.Tx, runID string, actualOrigin runlifecycle.RunOrigin, reference sourceartifact.RootAdmissionReference, postgres bool) (sourceartifact.RootedSource, error) {
+	binding, err := loadRunForkSelectedContractBinding(ctx, tx, runID)
 	if err != nil {
 		return sourceartifact.RootedSource{}, err
 	}
@@ -60,13 +60,13 @@ func loadSelectedForkRootedSourceTx(ctx context.Context, tx *sql.Tx, snapshot ru
 	if err != nil {
 		return sourceartifact.RootedSource{}, err
 	}
-	if !snapshot.Origin.Equal(origin) || snapshot.RootReference != binding.TargetRootReference {
+	if !actualOrigin.Equal(origin) || reference != binding.TargetRootReference {
 		return sourceartifact.RootedSource{}, fmt.Errorf("selected source child differs from its exact binding")
 	}
 	// This is a read-only snapshot; recovery's mutation-side row lock is not
 	// needed or permitted here. The permanent request still has to agree.
-	if _, err := selectedForkOperationForRecoveryTx(ctx, tx, binding, snapshot.BundleHash, false); err != nil {
+	if _, err := selectedForkOperationForRecoveryTx(ctx, tx, binding, reference.BundleHash, false); err != nil {
 		return sourceartifact.RootedSource{}, err
 	}
-	return artifactstore.LoadRootedSourceTx(ctx, tx, snapshot.RootReference, postgres)
+	return artifactstore.LoadRootedSourceTx(ctx, tx, reference, postgres)
 }

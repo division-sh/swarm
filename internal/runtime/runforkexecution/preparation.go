@@ -278,7 +278,7 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if err := runforkadmission.ValidateFixedConstructionTree(owned.originalSource.Source, plan); err != nil {
 		return nil, fmt.Errorf("admit original atomic construction tree: %w", err)
 	}
-	original, err = retainOriginalFanOutHistory(ctx, req.SourceLoader, original, owned.originalSource.SourceArtifactFact.BundleHash(), plan)
+	original, err = retainOriginalFanOutHistory(ctx, req.SourceLoader, original, owned.originalSource.RootedSource.Admission(), plan)
 	if err != nil {
 		return nil, err
 	}

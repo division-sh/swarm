@@ -322,6 +322,7 @@ type RunForkPlan struct {
 // fixed fork revision. Claim, lease, pacing, and service timestamps are not
 // historical authority and are reset when this fact is materialized.
 type RunForkFanOutObligation struct {
+	ExecutionSource   sourceartifact.RootedSource     `json:"-"`
 	Intent            fanoutobligation.Intent         `json:"intent"`
 	Outcomes          []fanoutobligation.Outcome      `json:"outcomes,omitempty"`
 	PendingReplays    []RunForkFanOutPendingReplay    `json:"pending_replays,omitempty"`

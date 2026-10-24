@@ -3,6 +3,7 @@ package packadmission
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,12 +14,14 @@ import (
 func generatedProviderDirectoryMembers(t *testing.T, artifact providerconnectors.GeneratedCatalogArtifact, change func(*providerconnectors.GenerationEvidence)) map[string][]byte {
 	t.Helper()
 	tools := map[string]any{}
+	var names []string
 	for qualified, tool := range artifact.Manifest.Tools {
 		key, local, found := strings.Cut(qualified, ".")
 		if !found || key != artifact.Manifest.Provider {
 			t.Fatal("generated fixture has no canonical provider tool coordinate")
 		}
 		tools[local] = tool
+		names = append(names, local)
 	}
 	generation := *artifact.Manifest.Generation
 	generation.Operations = append([]providerconnectors.GenerationOperationEvidence(nil), generation.Operations...)
@@ -33,8 +36,13 @@ func generatedProviderDirectoryMembers(t *testing.T, artifact providerconnectors
 	if err != nil {
 		t.Fatal(err)
 	}
+	slices.Sort(names)
+	metadata, err := yaml.Marshal(map[string]any{"version": "1.0.0", "platform_version": "*", "capabilities": map[string]any{"can": map[string]any{"call_provider_actions": names}, "cannot": []string{"bypass journal"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return map[string][]byte{
-		"manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [create_issue]}, cannot: [bypass journal]}\n"),
+		"manifest.yaml":  metadata,
 		"connector.yaml": body,
 	}
 }

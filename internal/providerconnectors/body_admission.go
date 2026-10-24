@@ -21,6 +21,21 @@ func AdmitBody(body packartifact.ProviderBody) (ConnectorManifest, error) {
 	if err != nil {
 		return ConnectorManifest{}, err
 	}
+	capabilities, _ := body.Metadata().Capabilities()
+	if len(capabilities.Can.CallProviderActions) != len(tools) {
+		return ConnectorManifest{}, connectorError(root, "manifest capabilities call_provider_actions must exactly match connector.yaml short tool names")
+	}
+	seen := make(map[string]bool, len(tools))
+	for _, local := range capabilities.Can.CallProviderActions {
+		qualified, err := runtimecontracts.QualifyProviderLocalName(body.ProviderKey(), local)
+		if err != nil {
+			return ConnectorManifest{}, connectorError(root, err.Error())
+		}
+		if _, present := tools[qualified]; !present || seen[qualified] {
+			return ConnectorManifest{}, connectorError(root, "manifest capabilities call_provider_actions must exactly match connector.yaml short tool names")
+		}
+		seen[qualified] = true
+	}
 	out := ConnectorManifest{source: root, Provider: body.ProviderKey(), Tools: tools}
 	if value, present := fields["generation"]; present {
 		generation, err := admitGenerationEvidence(value)

@@ -205,7 +205,7 @@ func TestTriggerWebhookTransportIsExplicitOrOmittedWithoutProviderGuessing(t *te
 		for _, transport := range []string{"", "transport: webhook\n"} {
 			body := transport + "event_name: {literal: raw}\ndelivery_id: {literal: receipt, required: true}\nevent_type: {literal: message, required: true}\n"
 			captured, err := s1LoadProviderMembers(provider, map[string][]byte{
-				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n"),
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n"),
 				"trigger.yaml":  []byte(body),
 			})
 			if err != nil {

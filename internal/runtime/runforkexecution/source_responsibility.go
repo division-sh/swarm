@@ -16,6 +16,7 @@ const (
 	originalRunSource selectedSourceKind = iota + 1
 	retainedForkSource
 	freshSelectedSource
+	retainedFanOutSource
 )
 
 // These are responsibility selectors, not grants. Only the selected-store
@@ -23,6 +24,7 @@ const (
 type SelectedSourceResponsibility struct {
 	kind selectedSourceKind
 	key  string
+	root sourceartifact.RootAdmission
 }
 
 func OriginalRunSource(runID string) SelectedSourceResponsibility {
@@ -35,6 +37,10 @@ func RetainedForkSource(forkRunID string) SelectedSourceResponsibility {
 
 func FreshSelectedSource(hash string) SelectedSourceResponsibility {
 	return SelectedSourceResponsibility{kind: freshSelectedSource, key: hash}
+}
+
+func retainedFanOutExecutionSource(source sourceartifact.RootedSource) SelectedSourceResponsibility {
+	return SelectedSourceResponsibility{kind: retainedFanOutSource, root: source.Admission()}
 }
 
 func (r SelectedSourceResponsibility) load(ctx context.Context, store SourceArtifactSelectedContractSourceStore) (sourceartifact.RootedSource, error) {
@@ -55,6 +61,19 @@ func (r SelectedSourceResponsibility) load(ctx context.Context, store SourceArti
 }
 
 func (r SelectedSourceResponsibility) resolve(ctx context.Context, store SourceArtifactSelectedContractSourceStore) (sourceartifact.RootedSource, error) {
+	if r.kind == retainedFanOutSource {
+		if err := r.root.Validate(); err != nil {
+			return sourceartifact.RootedSource{}, err
+		}
+		rooted, err := store.GetRootedSource(ctx, r.root.Reference())
+		if err != nil {
+			return sourceartifact.RootedSource{}, err
+		}
+		if !rooted.Admission().Equal(r.root) {
+			return sourceartifact.RootedSource{}, fmt.Errorf("retained fan-out read differs from its proven execution root")
+		}
+		return rooted, nil
+	}
 	if r.kind == freshSelectedSource {
 		if err := sourceartifact.ValidateHash(r.key); err != nil {
 			return sourceartifact.RootedSource{}, fmt.Errorf("fresh source requires an exact admitted target hash: %w", err)

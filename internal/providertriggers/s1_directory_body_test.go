@@ -12,9 +12,11 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func s1TriggerDirectoryMembers(rawName, normalizedName string) map[string][]byte {
+func s1TriggerDirectoryMembers(t testing.TB, rawName, normalizedName string) map[string][]byte {
+	t.Helper()
 	body := `payload_object_required: true
 secret: {required: true}
 signature: {type: token_equality, header: X-Signature}
@@ -29,15 +31,27 @@ event_name: {` + rawName + `}
       text: {from: message.text, schema: {type: string, minLength: 1}}
 `
 	}
+	source, err := yamlsource.Load([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, err := admitTriggerDefinition(source.Document("trigger.yaml").Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := triggerFixture(definition).metadata()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [execute code]}\n"),
+		"manifest.yaml": metadata,
 		"trigger.yaml":  []byte(body),
 	}
 }
 
 func s1AdmittedTriggerBody(t testing.TB, key, rawName, normalizedName string) packartifact.ProviderBody {
 	t.Helper()
-	provider, err := s1LoadProviderMembers(key, s1TriggerDirectoryMembers(rawName, normalizedName))
+	provider, err := s1LoadProviderMembers(key, s1TriggerDirectoryMembers(t, rawName, normalizedName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +176,7 @@ func TestS1TriggerDirectoryBodyRetainedAndScopedSourceUsesFrozenKey(t *testing.T
 		"child/schema.yaml":   []byte("description: child\n"),
 	}
 	for _, directory := range []string{"team-bot", "child/team_bot"} {
-		for label, body := range s1TriggerDirectoryMembers("literal: raw", "text_message") {
+		for label, body := range s1TriggerDirectoryMembers(t, "literal: raw", "text_message") {
 			members[directory+"/"+label] = body
 		}
 	}
@@ -199,7 +213,7 @@ func TestS1TriggerDirectoryBodyRetainedAndScopedSourceUsesFrozenKey(t *testing.T
 
 func TestS1TriggerDirectoryBodyCopyRenameRetainsExactBytesAndPolicy(t *testing.T) {
 	parent := t.TempDir()
-	members := s1TriggerDirectoryMembers("literal: raw", "text_message")
+	members := s1TriggerDirectoryMembers(t, "literal: raw", "text_message")
 	var captured []*sourceartifact.AdmittedSourceArtifact
 	for _, key := range []string{"team-bot", "team_bot"} {
 		root := filepath.Join(parent, key)
@@ -284,7 +298,7 @@ func TestS1TriggerDirectoryBodyHonorsLexicalAliasesAndRoleBoundary(t *testing.T)
 			t.Fatalf("canonical anchored name refused: %v", err)
 		}
 	}
-	members := s1TriggerDirectoryMembers("literal: raw", "text_message")
+	members := s1TriggerDirectoryMembers(t, "literal: raw", "text_message")
 	members["trigger.yaml"] = bytes.Replace(members["trigger.yaml"], []byte("literal: raw"), []byte("literal: &raw raw"), 1)
 	members["trigger.yaml"] = bytes.Replace(members["trigger.yaml"], []byte("event: text_message"), []byte("event: *raw"), 1)
 	provider, err := s1LoadProviderMembers("team-bot", members)

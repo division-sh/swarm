@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 const triggerPredicateFixture = `event_name: {literal: raw}
@@ -263,8 +264,20 @@ func parseTriggerTestBody(t testing.TB, body string) Manifest {
 }
 
 func admitTestTriggerBody(body string) (Manifest, error) {
+	source, err := yamlsource.Load([]byte(body))
+	if err != nil {
+		return Manifest{}, err
+	}
+	definition, err := admitTriggerDefinition(source.Document("trigger.yaml").Root())
+	if err != nil {
+		return Manifest{}, err
+	}
+	metadata, err := triggerFixture(definition).metadata()
+	if err != nil {
+		return Manifest{}, err
+	}
 	provider, err := s1LoadProviderMembers("acme", map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, observed, command]}, cannot: [execute code]}\n"),
+		"manifest.yaml": metadata,
 		"trigger.yaml":  []byte(body),
 	})
 	if err != nil {

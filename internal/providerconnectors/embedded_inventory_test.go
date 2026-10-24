@@ -76,6 +76,16 @@ func TestEffectiveConnectorAdmissionValidatesGeneratedIndexEvidence(t *testing.T
 	t.Run("unindexed evidence", func(t *testing.T) {
 		files := mutablePlatformPackFS(t)
 		files["providers/notion/connector.yaml"].Data = append([]byte(nil), files["providers/github/connector.yaml"].Data...)
+		var metadata map[string]any
+		if err := yaml.Unmarshal(files["providers/notion/manifest.yaml"].Data, &metadata); err != nil {
+			t.Fatal(err)
+		}
+		metadata["capabilities"].(map[string]any)["can"].(map[string]any)["call_provider_actions"] = []string{"add_labels_to_issue", "create_issue", "create_issue_comment"}
+		body, err := yaml.Marshal(metadata)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files["providers/notion/manifest.yaml"].Data = body
 		inventory := effectivePlatformPackInventoryFS(t, files)
 		if _, err := NewPackRegistryFromInventory(inventory, "0.7.0"); err == nil || !strings.Contains(err.Error(), "carries generation evidence but is not in the generated pack index") {
 			t.Fatalf("unindexed generated evidence error = %v", err)
