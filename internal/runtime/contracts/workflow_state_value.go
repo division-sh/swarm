@@ -73,12 +73,18 @@ func projectStateField(value yamlsource.Value, types TypeCatalogDocument) (Entit
 		if typeValue.Presence() == yamlsource.PresenceMapping || typeValue.Presence() == yamlsource.PresenceEmptyMapping {
 			return EntityFieldDecl{}, fmt.Errorf("indexed type must be a type name or [T], not a mapping")
 		}
-		declaration, err := projectStateField(typeValue, types)
+		var typeRef string
+		if typeValue.Presence() == yamlsource.PresenceSequence {
+			typeRef, err = listDeclarationSequence(typeValue, "state field")
+		} else {
+			typeRef, err = listDeclarationScalar(typeValue, "state field", true)
+		}
 		if err != nil {
 			return EntityFieldDecl{}, err
 		}
-		if declaration.Initial != nil {
-			return EntityFieldDecl{}, fmt.Errorf("indexed type must be a type declaration, not an initial value")
+		declaration, err := stateTypeDeclaration(typeRef, types)
+		if err != nil {
+			return EntityFieldDecl{}, err
 		}
 		declaration.Indexed = true
 		return declaration, nil
@@ -99,7 +105,7 @@ func projectStateField(value yamlsource.Value, types TypeCatalogDocument) (Entit
 		var itemType string
 		initial := make([]any, 0, len(items))
 		for _, item := range items {
-			declaration, err := stateLiteral(item, types)
+			declaration, err := stateLiteral(item)
 			if err != nil {
 				return EntityFieldDecl{}, err
 			}
@@ -118,7 +124,7 @@ func projectStateField(value yamlsource.Value, types TypeCatalogDocument) (Entit
 		if scalar.Tag == "!!str" && scalar.Style == 0 {
 			return stateTypeDeclaration(scalar.Value, types)
 		}
-		return stateLiteral(value, types)
+		return stateLiteral(value)
 	default:
 		return EntityFieldDecl{}, fmt.Errorf("state field requires a type or a non-null literal; empty lists are not declarations (use [T])")
 	}
@@ -138,7 +144,7 @@ func stateTypeDeclaration(raw string, types TypeCatalogDocument) (EntityFieldDec
 	return EntityFieldDecl{Type: typeName, IsOptional: optional}, nil
 }
 
-func stateLiteral(value yamlsource.Value, types TypeCatalogDocument) (EntityFieldDecl, error) {
+func stateLiteral(value yamlsource.Value) (EntityFieldDecl, error) {
 	scalar, err := value.Scalar()
 	if err != nil {
 		return EntityFieldDecl{}, fmt.Errorf("state initials must be scalar literals: %w", err)
@@ -148,9 +154,6 @@ func stateLiteral(value yamlsource.Value, types TypeCatalogDocument) (EntityFiel
 	case "!!str":
 		if scalar.Style == 0 {
 			return EntityFieldDecl{}, fmt.Errorf("text initial %q must be quoted", scalar.Value)
-		}
-		if _, err := stateTypeDeclaration(scalar.Value, types); err == nil {
-			return EntityFieldDecl{}, fmt.Errorf("%q names a type; remove the quotes to declare it", scalar.Value)
 		}
 		typeName = "text"
 	case "!!int":
