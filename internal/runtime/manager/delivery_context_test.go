@@ -53,6 +53,7 @@ func TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalRecei
 	identity := runtimeagentidentitytest.RootRuntime(t, "agent-1", "manager-delivery-context-test")
 	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: identity, AgentID: identity.AgentID(), Generation: 3}
 	loopCtx := runtimeeffects.WithLifecycleToken(context.Background(), token)
+	loopCtx = worklifetime.WithProcess(loopCtx, process)
 	controller := liveTestEffectController(deliveryContextEffectStore{})
 	loopCtx = runtimeeffects.WithController(loopCtx, controller)
 	loopCtx = managedExecutionTestContext(t, loopCtx)
@@ -71,6 +72,9 @@ func TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalRecei
 	defer cleanup()
 	if got.Value(deliveryContextKey{}) != nil {
 		t.Fatal("agent execution context inherited an arbitrary publisher value")
+	}
+	if original, found := worklifetime.ProcessFromContext(got); !found || original != process {
+		t.Fatal("agent receiver lost its owning execution loop's original process")
 	}
 	if owner, ok := worklifetime.OccurrenceFromContext(got); !ok || owner != runtimeOwner {
 		t.Fatalf("agent execution occurrence = %v, %v; want delivery owner", owner, ok)

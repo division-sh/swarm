@@ -449,9 +449,11 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	runA := uuid.NewString()
 	runB := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runA, Artifact: artifactA, StartedAt: base,
 	})
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runB, Artifact: artifactB, StartedAt: base,
 	})
@@ -517,6 +519,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	base := time.Unix(1700000300, 0).UTC()
@@ -592,6 +595,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	businessEvent := uuid.NewString()
@@ -621,6 +625,7 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	entityOne := uuid.NewString()

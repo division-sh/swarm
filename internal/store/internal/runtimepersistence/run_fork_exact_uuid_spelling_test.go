@@ -35,6 +35,7 @@ func TestRunForkExactEventWriterPreservesAdmittedUUIDSpellingsBothStores(t *test
 					f.runID = strings.ReplaceAll(f.runID, "-", "")
 				}
 				ctx := testAuthorActivityContext()
+				ctx = storeTestOriginalProcessContext(t, ctx, s.selected)
 				requireRunFixtureForTest(t, ctx, s.selected, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: f.runID, StartedAt: f.at,
 				})

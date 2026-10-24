@@ -23,6 +23,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			primaryRunID := runtimecorrelation.RunIDFromContext(ctx)
 			ctx = testAuthorActivityContext()
 			sibling := uuid.NewString()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, sibling, time.Now().UTC())
 			journal := captureActivityFixtureJournal(t, ctx, selected)
 			fault := errors.New("post-acknowledgment cleanup")

@@ -4,18 +4,22 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
-	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
-func quiescenceTestBackend(t *testing.T, schema string) (*sql.DB, *sqlitebackend.Backend) {
+func quiescenceTestBackend(t *testing.T, schema string) (*sql.DB, *sqlitebackend.Backend, context.Context) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -30,11 +34,53 @@ func quiescenceTestBackend(t *testing.T, schema string) (*sql.DB, *sqlitebackend
 	if err != nil {
 		t.Fatal(err)
 	}
-	return db, backend
+	ctx := context.Background()
+	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.TableName != "runtime_process_generation" {
+			continue
+		}
+		statements, err := schemastore.SQLiteStatementsForPlan(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, statement := range statements {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := platformschema.SeedFreshProcessGeneration(ctx, db, plans); err != nil {
+		t.Fatal(err)
+	}
+	var original processbinding.LeaseStamp
+	acknowledged, err := backend.RunProcessAcquisitionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		original, err = generationauthority.AdvanceProcessGeneration(txctx, tx, processbinding.LeaseIdentity{
+			LeaseID: uuid.NewString(), OwnerID: "quiescence-original", BootID: uuid.NewString(),
+			RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend,
+		}, true)
+		return err
+	})
+	if err != nil || !acknowledged {
+		t.Fatalf("original quiescence acquisition: acknowledged=%v err=%v", acknowledged, err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db, backend, ctx
 }
 
 func TestQuiescenceTerminatesExactSessionsInAttempt(t *testing.T) {
-	db, backend := quiescenceTestBackend(t, `CREATE TABLE agent_sessions (
+	db, backend, ctx := quiescenceTestBackend(t, `CREATE TABLE agent_sessions (
 		session_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, status TEXT NOT NULL,
 		termination_reason TEXT, termination_detail TEXT, terminated_at TEXT,
 		lease_holder TEXT, lease_grant_id TEXT, lease_expires_at TEXT, updated_at TEXT
@@ -46,7 +92,7 @@ func TestQuiescenceTerminatesExactSessionsInAttempt(t *testing.T) {
 		}
 	}
 	rollback := errors.New("test rollback")
-	result := mutationprotocol.RunSQLite(context.Background(), backend, "test session quiescence", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (int, error) {
+	result := mutationprotocol.RunSQLite(ctx, backend, "test session quiescence", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (int, error) {
 		var count int
 		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
 			count, err = sqliteTerminateActiveRunSessionsTx(ctx, tx, attempt, []string{runID}, "test", time.Now().UTC())
@@ -73,7 +119,7 @@ func TestQuiescenceTerminatesExactSessionsInAttempt(t *testing.T) {
 }
 
 func TestQuiescenceCancelsExactWorkflowTimersInAttempt(t *testing.T) {
-	db, backend := quiescenceTestBackend(t, `CREATE TABLE timers (
+	db, backend, ctx := quiescenceTestBackend(t, `CREATE TABLE timers (
 		timer_id TEXT PRIMARY KEY, timer_name TEXT NOT NULL, fire_at TEXT NOT NULL,
 		run_id TEXT NOT NULL, task_type TEXT NOT NULL, status TEXT NOT NULL
 	)`)
@@ -85,7 +131,7 @@ func TestQuiescenceCancelsExactWorkflowTimersInAttempt(t *testing.T) {
 		}
 	}
 	rollback := errors.New("test rollback")
-	result := mutationprotocol.RunSQLite(context.Background(), backend, "test timer quiescence", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (int, error) {
+	result := mutationprotocol.RunSQLite(ctx, backend, "test timer quiescence", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (int, error) {
 		var count int
 		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			refs, err := cancelActiveRunWorkflowTimersTx(ctx, tx, attempt, false, []string{runID, runID})
@@ -112,32 +158,5 @@ func TestQuiescenceCancelsExactWorkflowTimersInAttempt(t *testing.T) {
 	}
 	if status != "active" {
 		t.Fatalf("status after rollback = %q, want active", status)
-	}
-}
-
-func TestEmptyQuiescenceRollsBackStoryInitialization(t *testing.T) {
-	db, backend := quiescenceTestBackend(t, `
-		CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY, last_sequence INTEGER NOT NULL);
-		CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL, bundle_hash TEXT);
-	`)
-	owner, err := NewSQLite(backend, func() error { return nil }, runhandoff.NewCandidateCoordinator(), time.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := owner.ApplyActiveRunQuiescence(context.Background(), runtimerunquiescence.Request{
-		OperationName: "test", ReasonCode: "test", ControlledBy: "test", RunIDs: []string{uuid.NewString()},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Runs) != 0 {
-		t.Fatalf("quiesced runs = %+v, want none", result.Runs)
-	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM author_activity_order`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("author activity order rows = %d, want 0", count)
 	}
 }

@@ -118,6 +118,9 @@ func testPreparedGatewayHandlerJoin(t *testing.T, listenerFailure bool) {
 	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
 	defer releaseHandler()
 	server := serveSelectedContractGateway(listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if original, found := worklifetime.ProcessFromContext(r.Context()); !found || original != process {
+			t.Error("gateway request lost its original process attribution")
+		}
 		close(entered)
 		<-release
 		w.WriteHeader(http.StatusNoContent)

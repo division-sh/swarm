@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -60,6 +61,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
+				ctx = nativeProcessContextFixture(t, ctx, selected.events)
 				runOwner, ok := selected.events.(storetest.RunFixtureStore)
 				if !ok {
 					t.Fatal("A2 native fixture requires the original selected run owner")
@@ -417,9 +419,7 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 	if !found {
 		t.Fatal("activation fixture requires its admitted source")
 	}
-	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "a2-activation-join", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}

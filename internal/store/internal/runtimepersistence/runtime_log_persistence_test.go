@@ -125,6 +125,7 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 	defer cleanup()
 	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	envelope := computeModuleReplayEvidenceTestEnvelope()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})

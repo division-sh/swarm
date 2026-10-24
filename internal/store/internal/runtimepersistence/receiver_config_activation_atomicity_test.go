@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -121,6 +123,25 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, _ := storeTestWorkFixtures.Load(t)
+	workProcess := work.(*storeTestWorkFixture).process
+	if err := workProcess.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	ctx = worklifetime.WithProcess(ctx, workProcess)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	bus := &sqliteFlowActivationBus{}
 	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle, configureLifecycle)

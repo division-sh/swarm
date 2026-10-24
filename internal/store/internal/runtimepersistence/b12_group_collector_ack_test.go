@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -52,13 +51,6 @@ func TestB12GroupCollectorDoesNotRetryUncertainFlushBeforeDeferred(t *testing.T)
 						})
 					}
 				}
-				sink := &b10CandidateSink{runID: f.runID}
-				scope, _ := authoractivity.ScopeFromContext(f.ctx)
-				registration, err := f.raw.(runlifecycle.CandidateRegistrar).RegisterCompletionCandidateSink(f.ctx, runlifecycle.CandidateScope{BundleHash: scope.BundleHash}, sink)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(registration.Release)
 				collector, restore, err := InstallTransactionProbeForTest(f.raw, transactiontest.Options{})
 				if err != nil {
 					t.Fatal(err)
@@ -95,16 +87,16 @@ func TestB12GroupCollectorDoesNotRetryUncertainFlushBeforeDeferred(t *testing.T)
 				}
 				counts := collector.Snapshot().ByOperation[transactiontest.PipelineSettlement]
 				if phase == "healthy" {
-					if counts.WriteCommits != 2 || sink.submits != 2 || observed.reads != 0 {
-						t.Fatalf("healthy group then singleton: counts=%+v sink=%+v reads=%d", counts, sink, observed.reads)
+					if counts.WriteCommits != 2 || observed.reads != 0 {
+						t.Fatalf("healthy group then singleton: counts=%+v reads=%d", counts, observed.reads)
 					}
 				} else {
 					want := pipelineobligation.PublicationSettlementPending
 					if phase == "lost_after_commit" {
 						want = pipelineobligation.PublicationSettlementSatisfied
 					}
-					if observed.reads != 1 || len(observed.observation.Rows) != 1 || observed.observation.Rows[0].State != want || counts.CommitAttempts != 1 || counts.CommitFailures != 1 || counts.WriteCommits != 0 || sink.submits != 0 {
-						t.Fatalf("uncertain collector observation/attempt/candidate: observed=%+v counts=%+v sink=%+v", observed, counts, sink)
+					if observed.reads != 1 || len(observed.observation.Rows) != 1 || observed.observation.Rows[0].State != want || counts.CommitAttempts != 1 || counts.CommitFailures != 1 || counts.WriteCommits != 0 {
+						t.Fatalf("uncertain collector observation/attempt: observed=%+v counts=%+v", observed, counts)
 					}
 				}
 			})
@@ -175,6 +167,7 @@ func newCollectorFixtureWithCardinality(t *testing.T, backend string, cardinalit
 	artifact, bundle := fanOutMixedRouteSource(t)
 	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(artifact.BundleHash()), 15*time.Second)
 	t.Cleanup(cancel)
+	ctx = storeTestOriginalProcessContext(t, ctx, raw)
 	seed := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, backend == "postgres", cardinality, time.Now().UTC(), artifact)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, seed.runID), mustStoreTestSourceArtifactFact(seed.bundleHash))
 	f := &fanOutGroupHistoryFixture{ctx: ctx, raw: raw, db: db, observer: db, postgres: backend == "postgres", runID: seed.runID, sourceRoute: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()}

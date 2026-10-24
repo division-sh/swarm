@@ -54,7 +54,7 @@ type SelectedDeliveryFixture struct {
 
 // OpenSelectedDeliveryExecution reuses the existing native manager-delivery
 // claim gate and joins the real selected owner before capability/store release.
-func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner SelectedDeliveryFixtureStore) *SelectedDeliveryFixture {
+func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner SelectedDeliveryFixtureStore, capability startupownership.ProcessCapability) *SelectedDeliveryFixture {
 	t.Helper()
 	fixture := &SelectedDeliveryFixture{}
 	repo := canonicalrouting.RepoRoot(t)
@@ -62,16 +62,20 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
-	ctx = correlation.WithSourceArtifactFact(ctx, source)
-	runtimeID := uuid.NewString()
-	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, source.BundleHash()))
-	process := worklifetime.NewProcess()
-	ctx = worklifetime.WithProcess(ctx, process)
-	capability, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "manager-selected-delivery-proof", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+	original, err := capability.Evidence()
 	if err != nil {
 		t.Fatal(err)
 	}
+	source := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+	ctx = correlation.WithSourceArtifactFact(ctx, source)
+	runtimeID := original.RuntimeInstanceID
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, source.BundleHash()))
+	process := worklifetime.NewProcess()
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	ctx = worklifetime.WithProcess(ctx, process)
+	sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
 	t.Cleanup(func() {
 		if err := capability.Release(context.Background()); err != nil {
 			t.Error(err)

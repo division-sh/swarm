@@ -12,6 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+	"github.com/division-sh/swarm/internal/store/platformschema"
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
@@ -139,7 +144,7 @@ func TestAcquireMutationCancellationWinsTokenRace(t *testing.T) {
 func TestRunTransactionRealBusyExhaustionRetainsBusyCause(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "busy-exhaustion.db")
 	target := newTransactionTestBackend(t, path)
-	holder := newTransactionTestBackend(t, path)
+	holder := newTransactionTestBackend(t, path, target)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -330,14 +335,14 @@ type postBusyReadmissionProof struct {
 	holderDone    <-chan error
 }
 
-func startPostBusyReadmissionProof(t *testing.T, backend *Backend) *postBusyReadmissionProof {
+func startPostBusyReadmissionProof(t *testing.T, backend *transactionTestBackend) *postBusyReadmissionProof {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 	return startPostBusyReadmissionProofWithContext(t, backend, ctx)
 }
 
-func startPostBusyReadmissionProofWithContext(t *testing.T, backend *Backend, targetCtx context.Context) *postBusyReadmissionProof {
+func startPostBusyReadmissionProofWithContext(t *testing.T, backend *transactionTestBackend, targetCtx context.Context) *postBusyReadmissionProof {
 	t.Helper()
 	busyCause := errors.New("database is locked: deterministic post-busy proof")
 	firstAttempt := make(chan struct{})
@@ -390,7 +395,84 @@ func (p *postBusyReadmissionProof) releaseHolder() {
 	})
 }
 
-func newTransactionTestBackend(t *testing.T, path string) *Backend {
+type transactionTestBackend struct {
+	*Backend
+	original processbinding.LeaseStamp
+}
+
+func (b *transactionTestBackend) RunTransaction(ctx context.Context, label string, write func(context.Context, *sql.Tx) error) error {
+	_, err := b.RunTransactionOutcome(ctx, label, write)
+	return err
+}
+
+func (b *transactionTestBackend) RunTransactionOutcome(ctx context.Context, label string, write func(context.Context, *sql.Tx) error) (bool, error) {
+	ctx, err := generationauthority.MutationContext(ctx, b.original, false)
+	if err != nil {
+		return false, err
+	}
+	return b.Backend.RunTransactionOutcome(ctx, label, write)
+}
+
+func originalTransactionTestBackend(t *testing.T, db *sql.DB, path string, parent ...*transactionTestBackend) *transactionTestBackend {
+	t.Helper()
+	backend, err := New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &transactionTestBackend{Backend: backend}
+	if len(parent) != 0 {
+		fixture.original = parent[0].original
+		return fixture
+	}
+	// Set up through a separate native connection so no fault/cancellation
+	// barrier or measured workload-pool slot is consumed by construction.
+	construction, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := construction.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.TableName == "runtime_process_generation" {
+			for _, statement := range plan.Statements {
+				if _, err := construction.Exec(statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	if err := platformschema.SeedFreshProcessGeneration(context.Background(), construction, plans); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := New(construction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack, err := owner.RunProcessAcquisitionOutcome(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		fixture.original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, processbinding.LeaseIdentity{
+			LeaseID: uuid.NewString(), OwnerID: "native-transaction-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend,
+		}, true)
+		return err
+	})
+	if err != nil || !ack {
+		t.Fatalf("original process acquisition: acknowledged=%v err=%v", ack, err)
+	}
+	return fixture
+}
+
+func newTransactionTestBackend(t *testing.T, path string, parent ...*transactionTestBackend) *transactionTestBackend {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(1)")
 	if err != nil {
@@ -401,14 +483,10 @@ func newTransactionTestBackend(t *testing.T, path string) *Backend {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS mutation_probe (id INTEGER PRIMARY KEY, value INTEGER NOT NULL); INSERT OR IGNORE INTO mutation_probe (id, value) VALUES (1, 0)`); err != nil {
 		t.Fatalf("prepare SQLite mutation probe: %v", err)
 	}
-	backend, err := New(db)
-	if err != nil {
-		t.Fatalf("construct SQLite backend: %v", err)
-	}
-	return backend
+	return originalTransactionTestBackend(t, db, "file:"+path, parent...)
 }
 
-func waitForQueuedMutations(t *testing.T, backend *Backend, want int) {
+func waitForQueuedMutations(t *testing.T, backend *transactionTestBackend, want int) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -420,7 +498,7 @@ func waitForQueuedMutations(t *testing.T, backend *Backend, want int) {
 	t.Fatalf("queued mutation count = %d, want %d", queuedMutationCount(backend), want)
 }
 
-func queuedMutationCount(backend *Backend) int {
+func queuedMutationCount(backend *transactionTestBackend) int {
 	backend.mutationState.Lock()
 	defer backend.mutationState.Unlock()
 	return backend.mutationState.waiting

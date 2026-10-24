@@ -9,14 +9,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	runstore "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -37,7 +40,7 @@ func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstra
 	var selected []schemastore.SchemaTableDDL
 	for _, plan := range plans {
 		switch plan.TableName {
-		case "runtime_store_metadata", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences",
+		case "runtime_store_metadata", "runtime_process_generation", "runs", "run_event_counts", "source_artifacts", "author_activity_order", "author_activity_occurrences",
 			"run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
 			selected = append(selected, plan)
 		case "events", "entity_state", "standing_services", "standing_service_generations":
@@ -46,7 +49,7 @@ func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstra
 			}
 		}
 	}
-	want := 8
+	want := 10
 	if snapshot {
 		want += 4
 	}
@@ -61,11 +64,10 @@ func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstra
 	}
 }
 
-func requireStatementRun(t testing.TB, owner runlifecycle.OperationOwner, artifact interface {
+func requireStatementRun(t testing.TB, ctx context.Context, owner runlifecycle.OperationOwner, artifact interface {
 	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 }, ids ...string) {
 	t.Helper()
-	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
 	if _, err := artifact.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +80,82 @@ func requireStatementRun(t testing.TB, owner runlifecycle.OperationOwner, artifa
 	}
 }
 
-func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) runlifecycle.OperationOwner {
+func statementOriginalContext(t testing.TB, sqlite bool, acquire func(context.Context, func(context.Context, *sql.Tx) error) (bool, error)) context.Context {
+	t.Helper()
+	identity := processbinding.LeaseIdentity{LeaseID: uuid.NewString(), OwnerID: "native-statement-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend}
+	if sqlite {
+		identity.Backend = processbinding.SQLiteLeaseBackend
+	}
+	var original processbinding.LeaseStamp
+	committed, err := acquire(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, identity, sqlite)
+		return err
+	})
+	if err != nil || !committed {
+		t.Fatalf("acquire original statement process: committed=%v err=%v", committed, err)
+	}
+	ctx, err := generationauthority.MutationContext(context.Background(), original, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return authoractivity.WithScope(ctx, authoractivity.BundleScope(identity.RuntimeInstanceID, sourceartifactfixture.BundleHash))
+}
+
+func acquireStatementProcessForDB(t testing.TB, db *sql.DB, postgres bool) context.Context {
+	t.Helper()
+	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := schemastore.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.TableName != "runtime_process_generation" {
+			continue
+		}
+		statements := plan.Statements
+		if !postgres {
+			statements, err = schemastore.SQLiteStatementsForPlan(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, statement := range statements {
+			if _, err := db.ExecContext(context.Background(), statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := platformschema.SeedFreshProcessGeneration(context.Background(), db, []schemastore.SchemaTableDDL{plan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !postgres {
+		backend, err := sqlitebackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return statementOriginalContext(t, true, backend.RunProcessAcquisitionOutcome)
+	}
+	backend, err := postgresbackend.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(context.Background(), backend, "swarm:runtime:shared-store-owner")
+	if err != nil || !acquired {
+		t.Fatalf("acquire retained statement session: acquired=%v err=%v", acquired, err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	return statementOriginalContext(t, false, lease.RunProcessAcquisitionOutcome)
+}
+
+func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) (runlifecycle.OperationOwner, context.Context) {
 	t.Helper()
 	backend, err := sqlitebackend.New(db)
 	if err != nil {
@@ -97,11 +174,12 @@ func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireStatementRun(t, owner, artifacts, ids...)
-	return owner
+	ctx := statementOriginalContext(t, true, backend.RunProcessAcquisitionOutcome)
+	requireStatementRun(t, ctx, owner, artifacts, ids...)
+	return owner, ctx
 }
 
-func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) runlifecycle.OperationOwner {
+func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) (runlifecycle.OperationOwner, context.Context) {
 	t.Helper()
 	backend, err := postgresbackend.New(db)
 	if err != nil {
@@ -120,6 +198,16 @@ func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, i
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireStatementRun(t, owner, artifacts, ids...)
-	return owner
+	lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(context.Background(), backend, "swarm:runtime:shared-store-owner")
+	if err != nil || !acquired {
+		t.Fatalf("acquire retained statement session: acquired=%v err=%v", acquired, err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx := statementOriginalContext(t, false, lease.RunProcessAcquisitionOutcome)
+	requireStatementRun(t, ctx, owner, artifacts, ids...)
+	return owner, ctx
 }

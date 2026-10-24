@@ -187,7 +187,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 						t.Fatalf("retained execution count=%d activation=%s discards=%d: %v", observed.ExecutedEventCount, result.Activation.ForkRunStatus, discards, err)
 					}
 					var status, executionStatus string
-					if err := db.QueryRow(`SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, result.Materialization.ForkRunID).Scan(&status, &executionStatus); err != nil || status != "completed" || executionStatus != "closed" {
+					if err := db.QueryRow(`SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, result.Materialization.ForkRunID).Scan(&status, &executionStatus); err != nil || status != "running" || executionStatus != "running" {
 						t.Fatalf("durable activation/execution = %s/%s: %v", status, executionStatus, err)
 					}
 					var lineage int
@@ -214,6 +214,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 
 func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, loaded LoadedSelectedContractSource, runID, eventID string, input ...events.Event) {
 	t.Helper()
+	ctx = nativeRunForkTestContext(t, ctx, selected)
 	at := time.Unix(1700002200, 0).UTC()
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,

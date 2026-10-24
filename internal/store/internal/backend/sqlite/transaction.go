@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -42,6 +43,17 @@ func (b *Backend) RunTransaction(ctx context.Context, label string, operation fu
 // RunTransactionOutcome keeps acknowledged COMMIT separate from later cleanup
 // errors. False is not evidence that an uncertain COMMIT rolled back.
 func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	return b.runTransactionOutcome(ctx, label, false, operation)
+}
+
+// RunProcessAcquisitionOutcome is the named pre-authority entrance. The
+// startup owner holds SQLite construction possession; the native writer and
+// generation fence remain held through this transaction's physical settlement.
+func (b *Backend) RunProcessAcquisitionOutcome(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	return b.runTransactionOutcome(ctx, "acquire runtime process capability", true, operation)
+}
+
+func (b *Backend) runTransactionOutcome(ctx context.Context, label string, acquisition bool, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	if err := b.refuseInspectionMutation(ctx); err != nil {
 		return false, err
 	}
@@ -92,7 +104,7 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 		permitWait := time.Since(permitStarted)
 		committed, err := func() (bool, error) {
 			defer b.releaseMutation()
-			return b.runTransactionOnceOutcome(attemptCtx, nil, permitWait, operation)
+			return b.runTransactionOnceOutcome(attemptCtx, nil, permitWait, acquisition, operation)
 		}()
 		attemptErr := attemptCtx.Err()
 		cancelAttempt()
@@ -261,11 +273,11 @@ func waitMutationBackoff(ctx context.Context, deadline time.Time, delay time.Dur
 }
 
 func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (err error) {
-	_, err = b.runTransactionOnceOutcome(ctx, opts, 0, operation)
+	_, err = b.runTransactionOnceOutcome(ctx, opts, 0, false, operation)
 	return err
 }
 
-func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, acquisition bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
 	write := opts == nil || !opts.ReadOnly
 	if err := ctx.Err(); err != nil {
 		return false, cancellationBeforeConnection(ctx, err, write)
@@ -282,6 +294,8 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	var rollbackDone <-chan error
 	releaseOrdering := func() {}
 	defer func() { releaseOrdering() }()
+	releaseGeneration := func() {}
+	defer func() { releaseGeneration() }()
 	discard := false
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
@@ -330,9 +344,20 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		stopRollback = context.AfterFunc(ctx, func() { done <- rollbackTx.Rollback() })
 	}
 	ctx, releaseOrdering = authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectSQLite)
+	ctx, releaseGeneration = generationauthority.BindTransaction(ctx, ctx, tx, true, opts != nil && opts.ReadOnly)
 	ctx = transactiontest.WithAttempt(ctx, probe)
 	if err = ctx.Err(); err != nil {
 		return false, err
+	}
+	if write {
+		if acquisition {
+			err = generationauthority.FenceGenerationChange(ctx, tx, true)
+		} else {
+			err = generationauthority.AdmitTransaction(ctx, tx, true)
+		}
+		if err != nil {
+			return false, err
+		}
 	}
 	if err = operation(ctx, tx); err != nil {
 		return false, err

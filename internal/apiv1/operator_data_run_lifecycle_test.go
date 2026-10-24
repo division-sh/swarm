@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -79,7 +80,7 @@ func forEachDataRunLifecycleStore(t *testing.T, run func(*testing.T, dataRunLife
 
 func TestRunCreationRequestBindingAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, scanRef, scoreRef := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
@@ -198,7 +199,7 @@ func TestRunCreationRequestBindingAcrossSelectedStores(t *testing.T) {
 
 func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, scanRef, scoreRef := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatalf("register data run catalog: %v", err)
@@ -565,9 +566,10 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		})
 
 		t.Run("fork pin owner preserves exact selected subset and overrides", func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContext(ctx)
 			newTarget := func() string {
 				runID := uuid.NewString()
+				ctx = apiTestOriginalProcessContext(t, ctx, fixture.primary)
 				storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 					RunID: runID, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
 					BundleHash: runStartTestBundleHash,
@@ -617,6 +619,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("register target catalog without source pin declaration: %v", err)
 			}
 			missingTarget := uuid.NewString()
+			ctx = apiTestOriginalProcessContext(t, ctx, fixture.primary)
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: missingTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
 				BundleHash: dataRunMissingBundleHash,
@@ -678,8 +681,18 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("register amended catalog: %v", err)
 			}
 			amendedSource := semanticview.Wrap(amendedBundle)
+			process, _ := worklifetime.ProcessFromContext(ctx)
+			amendedWork, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: amendedBundleHash})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := amendedWork.RetireAndWait(ctx); err != nil {
+					t.Error(err)
+				}
+			})
 			amendedBus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &amended, runtimebus.EventBusOptions{
-				ContractBundle: amendedSource, SourceArtifactFact: mustAPITestSourceArtifactFact(amendedBundleHash),
+				ContractBundle: amendedSource, SourceArtifactFact: mustAPITestSourceArtifactFact(amendedBundleHash), WorkOwner: amendedWork,
 			})
 			if err != nil {
 				t.Fatalf("new amended data EventBus: %v", err)
@@ -721,6 +734,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 
 			ctx := testAuthorActivityContext(context.Background())
 			incompatibleTarget := uuid.NewString()
+			ctx = apiTestOriginalProcessContext(t, ctx, fixture.primary)
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: incompatibleTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
 				BundleHash: amendedBundleHash,
@@ -734,6 +748,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("schema-incompatible fork left pins = %#v, %v", pins, loadErr)
 			}
 			overrideTarget := uuid.NewString()
+			ctx = apiTestOriginalProcessContext(t, ctx, fixture.primary)
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: overrideTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
 				BundleHash: amendedBundleHash,
@@ -801,7 +816,7 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 		{name: "request hash agreement", column: "request_json", mutate: func(value map[string]any) { value["event_id"] = uuid.NewString() }},
 	}
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, scanRef, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
@@ -884,7 +899,7 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
 	}
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, _, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
@@ -924,7 +939,7 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 
 func TestFailedFusedRunRejectsTypedRevisionAndCoordinatedContextCorruptionAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, scanRef, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
@@ -1048,7 +1063,7 @@ func TestFailedFusedRunRejectsTypedRevisionAndCoordinatedContextCorruptionAcross
 
 func TestSuccessfulFusedRunRequiresExactSourceCommitAggregateAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, scanRef, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
@@ -1106,7 +1121,7 @@ func TestSuccessfulFusedRunRequiresExactSourceCommitAggregateAcrossSelectedStore
 
 func TestDataShowPinCursorSurvivesConcurrentRunCreationAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, scanRef, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
@@ -1181,7 +1196,7 @@ func TestDataShowPinCursorSurvivesConcurrentRunCreationAcrossSelectedStores(t *t
 
 func TestDataShowProvenanceCursorSurvivesConcurrentProducerAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, scanRef, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
@@ -1235,7 +1250,7 @@ func TestDataShowProvenanceCursorSurvivesConcurrentProducerAcrossSelectedStores(
 
 func TestFusedRunBindingRejectsCorruptCanonicalSourceEvaluationAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, scanRef, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)

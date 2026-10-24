@@ -89,8 +89,7 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 				if err != nil {
 					return err
 				}
-				_, err = attempt.RequestCompletion(txctx, s.lifecycle, identity.RunID, &expires)
-				return err
+				return nil
 			}
 			if rec.status == "suspended" {
 				return runtimesessions.ErrSessionSuspended
@@ -113,8 +112,7 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 			if err != nil {
 				return err
 			}
-			_, err = attempt.RequestCompletion(txctx, s.lifecycle, identity.RunID, &expires)
-			return err
+			return nil
 		})
 		return value, err
 	})
@@ -183,8 +181,7 @@ func (s *LLMSQLiteOwner) Renew(ctx context.Context, lease *runtimesessions.Lease
 			if err := addAgentSessionFacts(attempt, identity.RunID, lease.SessionID); err != nil {
 				return err
 			}
-			_, err = attempt.RequestCompletion(txctx, s.lifecycle, identity.RunID, &expiry)
-			return err
+			return nil
 		})
 		return renewed, err
 	})
@@ -258,8 +255,7 @@ func (s *LLMSQLiteOwner) ReleaseOutcome(ctx context.Context, lease *runtimesessi
 			if err := addAgentSessionFacts(attempt, identity.RunID, lease.SessionID); err != nil {
 				return err
 			}
-			_, err = attempt.RequestCompletion(txctx, s.lifecycle, identity.RunID, nil)
-			return err
+			return nil
 		})
 		return rows, err
 	})
@@ -381,9 +377,6 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, leaseInput *runtimesessions
 			if _, err := tx.ExecContext(txctx, `UPDATE agent_sessions SET successor_session_id=?, updated_at=? WHERE session_id=? AND status='terminated'`, newID, now, rec.sessionID); err != nil {
 				return fmt.Errorf("link sqlite rotated successor session row: %w", err)
 			}
-			if _, err := attempt.RequestCompletion(txctx, s.lifecycle, identity.RunID, &expires); err != nil {
-				return err
-			}
 			return addAgentSessionFacts(attempt, identity.RunID, rec.sessionID, newID)
 		})
 		return lease, err
@@ -438,14 +431,10 @@ func (s *LLMSQLiteOwner) IncrementTurnOutcome(ctx context.Context, lease *runtim
 			if err := tx.QueryRowContext(txctx, `SELECT lease_expires_at FROM agent_sessions WHERE session_id=?`, lease.SessionID).Scan(&expiryRaw); err != nil {
 				return err
 			}
-			var nextWake *time.Time
-			if expiry, valid, err := sqliteTimeValue(expiryRaw); err != nil {
+			if _, _, err := sqliteTimeValue(expiryRaw); err != nil {
 				return err
-			} else if valid {
-				nextWake = &expiry
 			}
-			_, err = attempt.RequestCompletion(txctx, s.lifecycle, identity.RunID, nextWake)
-			return err
+			return nil
 		})
 		return rows, err
 	})
@@ -459,7 +448,7 @@ func (s *LLMSQLiteOwner) IncrementTurnOutcome(ctx context.Context, lease *runtim
 	return runtimesessions.TurnIncrementResult{Acknowledged: true}, result.Err()
 }
 
-func (s *LLMSQLiteOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
+func (s *LLMSQLiteOwner) ResetAll(ctx context.Context, metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
 	if s == nil || s.backend == nil {
 		return runtimesessions.ResetSummary{}, nil
 	}
@@ -468,7 +457,6 @@ func (s *LLMSQLiteOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runti
 	}
 	source := strings.TrimSpace(metadata.Source)
 	now := s.now()
-	ctx := context.Background()
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite session reset", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimesessions.ResetSummary, error) {
 		var summary runtimesessions.ResetSummary
 		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {

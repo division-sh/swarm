@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -853,7 +854,7 @@ func runAuthorityTransaction(
 	opts *sql.TxOptions,
 	fn func(context.Context, *sql.Tx) error,
 ) (committed bool, err error) {
-	return runAuthorityTransactionWithProof(ctx, session, opts, fn, nil)
+	return runAuthorityTransactionWithProof(ctx, session, opts, fn, nil, false)
 }
 
 func runAuthorityTransactionWithProof(
@@ -862,6 +863,7 @@ func runAuthorityTransactionWithProof(
 	opts *sql.TxOptions,
 	fn func(context.Context, *sql.Tx) error,
 	admitProof func() func(),
+	construction bool,
 ) (committed bool, err error) {
 	if session == nil {
 		return false, errors.New("PostgreSQL session authority is required")
@@ -882,6 +884,8 @@ func runAuthorityTransactionWithProof(
 	probe.Begun()
 	orderingCtx, releaseOrdering := authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectPostgres)
 	defer releaseOrdering()
+	orderingCtx, releaseGeneration := generationauthority.BindTransaction(ctx, orderingCtx, tx, false, opts != nil && opts.ReadOnly)
+	defer releaseGeneration()
 	serializationConflict := false
 	defer func() {
 		if tx != nil {
@@ -900,6 +904,11 @@ func runAuthorityTransactionWithProof(
 		}
 	}()
 	if runErr := session.runWithCallerCancellation(orderingCtx, func(operationCtx context.Context) error {
+		if !construction && (opts == nil || !opts.ReadOnly) {
+			if err := generationauthority.AdmitTransaction(operationCtx, tx, false); err != nil {
+				return err
+			}
+		}
 		return fn(transactiontest.WithAttempt(operationCtx, probe), tx)
 	}); runErr != nil {
 		serializationConflict = (opts == nil || !opts.ReadOnly) && exactSerializationConflict(runErr)
@@ -957,6 +966,42 @@ func (l *AdvisoryLockLease) RunTransactionOutcome(ctx context.Context, fn func(c
 		return false, errors.New("advisory lock lease has no current PostgreSQL session")
 	}
 	return RunAuthorityTransactionOutcome(ctx, session, fn)
+}
+
+// RunSchemaBootstrapOutcome uses the original retained construction session,
+// including its native lease proof, before any schema callback can run.
+func (l *AdvisoryLockLease) RunSchemaBootstrapOutcome(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	if l == nil || fn == nil {
+		return false, errors.New("schema bootstrap requires its retained construction lease")
+	}
+	l.mu.Lock()
+	session, key := l.session, l.lockKey
+	current := !l.released && session != nil
+	l.mu.Unlock()
+	if !current {
+		return false, errors.New("schema bootstrap construction lease is closed")
+	}
+	return runAuthorityTransactionWithProof(ctx, session, nil, func(txctx context.Context, tx *sql.Tx) error {
+		var held bool
+		if err := tx.QueryRowContext(txctx, retainedAdvisoryLockProofSQL, key).Scan(&held); err != nil {
+			return err
+		}
+		if !held {
+			return errors.New("construction lease is not held by its original native session")
+		}
+		return fn(txctx, tx)
+	}, nil, true)
+}
+
+// RunProcessAcquisitionOutcome is the one pre-authority generation transition,
+// serialized under the original construction lease and exclusive native fence.
+func (l *AdvisoryLockLease) RunProcessAcquisitionOutcome(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	return l.RunSchemaBootstrapOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := generationauthority.FenceGenerationChange(txctx, tx, false); err != nil {
+			return err
+		}
+		return fn(txctx, tx)
+	})
 }
 
 func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
@@ -1062,7 +1107,7 @@ func (l *AdvisoryLockLease) ProveCurrentWithRead(ctx context.Context, deadline t
 	}, func() func() {
 		decision = newLocalProofDecision(ctx, session, deadline)
 		return decision.finish
-	})
+	}, false)
 	if decision != nil && decision.expired {
 		err = errors.Join(err, context.DeadlineExceeded)
 	}

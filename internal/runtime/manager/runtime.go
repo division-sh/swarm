@@ -161,7 +161,7 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if transition == nil {
 		// A prior run may already be joined while exact activation cleanup is
 		// retained after a failed durable settlement.
-		return am.retireDynamicFlowAttemptsAfterJoin(context.Background())
+		return am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(am.runtimeContext()))
 	}
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
@@ -1033,9 +1033,10 @@ func (am *AgentManager) completeClaimedShutdownTransition(transition *runtimeLif
 	for _, wait := range done {
 		<-wait
 	}
-	runSettleErr := am.lifecycle.retireRunOwner(context.Background())
+	settlementCtx := context.WithoutCancel(executor.Context())
+	runSettleErr := am.lifecycle.retireRunOwner(settlementCtx)
 	if runSettleErr == nil {
-		runSettleErr = am.retireDynamicFlowAttemptsAfterJoin(context.Background())
+		runSettleErr = am.retireDynamicFlowAttemptsAfterJoin(settlementCtx)
 	}
 	settleErr := executor.Done()
 	am.lifecycle.completeShutdownTransition(transition, errors.Join(runSettleErr, settleErr))
@@ -1342,7 +1343,7 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 		return false, fmt.Errorf("session reset owner is required")
 	}
 	{
-		summary, err := am.sessionResetter.ResetAll(sessions.ResetMetadata{
+		summary, err := am.sessionResetter.ResetAll(am.runtimeContext(), sessions.ResetMetadata{
 			Source: source,
 		})
 		if err != nil {
@@ -1354,6 +1355,7 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 					Failure:   failureEnvelope(err, "agent-manager", "reset_sessions"),
 				})
 			}
+			return false, fmt.Errorf("reset durable sessions: %w", err)
 		} else if summary.OrphanedCount() > 0 && am.bus != nil {
 			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 				Level:     "warn",
@@ -1783,12 +1785,12 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 			}
 			if releaseErr := am.lifecycle.releaseLoop(token, done); releaseErr != nil && am.bus != nil {
 				failure := runtimefailures.FromError(releaseErr, "agent-manager", "release_agent_loop")
-				_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+				_ = am.bus.LogRuntime(context.WithoutCancel(parent), runtimepipeline.RuntimeLogEntry{
 					Level: "error", Component: "agent-manager", Action: "agent_loop_release_failed",
 					AgentID: agent.ID(), Failure: &failure.Failure,
 				})
 			}
-			_ = am.projectLifecycleDiagnostics(context.Background())
+			_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
 			if settleErr := workLease.Done(); settleErr != nil {
 				diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "agent execution loop work settlement failed",
 					"agent_id", agent.ID(),
@@ -2099,6 +2101,9 @@ func agentDeliveryExecutionContext(
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(deliveryCtx)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(deliveryCtx)
 	ctx, cleanup := eventreceiver.NewContext(deliveryCtx)
+	if process, found := worklifetime.ProcessFromContext(loopCtx); found {
+		ctx = worklifetime.WithProcess(ctx, process)
+	}
 	fail := func(err error) (context.Context, func(), error) {
 		cleanup()
 		return nil, nil, err
@@ -2128,9 +2133,6 @@ func agentDeliveryExecutionContext(
 		}
 		if admission, found := managedexecution.FromContext(loopCtx); found {
 			ctx = managedexecution.WithAdmission(ctx, admission)
-		}
-		if process, found := worklifetime.ProcessFromContext(loopCtx); found {
-			ctx = worklifetime.WithProcess(ctx, process)
 		}
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)

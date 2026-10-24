@@ -18,6 +18,7 @@ func TestRunStopStoragePreservesExactRunCountsAndOriginalReadBothStores(t *testi
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = fixture.originalContext(ctx)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "stop.storage", "runtime", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			sibling := eventtest.RunCreatingRootIngress(uuid.NewString(), "stop.storage.sibling", "runtime", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, event.CreatedAt())
 			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, event, []string{"worker", "other-worker"}); err != nil {

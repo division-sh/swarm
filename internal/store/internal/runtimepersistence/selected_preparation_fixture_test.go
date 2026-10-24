@@ -8,8 +8,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -41,7 +43,14 @@ func selectedMaterializationProcessForTest(t testing.TB, work *storeTestWorkFixt
 		}
 		return capability
 	}
-	capability := selectedPreparationProcessForTest(t, selected)
+	native, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatal("selected materialization requires the original native fixture owner")
+	}
+	capability, err := agentfixture.ProcessCapability(t, worklifetime.WithProcess(testAuthorActivityContext(), work.process), native)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if work.capabilities == nil {
 		work.capabilities = make(map[any]startupownership.ProcessCapability)
 	}

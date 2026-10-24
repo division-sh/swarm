@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"strconv"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -227,6 +230,12 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 
 func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
+	ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), s)
+	return seedSQLiteConversationForkSourceWithContext(t, ctx, s, base, historical...)
+}
+
+func seedSQLiteConversationForkSourceWithContext(t *testing.T, ctx context.Context, s *SQLiteRuntimeStore, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
+	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
 		bundleHash: authorActivityTestBundleHash,
@@ -247,7 +256,14 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		source.bundleHash = run.Artifact.BundleHash()
 		run.BundleHash = source.bundleHash
 	}
-	ctx := testAuthorActivityContextForBundle(source.bundleHash)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(source.bundleHash))
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, source.bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, scope)
+	source.ctx = ctx
+	ctx = storeTestOriginalProcessContext(t, ctx, s)
 	requireRunFixtureForTest(t, ctx, s, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()

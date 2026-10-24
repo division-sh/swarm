@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/store"
@@ -21,6 +22,7 @@ func managedConformanceExecutionContext(t testing.TB, ctx context.Context, autho
 
 func managedConformanceExecutionContextForBundle(t testing.TB, ctx context.Context, authorityID string, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	t.Helper()
+	ctx = worklifetime.WithProcess(ctx, conformanceTestProcessOwner(t))
 	admission, err := managedexecution.New(
 		managedexecution.KindNormalRuntime,
 		authorityID,

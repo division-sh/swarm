@@ -35,6 +35,7 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 				pg := newTestPostgresStore(t, db)
 				db.SetMaxOpenConns(1)
 				base := testAuthorActivityContext()
+				base = storeTestOriginalProcessContext(t, base, pg)
 				now := time.Now().UTC()
 				var table, event, observe string
 				var invoke func(context.Context) error
@@ -93,6 +94,7 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 					}
 				case strings.HasPrefix(name, "quiescence") || name == "reset_cleanup":
 					runID := uuid.NewString()
+					base = storeTestOriginalProcessContext(t, base, pg)
 					requireRunFixtureForTest(t, base, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-time.Hour)})
 					table, event = "runs", "UPDATE"
 					observe = `SELECT COALESCE(string_agg(status, ',' ORDER BY run_id), '') FROM runs`

@@ -34,12 +34,12 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
+
 	"github.com/google/uuid"
 )
 
@@ -56,6 +56,10 @@ func TestIssue2394PublicationGroupDeferredAgentSIGKILLBothStores(t *testing.T) {
 				source := loadPublicationGroupAgentCrashSource(t, root)
 				ctx, seeded := seedPublicationGroupAgentIntent(t, backend, fixture, source)
 				requirePublicationGroupCrashWorkflowLoad(t, ctx, fixture, seeded.runID)
+				work, _ := storeTestWorkFixtures.Load(t)
+				if err := selectedMaterializationProcessForTest(t, work.(*storeTestWorkFixture), fixture.store).Release(context.Background()); err != nil {
+					t.Fatal(err)
+				}
 				env := []string{"SWARM_FAN_OUT_CRASH_BACKEND=" + backend, "SWARM_FAN_OUT_CRASH_LOCATION=" + location,
 					"SWARM_FAN_OUT_CRASH_ROOT=" + root, "SWARM_FAN_OUT_CRASH_RUN=" + seeded.runID, "SWARM_FAN_OUT_CRASH_CUT=" + cut,
 					"SWARM_PUBLICATION_GROUP_CRASH_RECEIVER=agent"}
@@ -169,6 +173,10 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	}
 	t.Cleanup(catalog.Release)
 	workProcess := worklifetime.NewProcess()
+	if err := workProcess.BindOriginalProcess(processEvidence.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	ctx = worklifetime.WithProcess(ctx, workProcess)
 	work, err := workProcess.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: request.RuntimeInstanceID, BundleHash: fact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
@@ -324,20 +332,10 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	})
 	report := os.NewFile(3, "publication-group-agent-crash-evidence")
 	defer report.Close()
-	sink := &pipelineGracefulSink{}
-	sinkRegistration, err := fixture.store.(runlifecycle.CandidateRegistrar).RegisterCompletionCandidateSink(ctx, runlifecycle.CandidateScope{BundleHash: fact.BundleHash()}, sink)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(sinkRegistration.Release)
 	control := &pipelineCrashConnector{cut: os.Getenv("SWARM_FAN_OUT_CRASH_CUT")}
-	var beforeSubmit int32
 	barrier := func() {
 		if gate.entries.Load() != 1 {
 			panic("agent group cut lacks exactly one held actual agent invocation")
-		}
-		if control.cut == "after_commit_before_ack" && sink.submits.Load() != beforeSubmit {
-			panic("agent group candidate submission preceded acknowledgement")
 		}
 		if err := json.NewEncoder(report).Encode(fanOutCrashEvidence{Authority: processEvidence}); err != nil {
 			panic(err)
@@ -347,7 +345,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	control.barrier, signal.barrier = barrier, barrier
 	serving := &publicationGroupAgentCrashExecutor{publicationGroupCrashExecutor: &publicationGroupCrashExecutor{PipelineCoordinator: coordinator, errors: make(chan error, 8)}}
 	if mode == "predecessor" {
-		serving.fault = publicationGroupAgentCrashGroup{control: control, gate: gate, signal: signal, cut: control.cut, before: func() { beforeSubmit = sink.submits.Load() }}
+		serving.fault = publicationGroupAgentCrashGroup{control: control, gate: gate, signal: signal, cut: control.cut}
 	}
 	workers := 1
 	registration, err := startupownership.StartFanOutServing(ctx, live, work, &workers, serving)
@@ -403,36 +401,6 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	}
 	if gate.entries.Load() != 3 || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")) {
 		t.Fatal("duplicate recovery reexecuted an agent or mutated committed business history")
-	}
-	sinkRegistration.Release()
-	observed := &pipelineCrashCandidateObserver{CandidateStore: fixture.store.(runlifecycle.CandidateStore), results: make(chan pipelineCrashCandidateResult, 8)}
-	lifecycle, err := runlifecycle.NewExecutor(observed, runlifecycle.CandidateScope{BundleHash: fact.BundleHash()}, stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{".": {"done", "exhausted"}}), work, runlifecycle.ExecutorOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := lifecycle.Retire(deadline); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := lifecycle.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case result := <-observed.results:
-		if result.err != nil || result.candidate.RunID != runID || result.outcome.Outcome != runlifecycle.OutcomeAwaitMutation {
-			t.Fatalf("actual agent-run startup candidate recovery: %+v", result)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("startup did not discover durable agent-run candidate")
-	}
-	if err := lifecycle.Retire(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if observed.executions.Load() != 1 {
-		t.Fatalf("agent-run candidate executed %d times", observed.executions.Load())
 	}
 	if err := json.NewEncoder(report).Encode(fanOutCrashEvidence{Authority: processEvidence, Recovered: true}); err != nil {
 		t.Fatal(err)

@@ -11,12 +11,14 @@ import (
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -89,12 +91,27 @@ var fixtureSessions sync.Map
 
 func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixtureSession, error) {
 	t.Helper()
-	key := fmt.Sprintf("%p:%p", t, selected)
+	callerKey := fmt.Sprintf("%p:%p", t, selected)
+	key := callerKey
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		key = fmt.Sprintf("%p:%p", process, selected)
+	}
 	runtimeInstanceID, hasRuntimeInstanceID := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
-	if existing, ok := fixtureSessions.Load(key); ok {
+	existing, ok := fixtureSessions.Load(key)
+	if !ok && callerKey != key {
+		existing, ok = fixtureSessions.Load(callerKey)
+	}
+	if ok {
 		session := existing.(*fixtureSession)
 		if hasRuntimeInstanceID && session.runtimeInstanceID != runtimeInstanceID {
 			return nil, errors.New("agent fixture session runtime differs from caller runtime")
+		}
+		if callerKey != key {
+			fixtureSessions.Store(key, session)
+			fixtureSessions.Store(callerKey, session)
+			t.Cleanup(func() {
+				fixtureSessions.Delete(callerKey)
+			})
 		}
 		return session, nil
 	}
@@ -113,8 +130,16 @@ func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixt
 		_ = capability.Release(context.Background())
 		return actual.(*fixtureSession), nil
 	}
+	if callerKey != key {
+		fixtureSessions.Store(callerKey, created)
+	}
 	t.Cleanup(func() {
-		fixtureSessions.Delete(key)
+		fixtureSessions.Range(func(key, value any) bool {
+			if value == created {
+				fixtureSessions.Delete(key)
+			}
+			return true
+		})
 		_ = capability.Release(context.Background())
 	})
 	return created, nil
@@ -130,6 +155,25 @@ func ProcessCapability(t testing.TB, ctx context.Context, selected Store) (runti
 		return nil, err
 	}
 	return session.capability, nil
+}
+
+// ProcessContext carries this fixture's retained original acquisition, never a
+// replacement read from the selected store's current generation.
+func ProcessContext(t testing.TB, ctx context.Context, selected Store) (context.Context, error) {
+	capability, err := ProcessCapability(t, ctx, selected)
+	if err != nil {
+		return nil, err
+	}
+	original, err := capability.Evidence()
+	if err != nil {
+		return nil, err
+	}
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+			return nil, err
+		}
+	}
+	return generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
 }
 
 // AdmitGeneration installs the caller's complete source plan before a fixture
@@ -412,6 +456,10 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 	if err != nil {
 		return err
 	}
+	ctx, err = ProcessContext(t, ctx, selected)
+	if err != nil {
+		return err
+	}
 	if err := ensureFixtureRun(ctx, selected, identity.RunID, rec.StartedAt, source); err != nil {
 		return err
 	}
@@ -600,6 +648,10 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
+	ctx, err = ProcessContext(t, ctx, selected)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	if err := ensureFixtureRun(ctx, selected, identity.RunID, req.Now); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -725,6 +777,10 @@ func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimem
 		ctx = context.Background()
 	}
 	identity, key, kind, err := validateExactDurableTransition(req)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	ctx, err = ProcessContext(t, ctx, selected)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}

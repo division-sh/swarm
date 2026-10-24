@@ -45,6 +45,7 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		// Row34 is component-prepared/native-committed, not a manager or
 		// executable-attachment proof (reviewer-e 6202595494).
 		ctx := correlation.WithRunID(testAuthorActivityContext(), runID)
+		ctx = storeTestOriginalProcessContext(t, ctx, selected)
 		requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: event.CreatedAt().Add(-time.Minute)})
 		command, err := flowactivationfixture.Command(ctx, pipeline.WorkflowInstance{
 			InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID, EntityType: "default",
@@ -118,6 +119,7 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		flow + "/events.yaml":   eventSchema,
 	})
 	ctx := correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: event.CreatedAt().Add(-time.Minute),
 		Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),

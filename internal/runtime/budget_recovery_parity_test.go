@@ -25,6 +25,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -67,6 +68,14 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, postgres := tc.start(t)
 			ctx := testAuthorActivityContext(context.Background())
+			originalStore, ok := selected.(agentfixture.Store)
+			if !ok {
+				t.Fatalf("budget fixture store %T has no original process owner", selected)
+			}
+			ctx, err := agentfixture.ProcessContext(t, ctx, originalStore)
+			if err != nil {
+				t.Fatal(err)
+			}
 			now := time.Now().UTC().Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			entityA, entityB, terminalEntity, crossSourceEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()

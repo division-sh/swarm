@@ -14,13 +14,12 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
+
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 )
 
 func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testing.T) {
@@ -46,7 +45,6 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	lifecycleExecutor := startAPIRunLifecycleExecutor(t, pg, source, bundleHash)
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	module := newRunCompletionSystemNodeModule(t, source)
@@ -68,7 +66,20 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if result := asMap(t, started.Result); result["run_id"] != runID || result["status"] != "running" {
 		t.Fatalf("run.start result = %#v, want running run %s", result, runID)
 	}
-	run := waitForRunGetStatus(t, handler, db, lifecycleExecutor, runID, "completed")
+	var run map[string]any
+	requireAPIV1Convergence(t, "system-node instance finish and quiescence", func() (bool, error) {
+		diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"settled","method":"run.diagnose","params":{"run_id":%q}}`, runID))
+		if diagnose.Error != nil {
+			t.Fatalf("run.diagnose error = %#v", diagnose.Error)
+		}
+		report := asMap(t, diagnose.Result)
+		run = asMap(t, report["run"])
+		instance, err := pg.LoadOperatorEntity(context.Background(), runtimepipeline.FlowInstanceEntityID("discovery"), runID)
+		if err != nil {
+			return false, err
+		}
+		return instance.Entity.CurrentState != nil && *instance.Entity.CurrentState == "done" && asMap(t, report["test_quiescence"])["ready"] == true, nil
+	})
 	if run["run_id"] != runID {
 		t.Fatalf("run.get run_id = %#v, want %s", run["run_id"], runID)
 	}
@@ -88,76 +99,16 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		t.Fatalf("run.diagnose error = %#v", diagnose.Error)
 	}
 	diagnosis := asMap(t, diagnose.Result)
-	if diagnosis["operational_state"] != "completed" {
-		t.Fatalf("run.diagnose operational_state = %#v, want completed", diagnosis["operational_state"])
+	if asMap(t, diagnosis["test_quiescence"])["ready"] != true {
+		t.Fatalf("run.diagnose test_quiescence = %#v, want ready", diagnosis["test_quiescence"])
 	}
 	diagnosisRun := asMap(t, diagnosis["run"])
-	if diagnosisRun["status"] != "completed" {
-		t.Fatalf("run.diagnose run.status = %#v, want completed", diagnosisRun["status"])
-	}
-
-	terminalPublish := rpcCall(t, handler, eventPublishBody(runID, bundleHash, "flow.started", `{"topic":"after-terminal"}`, "", "idem-after-terminal"))
-	if terminalPublish.Error == nil {
-		t.Fatal("event.publish --run-id terminal error = nil")
-	}
-	if data := asMap(t, terminalPublish.Error.Data); data["code"] != RunAlreadyTerminalCode {
-		t.Fatalf("event.publish --run-id terminal data = %#v, want %s", data, RunAlreadyTerminalCode)
+	if diagnosisRun["status"] != "running" {
+		t.Fatalf("run.diagnose run.status = %#v, want running", diagnosisRun["status"])
 	}
 	if count := countEventsByName(t, pg, "flow.started"); count != 1 {
-		t.Fatalf("flow.started event count after terminal publish = %d, want 1", count)
+		t.Fatalf("flow.started event count after instance finish = %d, want 1", count)
 	}
-}
-
-func startAPIRunLifecycleExecutor(
-	t *testing.T,
-	pg *store.PostgresStore,
-	source semanticview.Source,
-	bundleHash string,
-) *runtimerunlifecycle.Executor {
-	t.Helper()
-	scope := runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}
-	occurrence := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bundleHash)
-	executor, err := runtimerunlifecycle.NewExecutor(
-		pg,
-		scope,
-		runCompletionTerminalCatalog(source),
-		occurrence,
-		runtimerunlifecycle.ExecutorOptions{},
-	)
-	if err != nil {
-		t.Fatalf("NewExecutor: %v", err)
-	}
-	registration, err := pg.RegisterCompletionCandidateSink(context.Background(), scope, executor)
-	if err != nil {
-		t.Fatalf("RegisterCompletionCandidateSink: %v", err)
-	}
-	if err := executor.Start(context.Background()); err != nil {
-		registration.Release()
-		t.Fatalf("start completion candidate executor: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := executor.Retire(context.Background()); err != nil {
-			t.Errorf("retire completion candidate executor: %v", err)
-		}
-		registration.Release()
-	})
-	return executor
-}
-
-func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycle.FinalCatalog {
-	flows := make(map[string][]string)
-	for flowID := range source.FlowSchemaEntries() {
-		states := source.FlowFinalStages(flowID)
-		flows[flowID] = states
-		flows[source.FlowPath(flowID)] = states
-	}
-	for _, scope := range source.FlowScopes() {
-		states := source.FlowFinalStages(scope.ID)
-		flows[scope.ID] = states
-		flows[scope.Path] = states
-		flows[scope.OwningFlowID] = states
-	}
-	return stagecatalogfixture.NewFinalCatalog(source.FlowFinalStages(semanticview.RootExecutionFlowID(source)), flows)
 }
 
 type runCompletionSystemNodeModule struct {
@@ -189,38 +140,6 @@ func (m runCompletionSystemNodeModule) WorkflowNodes() []runtimepipeline.Workflo
 
 func (m runCompletionSystemNodeModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guards
-}
-
-func waitForRunGetStatus(
-	t *testing.T,
-	handler *Handler,
-	db *sql.DB,
-	executor *runtimerunlifecycle.Executor,
-	runID,
-	wantStatus string,
-) map[string]any {
-	t.Helper()
-	var run map[string]any
-	requireAPIV1Convergence(t, fmt.Sprintf("run.get status for %s", runID), func() (bool, error) {
-		get := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"get","method":"run.get","params":{"run_id":%q}}`, runID))
-		if get.Error != nil {
-			t.Fatalf("run.get error = %#v", get.Error)
-		}
-		run = asMap(t, asMap(t, get.Result)["run"])
-		if run["status"] == wantStatus {
-			return true, nil
-		}
-		var revision int64
-		var dueAt sql.NullTime
-		if err := db.QueryRow(`SELECT completion_revision, completion_due_at FROM runs WHERE run_id = $1::uuid`, runID).Scan(&revision, &dueAt); err != nil {
-			return false, err
-		}
-		return false, fmt.Errorf(
-			"status=%#v, want %s; completion_revision=%d due_present=%t active_candidates=%d",
-			run["status"], wantStatus, revision, dueAt.Valid, executor.ActiveCandidates(),
-		)
-	})
-	return run
 }
 
 func triggerEventIDForRun(t *testing.T, db *sql.DB, runID string) string {

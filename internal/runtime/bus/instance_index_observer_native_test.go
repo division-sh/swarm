@@ -119,7 +119,7 @@ func verifyNativeObserverCreationOrder(t *testing.T, backend string, observerFir
 	if !observerFirst {
 		observer = construct("observer", "one")
 	}
-	eventBus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: table})
+	eventBus, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: table})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,17 +17,31 @@ type processGenerationReader interface {
 }
 
 func ReadProcessGeneration(ctx context.Context, q processGenerationReader, sqlite bool) (processbinding.LeaseStamp, error) {
-	return readProcessGeneration(ctx, q, sqlite, false)
+	if ctx != nil {
+		if tx, ok := q.(*sql.Tx); ok {
+			if scope, bound := ctx.Value(transactionKey{}).(*transaction); bound && scope != nil {
+				scope.Lock()
+				defer scope.Unlock()
+				if !scope.active {
+					return processbinding.LeaseStamp{}, sql.ErrTxDone
+				}
+				if scope.tx != tx || scope.sqlite != sqlite {
+					return processbinding.LeaseStamp{}, errors.New("process reader differs from its native transaction")
+				}
+				if scope.loaded {
+					return scope.stamp, errors.Join(ctx.Err(), scope.caller.Err())
+				}
+			}
+		}
+	}
+	return readProcessGeneration(ctx, q, sqlite, unlocked)
 }
 
 func ReadProcessGenerationTx(ctx context.Context, tx *sql.Tx, sqlite bool) (processbinding.LeaseStamp, error) {
 	if ctx == nil || tx == nil {
 		return processbinding.LeaseStamp{}, errors.New("process-generation context and transaction are required")
 	}
-	if err := FenceMutation(ctx, tx, sqlite); err != nil {
-		return processbinding.LeaseStamp{}, err
-	}
-	return readProcessGeneration(ctx, tx, sqlite, !sqlite)
+	return readCurrentTx(ctx, tx, sqlite, shared)
 }
 
 func ProcessCoordinatesCurrent(ctx context.Context, q processGenerationReader, expected processbinding.LeaseCoordinates, sqlite bool) (bool, error) {
@@ -46,7 +60,7 @@ func ProcessCoordinatesCurrentTx(ctx context.Context, tx *sql.Tx, expected proce
 	return err == nil && current.Generation != 0 && current.Coordinates() == expected, err
 }
 
-func readProcessGeneration(ctx context.Context, q processGenerationReader, sqlite, lock bool) (processbinding.LeaseStamp, error) {
+func readProcessGeneration(ctx context.Context, q processGenerationReader, sqlite bool, mode lockMode) (processbinding.LeaseStamp, error) {
 	if ctx == nil || q == nil {
 		return processbinding.LeaseStamp{}, errors.New("process-generation context and reader are required")
 	}
@@ -56,8 +70,10 @@ func readProcessGeneration(ctx context.Context, q processGenerationReader, sqlit
 	query := `SELECT generation, CAST(lease_id AS TEXT), owner_id, CAST(boot_id AS TEXT),
 		CAST(runtime_instance_id AS TEXT), backend
 		FROM runtime_process_generation WHERE singleton_id = 1`
-	if lock {
+	if !sqlite && mode == exclusive {
 		query += " FOR UPDATE"
+	} else if !sqlite && mode == shared {
+		query += " FOR SHARE"
 	}
 	var generation int64
 	var lease, owner, boot, runtime, backend sql.NullString
@@ -105,10 +121,7 @@ func AdvanceProcessGeneration(ctx context.Context, tx *sql.Tx, identity processb
 	if ctx == nil || tx == nil {
 		return processbinding.LeaseStamp{}, errors.New("process-generation context and transaction are required")
 	}
-	if err := FenceMutation(ctx, tx, sqlite); err != nil {
-		return processbinding.LeaseStamp{}, err
-	}
-	current, err := readProcessGeneration(ctx, tx, sqlite, !sqlite)
+	current, err := readCurrentTx(ctx, tx, sqlite, exclusive)
 	if err != nil {
 		return processbinding.LeaseStamp{}, err
 	}
@@ -136,6 +149,7 @@ func AdvanceProcessGeneration(ctx context.Context, tx *sql.Tx, identity processb
 	if changed != 1 {
 		return processbinding.LeaseStamp{}, errors.New("process-generation predecessor changed")
 	}
+	recordAdvance(ctx, next)
 	return next, nil
 }
 
@@ -149,10 +163,7 @@ func ProcessGenerationCurrent(ctx context.Context, tx *sql.Tx, expected processb
 	if ctx == nil || tx == nil {
 		return false, errors.New("process-generation context and transaction are required")
 	}
-	if err := FenceMutation(ctx, tx, sqlite); err != nil {
-		return false, err
-	}
-	current, err := readProcessGeneration(ctx, tx, sqlite, !sqlite)
+	current, err := ReadProcessGenerationTx(ctx, tx, sqlite)
 	if err != nil {
 		return false, err
 	}

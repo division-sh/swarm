@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimegates "github.com/division-sh/swarm/internal/runtime/gateruntime"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -22,6 +21,7 @@ func TestRunLifecycleCompletionBlockerMatrixParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 			testCompletionSessionBlockers(t, fixture, ctx)
 			testCompletionGateBlockers(t, fixture, ctx)
 			testCompletionEffectBlockers(t, fixture, ctx)
@@ -74,7 +74,7 @@ func testCompletionSessionBlockers(t *testing.T, fixture runLifecycleCandidatePa
 			if got := summaries.Sessions.MalformedLease > 0; got != test.malformed {
 				t.Fatalf("session malformed = %v, want %v: %#v", got, test.malformed, summaries.Sessions)
 			}
-			assertCompletionBlockerExecution(t, fixture, ctx, runID, test.wantBlock)
+
 		})
 	}
 }
@@ -160,7 +160,7 @@ func testCompletionGateBlockers(t *testing.T, fixture runLifecycleCandidateParit
 			if got := summaries.Decisions.MalformedObligations > 0; got != test.malformed {
 				t.Fatalf("gate malformed = %v, want %v: %#v", got, test.malformed, summaries.Decisions)
 			}
-			assertCompletionBlockerExecution(t, fixture, ctx, runID, test.wantBlock)
+
 		})
 	}
 }
@@ -210,10 +210,7 @@ func testCompletionEffectBlockers(t *testing.T, fixture runLifecycleCandidatePar
 				(summaries.Effects.MalformedBindings > 0) != test.malformed {
 				t.Fatalf("external-effect summary = %#v", summaries.Effects)
 			}
-			assertCompletionBlockerExecution(
-				t, fixture, ctx, runID,
-				test.active > 0 || test.orphan > 0 || test.malformed,
-			)
+
 		})
 	}
 }
@@ -237,7 +234,7 @@ func testCompletionEntityBlockers(t *testing.T, fixture runLifecycleCandidatePar
 		if summaries.Entities.ReadyForCompletion() || summaries.Entities.Malformed != 1 {
 			t.Fatalf("unknown entity terminal descriptor did not fail closed: %#v", summaries.Entities)
 		}
-		assertCompletionBlockerExecution(t, fixture, ctx, runID, true)
+
 	})
 }
 
@@ -448,48 +445,6 @@ func insertCompletionBlockerEffect(
 	}
 	if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("insert completion blocker reservation: %v", err)
-	}
-}
-
-func assertCompletionBlockerExecution(
-	t *testing.T,
-	fixture runLifecycleCandidateParityFixture,
-	ctx context.Context,
-	runID string,
-	wantBlock bool,
-) {
-	t.Helper()
-	request := requestRunLifecycleCandidateParity(t, fixture, ctx, runID)
-	result, err := fixture.store.ExecuteCompletionCandidate(
-		ctx,
-		request.Candidate,
-		stagecatalogfixture.NewFinalCatalog(
-			nil,
-			map[string][]string{semanticRunFixtureFlow: {"completed"}},
-		),
-	)
-	if err != nil {
-		t.Fatalf("execute completion blocker candidate: %v", err)
-	}
-	snapshot, err := fixture.store.LoadRunLifecycleSnapshot(ctx, runID)
-	if err != nil {
-		t.Fatalf("load completion blocker lifecycle: %v", err)
-	}
-	if wantBlock {
-		if result.Outcome != runtimerunlifecycle.OutcomeAwaitMutation &&
-			result.Outcome != runtimerunlifecycle.OutcomeRearmAt {
-			t.Fatalf("blocked completion outcome = %s", result.Outcome)
-		}
-		if snapshot.Status != string(runtimerunlifecycle.StateRunning) || snapshot.EndedAt != nil {
-			t.Fatalf("blocked completion mutated lifecycle: %#v", snapshot)
-		}
-		return
-	}
-	if result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
-		t.Fatalf("eligible completion outcome = %s", result.Outcome)
-	}
-	if snapshot.Status != string(runtimerunlifecycle.StateCompleted) || snapshot.EndedAt == nil {
-		t.Fatalf("eligible completion did not terminalize lifecycle: %#v", snapshot)
 	}
 }
 

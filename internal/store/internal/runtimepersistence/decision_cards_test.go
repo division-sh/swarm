@@ -657,6 +657,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, cardStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 16, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
@@ -716,6 +717,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 		t.Run(backend+"/committed_verdict_blocks_terminalization", func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, cardStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 17, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
@@ -762,6 +764,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 		t.Run(backend+"/committed_verdict_freezes_on_fork", func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, cardStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 18, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
@@ -1649,6 +1652,7 @@ func decisionCardTestStore(t *testing.T, backend string, probes ...*cardIntentRe
 			t.Fatalf("BootstrapSchema sqlite: %v", err)
 		}
 		registerTestAuthorActivityCatalog(t, store)
+		ctx = storeTestOriginalProcessContext(t, ctx, store)
 		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 			t.Fatalf("create sqlite run through lifecycle owner: %v", err)
 		}
@@ -1663,6 +1667,7 @@ func decisionCardTestStore(t *testing.T, backend string, probes ...*cardIntentRe
 		}
 		store := newTestPostgresStore(t, db)
 		registerTestAuthorActivityCatalog(t, store)
+		ctx = storeTestOriginalProcessContext(t, ctx, store)
 		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 			t.Fatalf("create postgres run through lifecycle owner: %v", err)
 		}

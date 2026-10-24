@@ -211,14 +211,8 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						if err := capability.Release(context.Background()); err != nil {
 							t.Fatal(err)
 						}
-						freshProcess := worklifetime.NewProcess()
-						t.Cleanup(func() {
-							freshProcess.Retire()
-							if _, err := freshProcess.Join(context.Background()); err != nil {
-								t.Error(err)
-							}
-						})
-						capability = selectedContractTestProcessCapability(t, ctx, authorityStore)
+						var freshProcess *worklifetime.Process
+						ctx, freshProcess, capability = successorRunForkProcessForTest(t, ctx, authorityStore)
 						owner = newOwner()
 						if err := owner.BindSelectedProcess(ctx, freshProcess, capability); err != nil {
 							t.Fatal(err)
@@ -362,9 +356,6 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 					if publication.Err() == nil {
 						t.Fatal("stopped retained execution was not cancelled")
 					}
-					if _, err := observeSelectedRetainedExecution(t, ctx, owner, selected, forkRun); err != nil && !errors.Is(err, context.Canceled) {
-						t.Fatalf("join stopped retained execution: %v", err)
-					}
 					if err := <-stopped; err != nil {
 						t.Fatal(err)
 					}
@@ -372,6 +363,9 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						if err := <-retired; err != nil {
 							t.Fatalf("retirement could not join settled execution/control: %v", err)
 						}
+					}
+					if _, err := observeSelectedRetainedExecution(t, ctx, owner, selected, forkRun); err != nil && !errors.Is(err, context.Canceled) {
+						t.Fatalf("join stopped retained execution: %v", err)
 					}
 				}
 				var status, control, execution string

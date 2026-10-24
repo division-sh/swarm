@@ -27,7 +27,7 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 	proveNativeReconfigureMemoryBothStores(t, false, manager.ProveReconfigureExplicitTrue)
 }
 
-func proveNativeReconfigureMemoryBothStores(t *testing.T, enabled bool, prove func(*testing.T, manager.AgentLifecyclePersistence, manager.ReconfigureMemoryNativeTestStore, manager.PersistedAgent, func(agentmemory.Identity) []sessions.Record, manager.ReconfigureMemoryNativeAdmission)) {
+func proveNativeReconfigureMemoryBothStores(t *testing.T, enabled bool, prove func(*testing.T, context.Context, manager.AgentLifecyclePersistence, manager.ReconfigureMemoryNativeTestStore, manager.PersistedAgent, func(agentmemory.Identity) []sessions.Record, manager.ReconfigureMemoryNativeAdmission)) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -41,13 +41,17 @@ func proveNativeReconfigureMemoryBothStores(t *testing.T, enabled bool, prove fu
 				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
 			record := manager.ReconfigureMemoryNativeFixture(t, enabled)
-			storetest.RequireStaticAgentFixture(t, manager.TerminalPanicFixtureContext(), selected, record)
+			ctx, err := agentfixture.ProcessContext(t, manager.TerminalPanicFixtureContext(), selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
 			view, found, err := selected.LoadAgentLifecycleState(context.Background(), record.Config.Identity)
 			if err != nil || !found {
 				t.Fatalf("native memory fixture row: found=%v err=%v", found, err)
 			}
 			record.Topology = view.Topology
-			prove(t, storetest.AgentLifecycleFixture(t, selected), selected, record, func(identity agentmemory.Identity) []sessions.Record {
+			prove(t, ctx, storetest.AgentLifecycleFixture(t, selected), selected, record, func(identity agentmemory.Identity) []sessions.Record {
 				return readNativeReconfigureSessionHistory(t, selected, identity)
 			}, func(candidate actors.AgentConfig) (manager.AgentLifecyclePersistence, agenttopology.Admission) {
 				return admitNativeReconfigureCandidate(t, selected, candidate)

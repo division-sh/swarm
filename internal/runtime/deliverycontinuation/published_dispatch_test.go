@@ -707,7 +707,7 @@ func TestCoordinatorDispatchPublishedRejectsSelectedAuthority(t *testing.T) {
 	}
 	dispatcher := &coordinatorTestDispatcher{}
 	store := &coordinatorTestStore{observations: make(map[string]runtimedelivery.ContinuationObservation)}
-	c, err := NewSelected(store, authority, owner, dispatcher, nil)
+	c, err := NewSelected(store, authority, owner, dispatcher, nil, func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

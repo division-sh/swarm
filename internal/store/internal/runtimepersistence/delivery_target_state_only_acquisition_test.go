@@ -36,6 +36,7 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			bundle, _ := semanticview.Bundle(source)
 			selected, _, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
 			childRunID := uuid.NewString()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, childRunID, time.Now().UTC())
 			root := runtimeflowidentity.Stored(source, ".", runID, runID, "", "")
 			constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: time.Now().UTC()})
@@ -425,6 +426,7 @@ func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcqui
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := newTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	return selected, db, ctx, runID
 }
@@ -441,12 +443,14 @@ func openStateOnlyAcquisitionStoreWithSource(t *testing.T, backend string, sourc
 	if backend == "sqlite" {
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		db := selected.backend.ConstructionHandle()
+		ctx = storeTestOriginalProcessContext(t, ctx, selected)
 		requireRunFixtureForTest(t, ctx, selected, fixture)
 		return selected, db, ctx, runID
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := newTestPostgresStore(t, db)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, fixture)
 	return selected, db, ctx, runID
 }

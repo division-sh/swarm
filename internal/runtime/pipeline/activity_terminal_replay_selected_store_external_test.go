@@ -29,6 +29,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -369,14 +370,21 @@ func activityJournalProofSource(t *testing.T, tools map[string]runtimecontracts.
 	return semanticview.Wrap(bundle)
 }
 
-func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string) context.Context {
+func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string, original ...startupownership.ProcessCapability) context.Context {
 	t.Helper()
 	bundle, found := semanticview.Bundle(source)
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("activity journal fixture requires its actual compiled artifact")
 	}
-	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
+	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
 	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(context.Background(), runID), fact))
+	if len(original) == 1 {
+		ctx = nativeOriginalProcessContextFixture(t, ctx, original[0])
+	} else if len(original) == 0 {
+		ctx = nativeProcessContextFixture(t, ctx, selected.events)
+	} else {
+		t.Fatal("activity fixture requires one original process")
+	}
 	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
 	})

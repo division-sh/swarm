@@ -370,10 +370,12 @@ func TestFanOutReadAPISelectedStores(t *testing.T) {
 			var runs RunReadStore
 			if backend == "sqlite" {
 				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				ctx = apiTestOriginalProcessContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC()})
 				runs = selected
 			} else {
 				selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				ctx = apiTestOriginalProcessContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC()})
 				runs = selected
 			}

@@ -195,7 +195,10 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+				if selectedTestInstanceSettled(t, wait, owner, selected, flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(".", child, child)}, "attention") {
+					if header.Status != "running" || header.EndedAt != nil || process.ActiveCount() != baseline {
+						t.Fatalf("finished instance changed live run or leaked shutdown work: %+v leases=%d baseline=%d", header, process.ActiveCount(), baseline)
+					}
 					break
 				}
 				select {

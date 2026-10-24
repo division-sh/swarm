@@ -16,6 +16,7 @@ func TestNotifyAllChildrenObservationPreservesPhysicalItemMetadataAndDiagnosticS
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 			active, sibling := seedDeliveryRecoveryClaim(t, fixture, ctx), seedDeliveryRecoveryClaim(t, fixture, ctx)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, active, 2)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, sibling, 1)
@@ -171,6 +172,7 @@ func TestNotifyAllChildrenObservationRefusesRawCancelledClosedAndFailedSectionsB
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), context.Background()
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 			refuse := func(ctx context.Context) {
 				if rows, err := ReadNotifyAllChildrenItemStorageForTest(ctx, fixture.store, uuid.NewString(), uuid.NewString()); err == nil || rows != nil {
 					t.Fatalf("failed items=%v/%v", rows, err)

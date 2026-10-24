@@ -391,6 +391,7 @@ func platformTableNamesForSQLiteSchemaTest() []string {
 		"timers",
 		"dead_letters",
 		"runs",
+		"run_event_counts",
 		"run_scenario_execution_profiles",
 		"entity_mutations",
 		"runtime_store_metadata",

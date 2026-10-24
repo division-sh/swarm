@@ -74,6 +74,7 @@ func TestRunControlAcknowledgedCleanupFaultPreservesFollowUpBothStores(t *testin
 			registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
 			runID := runtimecorrelation.RunIDFromContext(seedCtx)
 			ctx := authorGenericScheduleConsumerContext(runID)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			fault := errors.New("injected after acknowledged run control COMMIT")
 			store := &postCommitRunControlFaultStore{Store: selected.(runtimeruncontrol.Store), fault: fault}
 			request := runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "ack_fault", ControlledBy: "test", Now: time.Now().UTC()}

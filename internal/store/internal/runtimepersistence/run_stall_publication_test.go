@@ -101,7 +101,7 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 			routing, eventType = staticSource, "global/test.node_emitted"
 			instance.Route = flowidentity.StoredRoute("global", "global", "global")
 		}
-		catalogScope := authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash)
+		catalogScope := authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceartifactfixture.BundleHash)
 		ctx = authoractivity.WithScope(ctx, catalogScope)
 		toolName := tools.EmitToolName("test.node_emitted")
 		surface := managedCompletionTestSurface(t, fixture.authority, adapter)
@@ -197,11 +197,7 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 			outputID, outputAt = candidates[0].EventID, candidates[0].CreatedAt
 		}
 		if phase != "proposal_only" && phase != "no_proposal" {
-			lease, err := selected.selected.(testAuthorActivityCatalogRegistrar).RegisterAuthorActivityEventCatalog(catalogScope, []authoractivity.EventDescriptor{{EventType: string(eventType), Disposition: authoractivity.StoryAuthored}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(lease.Release)
+			registerTestAuthorActivityCatalogForContext(t, selected.selected.(testAuthorActivityCatalogRegistrar), ctx)
 			publisherStore := selected.selected.(storeTestDurableEventBusStore)
 			feedbackErr := errors.New("feedback read unavailable after publication")
 			publicationErr := errors.New("publication refused before native commit")

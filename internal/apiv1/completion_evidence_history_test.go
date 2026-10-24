@@ -30,6 +30,7 @@ func TestCompletion2270PublicHistorySurvivesReopenBothStores(t *testing.T) {
 				ctx := context.Background()
 				runID, sessionID, turnID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 				identity := sqliteAgentUsageIdentityForRun(t, runID, "completion-history-2270")
+				ctx = apiTestOriginalProcessContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 				actor := withAPITestIntent(t, actors.AgentConfig{Identity: identity, ID: identity.AgentID(), Role: "researcher", Type: "managed", Model: "regular",
 					ExecutionMode: "live", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: memory}})
@@ -63,6 +64,7 @@ func TestCompletion2270SubNanodollarPublicHistoryBothStores(t *testing.T) {
 			ctx := context.Background()
 			runID, sessionID, turnID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			identity := sqliteAgentUsageIdentityForRun(t, runID, "fractional-price-2270")
+			ctx = apiTestOriginalProcessContext(t, ctx, selected)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 			seedCompletion2270Agent(t, ctx, selected, identity)
 			want, frameHash := persistCompletion2270History(t, selected, identity, sessionID, turnID, false, 0.0000000004)
@@ -100,7 +102,7 @@ func completion2270HistoryStore(t *testing.T, backend string) (completion2270Pub
 
 func completion2270HistorySession(t *testing.T, selected sessions.Registry, identity agentidentity.Identity) string {
 	t.Helper()
-	ctx := effects.WithDifferentOwner(context.Background(), effects.OwnerBuildTestInfrastructure)
+	ctx := effects.WithDifferentOwner(apiTestOriginalProcessContext(t, context.Background(), selected), effects.OwnerBuildTestInfrastructure)
 	lease, err := selected.Acquire(ctx, agentmemory.Identity(identity), "completion-history-seed")
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +115,7 @@ func completion2270HistorySession(t *testing.T, selected sessions.Registry, iden
 
 func persistCompletion2270History(t *testing.T, selected completion2270PublicStore, identity agentidentity.Identity, sessionID, turnID string, memory bool, total float64) (effects.CompletionEvidence, string) {
 	t.Helper()
-	ctx, at := context.Background(), time.Now().UTC()
+	ctx, at := apiTestOriginalProcessContext(t, context.Background(), selected), time.Now().UTC()
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "completion.history", "completion-2270", "", []byte(`{}`), 0, identity.RunID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, nil, "subscribed")
 	input, output := int64(12), int64(3)

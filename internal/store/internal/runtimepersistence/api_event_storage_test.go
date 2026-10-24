@@ -21,6 +21,7 @@ func TestAPIEventStoragePreservesWholeStoreCountsLineageAndNativeSnapshotBothSto
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = fixture.originalContext(ctx)
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			original := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{"value":1}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at)
 			replay := eventtest.Child(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{"value":1}`), 1, original, events.EventEnvelope{}, at.Add(time.Second))
@@ -141,6 +142,7 @@ func TestAPILatestNamedEventIdentityPreservesPhysicalOrderAndGlobalScopeBothStor
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = fixture.originalContext(ctx)
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			first := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at)
 			second := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at.Add(time.Second))
@@ -179,6 +181,7 @@ func TestAPIEventAcknowledgmentCountsPreserveNativeScopesBothStores(t *testing.T
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = fixture.originalContext(ctx)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "ack.observation", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, event); err != nil {
 				t.Fatal(err)
@@ -264,7 +267,7 @@ func TestAPIEventStorageRefusesRawCancelledClosedAndUnavailableOwnershipBothStor
 			}
 			assertAPIEventStorageRefusal(t, ctx, fixture.store)
 			assertAPIIndependentScalarCountRefusal(t, ctx, fixture.store)
-			ctx = context.Background()
+			ctx = fixture.originalContext(context.Background())
 			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, `ALTER TABLE events RENAME TO unavailable_api_event_observation`)
 				return err
@@ -274,7 +277,7 @@ func TestAPIEventStorageRefusesRawCancelledClosedAndUnavailableOwnershipBothStor
 			restored := false
 			defer func() {
 				if !restored {
-					if err := runUnrevisionedEventFixtureTransactionForTest(context.Background(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+					if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 						_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_api_event_observation RENAME TO events`)
 						return err
 					}); err != nil {

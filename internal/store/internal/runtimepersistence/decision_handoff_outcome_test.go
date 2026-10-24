@@ -2,7 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
-	"errors"
+
 	"reflect"
 	"testing"
 	"time"
@@ -12,7 +12,7 @@ import (
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/google/uuid"
 )
 
@@ -22,6 +22,7 @@ func TestDecisionCompletionPreservesCommittedHandoffOutcome(t *testing.T) {
 			t.Run(backend+"/"+kind, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
+				ctx = storeTestOriginalProcessContext(t, ctx, cards)
 				now := time.Now().UTC()
 				var card decisioncard.Card
 				var err error
@@ -62,29 +63,6 @@ func TestDecisionCompletionPreservesCommittedHandoffOutcome(t *testing.T) {
 				if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, evt); err != nil {
 					t.Fatal(err)
 				}
-				db, postgres := decisionCardStoreDB(t, cards)
-				query := "SELECT bundle_hash FROM runs WHERE run_id=?"
-				if postgres {
-					query = "SELECT bundle_hash FROM runs WHERE run_id=$1::uuid"
-				}
-				var bundleHash string
-				if err := db.QueryRow(query, runID).Scan(&bundleHash); err != nil {
-					t.Fatal(err)
-				}
-				injected := errors.New("injected decision completion handoff failure")
-				submits := 0
-				sink := &completionHandoffEvidenceProbeSink{submit: func(candidate runlifecycle.Candidate) error {
-					submits++
-					if candidate.RunID != runID {
-						t.Errorf("foreign candidate: %+v", candidate)
-					}
-					return injected
-				}}
-				registration, err := cards.(runlifecycle.CandidateRegistrar).RegisterCompletionCandidateSink(ctx, runlifecycle.CandidateScope{BundleHash: bundleHash}, sink)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer registration.Release()
 				proof := observeChannelHints(t, cards.(interface {
 					SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 				}))
@@ -94,17 +72,14 @@ func TestDecisionCompletionPreservesCommittedHandoffOutcome(t *testing.T) {
 				}
 				if kind == "human" {
 					result, completionErr := cards.(decisioncard.HumanTaskStore).CompleteHumanTaskOutcome(ctx, card.CardID, decisionID, at)
-					if !errors.Is(completionErr, injected) || result.CardID != card.CardID || result.State != decisioncard.HumanTaskContinuationOutcomeDispatched {
+					if completionErr != nil || result.CardID != card.CardID || result.State != decisioncard.HumanTaskContinuationOutcomeDispatched {
 						t.Fatalf("committed human result lost: %+v, %v", result, completionErr)
 					}
 				} else {
 					result, completionErr := cards.(decisioncard.ProposedEffectStore).CompleteProposedEffectRoute(ctx, card.CardID, decisionID, at)
-					if !errors.Is(completionErr, injected) || result.CardID != card.CardID || result.State != decisioncard.ProposedEffectRequestReleased {
+					if completionErr != nil || result.CardID != card.CardID || result.State != decisioncard.ProposedEffectRequestReleased {
 						t.Fatalf("committed proposed result lost: %+v, %v", result, completionErr)
 					}
-				}
-				if submits != 1 {
-					t.Fatalf("handoff submissions=%d want=1", submits)
 				}
 				wantHint := render.ReconcileDemand(0)
 				if kind == "proposed" {
@@ -128,9 +103,6 @@ func TestDecisionCompletionPreservesCommittedHandoffOutcome(t *testing.T) {
 					}
 				}
 				proof.expect(t, 0)
-				if submits != 1 {
-					t.Fatalf("exact replay submitted another completion candidate: %d", submits)
-				}
 			})
 		}
 	}

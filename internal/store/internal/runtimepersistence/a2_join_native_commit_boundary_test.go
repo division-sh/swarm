@@ -72,6 +72,7 @@ func TestA2JoinNativeCommitBoundaryOnBothStores(t *testing.T) {
 				selected, db, connector := newStopCommitStore(t, backend)
 				ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), time.Minute)
 				defer cancel()
+				ctx = storeTestOriginalProcessContext(t, ctx, selected)
 				fixture := seedA2NativeJoinFixture(t, ctx, backend, db, selected)
 				ctx = correlation.WithRunID(ctx, fixture.command.State.Identity.RunID)
 				owner := selected.(a2NativeJoinStore)
@@ -175,6 +176,7 @@ func seedA2NativeJoinFixture(t *testing.T, ctx context.Context, backend string, 
 	runID, entityID := uuid.NewString(), uuid.NewString()
 	flowID, path := "native-join", "native-join/one"
 	ctx = correlation.WithRunID(ctx, runID)
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	// The claim requires complete native construction, not a header/field-only

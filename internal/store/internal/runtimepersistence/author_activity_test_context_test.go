@@ -48,7 +48,7 @@ type storeTestWorkFixture struct {
 
 var storeTestWorkFixtures sync.Map
 
-func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
+func storeTestWorkOwner(t testing.TB) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	if existing, ok := storeTestWorkFixtures.Load(t); ok {
 		return existing.(*storeTestWorkFixture).runtime
@@ -83,9 +83,32 @@ func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 	return owner
 }
 
-func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
+func storeTestWorkContext(t testing.TB, ctx context.Context) context.Context {
 	t.Helper()
-	return worklifetime.WithOccurrence(ctx, storeTestWorkOwner(t))
+	owner := storeTestWorkOwner(t)
+	value, _ := storeTestWorkFixtures.Load(t)
+	return worklifetime.WithProcess(worklifetime.WithOccurrence(ctx, owner), value.(*storeTestWorkFixture).process)
+}
+
+func storeTestOriginalProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	}
+	storeTestWorkOwner(t)
+	value, _ := storeTestWorkFixtures.Load(t)
+	work := value.(*storeTestWorkFixture)
+	capability := selectedMaterializationProcessForTest(t, work, selected)
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := work.process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	return worklifetime.WithProcess(ctx, work.process)
 }
 
 func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {
@@ -125,10 +148,11 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
+	setupCtx := storeTestOriginalProcessContext(t, storeTestWorkContext(t, testAuthorActivityContext()), store)
 	if opts.SourceArtifactFact.Validate() != nil {
-		opts.SourceArtifactFact = sourceartifactfixture.Require(t, context.Background(), store)
+		opts.SourceArtifactFact = sourceartifactfixture.Require(t, setupCtx, store)
 	} else if opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
-		sourceartifactfixture.Require(t, context.Background(), store)
+		sourceartifactfixture.Require(t, setupCtx, store)
 	}
 	if opts.ContractBundle == nil && opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
 		repo := runtimepipeline.WorkflowRepoRoot()
@@ -213,6 +237,7 @@ func testAuthorActivityContextForBundle(bundleHash string) context.Context {
 		mustStoreTestSourceArtifactFact(bundleHash),
 	)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
 		bundleHash,
@@ -303,7 +328,7 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		"task.canonical_entity", "task.dead", "task.dead_letter", "task.delivered", "task.failed", "task.failed.new", "task.failed.old", "task.in_progress", "task.other", "task.other_agent", "task.payload_only", "task.pending",
 		"trace.event_only", "trace.failed", "trace.late_delivered", "trace.second_delivered", "trace.task_audit", "trace.tie",
 		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.receipts.typed_identity", "test.started", "test.terminal_admission", "test.terminal_delivery",
-		"atomic.selected", "atomic.source", "batch.contract", "duplicate.base", "test.node_emitted",
+		"atomic.selected", "atomic.source", "batch.contract", "duplicate.base", "global/test.node_emitted", "test.node_emitted",
 		"trace.visible", "validation/validation.package_ready", "workflow.executable",
 	}
 	sort.Strings(eventTypes)
@@ -312,7 +337,7 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		descriptor := runtimeauthoractivity.EventDescriptor{EventType: eventType, Disposition: runtimeauthoractivity.StoryDifferent}
 		if eventType == "test.delivery_receipt" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
-		} else if eventType == "test.node_emitted" || eventType == "atomic.selected" {
+		} else if eventType == "test.node_emitted" || eventType == "global/test.node_emitted" || eventType == "atomic.selected" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
 		}
 		descriptors = append(descriptors, descriptor)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/lib/pq"
 )
@@ -59,7 +60,13 @@ func (b *Backend) RunTransactionWithOptions(ctx context.Context, opts *sql.TxOpt
 }
 
 func (b *Backend) RunTransactionWithOptionsOutcome(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (bool, error) {
-	return b.runTransactionOutcome(ctx, opts, true, operation)
+	return b.runTransactionOutcome(ctx, opts, true, false, operation)
+}
+
+// RunSchemaBootstrapOutcome is the schema owner's construction entrance. It
+// cannot require the process singleton which that same operation creates.
+func (b *Backend) RunSchemaBootstrapOutcome(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	return b.runTransactionOutcome(ctx, nil, true, true, operation)
 }
 
 // RunReadTransaction owns one caller-scoped, transactionally consistent read.
@@ -75,11 +82,11 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 		}
 		return errors.Join(operation(b.inspectionSQLContext(ctx), tx), ctx.Err())
 	}
-	_, err := b.runTransactionOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, false, operation)
+	_, err := b.runTransactionOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, false, false, operation)
 	return err
 }
 
-func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions, drain bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions, drain, construction bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
 	if err := b.refuseInspectionMutation(ctx); err != nil {
 		return false, err
 	}
@@ -113,6 +120,8 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	var tx *sql.Tx
 	releaseOrdering := func() {}
 	defer func() { releaseOrdering() }()
+	releaseGeneration := func() {}
+	defer func() { releaseGeneration() }()
 	var stopReadRollback func() bool
 	var readRollbackDone <-chan error
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
@@ -190,6 +199,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	}
 	probe.Begun()
 	sqlCtx, releaseOrdering = authoractivity.BindTransaction(ctx, sqlCtx, tx, authoractivity.DialectPostgres)
+	sqlCtx, releaseGeneration = generationauthority.BindTransaction(ctx, sqlCtx, tx, false, opts != nil && opts.ReadOnly)
 	if !drain {
 		readTx := tx
 		done := make(chan error, 1)
@@ -203,6 +213,12 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	sqlCtx = transactiontest.WithAttempt(sqlCtx, probe)
 	if err := ctx.Err(); err != nil {
 		return false, err
+	}
+	if drain && (opts == nil || !opts.ReadOnly) && !construction {
+		if admissionErr := generationauthority.AdmitTransaction(sqlCtx, tx, false); admissionErr != nil {
+			serializationConflict = exactSerializationConflict(admissionErr)
+			return false, admissionErr
+		}
 	}
 	if operationErr := operation(sqlCtx, tx); operationErr != nil {
 		if callerErr := ctx.Err(); callerErr != nil {

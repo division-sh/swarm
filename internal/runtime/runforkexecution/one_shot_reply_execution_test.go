@@ -237,8 +237,7 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			selected = reopen()
-			restarted := runForkTestContext(t)
-			capability := selectedContractTestProcessCapability(t, restarted, selected)
+			restarted, process, capability := successorRunForkProcessForTest(t, runForkTestContext(t), selected)
 			successor := construct()
 			if err := successor.BindSelectedProcess(restarted, process, capability); err != nil {
 				t.Fatal(err)
