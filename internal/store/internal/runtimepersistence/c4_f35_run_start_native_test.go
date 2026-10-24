@@ -577,7 +577,7 @@ func c4CreationReplayContext(t *testing.T, selected any, record c4CreationCrashR
 	}
 	ctx := correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
-	return correlation.WithRunID(effects.WithExecutionMode(ctx, effects.ExecutionModeLive), record.RunID)
+	return originalStoreFixtureContext(t, correlation.WithRunID(effects.WithExecutionMode(ctx, effects.ExecutionModeLive), record.RunID), selected)
 }
 
 func TestC4F35CreationCommitSIGKILLReopenBothStores(t *testing.T) {
@@ -798,6 +798,7 @@ func c4RunCreationCrashChild(t *testing.T) {
 		candidate := pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: flowidentity.StandingServiceID(record.FlowPath), FlowPath: record.FlowPath, Source: sourceartifactfixture.Fact()}
 		record.RunID = flowidentity.StandingGenerationRunID(candidate.ServiceID, 1)
 		ctx = testAuthorActivityRuntimeContext()
+		ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 		workflow := newWorkflowTestCoordinator(t, fixture.db, pipeline.NewWorkflowPersistence(fixture.store.(workflowTestSelectedStore)), fixture.store.(workflowTestSelectedStore))
 		create = func() {
 			arm()
@@ -1155,6 +1156,7 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireRevisionCount(t, ctx, selected, observed.RunID, 1)
 				}
 				selected, db = c4ReopenCreationStore(t, backend, selected, db, connector)
+				ctx = originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), selected)
 				workflow = newWorkflowTestCoordinator(t, db, pipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 				reader = selected.(runOriginReadStore)
 				reopened, reopenedFound, err := workflow.LoadReconciledStandingService(ctx, candidate)
