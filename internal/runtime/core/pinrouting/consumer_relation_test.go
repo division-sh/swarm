@@ -100,10 +100,8 @@ func requireRootIngressPlans(t *testing.T, plans []ConnectRoutePlan, eventNames 
 
 func TestRequiredAgentRoleDoesNotEstablishOutputConsumer(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{Role: "worker", SubscribesTo: []string{"work.ready"}}},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{},
+		Events:     map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}},
 	}
 	classification := ClassifyOutputConsumer(semanticview.Wrap(bundle), ".", "work.ready")
 	if classification.HasRuntimeConsumer() || classification.Has(OutputConsumerRootExport) {

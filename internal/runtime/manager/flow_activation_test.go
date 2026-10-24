@@ -1725,11 +1725,7 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"analyzer-flow": {
-				RequiredAgents: []runtimecontracts.FlowRequiredAgent{{
-					Role:         "analyzer",
-					SubscribesTo: []string{"analysis.requested"},
-					Emits:        []string{"analysis.done"},
-				}},
+
 				Pins: runtimecontracts.FlowPins{
 					Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "analysis.requested"}}},
 					Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}}},
@@ -5345,7 +5341,7 @@ func TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission(t *
 
 func TestStaticFlowRequiredAgentPreflightRegistersSubscriptions(t *testing.T) {
 	bundle := testStaticFlowBundle()
-	records, err := staticRequiredDeclarationPreflightBlueprints(semanticview.Wrap(bundle))
+	records, err := staticAgentDeclarationPreflightBlueprints(semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
 	}
@@ -5374,13 +5370,6 @@ func TestDeclaredFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *testing.T) {
 	}
 	if len(staticRecords) != 0 {
 		t.Fatalf("standing static agent records = %#v, want none before materialized activation", staticRecords)
-	}
-	requiredRecords, err := StaticFlowRequiredAgentMaterializationBlueprints(source)
-	if err != nil {
-		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
-	}
-	if len(requiredRecords) != 0 {
-		t.Fatalf("standing required-agent records = %#v, want none before materialized activation", requiredRecords)
 	}
 }
 
@@ -5496,14 +5485,10 @@ func TestStaticAgentPreflightKeepsDistinctSameIDPhysicalDeclarations(t *testing.
 
 func TestStaticFlowRequiredAgentPreflightInfersFromOmittedRequiredAgents(t *testing.T) {
 	bundle := testStaticFlowBundle()
-	schema := bundle.FlowSchemas["analyzer-flow"]
-	schema.RequiredAgents = nil
-	schema.RequiredAgentsDeclared = false
-	bundle.FlowSchemas["analyzer-flow"] = schema
 	bundle.Semantics.FlowAgents = map[string][]runtimecontracts.FlowRequiredAgent{}
 	bundle.Semantics.FlowAgentFacts = map[string][]runtimecontracts.RequiredAgentFact{}
 
-	records, err := staticRequiredDeclarationPreflightBlueprints(semanticview.Wrap(bundle))
+	records, err := staticAgentDeclarationPreflightBlueprints(semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
 	}
@@ -5522,7 +5507,7 @@ func TestStaticFlowRequiredAgentPreflightUsesFlowOwnedDeclaration(t *testing.T) 
 	if len(declarations) != 1 || declarations[0].Source.FlowPath != "support" {
 		t.Fatalf("support declarations = %#v, want one flow-owned declaration", declarations)
 	}
-	records, err := staticRequiredDeclarationPreflightBlueprints(source)
+	records, err := staticAgentDeclarationPreflightBlueprints(source)
 	if err != nil {
 		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
 	}
@@ -5532,32 +5517,6 @@ func TestStaticFlowRequiredAgentPreflightUsesFlowOwnedDeclaration(t *testing.T) 
 	cfg := records[0].Config
 	if cfg.ID != "backend" || cfg.FlowID != "support" || cfg.FlowPath != "support" || records[0].Identity.Name.Owner != declarations[0].OwnerURI {
 		t.Fatalf("materialized agent = %#v, want exact canonical support declaration", cfg)
-	}
-}
-
-func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing.T) {
-	bundle := testStaticFlowBundle()
-	flow := bundle.FlowTree.ByID["analyzer-flow"]
-	entry := flow.Agents["analyzer"]
-	delete(flow.Agents, "analyzer")
-	delete(flow.AgentURIs, "analyzer")
-	flow.Agents["worker-alias"] = entry
-	ref := testFlowAgentURIRef("analyzer-flow", "worker-alias")
-	flow.AgentURIs["worker-alias"] = ref.Full
-	bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{"analyzer-flow/worker-alias": ref}
-	bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{ref.Full: ref}
-	schema := bundle.FlowSchemas["analyzer-flow"]
-	schema.RequiredAgents = []runtimecontracts.FlowRequiredAgent{{
-		Role:         "worker",
-		SubscribesTo: []string{"analysis.requested"},
-		Emits:        []string{"analysis.done"},
-	}}
-	bundle.FlowSchemas["analyzer-flow"] = schema
-
-	records, err := staticRequiredDeclarationPreflightBlueprints(semanticview.Wrap(bundle))
-
-	if err == nil || !strings.Contains(err.Error(), `required agent "worker"`) {
-		t.Fatalf("expected required-agent map-key error, records=%#v err=%v", records, err)
 	}
 }
 

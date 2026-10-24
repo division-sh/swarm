@@ -431,7 +431,7 @@ func TestCompiledLifecycleEmitterHumanTaskPlatformBoundary(t *testing.T) {
 					}
 					kinds[consumer.Kind]++
 				}
-				if !reflect.DeepEqual(kinds, map[EventEndpointKind]int{EventEndpointAgent: 1, EventEndpointRequiredAgentRole: 1}) {
+				if !reflect.DeepEqual(kinds, map[EventEndpointKind]int{EventEndpointAgent: 1}) {
 					t.Fatalf("human-task receiver kinds = %v", kinds)
 				}
 				resolution := ResolveNonConnectFlowInputProducerWithOptions(source, flow, event, runtimecontracts.FlowInputProducerResolutionOptions{AllowNonInputEvent: true})

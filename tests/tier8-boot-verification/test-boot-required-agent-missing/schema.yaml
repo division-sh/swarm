@@ -1,8 +1,0 @@
-stages:
-  pending: {}
-  done: {final: true}
-required_agents:
-  - role: missing-agent
-    emits: [task.completed]
-inputs:
-  - task.requested

@@ -1991,40 +1991,14 @@ delay: 7d
 	}
 }
 
-func TestFlowSchemaDocumentDecode_PreservesRequiredAgentSubscribesTo(t *testing.T) {
-	var schema FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte(`
-name: worker
-required_agents:
-  - role: analyst
-    subscribes_to: [task.requested]
-    emits: [task.completed]
-`), &schema); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if len(schema.RequiredAgents) != 1 || len(schema.RequiredAgents[0].SubscribesTo) != 1 || schema.RequiredAgents[0].SubscribesTo[0] != "task.requested" {
-		t.Fatalf("RequiredAgents = %#v, want canonical required-agent subscribes_to", schema.RequiredAgents)
-	}
-}
-
 func TestFlowSchemaDocumentDecode_TracksRequiredAgentsPresence(t *testing.T) {
-	tests := []struct {
-		name     string
-		yamlText string
-		declared bool
-	}{
-		{name: "omitted", yamlText: "name: worker\n", declared: false},
-		{name: "explicit empty", yamlText: "name: worker\nrequired_agents: []\n", declared: true},
-		{name: "explicit entries", yamlText: "name: worker\nrequired_agents:\n  - role: analyst\n", declared: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, value := range []string{"null", "[]", "{}", "false", "''", "[{role: analyst}]"} {
+		t.Run(value, func(t *testing.T) {
 			var schema FlowSchemaDocument
-			if err := decodeNodeTestYAML([]byte(tc.yamlText), &schema); err != nil {
-				t.Fatalf("yaml.Unmarshal: %v", err)
-			}
-			if schema.RequiredAgentsDeclared != tc.declared {
-				t.Fatalf("RequiredAgentsDeclared = %v, want %v", schema.RequiredAgentsDeclared, tc.declared)
+			err := decodeNodeTestYAML([]byte("name: worker\nrequired_agents: "+value+"\n"), &schema)
+			diagnostic, ok := AsLoaderDiagnostic(err)
+			if !ok || diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(diagnostic.Remediation, "agents.yaml") {
+				t.Fatalf("retired list presence lost refusal or declaration owner: %v", err)
 			}
 		})
 	}

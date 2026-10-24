@@ -19,7 +19,6 @@ var flowSchemaDocumentFields = map[string]struct{}{
 	"schedules":           {},
 	"inputs":              {},
 	"outputs":             {},
-	"required_agents":     {},
 	"auto_emit_on_create": {},
 }
 

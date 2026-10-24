@@ -10,14 +10,3 @@ auto_emit_on_create:
 inputs:
   - item.completed
   - timer.item.timeout
-required_agents:
-  - role: control-plane
-    subscribes_to:
-      - item.completed
-    emits:
-      - item.created
-  - role: worker
-    subscribes_to:
-      - item.completed
-    emits:
-      - item.completed

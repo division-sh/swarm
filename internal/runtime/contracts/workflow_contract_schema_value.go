@@ -51,9 +51,6 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 			} else {
 				out.Pins.Outputs = pins.Outputs
 			}
-		case "required_agents":
-			out.RequiredAgentsDeclared = true
-			out.RequiredAgents, err = projectSchemaRequiredAgentsValue(value)
 		case "auto_emit_on_create":
 			var members map[string]yamlsource.Value
 			members, err = schemaValueFields(value, "auto_emit_on_create", map[string]struct{}{"event": {}, "description": {}}, true)
@@ -165,45 +162,4 @@ func schemaValueDeclarations(value yamlsource.Value, nonempty bool) ([]yamlsourc
 		return nil, err
 	}
 	return fields, nil
-}
-
-func projectSchemaRequiredAgentsValue(value yamlsource.Value) ([]FlowRequiredAgent, error) {
-	items, err := schemaValueSequence(value, false)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]FlowRequiredAgent, 0, len(items))
-	for _, item := range items {
-		fields, err := schemaValueFields(item, "required agent", map[string]struct{}{"role": {}, "subscribes_to": {}, "emits": {}, "description": {}}, true)
-		if err != nil {
-			return nil, err
-		}
-		var row FlowRequiredAgent
-		if err := schemaValueRequiredTexts(item, fields, map[string]*string{"role": &row.Role}); err != nil {
-			return nil, err
-		}
-		if err := schemaValueTexts(fields, map[string]*string{"description": &row.Description}, false); err != nil {
-			return nil, err
-		}
-		for _, entry := range []struct {
-			key    string
-			target *[]string
-		}{{"subscribes_to", &row.SubscribesTo}, {"emits", &row.Emits}} {
-			if field, present := fields[entry.key]; present {
-				items, err := schemaValueSequence(field, false)
-				if err != nil {
-					return nil, err
-				}
-				for _, item := range items {
-					text, err := schemaValueText(item, true)
-					if err != nil {
-						return nil, err
-					}
-					*entry.target = append(*entry.target, text)
-				}
-			}
-		}
-		out = append(out, row)
-	}
-	return out, nil
 }

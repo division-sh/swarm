@@ -1013,13 +1013,10 @@ func policyValues(policy runtimecontracts.PolicyDocument) map[string]any {
 	return values
 }
 
-func requiredAgentsView(schema runtimecontracts.FlowSchemaDocument, facts []runtimecontracts.RequiredAgentFact, schemaFile, agentsFile string) RequiredAgentsView {
-	source := runtimecontracts.RequiredAgentSourceInferred
+func requiredAgentsView(_ runtimecontracts.FlowSchemaDocument, facts []runtimecontracts.RequiredAgentFact, _, agentsFile string) RequiredAgentsView {
+	source := runtimecontracts.RequiredAgentSourceDeclared
 	sourceFile := strings.TrimSpace(agentsFile)
-	if runtimecontracts.RequiredAgentsDeclared(schema) {
-		source = runtimecontracts.RequiredAgentSourceExplicit
-		sourceFile = strings.TrimSpace(schemaFile)
-	} else if len(facts) > 0 {
+	if len(facts) > 0 {
 		sourceFile = strings.TrimSpace(facts[0].SourceFile)
 		for _, fact := range facts[1:] {
 			if strings.TrimSpace(fact.SourceFile) != sourceFile {

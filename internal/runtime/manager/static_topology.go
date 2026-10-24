@@ -985,43 +985,21 @@ func (am *AgentManager) resolvedStaticTopologyBlueprints(source semanticview.Sou
 }
 
 // ResolveStaticTopologyBlueprints is the runless declaration compiler used by
-// startup topology and deployment admission, including required flow agents.
+// startup topology and deployment admission.
 func ResolveStaticTopologyBlueprints(options AgentManagerOptions, source semanticview.Source) ([]AgentMaterializationBlueprint, error) {
 	ordinary, err := StaticAgentMaterializationBlueprints(source)
 	if err != nil {
 		return nil, err
 	}
-	required, err := StaticFlowRequiredAgentMaterializationBlueprints(source)
-	if err != nil {
-		return nil, err
-	}
-	byIdentity := map[string]staticAgentBlueprint{}
-	for _, blueprint := range append(ordinary, required...) {
-		if err := resolveAgentModel(&blueprint.Config, options.ExecutionPosture, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
+	for index := range ordinary {
+		if err := resolveAgentModel(&ordinary[index].Config, options.ExecutionPosture, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
 			return nil, err
 		}
-		key, err := blueprint.Identity.Fingerprint()
-		if err != nil {
-			return nil, err
-		}
-		if previous, ok := byIdentity[key]; ok {
-			left, _ := agentConfigPlanRevision(previous.Config, previous.Identity)
-			right, _ := agentConfigPlanRevision(blueprint.Config, blueprint.Identity)
-			if left != right {
-				return nil, fmt.Errorf("static declaration %s has conflicting blueprints", blueprint.Identity.Description())
-			}
-			continue
-		}
-		byIdentity[key] = blueprint
 	}
-	out := make([]staticAgentBlueprint, 0, len(byIdentity))
-	for _, blueprint := range byIdentity {
-		out = append(out, blueprint)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return runtimeagentidentity.LessPlan(out[i].Identity, out[j].Identity)
+	sort.Slice(ordinary, func(i, j int) bool {
+		return runtimeagentidentity.LessPlan(ordinary[i].Identity, ordinary[j].Identity)
 	})
-	return out, nil
+	return ordinary, nil
 }
 
 // PreRunAgentMaterializationBlueprints returns the resolved declaration plans
@@ -1030,15 +1008,10 @@ func (am *AgentManager) PreRunAgentMaterializationBlueprints() ([]AgentMateriali
 	if am == nil {
 		return nil, nil
 	}
-	ordinary, err := staticAgentDeclarationPreflightBlueprints(am.semanticSource)
+	blueprints, err := staticAgentDeclarationPreflightBlueprints(am.semanticSource)
 	if err != nil {
 		return nil, err
 	}
-	required, err := staticRequiredDeclarationPreflightBlueprints(am.semanticSource)
-	if err != nil {
-		return nil, err
-	}
-	blueprints := append(ordinary, required...)
 	for i := range blueprints {
 		if err := am.resolveAgentModel(&blueprints[i].Config); err != nil {
 			return nil, err
