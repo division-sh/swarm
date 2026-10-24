@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/packmodel"
 )
 
-const s1ProviderManifest = "version: 1.2.3\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [inbound.team.message]\n    receive_https_route: /webhooks/{alias}/{provider}\n    persist_dedupe_markers: true\n  cannot: [execute arbitrary code]\n"
+const s1ProviderManifest = "version: 1.2.3\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [inbound.team.message]\n    persist_dedupe_markers: true\n  cannot: [execute arbitrary code]\n"
 
 func TestS1ProviderMembershipDiskLogicalParity(t *testing.T) {
 	root := t.TempDir()

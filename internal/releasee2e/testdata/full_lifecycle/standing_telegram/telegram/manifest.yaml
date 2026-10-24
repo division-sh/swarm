@@ -2,7 +2,6 @@ version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 capabilities:
   can:
-    receive_https_route: /webhooks/{alias}/telegram
     verify_secret: webhook_signing_secret
     emit_events: [raw, callback_action, text_message]
     persist_dedupe_markers: true

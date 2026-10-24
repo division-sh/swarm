@@ -22,6 +22,15 @@ func TestS1SharedManifestRefusesAuthoredProviderIdentity(t *testing.T) {
 }
 
 func TestS1SharedManifestClosedFieldsAndTypedPresence(t *testing.T) {
+	for _, name := range []string{"receive_https_route", "receive_session_events"} {
+		for _, value := range []string{"null", "''", "false", "{}", "[]", "retired"} {
+			body := s1ManifestHeader + "capabilities: {can: {" + name + ": " + value + "}, cannot: [execute code]}\n"
+			_, err := ParseManifestAt([]byte(body), "provider/manifest.yaml", DirectoryProvider)
+			if err == nil || !strings.Contains(err.Error(), name+" is not a manifest capability") || !strings.Contains(err.Error(), "transport:") || !strings.Contains(err.Error(), "trigger.yaml") {
+				t.Fatalf("retired transport capability lost BODY teaching: %v", err)
+			}
+		}
+	}
 	for _, kind := range []DirectoryKind{DirectoryFlow, DirectoryProvider} {
 		base := s1ManifestHeader
 		if kind == DirectoryProvider {

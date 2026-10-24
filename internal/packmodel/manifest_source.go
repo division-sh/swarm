@@ -19,6 +19,9 @@ func manifestMapping(value yamlsource.Value, allowed ...string) (map[string]yaml
 		if _, duplicate := out[entry.Name]; duplicate {
 			return nil, manifestError(entry.Value, "duplicate field "+entry.Name)
 		}
+		if entry.Name == "receive_https_route" || entry.Name == "receive_session_events" {
+			return nil, retiredManifestField(entry.Name, entry.Value)
+		}
 		known := false
 		for _, name := range allowed {
 			known = known || entry.Name == name
@@ -69,7 +72,7 @@ func manifestTexts(value yamlsource.Value) ([]string, error) {
 }
 
 func admitCanValues(can map[string]yamlsource.Value, capabilities *Capabilities) error {
-	for name, target := range map[string]*string{"receive_https_route": &capabilities.Can.ReceiveHTTPSRoute, "receive_session_events": &capabilities.Can.ReceiveSessionEvents, "verify_secret": &capabilities.Can.VerifySecret} {
+	for name, target := range map[string]*string{"verify_secret": &capabilities.Can.VerifySecret} {
 		if value, present := can[name]; present {
 			text, err := manifestText(value)
 			if err != nil {
