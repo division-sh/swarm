@@ -47,7 +47,9 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 				TransportHash: "pending-join-parent-transport", SourceRunID: ancestor, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
 			AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
-		parentDone <- err
+		if err != nil {
+			parentDone <- err
+		}
 	}()
 	var parentRun string
 	select {
