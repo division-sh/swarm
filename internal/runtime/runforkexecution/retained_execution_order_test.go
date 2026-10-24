@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -182,6 +183,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				selected, owner = sqlite, selectedRuntimeOutcomeSQLiteOwner(t, sqlite)
 			}
 			ctx := runForkTestContext(t)
+			ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 			process, _ := worklifetime.ProcessFromContext(ctx)
 			baselineLeases := process.ActiveCount()
 			repo := runForkExecutionRepoRoot(t)

@@ -645,10 +645,6 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					} else {
 						restarted = newSelectedContractSQLiteExecutionOwnerForTest(t, selected.(*store.SQLiteRuntimeStore))
 					}
-					predecessor := selectedContractTestProcessCapability(t, ctx, selected.(runtimestartupownership.Store))
-					if err := predecessor.Release(context.Background()); err != nil {
-						t.Fatal(err)
-					}
 					process := worklifetime.NewProcess()
 					t.Cleanup(func() {
 						process.Retire()
