@@ -1,8 +1,6 @@
 package runforkpersistence
 
 import (
-	"context"
-	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -10,27 +8,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+
 	"github.com/google/uuid"
 )
-
-type arrivalJoinInventoryOwner struct {
-	rows  []genericschedule.Activation
-	reads int
-	err   error
-}
-
-func (o *arrivalJoinInventoryOwner) MaterializeRunForkArrivalJoinScheduleTx(context.Context, *mutationprotocol.Attempt, storegenericschedule.ForkJoinRequest) (genericschedule.Activation, error) {
-	return genericschedule.Activation{}, errors.New("readback must not materialize")
-}
-
-func (o *arrivalJoinInventoryOwner) ReadRunForkArrivalJoinScheduleInventoryTx(ctx context.Context, _ *mutationprotocol.Attempt, _ string) ([]genericschedule.Activation, error) {
-	o.reads++
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return o.rows, o.err
-}
 
 func arrivalJoinInventoryFixture(t *testing.T, root, completion bool) (runfork.RunForkPlan, time.Time, []storegenericschedule.ForkJoinRequest, []genericschedule.Activation) {
 	t.Helper()

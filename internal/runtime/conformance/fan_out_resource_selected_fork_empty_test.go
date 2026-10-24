@@ -100,6 +100,7 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				if err := predecessorCapability.Release(context.Background()); err != nil {
 					t.Fatal(err)
 				}
+				f.ctx = originalConformanceFixtureContext(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, f.source)), f.selected)
 				f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 				if err := predecessorCapability.ProveCurrent(context.WithoutCancel(f.ctx)); err == nil {
 					t.Fatal("empty successor did not fence its retired predecessor")
@@ -194,6 +195,7 @@ func TestDeploymentSourceSelectedControlOnlyRepeatedStopBothStores(t *testing.T)
 			if err := f.topology.capability.Release(context.Background()); err != nil {
 				t.Fatal(err)
 			}
+			f.ctx = originalConformanceFixtureContext(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, f.source)), f.selected)
 			f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 			f.boot(t)
 			restartedOwner, recovery := deploymentForkOwner(t, f)

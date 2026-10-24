@@ -1,15 +1,10 @@
 package pipelinepersistence
 
 import (
-	"context"
-	"database/sql"
-	"errors"
-
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -21,8 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+
 	"github.com/google/uuid"
 )
 
@@ -110,40 +104,6 @@ func TestRunForkFanOutBarrierProjectionSharesExactOwnership(t *testing.T) {
 	}
 }
 
-func runForkBarrierDueMutation(t *testing.T, postgres bool, source fanoutbarrier.Barrier, activation *genericschedule.Activation, birth time.Time, schedules GenericScheduleTxOwner) {
-	t.Helper()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	backend, err := postgresbackend.New(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectBegin()
-	mock.ExpectExec(`INSERT INTO fan_out_obligation_barriers`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE fan_out_obligation_barriers`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectRollback()
-	stop := errors.New("observe native barrier projection before rollback")
-	result := mutationprotocol.RunPostgres(context.Background(), backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil,
-		func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, postgres, schedules, uuid.NewString(), source, activation, nil, source.Registration.PlanRef, nil, birth)
-			})
-			if err != nil {
-				return struct{}{}, err
-			}
-			return struct{}{}, stop
-		})
-	if result.Acknowledged() || !errors.Is(result.Err(), stop) {
-		t.Fatalf("native barrier projection failed before observation: acknowledged=%t err=%v", result.Acknowledged(), result.Err())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func runForkBarrierDueFixture(t *testing.T) (fanoutbarrier.Barrier, genericschedule.Activation) {
 	t.Helper()
 	runID, deliveryID := uuid.NewString(), uuid.NewString()
@@ -194,35 +154,4 @@ func runForkBarrierDueFixture(t *testing.T) (fanoutbarrier.Barrier, genericsched
 		t.Fatal(err)
 	}
 	return barrier, activation
-}
-
-type runForkBarrierDueScheduleOwner struct {
-	birth    time.Time
-	commands []genericschedule.AdmissionCommand
-}
-
-func (o *runForkBarrierDueScheduleOwner) AdmitTx(_ context.Context, _ *mutationprotocol.Attempt, command genericschedule.AdmissionCommand) (genericschedule.AdmissionResult, error) {
-	o.commands = append(o.commands, command)
-	hash, err := command.ImmutableHash()
-	if err != nil {
-		return genericschedule.AdmissionResult{}, err
-	}
-	due, err := command.Due.FirstDue(o.birth)
-	if err != nil {
-		return genericschedule.AdmissionResult{}, err
-	}
-	activation := genericschedule.Activation{ID: uuid.NewString(), Command: command, ImmutableHash: hash, AdmittedAt: o.birth, InitialDueAt: due, CurrentDueAt: due, Status: genericschedule.StatusActive}
-	return genericschedule.AdmissionResult{Outcome: genericschedule.AdmissionCreated, Activation: activation}, activation.Validate()
-}
-
-func (*runForkBarrierDueScheduleOwner) CancelAdmissionTx(context.Context, *mutationprotocol.Attempt, genericschedule.AdmissionCommand, string, time.Time) (genericschedule.CancelResult, error) {
-	return genericschedule.CancelResult{}, errors.New("unexpected cancellation")
-}
-
-func (*runForkBarrierDueScheduleOwner) LoadActivationTx(context.Context, *mutationprotocol.Attempt, string) (genericschedule.Activation, bool, error) {
-	return genericschedule.Activation{}, false, errors.New("unexpected current source load")
-}
-
-func (*runForkBarrierDueScheduleOwner) CancelActivationTx(context.Context, *mutationprotocol.Attempt, genericschedule.CancelCommand) (genericschedule.CancelResult, error) {
-	return genericschedule.CancelResult{}, errors.New("unexpected cancellation")
 }

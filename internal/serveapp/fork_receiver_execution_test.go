@@ -127,7 +127,15 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				frontier := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, selected.RuntimeDeps().EventStore, seed.RunID)
 				sourceRows := readWorkspaceProofReceiverRows(t, selected.RuntimeDeps().EventStore, seed.RunID)
 				requireWorkspaceProofBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, seed.RunID, frontier, sourceRows["consumer"].ID)
+				ctx, cancel := context.WithTimeout(servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash, rt.ForkRuntime.ProcessCapability), 30*time.Second)
+				defer cancel()
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
+					t.Fatal(err)
+				}
+				if err := rt.Runtime.Bus.WaitForQuiescence(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := rt.Runtime.Manager.WaitForQuiescence(ctx); err != nil {
 					t.Fatal(err)
 				}
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "source-fixture-stop"})
@@ -144,8 +152,6 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				resumeSettlement := func() { barrier.releaseSettlement.Do(func() { close(barrier.resumeSettlement) }) }
 				t.Cleanup(resumeClaim)
 				t.Cleanup(resumeSettlement)
-				ctx, cancel := context.WithTimeout(servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash, rt.ForkRuntime.ProcessCapability), 30*time.Second)
-				defer cancel()
 				forkOptions := rt.ForkRuntime
 				if declaredAgent {
 					manager := workspace.NewHostManager()

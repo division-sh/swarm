@@ -9,6 +9,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -99,12 +100,32 @@ func (g *selectedChildContextProofGrant) requireGatewayCustody(ctx context.Conte
 		case "missing_surface":
 			candidate.CapabilitySurface = nil
 		}
-		if custody.matchesTurn(candidate) {
+		if custody.matchesTurn(candidate, hooks) {
 			return fmt.Errorf("gateway admitted crossed %s", field)
 		}
 	}
 	if _, ok := hooks.ResolveTurnContext(uuid.NewString()); ok {
 		return errors.New("gateway resolved an unregistered turn")
+	}
+	prospective := *custody
+	prospective.preparation.Actors = nil
+	if prospective.matchesTurn(turn, hooks) {
+		return errors.New("prospective gateway actor resolved without its Manager")
+	}
+	prospectiveHooks := hooks
+	prospectiveHooks.ResolveActorConfig = func(candidate agentidentity.Identity) (actors.AgentConfig, bool) {
+		return actor, candidate == identity
+	}
+	if !prospective.matchesTurn(turn, prospectiveHooks) {
+		return errors.New("gateway rejected exact registered prospective provider turn")
+	}
+	prospectiveHooks.ResolveActorConfig = func(agentidentity.Identity) (actors.AgentConfig, bool) {
+		foreign := actor
+		foreign.Identity.RunID = uuid.NewString()
+		return foreign, true
+	}
+	if prospective.matchesTurn(turn, prospectiveHooks) {
+		return errors.New("prospective gateway accepted another Manager actor")
 	}
 	request := managedexecution.WithAdmission(effects.WithAuthority(context.Background(), authority), admission)
 	request = authoractivity.WithScope(request, turn.AuthorActivityScope)
