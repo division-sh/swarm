@@ -283,6 +283,11 @@ func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map
 		if out[contract.FlowID] == nil {
 			out[contract.FlowID] = map[string]struct{}{}
 		}
+		if record.Entry.Writes.All {
+			for field := range contract.Contract.Fields {
+				out[contract.FlowID][field] = struct{}{}
+			}
+		}
 		for _, field := range record.Entry.Writes.Fields {
 			if _, declared := contract.Contract.Fields[field]; declared {
 				out[contract.FlowID][field] = struct{}{}

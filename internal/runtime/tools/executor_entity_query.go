@@ -276,7 +276,10 @@ func newEntityFilterEnv(schema entityToolSchema) (*workflowexpr.StructuralPredic
 	for _, field := range structural.Fields {
 		roots[field.Name] = struct{}{}
 	}
-	decls := []cel.EnvOption{cel.Variable("state", cel.DynType)}
+	var decls []cel.EnvOption
+	if _, declared := roots["state"]; !declared {
+		decls = append(decls, cel.Variable("state", cel.DynType))
+	}
 	keys := map[string]struct{}{}
 	for key := range entityStateTopLevelFields {
 		keys[key] = struct{}{}
@@ -473,6 +476,10 @@ func entityFilterSelectorBase(expr celast.Expr) (entityFilterSelectorReference, 
 }
 
 func validateEntityFilterSelectorReference(schema entityToolSchema, ref entityFilterSelectorReference) error {
+	if _, businessField := schema.Contract.Entity.Fields["state"]; businessField && ref.EntityScoped {
+		ref.EntityScoped = false
+		ref.Path = strings.TrimSuffix("state."+ref.Path, ".")
+	}
 	if ref.EntityScoped {
 		path := strings.TrimSpace(ref.Path)
 		if path == "" {

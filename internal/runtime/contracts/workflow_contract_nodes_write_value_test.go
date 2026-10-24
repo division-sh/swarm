@@ -32,6 +32,21 @@ func TestProjectNodeDataAccumulationValue(t *testing.T) {
 		accumulation.Writes[2].Operation != WorkflowDataOperationClear {
 		t.Fatalf("write forms not preserved: %#v", accumulation)
 	}
+	for _, field := range []string{"state", "payload", "instance", "metadata", "policy"} {
+		body := "worker:\n  task.requested:\n    data_accumulation:\n      writes: [" + field + "]\n"
+		snapshot, err := yamlsource.Load([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodes, err := projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
+		if err != nil {
+			t.Fatalf("literal field %s: %v", field, err)
+		}
+		write := nodes["worker"].EventHandlers["task.requested"].DataAccumulation.Writes[0]
+		if write.SourceExpression().Ref != "payload."+field || write.Target() != "state."+field {
+			t.Fatalf("literal field %s resolved as a root: %#v", field, write)
+		}
+	}
 }
 
 func TestProjectNodeDataAccumulationValueRejectsRetiredExpression(t *testing.T) {

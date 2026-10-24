@@ -82,7 +82,7 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 		if (w.TargetField == "" && w.TargetPathRef == "") || !w.Value.IsZero() {
 			return fmt.Errorf("workflow data write with source_field %q must also declare target_field or target_path and no value/expression", w.SourceField)
 		}
-		if paths.Parse(w.SourceField).HasExplicitRoot() {
+		if strings.Contains(w.SourceField, ".") && paths.Parse(w.SourceField).HasExplicitRoot() {
 			return fmt.Errorf("workflow data source_field %q must be payload-local, not scoped", w.SourceField)
 		}
 	case !w.Value.IsZero():
