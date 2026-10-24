@@ -114,11 +114,11 @@ func TestSelectedForkProcessAdmissionBothStores(t *testing.T) {
 			if err := capability.Release(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			successor := selectedContractTestProcessCapability(t, ctx, selected)
+			successorCtx, _, successor := successorRunForkProcessForTest(t, ctx, selected)
 			if err := owner.requirePreparationProcess(ctx, successor); err == nil {
 				t.Fatal("successor capability revived predecessor selected owner")
 			}
-			if err := successor.ProveCurrent(ctx); err != nil {
+			if err := successor.ProveCurrent(successorCtx); err != nil {
 				t.Fatalf("predecessor refusal invalidated successor: %v", err)
 			}
 			if process.ActiveCount() != baseline {

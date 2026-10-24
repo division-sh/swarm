@@ -207,10 +207,6 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 		return observed.ForkEvents[i].SourceEventID < observed.ForkEvents[j].SourceEventID
 	})
 	observed.ExecutedEventCount = len(observed.ForkEvents)
-	for _, event := range observed.ForkEvents {
-		diagnostic, err := storetest.ReadNodeDeliveryDiagnosticStorage(wait, selected, event.ForkEventID)
-		t.Logf("selected physical node settlement: event=%s diagnostic=%+v error=%v", event.ForkEventID, diagnostic, err)
-	}
 	return observed, outcome
 }
 

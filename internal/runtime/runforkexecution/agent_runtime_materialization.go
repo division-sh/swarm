@@ -954,7 +954,16 @@ type selectedContractGatewayServer struct {
 }
 
 func serveSelectedContractGateway(listener net.Listener, handler http.Handler, lease *worklifetime.Lease) *selectedContractGatewayServer {
-	server := &selectedContractGatewayServer{server: &http.Server{Handler: handler}, stopped: make(chan struct{}), lease: lease}
+	server := &selectedContractGatewayServer{server: &http.Server{Handler: handler,
+		BaseContext: func(net.Listener) context.Context {
+			ctx := context.Background()
+			// Retain attribution, not the standing lease's accepted-work admission.
+			if process, found := worklifetime.ProcessFromContext(lease.Context()); found {
+				ctx = worklifetime.WithProcess(ctx, process)
+			}
+			return ctx
+		},
+	}, stopped: make(chan struct{}), lease: lease}
 	go func() {
 		defer close(server.stopped)
 		// Even on a listener failure, Shutdown must retain accepted connections
