@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	replycontextstore "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -435,7 +436,7 @@ func (f *issue642ReplyCleanupFixture) request(t *testing.T, runIDs ...string) de
 	t.Helper()
 	if f.process == nil {
 		var err error
-		f.process, err = f.store.(startupownership.Store).AcquireProcessCapability(f.ctx, testStartupAcquireRequest("issue642-reply-cleanup"))
+		f.process, err = agentfixture.ProcessCapability(t, f.ctx, f.store.(agentfixture.Store))
 		if err != nil {
 			t.Fatal(err)
 		}

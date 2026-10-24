@@ -93,7 +93,9 @@ func TestIssue642EventlessEmptyStartCompletesWithoutInventedIngressBothStores(t 
 			if err := f.topology.capability.Release(cleanup); err != nil {
 				t.Fatal(err)
 			}
+			f.ctx = testAuthorActivityContextForBundle(context.Background(), f.runtime.sourceArtifactFact)
 			f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
+			f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
 			f.boot(t)
 			recovered, inventory := deploymentForkOwner(t, f)
 			matches := 0

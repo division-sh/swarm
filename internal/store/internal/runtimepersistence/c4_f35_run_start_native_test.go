@@ -338,6 +338,7 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector, p16CommitConnector{connector})
 				ctx = testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				owner = selected.(c4ForkCreationOwner)
 				if !committed {
 					c4RequireAbsentCreation(t, ctx, selected, forkRun)
@@ -645,6 +646,13 @@ func TestC4F35CreationCommitSIGKILLReopenBothStores(t *testing.T) {
 						t.Fatalf("creation retry after process death changed original evidence: %v", err)
 					}
 					c4RequireRevisionCount(t, ctx, fixture.store, record.RunID, 1)
+					process, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentfixture.Store))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := process.Release(context.Background()); err != nil {
+						t.Fatal(err)
+					}
 					if err := fixture.db.Close(); err != nil {
 						t.Fatal(err)
 					}
