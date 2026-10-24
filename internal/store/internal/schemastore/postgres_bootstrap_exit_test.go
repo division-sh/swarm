@@ -369,6 +369,15 @@ func TestPostgresBootstrapOwnsSQLAndCommitOutcome(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
+						// Socket close has no server-side acknowledgement. Join the
+						// exact native lock handoff before probing its released state.
+						handoff, err := postgresbackend.AcquireBlockingAdvisoryLockLease(ctx, peer, "swarm:runtime:shared-store-owner")
+						if err != nil {
+							t.Fatalf("join ambiguous bootstrap possession release: %v", err)
+						}
+						if err := handoff.Release(context.Background()); err != nil {
+							t.Fatalf("release ambiguous bootstrap handoff: %v", err)
+						}
 						available, acquired, err := postgresbackend.AcquireAdvisoryLockLease(context.Background(), peer, "swarm:runtime:shared-store-owner")
 						if err != nil || !acquired {
 							t.Fatalf("ambiguous bootstrap leaked retained possession: acquired=%t err=%v", acquired, err)
