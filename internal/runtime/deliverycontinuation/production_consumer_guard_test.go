@@ -175,7 +175,7 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 func containsRetiredDeliveryDialect(path, source, forbidden string) bool {
 	if forbidden == "retry_eligible" {
 		switch path {
-		case "internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/runforkrevision/projection.go", "platform-spec.yaml":
+		case "internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/delivery/test_retry_eligibility.go", "internal/store/internal/backend/runforkrevision/projection.go", "platform-spec.yaml":
 			// #2592/6192759467 admits this committed-outcome column, not
 			// the retired dispatch event or another eligibility interpreter.
 			source = regexp.MustCompile(`\bretry_eligible_at\b`).ReplaceAllString(source, "")
@@ -185,7 +185,7 @@ func containsRetiredDeliveryDialect(path, source, forbidden string) bool {
 }
 
 func TestRetiredDeliveryDialectStillRejectsRetryDispatchRestoration(t *testing.T) {
-	for _, path := range []string{"internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/runforkrevision/projection.go", "platform-spec.yaml"} {
+	for _, path := range []string{"internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/delivery/test_retry_eligibility.go", "internal/store/internal/backend/runforkrevision/projection.go", "platform-spec.yaml"} {
 		for _, cell := range []struct {
 			source    string
 			forbidden string
