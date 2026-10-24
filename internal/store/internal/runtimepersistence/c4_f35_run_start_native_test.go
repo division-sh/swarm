@@ -856,7 +856,7 @@ func c4ReplayCreationAfterCrash(t *testing.T, ctx context.Context, fixture autho
 		}
 		candidate := pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: flowidentity.StandingServiceID(record.FlowPath), FlowPath: record.FlowPath, Source: fact}
 		workflow := newWorkflowTestCoordinator(t, fixture.db, pipeline.NewWorkflowPersistence(fixture.store.(workflowTestSelectedStore)), fixture.store.(workflowTestSelectedStore))
-		replayed, replayErr := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)
+		replayed, replayErr := workflow.ReconcileStandingService(ctx, candidate)
 		if replayErr != nil || replayed.RunID != record.RunID || replayed.Generation != 1 {
 			t.Fatalf("fresh standing owner duplicated committed generation: %+v err=%v", replayed, replayErr)
 		}
