@@ -19,6 +19,8 @@ import (
 	"golang.org/x/term"
 )
 
+const credentialInventoryReadbackHint = "Credential presence here is inventory only; static provider/channel requirements use the file tier."
+
 type secretsListOptions struct {
 	asJSON  bool
 	present bool
@@ -107,6 +109,7 @@ func newSecretsSetCommand(ctx context.Context, repo string) *cobra.Command {
 			record := secretRecordFromDescriptor(desc)
 			fmt.Fprintf(cmd.OutOrStdout(), "secret set: key=%s source=%s writable=%s shadowed=%s present=%s\n",
 				record.Key, dash(record.Source), yesNo(record.Writable), yesNo(record.Shadowed), yesNo(record.Present))
+			fmt.Fprintln(cmd.OutOrStdout(), credentialInventoryReadbackHint)
 			return nil
 		},
 	}
@@ -226,6 +229,7 @@ func newSecretsRemoveCommand(ctx context.Context, repo string) *cobra.Command {
 			record := secretRecordFromDescriptor(desc)
 			fmt.Fprintf(cmd.OutOrStdout(), "secret removed from file tier: key=%s source=%s writable=%s shadowed=%s present=%s\n",
 				record.Key, dash(record.Source), yesNo(record.Writable), yesNo(record.Shadowed), yesNo(record.Present))
+			fmt.Fprintln(cmd.OutOrStdout(), credentialInventoryReadbackHint)
 			return nil
 		},
 	}
@@ -330,6 +334,7 @@ func mergeProviderSecretDescriptors(ctx context.Context, descriptors []runtimecr
 		return descriptors, nil
 	}
 	byKey := make(map[string]runtimecredentials.Descriptor, len(descriptors)+len(providerRequirements))
+	out := make([]runtimecredentials.Descriptor, 0, len(descriptors)+len(providerRequirements))
 	for _, desc := range descriptors {
 		byKey[strings.TrimSpace(desc.Key)] = desc
 	}
@@ -343,20 +348,27 @@ func mergeProviderSecretDescriptors(ctx context.Context, descriptors []runtimecr
 			return nil, err
 		}
 		if existing, ok := byKey[key]; ok {
-			desc.RequiredBy = mergeCredentialRequirements(existing.RequiredBy, requiredBy)
+			if existing.Present == desc.Present && existing.Source == desc.Source && existing.SourceFact() == desc.SourceFact() {
+				desc.RequiredBy = mergeCredentialRequirements(existing.RequiredBy, requiredBy)
+			} else {
+				out = append(out, existing)
+				desc.RequiredBy = mergeCredentialRequirements(nil, requiredBy)
+			}
 		} else {
 			desc.RequiredBy = mergeCredentialRequirements(nil, requiredBy)
 		}
 		byKey[key] = desc
 	}
-	out := make([]runtimecredentials.Descriptor, 0, len(byKey))
 	for _, desc := range byKey {
 		if strings.TrimSpace(desc.Key) == "" {
 			continue
 		}
 		out = append(out, desc)
 	}
-	sort.Slice(out, func(i, j int) bool {
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Key == out[j].Key {
+			return out[i].Source < out[j].Source
+		}
 		return out[i].Key < out[j].Key
 	})
 	return out, nil
@@ -404,7 +416,10 @@ func secretRecordsFromDescriptors(descriptors []runtimecredentials.Descriptor) [
 	for _, desc := range descriptors {
 		records = append(records, secretRecordFromDescriptor(desc))
 	}
-	sort.Slice(records, func(i, j int) bool {
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].Key == records[j].Key {
+			return records[i].Source < records[j].Source
+		}
 		return records[i].Key < records[j].Key
 	})
 	return records
@@ -471,6 +486,7 @@ func writeSecretsTable(out io.Writer, records []secretRecord) {
 		Rows:         rows,
 		EmptyMessage: "No secrets match the current filters. Add one: swarm secrets set <key>",
 	})
+	fmt.Fprintln(out, credentialInventoryReadbackHint)
 }
 
 func formatSecretRequirements(items []secretRequirement) string {

@@ -134,7 +134,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 				t.Helper()
 				waitForInboundAdmissionServeOutput(t, process, "DORMANT ingress telegram-ingress/telegram")
 				output := process.outputString()
-				for _, want := range []string{"DORMANT ingress telegram-ingress/telegram", "webhook_signing.telegram", "then restart", "NOT READY"} {
+				for _, want := range []string{"DORMANT ingress telegram-ingress/telegram", "webhook_signing.telegram", "then restart", "NOT READY", "file tier"} {
 					if !strings.Contains(output, want) {
 						t.Fatalf("dormant teaching missing %q:\n%s", want, output)
 					}
