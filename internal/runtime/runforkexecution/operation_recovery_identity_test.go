@@ -73,7 +73,8 @@ func TestSelectedOperationSuccessorReturnsRecoveredWinnerBothStores(t *testing.T
 					t.Error(err)
 				}
 			})
-			ctx = worklifetime.WithProcess(ctx, process)
+			ctx = worklifetime.WithProcess(runForkTestContext(t), process)
+			ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 			capability := selectedContractTestProcessCapability(t, ctx, selected.(startupownership.Store))
 			var successor SelectedContractExecutionOwner
 			switch native := selected.(type) {
