@@ -34,6 +34,9 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/item",
 				Config: json.RawMessage(`{"opaque":[7,7.0,null]}`),
 			})
+			ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+				Origin: semanticScenarioSetupRunOriginForTest(), RunID: cfg.Identity.RunID,
+			})
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{Config: cfg, Status: "active"}); err != nil {
 				t.Fatal(err)
 			}
