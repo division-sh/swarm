@@ -132,7 +132,7 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 					result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
 						SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
 						Owner: selectedContractExecutionOwnerForCatalogHarness(t, h, probe), SourceLoader: loader, ContractSelection: selection,
-						AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
+						AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg), ExpectedBundleHash: selection.BundleHash,
 					})
 					if err != nil || !result.Activation.Activated {
 						t.Fatalf("activation acknowledgment: %+v err=%v", result.Activation, err)

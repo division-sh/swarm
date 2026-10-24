@@ -124,7 +124,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 			MailboxStore:      h.pg,
 			LLMRuntime:        h.llm,
 			QuiescenceTimeout: 10 * time.Second,
-		},
+		}, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -512,7 +512,7 @@ func materializeSelectedContractForkCleanupProbe(
 	cfg.LLM.Backend = "anthropic"
 	prepared, err := owner.Prepare(h.ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: forkAt, SourceLoader: loader, ContractSelection: selection,
-		AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
+		AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg), ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err

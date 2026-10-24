@@ -67,7 +67,7 @@ func TestIssue642PublishedFanOutReturnsOwnChildReplyBothStores(t *testing.T) {
 				t.Fatalf("cut did not retain the own open row and exact published carrier: rows=%+v intents=%+v errors=%v/%v", childRows, page, err, pageErr)
 			}
 			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 				t.Fatalf("activate the exact deferred-reply child: %+v error=%v", executed, err)

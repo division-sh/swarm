@@ -61,7 +61,7 @@ func TestSelectedDownstreamPreparationFailsBeforeMaterializationBothStores(t *te
 			result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
 				Owner: owner, SourceLoader: loader, ContractSelection: selection,
-				AgentRuntime: options,
+				AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 			})
 			if err == nil || !strings.Contains(err.Error(), "missing selected-fork agent factory/runtime configuration") {
 				t.Fatalf("missing downstream configuration must fail at preparation: %v", err)
@@ -76,7 +76,7 @@ func TestSelectedDownstreamPreparationFailsBeforeMaterializationBothStores(t *te
 			options.Config.LLM.Backend = "anthropic"
 			prepared, err := owner.Prepare(ctx, forkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
-				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 			})
 			if err != nil {
 				t.Fatalf("complete downstream preparation: %v", err)
