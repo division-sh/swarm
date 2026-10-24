@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -213,7 +214,14 @@ func managerProjectionDeliverySource(t *testing.T) semanticview.Source {
 
 func managerSourceSetDeliverySource(t *testing.T) semanticview.Source {
 	t.Helper()
-	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", sourceartifactfixture.New("events.yaml", []byte("test.source_set_wait:\ntest.source_set_cancelled:\n")))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"events.yaml":   []byte("test.source_set_wait:\ntest.source_set_cancelled:\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", artifact)
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +231,14 @@ func managerSourceSetDeliverySource(t *testing.T) semanticview.Source {
 
 func managerFailureDeliverySource(t *testing.T) semanticview.Source {
 	t.Helper()
-	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", sourceartifactfixture.New("events.yaml", []byte("work.requested:\n")))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"events.yaml":   []byte("work.requested:\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", artifact)
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +248,14 @@ func managerFailureDeliverySource(t *testing.T) semanticview.Source {
 
 func managerClaimedExecutorDeliverySource(t *testing.T) semanticview.Source {
 	t.Helper()
-	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", sourceartifactfixture.New("events.yaml", []byte("input.first:\ninput.second:\ntest.lane.child:\ntest.lane.later:\ntest.lane.root:\n")))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"events.yaml":   []byte("input.first:\ninput.second:\ntest.lane.child:\ntest.lane.later:\ntest.lane.root:\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", artifact)
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)

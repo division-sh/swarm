@@ -137,8 +137,9 @@ func prepareConstructedRootAgentForTest(t *testing.T) (*AgentManager, *flowActiv
 	t.Helper()
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	root := t.TempDir()
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-agent-preparation\n")
+	root := filepath.Join(t.TempDir(), "root-agent-preparation")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "test-agent:\n  intent: {inline: Handle root work.}\n  model: regular\n  subscriptions: [task.assigned]\n")
 	repo := runtimepipeline.WorkflowRepoRoot()
