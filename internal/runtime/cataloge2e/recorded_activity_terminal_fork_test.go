@@ -87,11 +87,27 @@ func proveCopiedActivityTerminalHistory(t *testing.T, h *runtimeHarness, selecte
 			t.Fatalf("read exact terminal-cut pipeline accounting: %v/%v", pendingErr, cutErr)
 		}
 		if found && pending == 0 {
-			lineage, selected := cutPublished.Event.Event().SelectedForkLineage()
-			if !selected || lineage.SourceRunID() != sourceRun || lineage.SourceEventID() != cut || string(run.State) != "running" {
+			lineage, isSelected := cutPublished.Event.Event().SelectedForkLineage()
+			if !isSelected || lineage.SourceRunID() != sourceRun || lineage.SourceEventID() != cut || string(run.State) != "running" {
 				t.Fatalf("terminal-cut accounting changed source lineage or invented root completion: event=%+v run=%+v", cutPublished, run)
 			}
-			break
+			// Zero current handoffs can precede creation of the pending inputs'
+			// deliveries. Their exact successful receipts establish completion.
+			inputsCommitted := true
+			for _, work := range plan.PendingWork {
+				if work.EventName != "platform.activity_requested" || work.Classification != runfork.RunForkPendingClassificationPending {
+					continue
+				}
+				inputID := activityidentity.ForkLineageEventID(staged.ForkRunID, work.EventID)
+				receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(settlementCtx, selected, inputID)
+				if err != nil || (receipt.Found && (receipt.Outcome != "success" || len(receipt.Failure) != 0)) {
+					t.Fatalf("terminal result dropped or failed its exact pending-input accounting: %+v error=%v", receipt, err)
+				}
+				inputsCommitted = inputsCommitted && receipt.Found
+			}
+			if inputsCommitted {
+				break
+			}
 		}
 		select {
 		case <-settlementCtx.Done():
