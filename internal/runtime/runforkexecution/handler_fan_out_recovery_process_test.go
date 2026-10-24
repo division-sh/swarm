@@ -230,6 +230,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 			}
 			ctx := runForkTestContext(t)
 			capability := selectedContractTestProcessCapability(t, ctx, selected)
+			ctx = originalSelectedFixtureContext(t, ctx, selected)
 			owner := construct()
 			successor := make(chan effects.Authority, 1)
 			owner.ports.runtimeExecution = selectedActivitySuccessorClaim{owner.ports.runtimeExecution, successor}
