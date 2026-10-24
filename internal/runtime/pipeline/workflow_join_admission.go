@@ -255,7 +255,7 @@ func PrepareWorkflowJoinAdmission(source semanticview.Source, runID, event strin
 	}
 	declarations := make([]timeridentity.JoinRef, len(plans))
 	for index, plan := range plans {
-		ref, err := timeridentity.NewJoinRef(plan.Node, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID())
+		ref, err := timeridentity.NewJoinRef(plan.Node, plan.HandlerEvent, plan.Spec.Stage)
 		if err != nil {
 			return nil, nil, err
 		}

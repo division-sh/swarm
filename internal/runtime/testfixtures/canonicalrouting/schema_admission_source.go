@@ -34,7 +34,7 @@ stages:
       outcomes:
         approve:
           advances_to: done
-          input: {comment: {type: text, required: false, label: ''}}
+          input: {comment: {type: text, required: false}}
           emit: {event: work.completed, fields: {record: {note: payload.note, preserved: null}}}
   done: {final: true}
 loops:

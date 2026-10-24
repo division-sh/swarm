@@ -420,7 +420,7 @@ func TestFlowConstructionReceiptV3ExplicitAbsenceAndFieldlessProjection(t *testi
 
 func TestFlowConstructionReceiptV3ChildReturnAdmission(t *testing.T) {
 	receipt, _ := constructionReceiptFixture(t)
-	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "account", "join"), "item.done", "initial", "items")
+	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "account", "join"), "item.done", "initial")
 	if err != nil {
 		t.Fatal(err)
 	}

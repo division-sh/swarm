@@ -208,8 +208,8 @@ func testCompiledOrdinaryConsumerAgreement(t *testing.T) {
 stages:
   ready:
     timers:
-      - {id: advance, after: 1h, advances_to: working}
-      - {id: notify, after: 2h, emit: tick}
+      - {after: 1h, advances_to: working}
+      - {after: 2h, emit: tick}
   working: {}
   awaiting: {}
   done: {final: true}

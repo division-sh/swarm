@@ -138,7 +138,7 @@ func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryCont
 }
 
 func TestDeferredFanOutRetainsCapturedReplyForEveryOrdinal(t *testing.T) {
-	declaration, err := timeridentity.NewJoinRef(testRootExecutableNode(t, "worker"), "batch.ready", "pending", "consumed-input")
+	declaration, err := timeridentity.NewJoinRef(testRootExecutableNode(t, "worker"), "batch.ready", "pending")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -323,8 +323,7 @@ func projectRunForkFanOutBarrier(runID string, fact *runForkRevisionFanOutFact, 
 	if declarationErr != nil || !fanOutRef.DeclarationIdentity().Equal(declaration) ||
 		fanOutRef.BundleHash() != fact.BundleHash || fanOutRef.SemanticDigest() != fact.SemanticDigest ||
 		joinRef.Node().FlowPath() != fact.BarrierTargetFlowPath ||
-		joinRef.Node().NodeID() != fact.BarrierTargetNodeID || joinRef.HandlerEvent() != fact.BarrierHandlerEvent ||
-		joinRef.JoinID() != fact.BarrierJoinID {
+		joinRef.Node().NodeID() != fact.BarrierTargetNodeID || joinRef.HandlerEvent() != fact.BarrierHandlerEvent {
 		return nil, fmt.Errorf("typed timer handle contradicts projected barrier identity")
 	}
 	mode, ok := executionmode.Parse(fact.BarrierExecutionMode)

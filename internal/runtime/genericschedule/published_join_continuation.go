@@ -124,7 +124,7 @@ func publishedJoinContinuationRefs(source, child AdmissionCommand) (timeridentit
 func validatePublishedBarrierContinuation(source, child AdmissionCommand, before, after timeridentity.JoinRef) error {
 	original, originalOK := before.FanOutDelivery()
 	projected, projectedOK := after.FanOutDelivery()
-	if !originalOK || !projectedOK || before.Node() != after.Node() || before.HandlerEvent() != after.HandlerEvent() || before.JoinID() != after.JoinID() ||
+	if !originalOK || !projectedOK || before.Node() != after.Node() || before.HandlerEvent() != after.HandlerEvent() ||
 		!original.DeclarationIdentity().Equal(projected.DeclarationIdentity()) || original.TriggeringDeliveryID() != projected.TriggeringDeliveryID() {
 		return fmt.Errorf("published barrier continuation changes its exact intent or outcome declaration")
 	}

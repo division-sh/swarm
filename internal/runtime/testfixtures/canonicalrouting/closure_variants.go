@@ -78,7 +78,7 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 		agents = "reviewer-agent:\n  role: reviewer\n  intent: {inline: 'Review completed tasks.'}\n  subscriptions: [task.done]\n"
 	case EventMetadataAuthorityTaskProducerTimer:
 		taskDoneSwarm = "    producer: reminder\n"
-		timerBlock = "  timers:\n    - id: reminder\n      owner: worker\n      event: task.done\n      delay: 1m\n      start_on: event:task.start\n"
+		timerBlock = "  timers:\n    - owner: worker\n      event: task.done\n      delay: 1m\n      start_on: event:task.start\n"
 	case EventMetadataAuthorityExternalProof:
 		taskDoneSwarm = "    source: platform timer\n    producer: mailbox_human\n    consumer: external\n"
 	default:
@@ -228,7 +228,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	if timerHandlerKey == "" {
 		timerHandlerKey = "timer.reminder"
 	}
-	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
+	timerBlock := "    - owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {
 		timerBlock += "      cancel_on: " + settings.cancelOn + "\n"
 	}
@@ -317,15 +317,15 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	if settings.includeGlobalDonePath || settings.includeGlobalReviewPath {
 		waiting = "  waiting:\n    timers:\n"
 		if settings.includeGlobalDonePath {
-			waiting += "      - {id: global_done, after: 1h, advances_to: done}\n"
+			waiting += "      - {after: 1h, advances_to: done}\n"
 		}
 		if settings.includeGlobalReviewPath {
-			waiting += "      - {id: global_review, after: 1h, advances_to: review}\n"
+			waiting += "      - {after: 1h, advances_to: review}\n"
 		}
 	}
 	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n"+waiting+"  active: {}\n  review: "+reviewMetadata+"\n  done: {final: true}\npins:\n  inputs: ["+pinList+"]\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder:\n")
-	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
+	timerBlock := "    - owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {
 		timerBlock += "      cancel_on: " + settings.cancelOn + "\n"
 	}

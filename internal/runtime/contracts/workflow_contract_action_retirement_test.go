@@ -193,7 +193,7 @@ rules:
 	})
 	t.Run("timer_action", func(t *testing.T) {
 		var timer WorkflowTimerContract
-		if err := decodeNodeTestYAML([]byte("id: expiry\naction: expire\ndelay: 1h\n"), &timer); err != nil || timer.Action != "expire" {
+		if err := decodeNodeTestYAML([]byte("event: timer.expiry\naction: expire\ndelay: 1h\n"), &timer); err != nil || timer.Action != "expire" {
 			t.Fatalf("timer action changed: %#v, %v", timer, err)
 		}
 	})

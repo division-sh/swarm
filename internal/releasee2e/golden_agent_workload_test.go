@@ -2152,7 +2152,7 @@ func assertGoldenJoinContinuation(t *testing.T, ctx context.Context, rpc *releas
 	}
 	wantHandle := map[string]any{"kind": "join_complete", "join": map[string]any{
 		"mode": "arrival", "node": map[string]any{"flow_path": ".", "node_id": "candidate-collector"},
-		"handler_event": "candidate.completed", "join_id": "collecting", "stage": "collecting", "stage_entry": entry,
+		"handler_event": "candidate.completed", "stage": "collecting", "stage_entry": entry,
 	}}
 	wantPayload := map[string]any{"timer_handle": wantHandle}
 	assertGoldenExactPayload(t, completion, wantPayload)

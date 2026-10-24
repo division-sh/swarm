@@ -128,7 +128,6 @@ auto_emit_on_create:
 		applyClosedReplacement(t, ownerNodes, `          command: payload.command
 `, `          command: payload.command
     join:
-      id: all-account-notifications-delivered
       members:
         from_fan_out: true
       on_complete:

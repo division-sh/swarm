@@ -95,7 +95,6 @@ pins:
 	}
 	if barrier {
 		nodes += `      join:
-        id: all-items-delivered
         members: {from_fan_out: true}
         on_complete:
           emit:

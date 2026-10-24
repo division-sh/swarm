@@ -10,7 +10,7 @@ import (
 )
 
 func TestA2PersistedJoinProjectionPreservesDomainBoundary(t *testing.T) {
-	arm, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, time.Unix(100, 0), time.Time{})
+	arm, err := NewActivation(testJoinRef(t, "", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, time.Unix(100, 0), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

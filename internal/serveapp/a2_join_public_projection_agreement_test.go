@@ -215,7 +215,7 @@ func a2ReadJoinPublicObligation(t *testing.T, rt servedControlProofRuntime, runI
 	}
 	arm := joins[0]
 	ref := arm.JoinRef()
-	declaration, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "join-node"), "item.completed", "awaiting", "awaiting")
+	declaration, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "join-node"), "item.completed", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func a2RequireJoinPublicGraph(t *testing.T, rt servedControlProofRuntime, root s
 	}
 	graph, ref := view.StageGraphs[0], arm.JoinRef()
 	want := authoringview.StageGraphJoinView{
-		ID: ref.JoinID(), Stage: ref.Stage(), FlowPath: ref.Node().FlowPath(), NodeID: ref.Node().NodeID(), HandlerEvent: ref.HandlerEvent(),
+		Stage: ref.Stage(), FlowPath: ref.Node().FlowPath(), NodeID: ref.Node().NodeID(), HandlerEvent: ref.HandlerEvent(),
 		MembersFrom: "state.expected", MembersBy: "payload.member_id", Output: "payload.result", DeadlineAfter: "1h", DeadlineFrom: "stage_entry",
 	}
 	if graph.FlowPath != ref.Node().FlowPath() || len(graph.Joins) != 1 || graph.Joins[0] != want ||
@@ -461,7 +461,7 @@ func a2JoinPublicCLI(t *testing.T, rt servedControlProofRuntime, args ...string)
 func a2RequireJoinPublicLateFailure(t *testing.T, event operatorread.OperatorEventFull, entity operatorread.OperatorEntityFull, ref timeridentity.JoinRef) {
 	t.Helper()
 	delivery := event.Deliveries[0]
-	attrs := map[string]any{"row_id": ref.JoinID(), "stage": ref.Stage(), "node_id": ref.Node().Key(), "handler_event": ref.HandlerEvent(), "stage_entry": ref.StageEntry().Key()}
+	attrs := map[string]any{"stage": ref.Stage(), "node_id": ref.Node().Key(), "handler_event": ref.HandlerEvent(), "stage_entry": ref.StageEntry().Key()}
 	if event.RunID != entity.Entity.RunID || event.EventName != "item.completed" || delivery.SubscriberID != ref.Node().Key() || delivery.SubscriberType != "node" ||
 		!reflect.DeepEqual(event.Payload, map[string]any{"dispatch_id": "dispatch-m37", "member_id": "op-a", "result": map[string]any{"ok": false}}) ||
 		delivery.Target != (operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: ".", FlowInstance: entity.Entity.FlowInstance, EntityID: entity.Entity.EntityID}) ||

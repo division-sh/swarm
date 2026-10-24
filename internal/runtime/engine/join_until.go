@@ -29,7 +29,7 @@ func (e *Executor) stepJoinUntil(frame *executionFrame) error {
 	matched := false
 	for _, receipt := range context.Joins {
 		for _, plan := range frame.req.Handler.JoinUntilPlans {
-			declaration, err := timeridentity.NewJoinRef(plan.Node, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID())
+			declaration, err := timeridentity.NewJoinRef(plan.Node, plan.HandlerEvent, plan.Spec.Stage)
 			if err != nil {
 				return err
 			}

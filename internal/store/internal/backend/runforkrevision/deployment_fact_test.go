@@ -83,7 +83,7 @@ func TestDeploymentFanOutRevisionProjectionBothStores(t *testing.T) {
 				`CREATE TABLE fan_out_obligation_barriers (
 					run_id TEXT, triggering_delivery_id TEXT, flow_path TEXT, declaration_family TEXT,
 					semantic_path TEXT, bundle_hash TEXT, semantic_digest TEXT, created_at TIMESTAMP,
-					target_flow_path TEXT, target_node_id TEXT, handler_event TEXT, join_id TEXT,
+					target_flow_path TEXT, target_node_id TEXT, handler_event TEXT,
 					route_scope_key TEXT, route_instance_id TEXT, route_instance_path TEXT, entity_id TEXT,
 					routing_source TEXT, execution_mode TEXT, timer_handle TEXT, status TEXT,
 					summary TEXT, schedule_key TEXT, schedule_activation_id TEXT, updated_at TIMESTAMP, transferred_occurrence TEXT)`,

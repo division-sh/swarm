@@ -23,7 +23,7 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 			}
 			old := source.Generation()
 			entry := a2ForkEntry(t, "source", "source", "source", "draft", "old")
-			ref, err := timeridentity.NewJoinRef(forkGenerationRootNode("collector"), "result", "draft", "join")
+			ref, err := timeridentity.NewJoinRef(forkGenerationRootNode("collector"), "result", "draft")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -131,7 +131,7 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := a2ForkEntry(t, "source-run", "source-run", "source-run", "review", "entry")
-	joinRef, err := timeridentity.NewJoinRef(forkGenerationRootNode("review-node"), "review.result", "review", "review")
+	joinRef, err := timeridentity.NewJoinRef(forkGenerationRootNode("review-node"), "review.result", "review")
 	if err != nil {
 		t.Fatal(err)
 	}

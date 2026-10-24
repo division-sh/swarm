@@ -15,7 +15,7 @@ func TestWorkflowJoinViewPreservesCompilerOwnedMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := 2
-	spec := runtimecontracts.JoinSpec{ID: "collected", Stage: "waiting",
+	spec := runtimecontracts.JoinSpec{Stage: "waiting",
 		Members:  runtimecontracts.JoinMembersSpec{Count: &count, By: "payload.member_id"},
 		Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry}}
 	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: []runtimecontracts.WorkflowJoinPlan{
@@ -33,7 +33,7 @@ func TestWorkflowJoinViewPreservesCompilerOwnedMembership(t *testing.T) {
 }
 
 func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *testing.T) {
-	spec := runtimecontracts.JoinSpec{ID: "awaiting", Stage: "awaiting"}
+	spec := runtimecontracts.JoinSpec{Stage: "awaiting"}
 	root, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "join-node")
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 	}}}
 	source := semanticview.Wrap(bundle)
 	for _, node := range []runtimeidentity.ExecutableNode{root, orders} {
-		ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "awaiting")
+		ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +61,7 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostile, err := timeridentity.NewJoinRef(hostileNode, "item.completed", "awaiting", "awaiting")
+	hostile, err := timeridentity.NewJoinRef(hostileNode, "item.completed", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 }
 
 func TestWorkflowJoinPlanForRefPreservesDistinctFlowDeclarationsInEitherOrder(t *testing.T) {
-	spec := runtimecontracts.JoinSpec{ID: "awaiting", Stage: "awaiting"}
+	spec := runtimecontracts.JoinSpec{Stage: "awaiting"}
 	first, err := runtimeidentity.AdmitExecutableNodeDeclaration("orders/a", "shared")
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestWorkflowJoinPlanForRefPreservesDistinctFlowDeclarationsInEitherOrder(t 
 	} {
 		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: plans}})
 		for _, node := range []runtimeidentity.ExecutableNode{first, second} {
-			ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "awaiting")
+			ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting")
 			if err != nil {
 				t.Fatal(err)
 			}

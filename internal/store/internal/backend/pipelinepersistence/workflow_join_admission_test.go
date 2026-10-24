@@ -43,7 +43,7 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "gather"), "item.reported", "awaiting", "awaiting")
+			declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "gather"), "item.reported", "awaiting")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -327,8 +327,7 @@ func TestLoadWorkflowContractBundleRejectsRetiredTimerDurationAlias(t *testing.T
 	writeFieldReconciliationBundle(t, root, "", `
 worker:
   timers:
-    - id: reminder
-      event: timer.reminder
+    - event: timer.reminder
       delay_minutes: 5
 `)
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))

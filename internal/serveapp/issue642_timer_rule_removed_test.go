@@ -37,7 +37,7 @@ func issue642RemovedTimerTarget(t *testing.T, final bool) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const declaration = "  timers:\n    - id: check_timer\n      event: timer.check\n      delay: 1s\n      start_on: event:timer.scheduled\n"
+	const declaration = "  timers:\n    - event: timer.check\n      delay: 1s\n      start_on: event:timer.scheduled\n"
 	if strings.Count(string(nodes), declaration) != 1 {
 		t.Fatal("removed-rule fixture lost its exact original timer declaration")
 	}

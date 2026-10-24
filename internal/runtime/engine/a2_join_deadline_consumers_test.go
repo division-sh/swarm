@@ -105,7 +105,7 @@ func TestA2CompiledDeadlineTransitionConsumesExactCarrier(t *testing.T) {
 		t.Fatal(err)
 	}
 	compiled, ok := frame.result.StateMutation.Transition.Compiled()
-	if !ok || compiled.Edge().AdvanceCarrier != c.HandlerAdvanceCarrierJoinOnDeadline || compiled.Edge().EventType != "platform.join_timeout" || compiled.Edge().TimerID != handler.Join.EffectiveID() {
+	if !ok || compiled.Edge().AdvanceCarrier != c.HandlerAdvanceCarrierJoinOnDeadline || compiled.Edge().EventType != "platform.join_timeout" || compiled.Edge().TimerID != frame.req.HandlerEventKey {
 		t.Fatalf("wrong deadline edge: %#v", compiled.Edge())
 	}
 	for _, change := range []func(*executionFrame){

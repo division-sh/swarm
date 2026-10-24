@@ -2115,7 +2115,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 		"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
 	}}}
 	spec := runtimecontracts.JoinSpec{
-		ID: "line_items", Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
+		Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
 		Members:    runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"}, OnCompleteFound: true,
 		Deadline:   &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
@@ -2336,7 +2336,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := runtimecontracts.JoinSpec{
-				ID: "line_items", Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
+				Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
 				Members: runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"},
 				OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready", DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 					{TargetField: "checked", Value: runtimecontracts.CELExpression(tc.expression)},
@@ -2407,7 +2407,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 }
 
 func newEngineTestJoinActivation(node identity.ExecutableNode, handlerEvent string, spec runtimecontracts.JoinSpec, entry timeridentity.StageEntryRef, members []string, armedAt, fireAt time.Time) (joinruntime.Activation, error) {
-	ref, err := timeridentity.NewJoinRef(node, handlerEvent, spec.Stage, spec.EffectiveID())
+	ref, err := timeridentity.NewJoinRef(node, handlerEvent, spec.Stage)
 	if err != nil {
 		return joinruntime.Activation{}, err
 	}
@@ -5387,7 +5387,6 @@ fan_out:
     fields:
       item: fan_item
 join:
-  id: all-items-delivered
   members:
     from_fan_out: true
   on_complete:
@@ -5428,7 +5427,7 @@ join:
 		Spec: *qualified.Join, FanOut: runtimecontracts.WorkflowFanOutDeliveryJoinPlan{FanOut: plans[0].Ref},
 	}}
 	declaration, err := timeridentity.NewFanOutDeliveryJoinRef(
-		node, "batch.requested", qualified.Join.EffectiveID(),
+		node, "batch.requested",
 		mustFanOutDeclaration(t, plans[0].Ref.ElementRef),
 		plans[0].Ref.BundleHash, plans[0].Ref.SemanticDigest,
 	)
@@ -5517,7 +5516,6 @@ fan_out:
   emit:
     event: item.requested
 join:
-  id: all-items-delivered
   members:
     from_fan_out: true
   on_complete:
@@ -5553,7 +5551,7 @@ join:
 		Spec: *qualified.Join, FanOut: runtimecontracts.WorkflowFanOutDeliveryJoinPlan{FanOut: plan.Ref},
 	}}
 	declaration, err := timeridentity.NewFanOutDeliveryJoinRef(
-		node, "batch.requested", qualified.Join.EffectiveID(), mustFanOutDeclaration(t, plan.Ref.ElementRef),
+		node, "batch.requested", mustFanOutDeclaration(t, plan.Ref.ElementRef),
 		plan.Ref.BundleHash, plan.Ref.SemanticDigest,
 	)
 	if err != nil {

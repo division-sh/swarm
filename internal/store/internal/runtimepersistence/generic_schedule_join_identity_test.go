@@ -613,7 +613,7 @@ func selectedStoreJoinScheduleCommand(t *testing.T, runID, declarationFlowPath, 
 	if err != nil || !enters || entry.OriginRunID != "" {
 		t.Fatalf("join schedule lifecycle entry = %#v enters=%v err=%v", entry, enters, err)
 	}
-	ref, err := timeridentity.NewJoinRef(mustPersistenceNode(declarationFlowPath, "join-node"), "item.completed", "awaiting", "shared")
+	ref, err := timeridentity.NewJoinRef(mustPersistenceNode(declarationFlowPath, "join-node"), "item.completed", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}

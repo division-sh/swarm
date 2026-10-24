@@ -64,7 +64,7 @@ func ResolvePublishedJoinOccurrenceDeliveryTarget(source semanticview.Source, pu
 func selectedRetainedBarrierDeclaration(source semanticview.Source, original timeridentity.JoinRef) (timeridentity.JoinRef, error) {
 	retained, valid := original.FanOutDelivery()
 	selected, found := semanticview.WorkflowJoinPlanForHandler(source, original.Node(), original.HandlerEvent())
-	if !valid || !found || selected.Mode != runtimecontracts.WorkflowJoinModeFanOutDelivery || selected.Spec.EffectiveID() != original.JoinID() ||
+	if !valid || !found || selected.Mode != runtimecontracts.WorkflowJoinModeFanOutDelivery ||
 		selected.FanOut.FanOut.ElementRef != runtimecontracts.FanOutElementRefFrom(retained.DeclarationIdentity()) {
 		return timeridentity.JoinRef{}, fmt.Errorf("retained barrier has no exact selected declaration counterpart")
 	}
@@ -228,14 +228,14 @@ func workflowJoinDeclarationRef(source semanticview.Source, node runtimeidentity
 	var err error
 	switch plan.Mode {
 	case runtimecontracts.WorkflowJoinModeArrival:
-		ref, err = timeridentity.NewJoinRef(plan.Node, handlerEvent, handler.Join.Stage, handler.Join.EffectiveID())
+		ref, err = timeridentity.NewJoinRef(plan.Node, handlerEvent, handler.Join.Stage)
 	case runtimecontracts.WorkflowJoinModeFanOutDelivery:
 		fanOutDeclaration, identityErr := plan.FanOut.FanOut.ElementRef.DeclarationIdentity()
 		if identityErr != nil {
 			err = identityErr
 		} else {
 			ref, err = timeridentity.NewFanOutDeliveryJoinRef(
-				plan.Node, handlerEvent, handler.Join.EffectiveID(), fanOutDeclaration,
+				plan.Node, handlerEvent, fanOutDeclaration,
 				plan.FanOut.FanOut.BundleHash, plan.FanOut.FanOut.SemanticDigest,
 			)
 		}

@@ -467,7 +467,7 @@ func topologyReachable(start string, edges []WorkflowStageTopologyEdge, reverse 
 
 func joinTimerID(transition HandlerTransitionSemantic, carrier HandlerAdvanceCarrier) string {
 	if transition.Join != nil && carrier.Kind == HandlerAdvanceCarrierJoinOnDeadline {
-		return strings.TrimSpace(transition.Join.EffectiveID())
+		return strings.TrimSpace(transition.EventType)
 	}
 	return ""
 }

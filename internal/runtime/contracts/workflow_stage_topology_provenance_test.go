@@ -8,13 +8,13 @@ import (
 
 func TestWorkflowStageTopologyPreservesHandlerOriginAndEffectiveEvent(t *testing.T) {
 	joinA := JoinSpec{
-		ID: "join-a", Stage: "awaiting-a",
+		Stage:      "awaiting-a",
 		OnComplete: HandlerRuleEntry{AdvancesTo: "complete-a"},
 		Deadline:   &JoinDeadlineSpec{After: "1h", From: JoinDeadlineFromStageEntry},
 		OnDeadline: HandlerRuleEntry{AdvancesTo: "timeout-a"},
 	}
 	joinB := JoinSpec{
-		ID: "join-b", Stage: "awaiting-b",
+		Stage:      "awaiting-b",
 		OnComplete: HandlerRuleEntry{AdvancesTo: "complete-b"},
 		Deadline:   &JoinDeadlineSpec{After: "2h", From: JoinDeadlineFromStageEntry},
 		OnDeadline: HandlerRuleEntry{AdvancesTo: "timeout-b"},
@@ -97,7 +97,7 @@ func TestTopologyEdgeIdentityIncludesHandlerOrigin(t *testing.T) {
 
 func TestWorkflowStageTopologyScopesDeliveryJoinCompletionToHandlerLifecycle(t *testing.T) {
 	delivery := JoinSpec{
-		ID: "all-delivered", Members: JoinMembersSpec{FromFanOut: true, fromFanOutFound: true},
+		Members:    JoinMembersSpec{FromFanOut: true, fromFanOutFound: true},
 		OnComplete: HandlerRuleEntry{AdvancesTo: "done"}, OnCompleteFound: true,
 	}
 	for _, tc := range []struct {
@@ -132,7 +132,7 @@ func TestWorkflowStageTopologyScopesDeliveryJoinCompletionToHandlerLifecycle(t *
 
 func TestWorkflowStageTopologyKeepsDeliveryJoinCompletionInsideLoopRegion(t *testing.T) {
 	delivery := JoinSpec{
-		ID: "all-delivered", Members: JoinMembersSpec{FromFanOut: true, fromFanOutFound: true},
+		Members:    JoinMembersSpec{FromFanOut: true, fromFanOutFound: true},
 		OnComplete: HandlerRuleEntry{AdvancesTo: "drafting"}, OnCompleteFound: true,
 	}
 	node := identitytest.FlowNode(t, "child", "dispatcher")

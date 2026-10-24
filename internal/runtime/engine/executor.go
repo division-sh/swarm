@@ -780,7 +780,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	}
 	plan, found := e.joinPlan(frame.req)
 	if !found || plan.Mode == runtimecontracts.WorkflowJoinModeArrival && plan.ResultType.Empty() {
-		return false, fmt.Errorf("join %s has no resolved effective semantic plan", frame.req.Handler.Join.EffectiveID())
+		return false, fmt.Errorf("join handler %s has no resolved effective semantic plan", frame.req.HandlerEventKey)
 	}
 	spec := &plan.Spec
 	if plan.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
@@ -791,11 +791,11 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	ref, timerKind, internal := timeridentity.ParseJoinRef(payload)
 	declaration := frame.req.JoinDeclaration.Declaration()
 	if !declaration.Valid() {
-		return false, fmt.Errorf("join %s execution is missing its exact declaration identity", spec.EffectiveID())
+		return false, fmt.Errorf("join handler %s execution is missing its exact declaration identity", frame.req.HandlerEventKey)
 	}
 	if internal && !ref.Declaration().Equal(declaration) {
 		return false, failures.New(failures.ClassUnexpectedArrival, "join_timer_identity_mismatch", "runtime.engine", "join", map[string]any{
-			"row_id": spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+			"node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
 	if !internal {
@@ -828,7 +828,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	}
 	if !activation.JoinRef().Equal(ref) {
 		return false, failures.New(failures.ClassUnexpectedArrival, "join_activation_identity_mismatch", "runtime.engine", "join", map[string]any{
-			"row_id": spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+			"node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
 	if internal && generation.Valid() && activation.CloseReason == joinruntime.CloseReasonStageExit {
@@ -945,7 +945,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 func (e *Executor) stepFanOutDeliveryJoin(frame *executionFrame, plan runtimecontracts.WorkflowJoinPlan) (bool, error) {
 	declaration := frame.req.JoinDeclaration.Declaration()
 	if declaration.Mode() != timeridentity.JoinRefModeFanOutDelivery || !declaration.Valid() {
-		return false, fmt.Errorf("fan-out delivery join %s is missing its exact declaration identity", plan.Spec.EffectiveID())
+		return false, fmt.Errorf("fan-out delivery join handler %s is missing its exact declaration identity", frame.req.HandlerEventKey)
 	}
 	joinRef, timerKind, internal := timeridentity.ParseJoinRef(frame.payload)
 	if !internal {
@@ -953,7 +953,7 @@ func (e *Executor) stepFanOutDeliveryJoin(frame *executionFrame, plan runtimecon
 	}
 	if timerKind != timeridentity.TimerHandleJoinComplete || joinRef.Mode() != timeridentity.JoinRefModeFanOutDelivery || !joinRef.Declaration().Equal(declaration) {
 		return false, failures.New(failures.ClassUnexpectedArrival, "fan_out_delivery_join_identity_mismatch", "runtime.engine", "join", map[string]any{
-			"row_id": plan.Spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+			"node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
 	current, err := loopruntime.GenerationCurrent(frame.state.State.StateCarrier.StateBuckets, joinRef.Generation(), "")
@@ -1024,7 +1024,6 @@ func (e *Executor) selectJoinOutcome(frame *executionFrame, rule *runtimecontrac
 
 func (e *Executor) joinArrivalFailure(frame *executionFrame, class failures.Class, code string, spec *runtimecontracts.JoinSpec, entry, member string) error {
 	attributes := map[string]any{
-		"row_id":        spec.EffectiveID(),
 		"stage":         strings.TrimSpace(spec.Stage),
 		"node_id":       frame.req.Node.Key(),
 		"handler_event": strings.TrimSpace(frame.req.HandlerEventKey),

@@ -204,7 +204,7 @@ func TestPublishedJoinContinuationRejectsChangedChild(t *testing.T) {
 				entry.TransitionID = "other-transition"
 			case "declaration":
 				var err error
-				declaration, err = timeridentity.NewJoinRef(ref.Node(), "other.event", ref.Stage(), ref.JoinID())
+				declaration, err = timeridentity.NewJoinRef(ref.Node(), "other.event", ref.Stage())
 				if err != nil {
 					t.Fatal(err)
 				}

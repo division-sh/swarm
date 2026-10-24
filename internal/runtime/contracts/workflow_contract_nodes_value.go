@@ -118,22 +118,25 @@ func nodeValueStringSequence(value yamlsource.Value, owner string) ([]string, er
 }
 
 var nodeTimerFields = map[string]struct{}{
-	"id": {}, "stage": {}, "event": {}, "owner": {}, "action": {},
+	"stage": {}, "event": {}, "owner": {}, "action": {},
 	"cancellation": {}, "delay": {}, "start_on": {}, "cancel_on": {}, "recurring": {},
 }
 
 func projectNodeTimerValue(value yamlsource.Value) (WorkflowTimerContract, error) {
 	fields, err := nodeValueFields(value, "timer", nodeTimerFields)
 	if err != nil {
-		return WorkflowTimerContract{}, err
+		return WorkflowTimerContract{}, fmt.Errorf("DIALECT-TIMER: %w; timer identity derives from its node and event", err)
+	}
+	if _, present := fields["event"]; !present {
+		return WorkflowTimerContract{}, fmt.Errorf("DIALECT-TIMER: timer at %s requires event; identity derives from its node and event", value.Location())
 	}
 	var timer WorkflowTimerContract
 	if err := nodeValueTexts(fields, map[string]*string{
-		"id": &timer.ID, "stage": &timer.Stage, "event": &timer.Event,
+		"stage": &timer.Stage, "event": &timer.Event,
 		"owner": &timer.Owner, "action": &timer.Action,
 		"cancellation": &timer.Cancellation, "delay": &timer.Delay,
 		"start_on": &timer.StartOn, "cancel_on": &timer.CancelOn,
-	}, false); err != nil {
+	}, false, "event"); err != nil {
 		return WorkflowTimerContract{}, err
 	}
 	if value, present := fields["recurring"]; present {

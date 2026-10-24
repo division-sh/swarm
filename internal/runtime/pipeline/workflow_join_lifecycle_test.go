@@ -198,7 +198,7 @@ func VerifyNativeArmWorkflowJoinPersistsActivationAndScheduleAtomicallyForTest(t
 			}
 			handle, ok := timeridentity.ParseTimerHandle(parsePayloadMap(genericSchedulePayloadForTest(t, schedule)))
 			ref, refOK := handle.JoinRef()
-			if !ok || !refOK || handle.Kind() != tc.wantKind || ref.JoinID() != "awaiting" {
+			if !ok || !refOK || handle.Kind() != tc.wantKind || ref.HandlerEvent() != "item.completed" {
 				t.Fatalf("timer handle = %#v, %v", handle, ok)
 			}
 		})
@@ -955,7 +955,6 @@ manual.abort:
 join-node:
   item.completed:
     join:
-      id: awaiting
       stage: awaiting
       members: {from: state.expected, by: payload.member_id}
       output: payload.result
@@ -971,7 +970,6 @@ join-node:
 		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "id: awaiting", "id: shared", 1)
 		files["orders/nodes.yaml"] += `    approval.completed:
       join:
-        id: shared
         stage: reviewing
         members: {from: state.expected, by: payload.member_id}
         output: payload.result

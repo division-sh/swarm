@@ -717,11 +717,10 @@ contract_formats:
                 - after: "{{marginal_park_days}}d"
                   advances_to: expired
         row_identity: >
-          `id:` is optional. When absent, the platform derives a stable ID from
-          `<stage>.<emit-event-or-advance-target>`. Duplicate derived IDs are a
-          boot error; authors must add explicit IDs to disambiguate collisions.
-          Timer row IDs, whether derived or explicit, must be unique within the
-          owning flow's semantic timer namespace. Runtime semantic timer IDs
+          Identity is always `<stage>.<target>`, where target is `advances_to`
+          when present, otherwise `emit`. An authored `id:` is an unknown field.
+          Two rows in one stage targeting the same target fail admission; use
+          distinct events. Runtime semantic timer IDs
           are scoped by the owning flow for non-root flows so common local
           stage/timer IDs in sibling flows do not merge.
         invalid_forms: >
@@ -748,8 +747,9 @@ contract_formats:
                       fields: { feedback: decision.feedback }
         authoring: >
           A stage may own one typed decision gate. decision is a stable audit
-          identity; title, verdict labels, field labels, and display hints are
-          optional deterministic presentation polish. Every outcome advances
+          identity. Title, verdict text and input text derive uniformly by
+          humanizing the decision, verdict and field keys. Authored title and
+          label fields are unknown fields; choose the intended key. Every outcome advances
           to a direct declared stage and may emit one declared event. Outcome
           fields use the platform type vocabulary and exact decision.<field>
           references. Unknown or undeclared fields fail closed.
@@ -5069,8 +5069,8 @@ handler_specification:
       purpose: >-
         Declare an arrival-membership obligation or an exact fan-out all-settled obligation. Arrival joins belong to
         lifecycle entries, not business windows; streams remain owned by accumulate and require no closure.
+        Declaration identity is the exact scoped node and handler event. Authored join.id is an unknown field.
       sub_fields:
-        id: Optional stable simple identifier. It defaults to stage; collisions in the same flow/stage require explicit unique IDs.
         stage: Required stage in the same flow. Arrivals are admitted only against a persisted activation for this stage.
         members: >-
           Exactly one of `{from: state.<field>, by: payload.<field>}`, `{count: N, by: payload.<field>}` or
@@ -5157,9 +5157,9 @@ handler_specification:
         describe --graph renders stage-scoped join completion and deadline edges. Arrival-join completion and deadline
         originate at the declared join stage. Delivery-barrier completion originates from the ordinary handler stage
         scope, including the exact loop-operation source when the handler is loop-scoped. Deadline edges include after
-        and the join ID.
+        and the exact node and handler event.
       delivery_barrier_variant:
-        authored_shape: '`members: {from_fan_out: true}` selects the fan-out delivery variant. It requires an explicit stable join `id` and a non-empty `on_complete`, and forbids stage, members.from, members.by, members.count, output, deadline, on_deadline, until and retired join fields. The selector binds to exactly one top-level fan_out on the same handler; missing, duplicate, or nested fan-outs fail strict loading. It is not an authored identity reference.'
+        authored_shape: '`members: {from_fan_out: true}` selects the fan-out delivery variant. It requires a non-empty `on_complete`, and forbids id, stage, members.from, members.by, members.count, output, deadline, on_deadline, until and retired join fields. The selector binds to exactly one top-level fan_out on the same handler; missing, duplicate, or nested fan-outs fail strict loading. Its declaration identity is the scoped node and handler event.'
         canonical_owner: The effective WorkflowJoinPlan carries the exact compiled fan-out plan identity (bundle hash, flow path, declaration family, semantic path, and semantic digest), target declaration, route, execution mode, and typed completion handle. Boot verification, semantic view, engine, persistence, schedules, replay, fork, diagnostics, and authoring consume that plan and never reconstruct identity from a bare name, handler position, event type, or current bundle.
         registration: >-
           The fan-out trigger transaction atomically persists the S1 intent and one armed barrier for that exact intent
@@ -6860,7 +6860,7 @@ engine:
       closes pending and schedules exactly one continuation. Same-entry retries compare the retained snapshot. Non-loop
       re-entry creates a distinct arm even at equal timestamps and retains old closed entries for exact late/replay decisions.
       A source that is not an admitted unique TEXT collection fails with platform.schema_invalid,
-      detail join_members_invalid naming row_id and source, before committing entry, arm, schedule or business effects.
+      detail join_members_invalid naming node, handler event and source, before committing entry, arm, schedule or business effects.
     arrival: >-
       Runtime consumes the route's exact bound entry, loads its retained arm inside the entity lock and selected-store
       transaction, checks member/source-generation ownership, stores canonical output and closes when all members arrive.
@@ -6884,7 +6884,7 @@ engine:
       durable-store-only path may commit for later canonical restoration; a process-scheduler-only path may own the local
       occurrence. Missing ownership is never treated as successful scheduling. Every root- or flow-owned system join
       schedule carries one canonical timer handle whose identity includes the owning flow (empty only for root), node,
-      handler event, stage, join, exact lifecycle entry, captured generation, and timeout/completion kind. Generic schedule admission and restoration
+      handler event, stage, exact lifecycle entry, captured generation, and timeout/completion kind. Generic schedule admission and restoration
       require the persisted task ID, workflow-runtime owner, fire event, and routing-source flow to agree exactly with that
       handle; durable scope fields or a valid routing-source shape alone never authorize a join timer.
     occurrence_routing: >-
@@ -9271,8 +9271,7 @@ engine:
         Public staged lifecycle timers are declared as stage-resident rows in schema.yaml. Legacy/kernel timers are
         declared per system node in nodes.yaml.
       fields:
-        id: Unique timer name
-        event: Event name to fire when timer expires (e.g., timer.scan_timeout)
+        event: Required event name to fire when timer expires (e.g., timer.scan_timeout). Identity derives from the scoped node and event; id is an unknown field.
         delay: Canonical duration string or policy-rendered duration. Accepts Go duration strings (e.g., 72h,
           30m) plus a positive integer day unit (e.g., 7d).
         recurring: Boolean — if true, timer re-fires at the interval until cancelled
@@ -9294,8 +9293,8 @@ engine:
           emit: Optional event to emit when the timer fires.
           advances_to: Optional target stage. Presence of this field lowers to a timed transition edge and ends the
             source stage when the timer fires.
-          id: Optional stable row ID. If omitted, defaults to `<stage>.<emit-event-or-advance-target>`.
-        invalid_fields: [delay, interrupting, repeat, recurring]
+        identity: Always `<stage>.<target>`, using advances_to when present, otherwise emit. Duplicate targets in one stage fail admission.
+        invalid_fields: [id, delay, interrupting, repeat, recurring]
     lifecycle:
     - 1. A workflow instance is first materialized through one named lifecycle operation that commits its initial row and
       an `InitialEntry` effect in one selected mutation. The operation returns a closed `created` or `already_materialized`
@@ -9518,7 +9517,7 @@ engine:
         scheduling semantics and is not closed by this rule.
     example: "stages:\n  awaiting_review:\n    timers:\n      - after: 48h\n        emit: review.sla_escalated\n\
       \      - after: \"{{marginal_park_days}}d\"\n        advances_to: expired\n  expired:\n    final: true\n\
-      \n# Legacy/kernel timer example:\ntimers:\n  - id: daily_report\n    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\
+      \n# Node timer example:\ntimers:\n  - event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\
       \n    start_on: boot\n    recurring: true"
   expression_language:
     description: Scalar guards, rule conditions, query/filter conditions, and on_complete branch conditions are evaluated using
@@ -21506,7 +21505,6 @@ platform_tables:
             target_flow_path          TEXT NOT NULL,
             target_node_id            TEXT NOT NULL,
             handler_event             TEXT NOT NULL,
-            join_id                   TEXT NOT NULL,
             route_scope_key           TEXT NOT NULL,
             route_instance_id         TEXT NOT NULL,
             route_instance_path       TEXT NOT NULL,

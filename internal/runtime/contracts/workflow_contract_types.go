@@ -321,7 +321,7 @@ type WorkflowGateOutcomePlan struct {
 type WorkflowGateInputField struct {
 	Type     string `yaml:"type" json:"type"`
 	Required bool   `yaml:"required" json:"required"`
-	Label    string `yaml:"label,omitempty" json:"label,omitempty"`
+	Label    string `yaml:"-" json:"label,omitempty"`
 }
 
 // WorkflowStageTopology is the canonical lowered lifecycle graph for one flow.
@@ -1264,7 +1264,7 @@ func (a WorkflowDataAccumulation) HasWrites() bool {
 }
 
 type WorkflowTimerContract struct {
-	ID           string                         `yaml:"id"`
+	ID           string                         `yaml:"-"`
 	Stage        string                         `yaml:"stage"`
 	Event        string                         `yaml:"event"`
 	Owner        string                         `yaml:"owner"`

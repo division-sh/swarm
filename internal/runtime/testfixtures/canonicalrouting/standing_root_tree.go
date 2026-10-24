@@ -15,6 +15,8 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 	const outputs = "  outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
 	const nodes = "observer:\n  inbound.telegram:\n    guard: true\n  inbound.telegram.text_message:\n    guard: true\n  inbound.telegram.callback_action:\n    guard: true\n"
 	files := map[string]string{
+		"events.yaml":                       "inbound.telegram:\n",
+		"beta/events.yaml":                  "inbound.telegram:\n",
 		"schema.yaml":                       "name: standing-root-tree\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: alpha\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.alpha}\nconnect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
 		"nodes.yaml":                        nodes,
 		"beta/schema.yaml":                  "name: beta\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: beta\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.beta}\n",

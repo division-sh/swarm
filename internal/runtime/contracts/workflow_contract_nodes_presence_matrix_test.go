@@ -16,9 +16,8 @@ type nodePresenceShape struct {
 // the enclosing stage/operation is exercised by the supported branch tests.
 var nodeScalarFieldAdmission = map[string][8]bool{
 	"node.state_table":     {true, false, true, true, false, false, false, false},
-	"timer.id":             {true, false, true, true, false, false, false, false},
 	"timer.stage":          {true, false, true, true, false, false, false, false},
-	"timer.event":          {true, false, true, true, false, false, false, false},
+	"timer.event":          {false, false, false, true, false, false, false, false},
 	"timer.owner":          {true, false, true, true, false, false, false, false},
 	"timer.action":         {true, false, true, true, false, false, false, false},
 	"timer.cancellation":   {true, false, true, true, false, false, false, false},
@@ -63,7 +62,7 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 		fields     map[string]string
 	}{
 		{"node", "task.ready: {}\n", func() any { return new(SystemNodeContract) }, map[string]string{"state_table": "StateTable"}},
-		{"timer", "", func() any { return new(WorkflowTimerContract) }, map[string]string{"id": "ID", "stage": "Stage", "event": "Event", "owner": "Owner", "action": "Action", "cancellation": "Cancellation", "delay": "Delay", "start_on": "StartOn", "cancel_on": "CancelOn"}},
+		{"timer", "event: timer.tick\n", func() any { return new(WorkflowTimerContract) }, map[string]string{"stage": "Stage", "event": "Event", "owner": "Owner", "action": "Action", "cancellation": "Cancellation", "delay": "Delay", "start_on": "StartOn", "cancel_on": "CancelOn"}},
 		{"handler", "emit: ready\n", func() any { return new(SystemNodeEventHandler) }, map[string]string{"description": "Description", "advances_to": "AdvancesTo"}},
 		{"state", "fields: {}\n", func() any { return new(NodeStateSchema) }, map[string]string{"description": "Description"}},
 		{"activity", "id: presence\ninput: {}\n", func() any { return new(ActivitySpec) }, map[string]string{"id": "ID", "tool": "Tool"}},
@@ -83,6 +82,9 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 				for index, shape := range nodePresenceShapes("payload.rows", "[payload.rows]", "{value: payload.rows}") {
 					t.Run(shape.name, func(t *testing.T) {
 						body := group.base
+						if group.name == "timer" && field == "event" {
+							body = ""
+						}
 						if group.name == "activity" && field == "id" {
 							body = "input: {}\n"
 						}
@@ -314,13 +316,13 @@ func TestW4NodeTimerPresence(t *testing.T) {
 	proveNodePresence(t, nodePresenceShapes("true", "[true]", "{value: true}"),
 		[8]bool{true, false, false, true, false, false, false, false},
 		func(shape nodePresenceShape) string {
-			body := "id: reminder\nevent: timer.reminder\ndelay: 1m\n"
+			body := "event: timer.reminder\ndelay: 1m\n"
 			if shape.name != "missing" {
 				body += "recurring: " + shape.value + "\n"
 			}
 			return body
 		}, decodeNodeTestYAML, func(t *testing.T, name string, out WorkflowTimerContract) {
-			if out.ID != "reminder" || out.Recurring != (name == "scalar") {
+			if out.Event != "timer.reminder" || out.Recurring != (name == "scalar") {
 				t.Fatalf("timer=%#v", out)
 			}
 		})

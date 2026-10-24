@@ -299,7 +299,7 @@ func forkJoinNativeRequest(t *testing.T, f *forkJoinNativeFixture, flow string, 
 	if err != nil || !enters {
 		t.Fatalf("source initial entry: enters=%t err=%v", enters, err)
 	}
-	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "shared")
+	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}

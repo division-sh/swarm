@@ -87,7 +87,7 @@ func TestReplyContextProjectionUsesExactRunAndOpaqueKey(t *testing.T) {
 }
 
 func TestReplyContextProjectionNormalizesWithoutLosingOriginOrDisposition(t *testing.T) {
-	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "join"), "item.done", "collecting", "items")
+	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "join"), "item.done", "collecting")
 	if err != nil {
 		t.Fatal(err)
 	}

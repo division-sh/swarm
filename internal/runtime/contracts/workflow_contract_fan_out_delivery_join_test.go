@@ -7,7 +7,6 @@ import (
 
 func TestFanOutDeliveryJoinStrictClosedGrammar(t *testing.T) {
 	canonical := `
-id: all-items-delivered
 members:
   from_fan_out: true
 on_complete:
@@ -23,7 +22,7 @@ on_complete:
 	}
 
 	hostile := map[string]string{
-		"missing explicit id": strings.Replace(canonical, "id: all-items-delivered\n", "", 1),
+		"retired id":          "id: all-items-delivered\n" + canonical,
 		"missing on_complete": strings.Replace(canonical, "on_complete:\n  emit:\n    event: batch.completed\n", "", 1),
 		"empty on_complete":   strings.Replace(canonical, "on_complete:\n  emit:\n    event: batch.completed", "on_complete: {}", 1),
 		"false selector":      strings.Replace(canonical, "from_fan_out: true", "from_fan_out: false", 1),
@@ -55,7 +54,6 @@ fan_out:
   emit:
     event: item.requested
 join:
-  id: all-items-delivered
   members:
     from_fan_out: true
   on_complete:

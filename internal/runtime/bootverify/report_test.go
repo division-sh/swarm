@@ -825,8 +825,7 @@ root-node:
 						nodes: `
 timer-owner:
   timers:
-    - id: reminder
-      owner: timer-owner
+    - owner: timer-owner
       event: ticket.ready
       start_on: event:start.signal
       cancel_on: event:ticket.ready

@@ -224,7 +224,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 						t.Fatalf("collector business batch changed: %#v", collector.Fields["batch_id"])
 					}
 					if !retainedJoinRef.Valid() {
-						declaration, err := timeridentity.NewJoinRef(joinNode, "item.reported", "awaiting", "awaiting")
+						declaration, err := timeridentity.NewJoinRef(joinNode, "item.reported", "awaiting")
 						if err != nil {
 							t.Fatal(err)
 						}

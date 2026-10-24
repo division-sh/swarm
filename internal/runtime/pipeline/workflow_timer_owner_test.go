@@ -129,7 +129,7 @@ func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRes
 					files[flow+"/schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting: {}\n", flow)
 					files[flow+"/entities.yaml"] = "test_entity: {}\n"
 					files[flow+"/events.yaml"] = fmt.Sprintf("timer.arm:\ntimer.%s:\n", flow)
-					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  timers:\n    - {id: same, event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  timer.arm: {}\n", flow, flow)
+					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  timers:\n    - {event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  timer.arm: {}\n", flow, flow)
 				}
 				bundle := loadWorkflowTempBundle(t, files)
 				if len(bundle.Semantics.Timers) != 2 {
@@ -392,17 +392,18 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBot
 				t.Fatalf("source B timer rows all/active = %d/%d, want 5/3: %#v", len(allRows), len(activeRows), allRows)
 			}
 			activeByDeclaration := workflowTimerActivationsByDeclaration(activeRows)
-			keepKey := workflowTimerStageDeclarationKey(".", "waiting.keep")
-			changedKey := workflowTimerStageDeclarationKey(".", "waiting.changed")
-			removedKey := workflowTimerStageDeclarationKey(".", "waiting.removed")
-			addedKey := workflowTimerStageDeclarationKey(".", "waiting.added")
+			keepKey := workflowTimerStageDeclarationKey(".", "waiting.timer.keep")
+			oldChangedKey := workflowTimerStageDeclarationKey(".", "waiting.timer.changed.v1")
+			changedKey := workflowTimerStageDeclarationKey(".", "waiting.timer.changed.v2")
+			removedKey := workflowTimerStageDeclarationKey(".", "waiting.timer.removed")
+			addedKey := workflowTimerStageDeclarationKey(".", "waiting.timer.added")
 			if activeByDeclaration[keepKey].Ref != sourceAByDeclaration[keepKey].Ref {
 				t.Fatal("unchanged declaration did not preserve its exact activation")
 			}
 			if _, found := activeByDeclaration[removedKey]; found {
 				t.Fatal("removed declaration remains active")
 			}
-			if activeByDeclaration[changedKey].Ref == sourceAByDeclaration[changedKey].Ref {
+			if activeByDeclaration[changedKey].Ref == sourceAByDeclaration[oldChangedKey].Ref {
 				t.Fatal("changed declaration reused its stale activation identity")
 			}
 			if activeByDeclaration[addedKey].Ref.ActivationID == "" {
@@ -412,7 +413,7 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBot
 				!activeByDeclaration[changedKey].FireAt.Equal(createdAt.Add(2*time.Hour)) {
 				t.Fatalf("changed declaration facts = %#v", activeByDeclaration[changedKey])
 			}
-			for _, declaration := range []string{changedKey, removedKey} {
+			for _, declaration := range []string{oldChangedKey, removedKey} {
 				old := sourceAByDeclaration[declaration]
 				persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, old.Ref.ActivationID)
 				if persisted.Status != workflowTimerStatusCancelled {
@@ -424,7 +425,7 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBot
 				return active == 3 && draining == 0
 			}, "source B replacement wakeups")
 
-			stale := sourceAByDeclaration[changedKey]
+			stale := sourceAByDeclaration[oldChangedKey]
 			if err := projection.ReconcileWakeup(ctx, stale.Ref); err != nil {
 				t.Fatalf("retire stale source A wakeup: %v", err)
 			}
@@ -528,10 +529,10 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsPr
 			}
 			activeByDeclaration := workflowTimerActivationsByDeclaration(activeRows)
 			timerNode := pipelineNode(t, "", "timer-owner")
-			keepKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.keep")
-			changedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.changed")
-			removedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.removed")
-			addedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.added")
+			keepKey := workflowTimerNodeDeclarationKey(timerNode, "timer-owner.timer.keep")
+			changedKey := workflowTimerNodeDeclarationKey(timerNode, "timer-owner.timer.changed.v1")
+			removedKey := workflowTimerNodeDeclarationKey(timerNode, "timer-owner.timer.removed")
+			addedKey := workflowTimerNodeDeclarationKey(timerNode, "timer-owner.timer.added")
 			if activeByDeclaration[keepKey].Ref != sourceAByDeclaration[keepKey].Ref {
 				t.Fatal("unchanged progressed declaration did not preserve its exact activation")
 			}
@@ -920,7 +921,7 @@ func VerifyNativeWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothSto
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			files := workflowTimerOwnerSourceFiles()
-			files["schema.yaml"] = "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.timeout}\n  done: {}\n"
+			files["schema.yaml"] = "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {after: 1h, emit: timer.timeout}\n  done: {}\n"
 			files["events.yaml"] += "work.noted:\n"
 			files["nodes.yaml"] += "    work.noted: {}\n"
 			bundle := loadWorkflowTempBundle(t, files)
@@ -1251,7 +1252,7 @@ func VerifyNativeWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnB
 		t.Run(tc.name, func(t *testing.T) {
 			files := workflowTimerOwnerSourceFiles()
 			files["events.yaml"] += "work.created:\n"
-			files["nodes.yaml"] += "    work.created: {}\n  timers:\n    - {id: waiting.timeout, event: timer.timeout, start_on: 'event:work.created', delay: 1h}\n"
+			files["nodes.yaml"] += "    work.created: {}\n  timers:\n    - {event: timer.timeout, start_on: 'event:work.created', delay: 1h}\n"
 			bundle := loadWorkflowTempBundle(t, files)
 			fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
 			store := pc.workflowStore
@@ -2345,7 +2346,7 @@ func workflowTimerOwnerBundle(t *testing.T, recurring bool) *runtimecontracts.Wo
 func workflowTimerOwnerBundleWithDelay(t *testing.T, recurring bool, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := workflowTimerOwnerSourceFiles()
-	files["schema.yaml"] = fmt.Sprintf("name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: %q, emit: timer.timeout}\n  done: {}\n", delay)
+	files["schema.yaml"] = fmt.Sprintf("name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {after: %q, emit: timer.timeout}\n  done: {}\n", delay)
 	bundle := loadWorkflowTempBundle(t, files)
 	// Recurrence is a scheduler variant, not a different transition declaration.
 	bundle.Semantics.Timers[0].Recurring = recurring
@@ -2368,11 +2369,11 @@ func workflowTimerOwnerSourceFiles() map[string]string {
 
 func workflowTimerSourceRevisionBundle(t *testing.T, revised bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	timers := "      - {id: waiting.keep, after: 1h, emit: timer.keep}\n"
+	timers := "      - {after: 1h, emit: timer.keep}\n"
 	if revised {
-		timers += "      - {id: waiting.changed, after: 2h, emit: timer.changed.v2}\n      - {id: waiting.added, after: 30m, emit: timer.added}\n"
+		timers += "      - {after: 2h, emit: timer.changed.v2}\n      - {after: 30m, emit: timer.added}\n"
 	} else {
-		timers += "      - {id: waiting.changed, after: 1h, emit: timer.changed.v1}\n      - {id: waiting.removed, after: 1h, emit: timer.removed}\n"
+		timers += "      - {after: 1h, emit: timer.changed.v1}\n      - {after: 1h, emit: timer.removed}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: workflow-timer-source-revision\nstages:\n  waiting:\n    timers:\n" + timers,
@@ -2385,7 +2386,7 @@ func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *ru
 	t.Helper()
 	schema := "name: workflow-timer-first-revision\nstages:\n  waiting: {}\n"
 	if revised {
-		schema = "name: workflow-timer-first-revision\nstages:\n  waiting:\n    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
+		schema = "name: workflow-timer-first-revision\nstages:\n  waiting:\n    timers:\n      - {after: 1s, emit: timer.first}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   schema,
@@ -2399,11 +2400,11 @@ func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *ru
 	files := workflowTimerOwnerSourceFiles()
 	files["schema.yaml"] = "name: workflow-timer-progressed-revision\nstages:\n  waiting: {}\n  done: {}\n"
 	files["events.yaml"] += "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.removed:\ntimer.added:\n"
-	files["nodes.yaml"] += "  timers:\n    - {id: waiting.keep, event: timer.keep, start_on: 'state:waiting', delay: 1h}\n"
+	files["nodes.yaml"] += "  timers:\n    - {event: timer.keep, start_on: 'state:waiting', delay: 1h}\n"
 	if revised {
-		files["nodes.yaml"] += "    - {id: waiting.changed, event: timer.changed.v2, start_on: 'state:waiting', delay: 2h}\n    - {id: waiting.added, event: timer.added, start_on: 'state:waiting', delay: 30m}\n"
+		files["nodes.yaml"] += "    - {event: timer.changed.v2, start_on: 'state:waiting', delay: 2h}\n    - {event: timer.added, start_on: 'state:waiting', delay: 30m}\n"
 	} else {
-		files["nodes.yaml"] += "    - {id: waiting.changed, event: timer.changed.v1, start_on: 'state:waiting', delay: 1h}\n    - {id: waiting.removed, event: timer.removed, start_on: 'state:waiting', delay: 1h}\n"
+		files["nodes.yaml"] += "    - {event: timer.changed.v1, start_on: 'state:waiting', delay: 1h}\n    - {event: timer.removed, start_on: 'state:waiting', delay: 1h}\n"
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -2411,10 +2412,10 @@ func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *ru
 func workflowTimerInitialAndEventBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-initial-event\nstages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
+		"schema.yaml":   "name: workflow-timer-initial-event\nstages:\n  waiting:\n    timers:\n      - {after: 2h, emit: timer.initial}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.arm:\ntimer.initial:\ntimer.event:\n",
-		"nodes.yaml":    "timer-owner:\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  timer.arm: {}\n",
+		"nodes.yaml":    "timer-owner:\n  timers:\n    - {event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  timer.arm: {}\n",
 	})
 }
 
@@ -2428,10 +2429,10 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 			path, name, prefix = "", "timer-flow-scope-root", "root"
 			armEvent = "timer.arm"
 		}
-		files[path+"schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", name, prefix)
+		files[path+"schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting:\n    timers:\n      - {after: 2h, emit: %s.initial}\n", name, prefix)
 		files[path+"entities.yaml"] = "test_entity: {}\n"
 		files[path+"events.yaml"] = fmt.Sprintf("timer.arm:\n%s.initial:\n%s.event:\n", prefix, prefix)
-		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  timer.arm: {}\n", prefix, armEvent)
+		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  timers:\n    - {event: %s.event, start_on: 'event:%s', delay: 2h}\n  timer.arm: {}\n", prefix, armEvent)
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -2439,10 +2440,10 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
+		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {after: 1h, emit: timer.state_entry}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.arm:\nwork.noted:\ntimer.state_entry:\ntimer.event_armed:\n",
-		"nodes.yaml":    "observer:\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  timer.arm: {}\n  work.noted: {}\n",
+		"nodes.yaml":    "observer:\n  timers:\n    - {event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  timer.arm: {}\n  work.noted: {}\n",
 	})
 }
 
@@ -2454,7 +2455,7 @@ func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContra
 		"events.yaml":   "loop.start:\nloop.repeat:\n  revision_id: text\ntimer.arm:\n  revision_id: text\ntimer.event_armed:\n",
 		"nodes.yaml": `observer:
   timers:
-    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', delay: 1h}
+    - {event: timer.event_armed, start_on: 'event:timer.arm', delay: 1h}
   loop.start:
     loop: {start: revision, from: ready}
     advances_to: waiting
@@ -2475,13 +2476,13 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
 		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
   timers:
-    - {id: accepted, event: timer.accepted, start_on: 'event:accepted.start', cancel_on: 'event:accepted.cancel', delay: 1h}
-    - {id: reject.start, event: timer.reject.start, start_on: 'event:guard.reject', delay: 1h}
-    - {id: reject.target, event: timer.reject.target, start_on: 'event:reject.target', cancel_on: 'event:guard.reject', delay: 1h}
-    - {id: discard.start, event: timer.discard.start, start_on: 'event:guard.discard', delay: 1h}
-    - {id: discard.target, event: timer.discard.target, start_on: 'event:discard.target', cancel_on: 'event:guard.discard', delay: 1h}
-    - {id: dedup.start, event: timer.dedup.start, start_on: 'event:dedup.event', cancel_on: 'event:dedup.reset', delay: 1h}
-    - {id: dedup.target, event: timer.dedup.target, start_on: 'event:dedup.target', cancel_on: 'event:dedup.event', delay: 1h}
+    - {event: timer.accepted, start_on: 'event:accepted.start', cancel_on: 'event:accepted.cancel', delay: 1h}
+    - {event: timer.reject.start, start_on: 'event:guard.reject', delay: 1h}
+    - {event: timer.reject.target, start_on: 'event:reject.target', cancel_on: 'event:guard.reject', delay: 1h}
+    - {event: timer.discard.start, start_on: 'event:guard.discard', delay: 1h}
+    - {event: timer.discard.target, start_on: 'event:discard.target', cancel_on: 'event:guard.discard', delay: 1h}
+    - {event: timer.dedup.start, start_on: 'event:dedup.event', cancel_on: 'event:dedup.reset', delay: 1h}
+    - {event: timer.dedup.target, start_on: 'event:dedup.target', cancel_on: 'event:dedup.event', delay: 1h}
   accepted.start: {}
   accepted.cancel: {}
   reject.target: {}

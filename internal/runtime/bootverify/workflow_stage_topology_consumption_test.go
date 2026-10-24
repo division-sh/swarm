@@ -86,7 +86,7 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 	joinNode := identitytest.RootNode(t, "join-node")
 	memberCount := 1
 	joinA := runtimecontracts.JoinSpec{
-		ID: "join-a", Stage: "awaiting-a",
+		Stage:           "awaiting-a",
 		Members:         runtimecontracts.JoinMembersSpec{Count: &memberCount, By: "payload.member_id"},
 		Output:          "payload.result",
 		OnCompleteFound: true, OnDeadlineFound: true,
@@ -95,7 +95,7 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 		OnDeadline: runtimecontracts.HandlerRuleEntry{AdvancesTo: "timeout-a"},
 	}
 	joinB := runtimecontracts.JoinSpec{
-		ID: "join-b", Stage: "awaiting-b",
+		Stage:           "awaiting-b",
 		Members:         runtimecontracts.JoinMembersSpec{Count: &memberCount, By: "payload.member_id"},
 		Output:          "payload.result",
 		OnCompleteFound: true, OnDeadlineFound: true,
@@ -272,7 +272,7 @@ func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOthe
 	reviewNode := identitytest.RootNode(t, "review-node")
 	memberCount := 1
 	join := &runtimecontracts.JoinSpec{
-		ID: "approval", Stage: "joining",
+		Stage:           "joining",
 		Members:         runtimecontracts.JoinMembersSpec{Count: &memberCount, By: "payload.member_id"},
 		Output:          "payload.result",
 		OnCompleteFound: true, OnDeadlineFound: true,

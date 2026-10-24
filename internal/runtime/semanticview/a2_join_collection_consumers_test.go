@@ -91,7 +91,6 @@ func TestA2UntilCarrierPreservesMultipleExactDeclarationsAndScope(t *testing.T) 
 	count := 1
 	join := rc.JoinSpec{Stage: "waiting", Members: rc.JoinMembersSpec{Count: &count, By: "payload.member"}, Output: "payload.result", Until: "closed", OnCompleteFound: true, OnComplete: rc.HandlerRuleEntry{AdvancesTo: "done"}}
 	first, second := join, join
-	first.ID, second.ID = "first", "second"
 	handlers := map[string]rc.SystemNodeEventHandler{
 		"arrived": {Join: &first}, "other.arrived": {Join: &second},
 		"closed": {Description: "ordinary action", AdvancesTo: "next"},
@@ -182,9 +181,9 @@ func TestA2JoinCollectionViewDetachesAdmittedMapProjectionM09M42(t *testing.T) {
 func TestA2UntilCarrierPreservesAnotherJoinsArrivalHandler(t *testing.T) {
 	node := identitytest.RootNode(t, "collector")
 	count := 1
-	first := rc.JoinSpec{ID: "first", Stage: "waiting", Members: rc.JoinMembersSpec{Count: &count, By: "payload.member"}, Output: "payload.result", Until: "closed", OnCompleteFound: true, OnComplete: rc.HandlerRuleEntry{AdvancesTo: "done"}}
+	first := rc.JoinSpec{Stage: "waiting", Members: rc.JoinMembersSpec{Count: &count, By: "payload.member"}, Output: "payload.result", Until: "closed", OnCompleteFound: true, OnComplete: rc.HandlerRuleEntry{AdvancesTo: "done"}}
 	second := first
-	second.ID, second.Until = "second", "later"
+	second.Until = "later"
 	event := rc.EventCatalogEntry{Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"member": {Type: "text"}, "result": {Type: "integer"}}}}
 	bundle := &rc.WorkflowContractBundle{RootSchema: &rc.FlowSchemaDocument{},
 		Nodes:  map[string]rc.SystemNodeContract{"collector": {EventHandlers: map[string]rc.SystemNodeEventHandler{"arrived": {Join: &first}, "closed": {Join: &second}}}},
@@ -197,7 +196,7 @@ func TestA2UntilCarrierPreservesAnotherJoinsArrivalHandler(t *testing.T) {
 	}
 	source := Wrap(bundle)
 	resolution := ResolveExecutableNodeSubscriptionHandler(source, node, "closed")
-	if !resolution.Matched || resolution.HandlerEventKey != "closed" || resolution.Handler.Join == nil || resolution.Handler.Join.EffectiveID() != "second" || len(resolution.Handler.JoinUntilPlans) != 1 || resolution.Handler.JoinUntilPlans[0].Spec.EffectiveID() != "first" {
+	if !resolution.Matched || resolution.HandlerEventKey != "closed" || resolution.Handler.Join == nil || resolution.Handler.Join.Until != "later" || len(resolution.Handler.JoinUntilPlans) != 1 || resolution.Handler.JoinUntilPlans[0].HandlerEvent != "arrived" {
 		t.Fatal("closure transport replaced another join's lawful arrival handler")
 	}
 	if err := rc.ValidateJoinHandlerIsolation(resolution.Handler); err != nil {

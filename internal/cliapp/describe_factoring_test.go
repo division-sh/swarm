@@ -52,10 +52,10 @@ stage graph:
       - open after 1s emit expired advances_to done (timer deadline)
       - bare after 2s
     joins:
-      - all stage open members tasks by id output joined deadline 3s from stage_entry until stopped (receiver on result)
-      - count stage open members count 2 by id output joined deadline 4s from stage_entry (receiver on result)
-      - barrier members from_fan_out (scatter on requested)
-      - plain stage bare members tasks by id output joined (receiver on result)
+      - receiver:result stage open members tasks by id output joined deadline 3s from stage_entry until stopped (receiver on result)
+      - receiver:counted stage open members count 2 by id output joined deadline 4s from stage_entry (receiver on counted)
+      - scatter:requested members from_fan_out (scatter on requested)
+      - receiver:plain stage bare members tasks by id output joined (receiver on plain)
     fan_out:
       - open ->xN item items_from event.items as item identity id max_items 5 (handler receiver on ready)
       - <none> ->xN item items_from event.items
@@ -159,10 +159,10 @@ func describeFactoringView() authoringview.View {
 				Edges:  []authoringview.StageGraphEdgeView{{From: []string{"open", "review"}, To: "done", Source: " handler ", NodeID: " receiver ", EventType: " ready ", After: " 1s ", TimerID: " deadline ", LoopID: "retry", LoopOperation: "advance", MaxAttempts: "3", LoopEscape: true, DecisionID: "approve", Verdict: "yes"}, {To: "open"}},
 				Timers: []authoringview.StageGraphTimerView{{Stage: " open ", After: " 1s ", Emit: " expired ", AdvancesTo: " done ", TimerID: " deadline "}, {Stage: "bare", After: "2s"}},
 				Joins: []authoringview.StageGraphJoinView{
-					{ID: "all", Stage: "open", MembersFrom: "tasks", MembersBy: " id ", Output: "joined", DeadlineAfter: "3s", DeadlineFrom: "stage_entry", Until: "stopped", NodeID: "receiver", HandlerEvent: "result"},
-					{ID: "count", Stage: "open", MemberCount: &count, MembersBy: " id ", Output: "joined", DeadlineAfter: "4s", DeadlineFrom: "stage_entry", NodeID: "receiver", HandlerEvent: "result"},
-					{ID: "barrier", MembersFromFanOut: true, NodeID: "scatter", HandlerEvent: "requested"},
-					{ID: "plain", Stage: "bare", MembersFrom: "tasks", MembersBy: "id", Output: "joined", NodeID: "receiver", HandlerEvent: "result"},
+					{Stage: "open", MembersFrom: "tasks", MembersBy: " id ", Output: "joined", DeadlineAfter: "3s", DeadlineFrom: "stage_entry", Until: "stopped", NodeID: "receiver", HandlerEvent: "result"},
+					{Stage: "open", MemberCount: &count, MembersBy: " id ", Output: "joined", DeadlineAfter: "4s", DeadlineFrom: "stage_entry", NodeID: "receiver", HandlerEvent: "counted"},
+					{MembersFromFanOut: true, NodeID: "scatter", HandlerEvent: "requested"},
+					{Stage: "bare", MembersFrom: "tasks", MembersBy: "id", Output: "joined", NodeID: "receiver", HandlerEvent: "plain"},
 				},
 				FanOuts: []authoringview.StageGraphFanOutView{{From: []string{"open"}, Emit: " item ", ItemsFrom: " event.items ", ItemAlias: " item ", Identity: " id ", MaxItems: 5, Source: " handler ", NodeID: " receiver ", EventType: " ready "}, {Emit: "item", ItemsFrom: "event.items"}},
 				Gates:   []authoringview.StageGraphGateView{{Stage: "review", Decision: "approve", Authority: "operator", ReminderInterval: "1h", InputDraftTTL: "2h", Outcomes: []authoringview.StageGraphGateOutcomeView{{Verdict: "yes", AdvancesTo: "done", Emit: "approved"}, {Verdict: "no", AdvancesTo: "open"}}}}},

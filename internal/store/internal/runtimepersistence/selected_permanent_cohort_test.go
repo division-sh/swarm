@@ -249,7 +249,7 @@ func newPermanentCohortTimerFixture(t *testing.T, opened authorActivityReceiptFi
 func permanentTimerDeploymentCommand(t *testing.T, selected any) (context.Context, bus.DeploymentRunCreationCommand) {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml": "name: permanent-evidence\npins:\n  outputs:\n    - records.ready\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n",
+		"schema.yaml": "name: permanent-evidence\npins:\n  outputs:\n    - records.ready\nstages:\n  waiting:\n    timers:\n      - {after: 1h, emit: timer.elapsed}\n",
 		"events.yaml": "records.ready:\n  body: text\ntimer.elapsed:\n",
 	}
 	f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)

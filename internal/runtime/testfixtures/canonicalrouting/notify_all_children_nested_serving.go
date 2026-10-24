@@ -72,7 +72,6 @@ account.tasks.completed:
           task: task
           task_key: payload.account_id + ":" + task
     join:
-      id: direct-account-tasks-delivered
       members:
         from_fan_out: true
       on_complete:

@@ -68,8 +68,7 @@ func issue642TimerCrashFixture(t *testing.T, repo string) string {
 	for name, body := range map[string]string{
 		"nodes.yaml": `test-node:
   timers:
-    - id: check_timer
-      event: timer.check
+    - event: timer.check
       delay: 1s
       start_on: state:waiting
   timer.check:
