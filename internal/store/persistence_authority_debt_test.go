@@ -221,16 +221,18 @@ func debtRunFixtureSignatureSite(declaration, resolved string) authorityDebtSite
 
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
-	for _, pair := range append(runFixtures[:], selectedFixtures[:]...) {
+	for index, pair := range append(runFixtures[:], selectedFixtures[:]...) {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
 			if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
 				return head, base, source, []string{"both reviewed run-fixture signature identities survive: " + old.Declaration}
 			}
 		}
+		sourcePredecessor := source[old.identity()] == old && source[current.identity()].Multiplicity == 0
+		sourceLanded := index >= len(runFixtures) && source[current.identity()] == current && source[old.identity()].Multiplicity == 0
 		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
 			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
-			source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
+			(sourcePredecessor || sourceLanded) {
 			head = debtForwardQuiescenceUncertainty(head, old, current)
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 			source = debtForwardQuiescenceUncertainty(source, old, current)
