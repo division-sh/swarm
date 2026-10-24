@@ -1,14 +1,14 @@
 {
   "version": 2,
-  "source_run_id": "github-actions-38871894148-1",
+  "source_run_id": "github-actions-39925311892-1",
   "packages": {
     "github.com/division-sh/swarm": 0,
-    "github.com/division-sh/swarm/cmd/swarm": 28.722,
+    "github.com/division-sh/swarm/cmd/swarm": 19.588,
     "github.com/division-sh/swarm/cmd/swarm-complexity": 19.343,
     "github.com/division-sh/swarm/cmd/swarm-openapi-gen": 0,
     "github.com/division-sh/swarm/cmd/swarm-openrpc-gen": 0,
     "github.com/division-sh/swarm/cmd/swarm-provider-trigger-pack-gen": 0,
-    "github.com/division-sh/swarm/cmd/swarm-test": 139.88,
+    "github.com/division-sh/swarm/cmd/swarm-test": 101.366,
     "github.com/division-sh/swarm/cmd/swarm-test-changed": 0.005,
     "github.com/division-sh/swarm/cmd/swarm-test-timing": 79.674,
     "github.com/division-sh/swarm/cmd/swarm-unused": 31.982,
@@ -19,7 +19,7 @@
     "github.com/division-sh/swarm/internal/checkoutsource": 0.02,
     "github.com/division-sh/swarm/internal/cli/argcount": 0.004,
     "github.com/division-sh/swarm/internal/cli/readwindow": 0,
-    "github.com/division-sh/swarm/internal/cliapp": 206.446,
+    "github.com/division-sh/swarm/internal/cliapp": 164.703,
     "github.com/division-sh/swarm/internal/config": 0.01,
     "github.com/division-sh/swarm/internal/durabledata": 1.976,
     "github.com/division-sh/swarm/internal/events": 6.359,
@@ -33,8 +33,8 @@
     "github.com/division-sh/swarm/internal/packruntime": 0,
     "github.com/division-sh/swarm/internal/packs": 5.44,
     "github.com/division-sh/swarm/internal/platform": 0.004,
-    "github.com/division-sh/swarm/internal/providerconnectors": 4.553,
-    "github.com/division-sh/swarm/internal/providertriggers": 11.715,
+    "github.com/division-sh/swarm/internal/providerconnectors": 10.14,
+    "github.com/division-sh/swarm/internal/providertriggers": 13.719,
     "github.com/division-sh/swarm/internal/releasee2e": 1230.6190000000001,
     "github.com/division-sh/swarm/internal/runtime": 187.23,
     "github.com/division-sh/swarm/internal/runtime/accprojection": 0.375,
@@ -47,21 +47,21 @@
     "github.com/division-sh/swarm/internal/runtime/agents": 0.135,
     "github.com/division-sh/swarm/internal/runtime/agenttopology": 0.006,
     "github.com/division-sh/swarm/internal/runtime/authoractivity": 0.019,
-    "github.com/division-sh/swarm/internal/runtime/authoringview": 8.375,
+    "github.com/division-sh/swarm/internal/runtime/authoringview": 10.719,
     "github.com/division-sh/swarm/internal/runtime/authority": 0.007,
-    "github.com/division-sh/swarm/internal/runtime/bootverify": 50.22,
+    "github.com/division-sh/swarm/internal/runtime/bootverify": 35.17,
     "github.com/division-sh/swarm/internal/runtime/budgetspend": 0,
     "github.com/division-sh/swarm/internal/runtime/bus": 93.689,
     "github.com/division-sh/swarm/internal/runtime/bus/bustest": 0,
     "github.com/division-sh/swarm/internal/runtime/canonicaljson": 0.007,
-    "github.com/division-sh/swarm/internal/runtime/cataloge2e": 593.899,
+    "github.com/division-sh/swarm/internal/runtime/cataloge2e": 741.6179999999999,
     "github.com/division-sh/swarm/internal/runtime/channelactivation": 0.042,
     "github.com/division-sh/swarm/internal/runtime/channeldelivery": 2.084,
     "github.com/division-sh/swarm/internal/runtime/channelnative": 0.007,
     "github.com/division-sh/swarm/internal/runtime/computemodule": 0.222,
     "github.com/division-sh/swarm/internal/runtime/conformance": 3445.04,
     "github.com/division-sh/swarm/internal/runtime/containeridentity": 0.003,
-    "github.com/division-sh/swarm/internal/runtime/contracts": 333.836,
+    "github.com/division-sh/swarm/internal/runtime/contracts": 281.575,
     "github.com/division-sh/swarm/internal/runtime/core/activityidentity": 0,
     "github.com/division-sh/swarm/internal/runtime/core/actors": 0,
     "github.com/division-sh/swarm/internal/runtime/core/agentidentity": 0.002,
@@ -82,7 +82,7 @@
     "github.com/division-sh/swarm/internal/runtime/core/ownership": 0,
     "github.com/division-sh/swarm/internal/runtime/core/packidentity": 0.002,
     "github.com/division-sh/swarm/internal/runtime/core/paths": 0,
-    "github.com/division-sh/swarm/internal/runtime/core/pinrouting": 12.643,
+    "github.com/division-sh/swarm/internal/runtime/core/pinrouting": 10.89,
     "github.com/division-sh/swarm/internal/runtime/core/processbinding": 0.014,
     "github.com/division-sh/swarm/internal/runtime/core/provideroutput": 0,
     "github.com/division-sh/swarm/internal/runtime/core/registry": 0.007,
@@ -93,20 +93,20 @@
     "github.com/division-sh/swarm/internal/runtime/core/toolidentity": 0.003,
     "github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy": 0,
     "github.com/division-sh/swarm/internal/runtime/core/values": 0.004,
-    "github.com/division-sh/swarm/internal/runtime/core/worklifetime": 1.787,
+    "github.com/division-sh/swarm/internal/runtime/core/worklifetime": 4.091,
     "github.com/division-sh/swarm/internal/runtime/correlation": 0.005,
     "github.com/division-sh/swarm/internal/runtime/credentials": 1.408,
     "github.com/division-sh/swarm/internal/runtime/currentstate": 0.006,
     "github.com/division-sh/swarm/internal/runtime/dataaccess": 0.028,
     "github.com/division-sh/swarm/internal/runtime/deadletters": 0,
-    "github.com/division-sh/swarm/internal/runtime/decisioncard": 30.711,
+    "github.com/division-sh/swarm/internal/runtime/decisioncard": 24.328,
     "github.com/division-sh/swarm/internal/runtime/deliverycontinuation": 0.912,
     "github.com/division-sh/swarm/internal/runtime/deliverylifecycle": 2.825,
     "github.com/division-sh/swarm/internal/runtime/destructivereset": 0.555,
     "github.com/division-sh/swarm/internal/runtime/diaglog": 0,
-    "github.com/division-sh/swarm/internal/runtime/effects": 5.623,
+    "github.com/division-sh/swarm/internal/runtime/effects": 6.849,
     "github.com/division-sh/swarm/internal/runtime/effects/effecttest": 0,
-    "github.com/division-sh/swarm/internal/runtime/engine": 24.978,
+    "github.com/division-sh/swarm/internal/runtime/engine": 8.561,
     "github.com/division-sh/swarm/internal/runtime/entityquery": 0,
     "github.com/division-sh/swarm/internal/runtime/entityruntime": 0.007,
     "github.com/division-sh/swarm/internal/runtime/eventpayload": 0.001,
@@ -131,7 +131,7 @@
     "github.com/division-sh/swarm/internal/runtime/loopruntime": 0.008,
     "github.com/division-sh/swarm/internal/runtime/managedcredentials": 0.442,
     "github.com/division-sh/swarm/internal/runtime/managedcredentials/model": 0.013,
-    "github.com/division-sh/swarm/internal/runtime/manager": 92.334,
+    "github.com/division-sh/swarm/internal/runtime/manager": 79.529,
     "github.com/division-sh/swarm/internal/runtime/mcp": 20.705,
     "github.com/division-sh/swarm/internal/runtime/mockperformance": 0.004,
     "github.com/division-sh/swarm/internal/runtime/mutationlog": 0.007,
@@ -139,19 +139,19 @@
     "github.com/division-sh/swarm/internal/runtime/pipelineobligation": 0.006,
     "github.com/division-sh/swarm/internal/runtime/plangeneration": 0.003,
     "github.com/division-sh/swarm/internal/runtime/platformcontext": 0,
-    "github.com/division-sh/swarm/internal/runtime/publicingress": 1.725,
-    "github.com/division-sh/swarm/internal/runtime/pythonmodule": 33.036,
+    "github.com/division-sh/swarm/internal/runtime/publicingress": 9.304,
+    "github.com/division-sh/swarm/internal/runtime/pythonmodule": 20.757,
     "github.com/division-sh/swarm/internal/runtime/pythonmodule/internal/genartifactmanifest": 0,
     "github.com/division-sh/swarm/internal/runtime/registration": 0.192,
     "github.com/division-sh/swarm/internal/runtime/replycontext": 0,
     "github.com/division-sh/swarm/internal/runtime/requiredagents": 0.01,
-    "github.com/division-sh/swarm/internal/runtime/routingtopology": 6.017,
+    "github.com/division-sh/swarm/internal/runtime/routingtopology": 3.095,
     "github.com/division-sh/swarm/internal/runtime/runbundle": 0,
     "github.com/division-sh/swarm/internal/runtime/runcontrol": 0.08,
     "github.com/division-sh/swarm/internal/runtime/runfork": 0,
     "github.com/division-sh/swarm/internal/runtime/runforkadmission": 4.059,
-    "github.com/division-sh/swarm/internal/runtime/runforkexecution": 158.838,
-    "github.com/division-sh/swarm/internal/runtime/runforkreadiness": 11.89,
+    "github.com/division-sh/swarm/internal/runtime/runforkexecution": 116.562,
+    "github.com/division-sh/swarm/internal/runtime/runforkreadiness": 8.033,
     "github.com/division-sh/swarm/internal/runtime/runlifecycle": 0.009,
     "github.com/division-sh/swarm/internal/runtime/runquiescence": 0,
     "github.com/division-sh/swarm/internal/runtime/runstalled": 0.007,
@@ -167,7 +167,7 @@
     "github.com/division-sh/swarm/internal/runtime/startupownership": 3.942,
     "github.com/division-sh/swarm/internal/runtime/startuprecovery": 0.007,
     "github.com/division-sh/swarm/internal/runtime/testcases": 1.001,
-    "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting": 44.048,
+    "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting": 49.048,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest": 0,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring": 0,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren": 0,
@@ -182,20 +182,28 @@
     "github.com/division-sh/swarm/internal/runtime/timercancellation": 0.004,
     "github.com/division-sh/swarm/internal/runtime/timerobligation": 0,
     "github.com/division-sh/swarm/internal/runtime/toolgateway": 11.038,
-    "github.com/division-sh/swarm/internal/runtime/tools": 51.23,
+    "github.com/division-sh/swarm/internal/runtime/tools": 146.147,
     "github.com/division-sh/swarm/internal/runtime/triggergeneration": 0.005,
     "github.com/division-sh/swarm/internal/runtime/turnactivity": 0,
-    "github.com/division-sh/swarm/internal/runtime/workflowexpr": 30.381,
+    "github.com/division-sh/swarm/internal/runtime/workflowexpr": 43.074,
     "github.com/division-sh/swarm/internal/runtime/workflowlifecycle": 0.005,
     "github.com/division-sh/swarm/internal/runtime/workflowroute": 0,
     "github.com/division-sh/swarm/internal/runtime/workspace": 12.696,
     "github.com/division-sh/swarm/internal/runtime/workspace/worker": 0.649,
-    "github.com/division-sh/swarm/internal/serveapp": 5779.499999999999,
+    "github.com/division-sh/swarm/internal/serveapp": 6592.601999999999,
     "github.com/division-sh/swarm/internal/servedparity": 0.015,
+    "github.com/division-sh/swarm/internal/sessioncapture": 0,
+    "github.com/division-sh/swarm/internal/sessionprovider": 136.292,
+    "github.com/division-sh/swarm/internal/sessionprovider/authority": 0,
+    "github.com/division-sh/swarm/internal/sessionprovider/execution": 0,
+    "github.com/division-sh/swarm/internal/sessionprovider/input": 0,
+    "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact": 0,
+    "github.com/division-sh/swarm/internal/sessionprovider/internal/executionfact": 0,
+    "github.com/division-sh/swarm/internal/sessionprovider/internal/inputfact": 0,
     "github.com/division-sh/swarm/internal/sourceartifact": 0.223,
-    "github.com/division-sh/swarm/internal/store": 412.977,
+    "github.com/division-sh/swarm/internal/store": 583.118,
     "github.com/division-sh/swarm/internal/store/backendselection": 0.005,
-    "github.com/division-sh/swarm/internal/store/construction": 13.883,
+    "github.com/division-sh/swarm/internal/store/construction": 17.617,
     "github.com/division-sh/swarm/internal/store/devscratch": 0.066,
     "github.com/division-sh/swarm/internal/store/eventfixture": 0,
     "github.com/division-sh/swarm/internal/store/internal/adminpersistence": 0,
@@ -203,18 +211,18 @@
     "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal": 0.008,
     "github.com/division-sh/swarm/internal/store/internal/backend/activityresult": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence": 0.012,
-    "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity": 2.414,
+    "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity": 0.829,
     "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery": 0.279,
-    "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding": 7.069,
+    "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding": 15.987,
     "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/delivery": 8.188,
+    "github.com/division-sh/swarm/internal/store/internal/backend/delivery": 5.854,
     "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence": 1.014,
     "github.com/division-sh/swarm/internal/store/internal/backend/effects": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord": 3.12,
+    "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord": 1.244,
     "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/staged": 0,
@@ -225,30 +233,32 @@
     "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence": 1.5939999999999999,
     "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol": 7.547,
+    "github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol": 9.541,
     "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence": 8.241,
-    "github.com/division-sh/swarm/internal/store/internal/backend/postgres": 33.99,
+    "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence": 12.184,
+    "github.com/division-sh/swarm/internal/store/internal/backend/postgres": 38.423,
     "github.com/division-sh/swarm/internal/store/internal/backend/replycontext": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence": 42.373,
+    "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence": 34.642,
     "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision": 1.875,
     "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection": 1.133,
     "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/runstate": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence": 0,
+    "github.com/division-sh/swarm/internal/store/internal/backend/sessionpersistence": 0.162,
+    "github.com/division-sh/swarm/internal/store/internal/backend/sessionpersistence/generate": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/sessions": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/sqlite": 15.608,
+    "github.com/division-sh/swarm/internal/store/internal/backend/sqlite": 18.348,
     "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/transactiontest": 0.06,
     "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer": 0,
     "github.com/division-sh/swarm/internal/store/internal/budgetspend": 0,
-    "github.com/division-sh/swarm/internal/store/internal/durabledata": 1.4889999999999999,
+    "github.com/division-sh/swarm/internal/store/internal/durabledata": 3.205,
     "github.com/division-sh/swarm/internal/store/internal/failurecodec": 0,
     "github.com/division-sh/swarm/internal/store/internal/ingresspersistence": 0,
     "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence": 0,
-    "github.com/division-sh/swarm/internal/store/internal/operatorsurface": 0,
+    "github.com/division-sh/swarm/internal/store/internal/operatorsurface": 1.12,
     "github.com/division-sh/swarm/internal/store/internal/runbundle": 0.336,
     "github.com/division-sh/swarm/internal/store/internal/runhandoff": 0,
     "github.com/division-sh/swarm/internal/store/internal/runtimepersistence": 1819.6429999999998,
@@ -264,6 +274,7 @@
     "github.com/division-sh/swarm/internal/store/platformschema": 0,
     "github.com/division-sh/swarm/internal/store/selected": 3.879,
     "github.com/division-sh/swarm/internal/store/selected/selectedtest": 0,
+    "github.com/division-sh/swarm/internal/store/sessionstate": 0,
     "github.com/division-sh/swarm/internal/store/storetest": 9.149,
     "github.com/division-sh/swarm/internal/store/testsql": 0,
     "github.com/division-sh/swarm/internal/store/testutil/agentfixture": 0,
@@ -273,9 +284,9 @@
     "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture": 0,
     "github.com/division-sh/swarm/internal/testcatalog": 1.245,
     "github.com/division-sh/swarm/internal/testchanged": 0.01,
-    "github.com/division-sh/swarm/internal/testplanning": 108.323,
-    "github.com/division-sh/swarm/internal/testpostgres": 46.018,
-    "github.com/division-sh/swarm/internal/testtiming": 44.184,
+    "github.com/division-sh/swarm/internal/testplanning": 201.797,
+    "github.com/division-sh/swarm/internal/testpostgres": 40.52,
+    "github.com/division-sh/swarm/internal/testtiming": 36.404,
     "github.com/division-sh/swarm/internal/testutil": 7.443,
     "github.com/division-sh/swarm/internal/testutil/flowactivationfixture": 0.006,
     "github.com/division-sh/swarm/internal/testutil/packfixture": 0,
@@ -285,17 +296,19 @@
     "github.com/division-sh/swarm/internal/testutil/sourceartifactfixture": 0.003,
     "github.com/division-sh/swarm/internal/testutil/stagecatalogfixture": 0,
     "github.com/division-sh/swarm/internal/testutil/telegramapi": 0,
-    "github.com/division-sh/swarm/internal/userfacing": 23.549,
+    "github.com/division-sh/swarm/internal/testutil/whatsappfixture": 0.044,
+    "github.com/division-sh/swarm/internal/userfacing": 26.062,
     "github.com/division-sh/swarm/internal/versionmetadata": 0.006,
     "github.com/division-sh/swarm/internal/yamlsource": 0.007,
     "github.com/division-sh/swarm/packs": 0,
     "github.com/division-sh/swarm/scripts/rewrite-list-spellings-2287": 0.008,
     "github.com/division-sh/swarm/scripts/rewrite-pins-2438": 0.177,
-    "github.com/division-sh/swarm/scripts/rewrite-stages-2566": 17.139,
+    "github.com/division-sh/swarm/scripts/rewrite-stages-2566": 11.815,
     "github.com/division-sh/swarm/scripts/rewrite-stages-2566/formatproof": 0.353,
     "github.com/division-sh/swarm/scripts/rewrite-value-slots-2556": 0.017,
     "github.com/division-sh/swarm/tools/fixture-codemod": 0.146,
-    "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations": 238.971,
+    "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations": 461.613,
+    "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole": 0,
     "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-family143": 0,
     "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-family144": 0,
     "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-historical-models": 0,
@@ -311,63 +324,67 @@
       },
       "broad-01": {
         "selection": "3bea0e8e483ed6dd82cf1bb105f583bb528f2c407aff868c7f03019c294a0060",
-        "seconds": 179
+        "seconds": 145
       },
       "broad-02": {
-        "selection": "afb62d73d639138b60c2b2e1595156585ff99d739e15437ef1db69b809f6adb0",
-        "seconds": 148
+        "selection": "51bffbb9fd1a2b19d1b6492afd981d4d6631b66bd10527ff73c163e20a0957fe",
+        "seconds": 138
       },
       "broad-03": {
-        "selection": "c21e1d6016604cc9e425637efdb2c3e9eecfcf2fb7967d39926257fff1f1afde",
-        "seconds": 159
+        "selection": "7023dc6f7ca4a5187c860c5d3cd06d4bc22c8bba4089d7f85c8f4d2a5aeb072b",
+        "seconds": 184
       },
       "broad-04": {
-        "selection": "ea772e97da0ba13d252d9bbb84eba45507814bee2482c8fa669c0aa99c32831d",
-        "seconds": 125
+        "selection": "3a0c95de6448ca45feda628403cb3b7c62e5c6c3f02218c4e92064a9f7423f04",
+        "seconds": 265
       },
       "broad-05": {
-        "selection": "75ad360eed1253c57469ffe875f333f64beb78197c4adc67d87ef82989d89acd",
-        "seconds": 102
+        "selection": "ea5c606c811aad03373dbd7f2a16c4e3ad3852e91debdfbe2cd2ef2a0a020ee3",
+        "seconds": 145
       },
       "broad-06": {
-        "selection": "1a0a54b6ff40703436ad7247aae81573c701a4bbf1f5149140aa0cb7dde87bd3",
-        "seconds": 166
+        "selection": "a71d40628c790e4cb50a095a46165427e15e7682606a0fd28d8acb9dcc3521ba",
+        "seconds": 132
       },
       "broad-07": {
-        "selection": "b53d734e69b233139bd617033895dde8e331619d3bf5fbc19e14ada69b454663",
-        "seconds": 65
+        "selection": "4cff9c7d57130500fdefca9148b328137b4c16ec7d9c8b2d5ee47c570d3b15a5",
+        "seconds": 205
       },
       "broad-08": {
-        "selection": "658693a5cafc3821449ad30a23477bf5b4373a5109e70b788354c6ca8dc99268",
-        "seconds": 104
+        "selection": "c1d0d104e2994d09a57836be02f347ab5c40464a23a7904d2e7fdcfacbc3832f",
+        "seconds": 184
       },
       "broad-09": {
-        "selection": "a22235996dfa54009e98475af8810cf548a3b09250d998fd9637fad2fc833644",
-        "seconds": 151
+        "selection": "70b80b6233b70d965759497fc4769937fb1a72163f4bd2562dc87a35c449a9b7",
+        "seconds": 83
       },
       "broad-10": {
-        "selection": "1f9f2b3013866e053b4690e87c0653a2a5581c5cf68d65afd3dcf08d7e6a9f8e",
-        "seconds": 187
+        "selection": "8694a96cfc5f719c8df44968d43913f9e21ac2cfcb5fdfa3c5126bba8ba614a5",
+        "seconds": 98
       },
       "broad-11": {
-        "selection": "410d7bbc7d025a2a969e0a85a2675123dfbe76c1cc30e71f056c0b7ba14bc3d0",
-        "seconds": 89
+        "selection": "b84736e066d91f3fbb7026a4ee642348714bd92b1ec3222ab8d3e66feb6e5633",
+        "seconds": 74
+      },
+      "broad-12": {
+        "selection": "13c4654480828cfc3474c1d694333259f771a8e127710b3c2fbd224341761b1b",
+        "seconds": 116
       },
       "catalog-replay-1": {
         "selection": "6c0fc31af9148225f832593ff7ef6ec84e3a4f6b77994e44dfdde749c56b540f",
-        "seconds": 112
+        "seconds": 176
       },
       "catalog-replay-2-3": {
         "selection": "504149e2b83873e756a8f9a643b3b3fc2b4f676583a0a3a4200e02820dfda655",
-        "seconds": 176
+        "seconds": 225
       },
       "catalog-required-inventory": {
         "selection": "4dba61eee1068b69f9a6a392c1272d0f1a8c4994eadba754f30f67e062a499aa",
-        "seconds": 25
+        "seconds": 17
       },
       "catalog-required-verify": {
         "selection": "51f75ee919f964c9c98499c9101b0edb23c2115d59455b5d409b9852be0519c3",
-        "seconds": 236
+        "seconds": 195
       },
       "catalog-runtime": {
         "selection": "6479f09cbcb4a22e87801654a81f06b5e3dd73283e18cbab41b3ff6c15924e2e",
@@ -379,7 +396,7 @@
       },
       "catalog-runtime-scatter-safety": {
         "selection": "75eae930a8146c61b90444bbc7163559ba6d26848fb1a5bb3318df878aa2ead3",
-        "seconds": 95
+        "seconds": 111
       },
       "codemod-bus-mutation": {
         "selection": "933ec9a86947ca0344053a8f49daa3e3710870848b80235b27c8f8970c989f83",
@@ -387,19 +404,19 @@
       },
       "codemod-candidate-overlay": {
         "selection": "56d0f95454adf57b69ee2143410c5902b5799a8e6f65cc0fcf7ae06092587b16",
-        "seconds": 28
+        "seconds": 149
       },
       "codemod-owner-guards": {
         "selection": "c733bc7b7acc5b4b24ba1b973e7072a72f482ca5bdc880e5e577e8f3f498dae7",
-        "seconds": 106
+        "seconds": 92
       },
       "codemod-pipeline-mutation": {
         "selection": "60754fa7ad35a9ab23a635e74118fff7862b3219bbb60688af39f488b1714122",
-        "seconds": 52
+        "seconds": 182
       },
       "conformance-1": {
         "selection": "b4ac860cfb1f3736bdb73a4e0caa08bf2d1e0f2a4034efd1c37475d3da1cfa56",
-        "seconds": 256
+        "seconds": 185
       },
       "conformance-2": {
         "selection": "ad44fe4e2e720f7847d7f414fd6817eca77574faaffe7f3fc35961a07d81a3f7",
@@ -407,7 +424,7 @@
       },
       "conformance-2394-core": {
         "selection": "256e00796291873fdcc5d6b7cd3a9f6e285040cde6b18aab9caf547a32ed01bf",
-        "seconds": 264
+        "seconds": 190
       },
       "conformance-2394-pressure": {
         "selection": "a7409441cab7a5b23020a4bd41e367e4006cead04010a114746fd05223bba358",
@@ -419,7 +436,7 @@
       },
       "conformance-2394-reporter-window": {
         "selection": "cd7171943c2d1a33fa5cd88996c1dd7b266db995619a16f60af3167ec0da8a27",
-        "seconds": 65
+        "seconds": 92
       },
       "conformance-heavy-fanout": {
         "selection": "b8177339765e25f200b78cdec7aebdbf3c609c637a55796d2d14b319dd685c83",
@@ -439,11 +456,11 @@
       },
       "contracts-rest": {
         "selection": "4c32b4313b056853bcea2307bfa8b731f63ac48a54f9f4390b29b93441047f06",
-        "seconds": 197
+        "seconds": 138
       },
       "delivery-continuation-full": {
         "selection": "befceaf03352095c6d6d16d12c8c82338b1afdc14b9401ffd1cffeb04a2e10fe",
-        "seconds": 20
+        "seconds": 16
       },
       "hitl-releasee2e-burst-1": {
         "selection": "2ece4cd230dd210ea2109b23c3854a52667cd37d020e2e497f11b50623df0df0",
@@ -455,23 +472,23 @@
       },
       "hitl-releasee2e-golden": {
         "selection": "e7aefc5358ca06f6f8f4f95c6ee23aeaa9f6140cf95e569211bc80c34e5c057d",
-        "seconds": 311
+        "seconds": 235
       },
       "hitl-releasee2e-invocation-1": {
         "selection": "2c77cea086de2305b5b9e2deb50f0c3c1b3fbbd430ea20a9cf845e4783126272",
-        "seconds": 83
+        "seconds": 74
       },
       "hitl-releasee2e-invocation-2": {
         "selection": "11134a05ea22e04349d09f6baa4a7f4b8fa01d7a823fa222a240f2dbc3ac5970",
-        "seconds": 52
+        "seconds": 44
       },
       "hitl-releasee2e-invocation-3": {
         "selection": "4a8edc437eaa03586b416f5e974c262ddc54016730e36ce1bff19c4e5afd44ec",
-        "seconds": 69
+        "seconds": 48
       },
       "hitl-releasee2e-invocation-4": {
         "selection": "ed5fc2276c08eb7cdf28ed065697188d113750db340fb7fb0cf7cb30f493dc9d",
-        "seconds": 53
+        "seconds": 33
       },
       "hitl-releasee2e-invocation-5": {
         "selection": "034f04b9992906316e98f7447ad65b037fe5d707b32568978c680854793aa20b",
@@ -486,16 +503,20 @@
         "seconds": 97
       },
       "hitl-releasee2e-rest": {
-        "selection": "578da3a5785bd237f06929249606d928f5e0ba86505585376d02eb79434c75a2",
-        "seconds": 363
+        "selection": "08c450635f195e66c4184f44a22fe3e8ea6c49d999f660a65ad34ccf7b1b3721",
+        "seconds": 260
+      },
+      "hitl-releasee2e-s": {
+        "selection": "c8ada751be6f3bdf14913f19abd46983b7cecaf761c5153f0695bc034c1b97d9",
+        "seconds": 198
       },
       "persistence-authority-debt-census": {
         "selection": "336260e09c13be31219ddc4dc60aaee4e598d1f92a34da98dda9471ee94a9d2a",
-        "seconds": 278
+        "seconds": 426
       },
       "pipeline-activation": {
         "selection": "6e2415f83062179cab522d90d15d4eb97bcd146e4c7dba1687d71a42804033fc",
-        "seconds": 207
+        "seconds": 251
       },
       "pipeline-rest": {
         "selection": "ebae62a5b2bc81ccc069f50dccf1857a9bb955779123b5f0277d553af61e5e63",
@@ -515,7 +536,7 @@
       },
       "serveapp-2564-h2": {
         "selection": "57412463f128374994f09259f2085f9e5fab6fa6567bc9b1813f0f69b875f0b6",
-        "seconds": 224
+        "seconds": 340
       },
       "serveapp-channel": {
         "selection": "f813960ba79eb5b244202ac01f1f2f40989d4d98ef43eebc91e52acd8109fe54",
@@ -551,7 +572,7 @@
       },
       "serveapp-i-reporter": {
         "selection": "1d35f970272a8db985dbab6964a3b86f635e7399e3eb832e5a7489f048e17e1f",
-        "seconds": 137
+        "seconds": 162
       },
       "serveapp-i-reporter-all-commit": {
         "selection": "160d7145e075381ce6732bf6dc0929c8f68fa7c72ee60b8d48859bbb093b5333",
@@ -563,11 +584,11 @@
       },
       "serveapp-journeys-d-l": {
         "selection": "e35afdfe8bb9f417a30db34a24fdccf4f69c77cec16edff790fdbf245bc581a3",
-        "seconds": 149
+        "seconds": 184
       },
       "serveapp-journeys-first": {
         "selection": "35eab8052a7cd0c78a5f31719d0d087c641a5894dff8042be8329be1254c95f5",
-        "seconds": 138
+        "seconds": 371
       },
       "serveapp-journeys-m-z": {
         "selection": "c5f6f1b9521776d81643110aa29f29cd641c8b133ee6ccf3148b1eb6d1ed81c1",
@@ -575,7 +596,7 @@
       },
       "serveapp-mailbox": {
         "selection": "61884d28cd427cf7f8757ddf97110bb9fad4ffbb55c26e0cd33efe654fcad7f8",
-        "seconds": 356
+        "seconds": 294
       },
       "serveapp-mailbox-p-q": {
         "selection": "85e0ab92bb2e53c7b7892d2968ce952ad08ffc3dd59f8111691f3315fc84874c",
@@ -595,11 +616,11 @@
       },
       "serveapp-runtime": {
         "selection": "6313d48b724d037267e762b44f1e74f67584622a62d6de0af1f4b264b45aceda",
-        "seconds": 207
+        "seconds": 412
       },
       "serveapp-selected": {
         "selection": "e30f97e826537719137335a5b8e342bf08276967f5df84bedf213fcab4280917",
-        "seconds": 166
+        "seconds": 209
       },
       "serveapp-selected-rest": {
         "selection": "d9bb1f58004a96fd88094a5f822c252bf8151b63261c2995b63c9a6bcee55890",
@@ -613,13 +634,17 @@
         "selection": "853163293da3b74acfe5c59f5ceac9cd66f97bb23157e6558b96729540757a29",
         "seconds": 155
       },
+      "source-contract-guards": {
+        "selection": "dd48c3783a50451f452918a2674530dd1e60bdf086c7b23a1d67ad20b02c2e17",
+        "seconds": 24
+      },
       "store-admission-full": {
         "selection": "3a83cdf2e0910b84e3969480f64d8accb8b4034d281226e22e692bcb40127f98",
-        "seconds": 183
+        "seconds": 208
       },
       "store-runtime-fanout": {
         "selection": "c74fa3ee968a9b1e9d4a147368cd95404e961db727f2063d5a141cab03743b66",
-        "seconds": 218
+        "seconds": 168
       },
       "store-runtime-fanout-process": {
         "selection": "9e9d1c01d3bd33bd83306c450fa7756951e39fd3de6f247b0e91b16d62ede35c",
@@ -631,19 +656,19 @@
       },
       "store-runtime-fork-generation": {
         "selection": "0044b7a99de2eaf41afecdcb6a8383ae84082f5966f8ca3f9768659c263882d2",
-        "seconds": 91
+        "seconds": 111
       },
       "store-runtime-full-01": {
         "selection": "9c0a9422c4b60f27301a34a312bc838fe763e7af75d8f362ef2de6a4994069ed",
-        "seconds": 118
+        "seconds": 211
       },
       "store-runtime-full-02": {
         "selection": "7247dd22c559ded267fde35f8a51ab998b78919c79bd946939cae622318915dc",
-        "seconds": 148
+        "seconds": 216
       },
       "store-runtime-full-03": {
         "selection": "86fd73d88be519dd4ebbf0d5e63a7743c5e74531c3802492cef59e212e9959ed",
-        "seconds": 194
+        "seconds": 240
       },
       "store-runtime-full-03-i-l": {
         "selection": "c8ef64f420b6dbd4e74599db89876deae7a9992d18f4b3dfb1f529012c5f2e46",
@@ -651,7 +676,7 @@
       },
       "store-runtime-full-04": {
         "selection": "c56574f1d1d548b19e3fd384e20d5f35e826a154d74c4f14c71713422b9e31e3",
-        "seconds": 224
+        "seconds": 159
       },
       "store-runtime-full-05": {
         "selection": "9ff2a449fad81fb4011a2f3a3c9856f014b5850fa3be3d9a893ec2d2d84b4455",
@@ -659,11 +684,11 @@
       },
       "store-runtime-full-07-fork": {
         "selection": "28be3c6de7101618240e2af36f478d7e4cdca10bbf5c19856186ae050fb2b21e",
-        "seconds": 152
+        "seconds": 115
       },
       "store-runtime-s-z-rest": {
         "selection": "48b2e7f3660f05cdc2b557ccd2cb5af4afc30404ee4a152982220b0d9ab3631b",
-        "seconds": 136
+        "seconds": 200
       },
       "store-runtime-selected": {
         "selection": "c6121fa60548fc8a7fd5e4854bf9fcfb4bba3b8129498b34eef211a6326c88a3",
@@ -675,7 +700,7 @@
       },
       "unused-controls": {
         "selection": "ac3d13db9a054b1942810061ab84ca643f4f1bcc9d18075aab9743b6ec3e6982",
-        "seconds": 49
+        "seconds": 40
       }
     },
     "lifecycle": {}
