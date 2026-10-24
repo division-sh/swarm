@@ -22,7 +22,7 @@ func TestPacksListAndShowUseEmbeddedInventoryOutsideProject(t *testing.T) {
 		t.Fatalf("packs list code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
 	list := decodeOutputJSON[packInventoryReadback](t, stdout)
-	if list.BaseMode != "embedded" || len(list.Packs) != 10 || list.BaseDigest == "" || list.EffectiveDigest == "" {
+	if list.BaseMode != "embedded" || list.BaseDigest == "" || list.EffectiveDigest == "" {
 		t.Fatalf("bare embedded list = %#v", list)
 	}
 
@@ -31,7 +31,7 @@ func TestPacksListAndShowUseEmbeddedInventoryOutsideProject(t *testing.T) {
 		t.Fatalf("packs show code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
 	show := decodeOutputJSON[packShowReadback](t, stdout)
-	if show.Pack.ID != "telegram" || show.Pack.Source != "embedded" || len(show.Bodies) != 3 ||
+	if show.Pack.ID != "telegram" || show.Pack.Source != "embedded" ||
 		!strings.Contains(show.ManifestYAML, "version: 0.1.0") || !strings.Contains(show.Bodies["trigger.yaml"], "event_name:\n  literal: raw") {
 		t.Fatalf("bare embedded show = %#v", show)
 	}

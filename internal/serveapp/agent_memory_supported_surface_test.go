@@ -350,6 +350,9 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	if err := credentialStore.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
 		t.Fatalf("set webhook signing credential: %v", err)
 	}
+	if err := credentialStore.Set(context.Background(), "telegram.telegram_bot_token", "bot-token"); err != nil {
+		t.Fatalf("set provider credential: %v", err)
+	}
 
 	var storeLocation string
 	var prepareRestart func()

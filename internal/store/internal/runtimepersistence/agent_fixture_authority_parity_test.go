@@ -29,6 +29,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -38,6 +39,7 @@ import (
 
 type agentFixtureFlowStore interface {
 	agentfixture.Store
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	runtimemanager.AgentLifecycleOutcomeReader
 	runtimedelivery.Store
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
@@ -313,7 +315,7 @@ func assertExactAgentFixtureFlowAuthority(
 }
 
 type agentFixtureAcquireProbe struct {
-	agentfixture.Store
+	agentFixtureFlowStore
 	mu           sync.Mutex
 	acquireCalls int
 }
@@ -322,7 +324,7 @@ func (s *agentFixtureAcquireProbe) AcquireProcessCapability(ctx context.Context,
 	s.mu.Lock()
 	s.acquireCalls++
 	s.mu.Unlock()
-	return s.Store.AcquireProcessCapability(ctx, req)
+	return s.agentFixtureFlowStore.AcquireProcessCapability(ctx, req)
 }
 
 func (s *agentFixtureAcquireProbe) calls() int {
@@ -361,7 +363,7 @@ func TestAgentFixtureSealedAuthorityRejectionParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			invalid := rejectedAgentFixtureAdmissions(t)
-			probe := &agentFixtureAcquireProbe{Store: selected}
+			probe := &agentFixtureAcquireProbe{agentFixtureFlowStore: selected}
 			for index, topology := range invalid {
 				if _, err := agentfixture.CommitExact(t, ctx, probe, runtimemanager.AgentLifecycleTransition{
 					Identity: identity, AgentID: identity.AgentID(), Topology: topology,
@@ -509,7 +511,7 @@ func proveAgentFixtureMixedAuthorityRejection(t *testing.T, ctx context.Context,
 	flowIdentity := testAgentIdentity(t, "flow-survivor", "review/fixture")
 	flowState := seedExactAgentFixtureFlowState(t, ctx, selected, flowIdentity, grant)
 	before := captureAgentFixtureAuthority(t, ctx, selected)
-	probe := &agentFixtureAcquireProbe{Store: selected}
+	probe := &agentFixtureAcquireProbe{agentFixtureFlowStore: selected}
 	for index, topology := range rejectedAgentFixtureAdmissions(t) {
 		if _, err := agentfixture.CommitExact(t, ctx, probe, runtimemanager.AgentLifecycleTransition{
 			Identity: flowIdentity, AgentID: flowIdentity.AgentID(), Topology: topology,

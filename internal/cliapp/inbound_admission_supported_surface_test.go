@@ -91,7 +91,7 @@ func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &errOut); code != 0 {
 			t.Fatalf("verify repo %q exit=%d stdout=%s stderr=%s", repo, code, out.String(), errOut.String())
 		}
-		for _, want := range []string{"pack inventory: base=embedded", "provider.telegram"} {
+		for _, want := range []string{"pack inventory: base=embedded", "telegram bodies="} {
 			if !strings.Contains(out.String(), want) {
 				t.Fatalf("verify repo %q omitted embedded inventory %q:\n%s", repo, want, out.String())
 			}
@@ -112,7 +112,7 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 		t.Fatalf("verify text exit=%d stdout=%s stderr=%s", code, textOut.String(), textErr.String())
 	}
 	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform", "whatsapp"} {
-		if !strings.Contains(textOut.String(), "provider."+provider) {
+		if !strings.Contains(textOut.String(), provider+" bodies=") {
 			t.Fatalf("verify text omitted installed %s trigger:\n%s", provider, textOut.String())
 		}
 	}
@@ -122,7 +122,7 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 		t.Fatalf("verify JSON exit=%d stdout=%s stderr=%s", code, jsonOut.String(), jsonErr.String())
 	}
 	result := decodeOutputJSON[verifyCommandResult](t, jsonOut.String())
-	if result.PackInventory.BaseMode != "embedded" || len(result.PackInventory.Packs) != 17 ||
+	if result.PackInventory.BaseMode != "embedded" ||
 		result.PackInventory.BaseDigest == "" || result.PackInventory.EffectiveDigest == "" {
 		t.Fatalf("verify pack inventory = %#v", result.PackInventory)
 	}

@@ -127,7 +127,7 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 
 func s1AgentSelectorSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	rooted, _ := sourceartifactfixture.Rooted(t, "selected", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	rooted, _ := sourceartifactfixture.Rooted(t, "selected", sourceartifactfixture.Artifact())
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(filepath.Clean("../../.."), rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)

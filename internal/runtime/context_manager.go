@@ -1008,10 +1008,24 @@ func validateStandingTargetDeclarationOwner(contextDef *BundleContext, target St
 			continue
 		}
 		for _, binding := range declaration.Ingress {
-			if binding.Provider == target.Provider && binding.SigningSecret == target.SigningSecret && binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
+			if binding.Provider == target.Provider && binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
+				signingSecret := binding.SigningSecret
+				if contextDef.Runtime != nil {
+					_, _, _, err := contextDef.Runtime.standingIngressCredentialScope(InboundTarget{
+						BundleHash: target.BundleHash, FlowPath: target.FlowPath, Alias: target.Alias,
+						Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
+					})
+					if err != nil {
+						return err
+					}
+					signingSecret = target.SigningSecret
+				}
+				if signingSecret != target.SigningSecret {
+					continue
+				}
 				expected, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
 					BundleHash: contextDef.BundleHash(), FlowPath: declaration.FlowPath, Alias: declaration.Alias,
-					SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
+					SigningSecret: signingSecret, SourcePath: declaration.SourcePath,
 				})
 				if err != nil {
 					return err

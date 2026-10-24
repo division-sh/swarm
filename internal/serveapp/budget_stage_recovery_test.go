@@ -123,7 +123,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				if _, err := selected.SetupScenarioEntities(createCtx, runtimepipeline.ScenarioSetupRequest{
 					RunID: runs[i], CreatedAt: time.Now().UTC(),
 					Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
-						Alias: "retained", EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: &initial,
+						Alias: "retained", EntityID: entityID, FlowInstance: "child", EntityType: "item",
 					}},
 				}); err != nil {
 					t.Fatalf("create retained entity %d: %v", i, err)

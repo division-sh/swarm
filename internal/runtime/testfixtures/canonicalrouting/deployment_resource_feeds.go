@@ -40,7 +40,7 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 	switch route {
 	case "singleton":
 	case "dynamic":
-		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/schema.yaml"), "stages: []\n# fixture: consumer\n", "# fixture: consumer\ninstance: account_id\n")
+		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/schema.yaml"), "# fixture: consumer\n", "# fixture: consumer\ninstance: account_id\n")
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "  - event: root.ready\n    from: .\n    to: consumer\n", "  - event: root.ready\n    from: .\n    to: consumer\n    resolution: select-or-create\n")
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "  - event: fixture.close.requested\n    from: .\n    to: consumer\n", "  - event: fixture.close.requested\n    from: .\n    to: consumer\n    resolution: select\n")
 		writeClosedVariantFile(t, root, "consumer/entities.yaml", "consumer_state:\n  account_id: text\n")

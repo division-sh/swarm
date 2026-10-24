@@ -571,7 +571,13 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 	if err := yaml.Unmarshal([]byte(pins.String()+connects.String()), &routes); err != nil {
 		t.Fatal(err)
 	}
-	rootSchema["pins"], rootSchema["connect"] = routes["pins"], routes["connect"]
+	rootPins := rootSchema["pins"].(map[string]any)
+	for key, values := range routes["pins"].(map[string]any) {
+		original, _ := rootPins[key].([]any)
+		rootPins[key] = append(original, values.([]any)...)
+	}
+	originalConnections, _ := rootSchema["connect"].([]any)
+	rootSchema["connect"] = append(originalConnections, routes["connect"].([]any)...)
 	body, err = yaml.Marshal(rootSchema)
 	if err != nil {
 		t.Fatal(err)

@@ -716,21 +716,33 @@ func textFileTwoBundleOperator2456(t *testing.T, f *deploymentResourceFixture, o
 		if !ok || bundle.PackInventory == nil {
 			t.Fatal("runtime context requires compiled bundle pack inventory")
 		}
-		projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+		rooted, err := bundle.RootedSource()
 		if err != nil {
 			t.Fatal(err)
 		}
-		bundle.PackAdmission = projection
-		subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		subjects, err := catalog.InstalledCapabilitySubjects()
 		if err != nil {
 			t.Fatal(err)
 		}
 		selected := runtime.contextRuntime
 		return swruntime.BundleContext{
-			SourceArtifactFact: runtime.sourceArtifactFact, BundleIdentity: identity,
-			Source: source, Runtime: selected, WorkOwner: runtime.workOwner,
+			SourceArtifactFact: runtime.sourceArtifactFact, BundleIdentity: identity, RootAdmission: rooted.Admission(),
+			ProviderTriggerCatalog: catalog,
+			Source:                 source, Runtime: selected, WorkOwner: runtime.workOwner,
 			PackInventoryDigest:       bundle.PackInventory.Digest(),
-			ProviderTriggerGeneration: projection.ProviderTriggers.Generation(),
+			ProviderTriggerGeneration: catalog.Generation(),
 			InstalledTriggerSubjects:  subjects,
 		}
 	}

@@ -105,7 +105,14 @@ func selectedRootAdmissionStore(t *testing.T, backend string) rootedSourceStore 
 
 func admittedRootForStorage(t *testing.T, directory string) (sourceartifact.RootedSource, string) {
 	t.Helper()
-	return sourceartifactfixture.Rooted(t, directory, sourceartifactfixture.New("nodes.yaml", []byte("worker: {type: procedure}\n")))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"nodes.yaml":    []byte("worker: {type: procedure}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sourceartifactfixture.Rooted(t, directory, artifact)
 }
 
 func TestS1RootAdmissionRetainedOwnerBothStores(t *testing.T) {
