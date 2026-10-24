@@ -188,9 +188,11 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				TransportHash: "prepared-template-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: target.RootedSource.Admission().Reference(),
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			targetCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, target.SourceArtifactFact), target.RootedSource.Admission())
+			result, err := ExecuteSelectedContractRunFork(targetCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
-				SourceLoader: loader, ContractSelection: selection,
+				SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}, ContractSelection: selection,
+				SourceArtifactFact: target.SourceArtifactFact, ExpectedBundleHash: target.SourceArtifactFact.BundleHash(),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
 			if err != nil || !result.Activation.Activated {
