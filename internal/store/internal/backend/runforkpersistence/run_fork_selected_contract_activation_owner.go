@@ -42,6 +42,7 @@ type runForkSelectedContractActivationPort struct {
 	diverge                func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error
 	freeze                 func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error
 	publishChannelChanges  func(bool, bool) error
+	liveHandoff            func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkSelectedContractActivationEvidence) (string, error)
 	now                    func() time.Time
 }
 
@@ -91,7 +92,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			MaterializedEntityCount: len(lineage.EntityIDs),
 		}
 		if lineage.ForkStatus != runfork.RunForkMaterializedStatus {
-			result.RepeatedActivationFailed = lineage.ForkStatus == runfork.RunForkActivatedStatus
+			result.RepeatedActivationFailed = lineage.ForkStatus == runfork.RunForkActivatedStatus || lineage.ForkStatus == runfork.RunForkLiveStatus
 			return fmt.Errorf("selected-contract fork activation requires materialized fork status %q; got %q", runfork.RunForkMaterializedStatus, lineage.ForkStatus)
 		}
 		sourceSnapshot, err := port.loadSnapshot(txctx, tx, lineage.SourceRunID)
@@ -186,6 +187,17 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		}
 
 		now := port.now().UTC()
+		if req.LiveHandoff {
+			if port.liveHandoff == nil || req.ForkOperation == nil {
+				return errors.New("live fork activation requires its operation and handoff owner")
+			}
+			result.SourceRunStatus, err = port.liveHandoff(txctx, tx, attempt, runForkSelectedContractActivationEvidence{lineage, binding, plan, req})
+			if err != nil {
+				return err
+			}
+			result.ForkRunStatus = runfork.RunForkLiveStatus
+			return nil
+		}
 		if sourceAdmission == selectedForkHistoricalSource {
 			if err := port.transition(txctx, attempt, runtimerunlifecycle.ActiveTransitionRequest{RunID: lineage.ForkRunID, State: runtimerunlifecycle.StateRunning}); err != nil {
 				return fmt.Errorf("activate selected-contract historical-source child lifecycle: %w", err)
@@ -236,8 +248,12 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	if !committed {
 		return result, err
 	}
-	result.ForkRunStatus = runfork.RunForkActivatedStatus
 	result.Activated = true
+	if req.LiveHandoff {
+		result.SourceFrozen = result.SourceRunStatus == runfork.RunForkSourceFrozenStatus
+		return result, err
+	}
+	result.ForkRunStatus = runfork.RunForkActivatedStatus
 	if divergence != nil {
 		result.SourceRunStatus = divergence.SourceRunStatusAfterActivation
 		result.SourceFrozen = false
@@ -353,13 +369,17 @@ func completeSelectedForkOperationAtActivation(ctx context.Context, tx *sql.Tx, 
 		return err
 	}
 	pins := append([]durabledata.Pin(nil), req.DataPins...)
+	status := runfork.RunForkActivatedStatus
+	if lineage.ForkStatus == runfork.RunForkLiveStatus {
+		status = runfork.RunForkLiveStatus
+	}
 	for i := range pins {
-		pins[i].RunState = runfork.RunForkActivatedStatus
+		pins[i].RunState = status
 	}
 	return completeForkOperationTx(ctx, tx, operation, runfork.ForkOperationResult{
 		SourceRunID: lineage.SourceRunID, SourceRunStatus: sourceStatus, SourceFrozen: frozen,
 		ForkRunID: lineage.ForkRunID, ForkEventID: lineage.ForkEventID, ForkPoint: *operation.ResolvedPoint,
-		ForkRunStatus: runfork.RunForkActivatedStatus, BundleHash: req.ForkOperation.TargetBundleHash,
+		ForkRunStatus: status, BundleHash: req.ForkOperation.TargetBundleHash,
 		ExecutedEventCount: executed, DataPins: pins,
 	}, postgres)
 }
@@ -445,8 +465,11 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 			_, err := s.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, attempt, req)
 			return err
 		},
-		diverge:               insertRunForkSelectedContractBranchDivergence,
-		freeze:                s.applyRunForkSourceFreeze,
+		diverge: insertRunForkSelectedContractBranchDivergence,
+		freeze:  s.applyRunForkSourceFreeze,
+		liveHandoff: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, evidence runForkSelectedContractActivationEvidence) (string, error) {
+			return commitSelectedLiveHandoffTx(ctx, tx, attempt, evidence, s.RunLifecyclePostgresOwner.SelectLiveRunTx, s.EffectPostgresOwner, postgresDeliveryAdapter, false)
+		},
 		publishChannelChanges: s.publishChannelChanges,
 		now:                   func() time.Time { return time.Now().UTC() },
 	}
@@ -494,8 +517,11 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 			_, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, attempt, req)
 			return err
 		},
-		diverge:               insertSQLiteRunForkSelectedContractBranchDivergence,
-		freeze:                s.applyRunForkSourceFreeze,
+		diverge: insertSQLiteRunForkSelectedContractBranchDivergence,
+		freeze:  s.applyRunForkSourceFreeze,
+		liveHandoff: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, evidence runForkSelectedContractActivationEvidence) (string, error) {
+			return commitSelectedLiveHandoffTx(ctx, tx, attempt, evidence, s.RunLifecycleSQLiteOwner.SelectLiveRunTx, s.EffectSQLiteOwner, sqliteDeliveryAdapter, true)
+		},
 		publishChannelChanges: s.publishChannelChanges,
 		now:                   s.now,
 	}
