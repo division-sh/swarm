@@ -840,7 +840,7 @@ func (b *WorkflowContractBundle) resolveQueryCollectionSource(node runtimeidenti
 	if entities == "" {
 		return WorkflowCollectionItemResolution{}, fmt.Errorf("query must declare exactly one collection source: source or entities is required")
 	}
-	if paths.Parse(entities).HasExplicitRoot() {
+	if entities != stateEntityType && paths.Parse(entities).HasExplicitRoot() {
 		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q must name an entity table; use source for collection paths", entities)
 	}
 	return b.resolveQueryEntityTable(node, entities)
