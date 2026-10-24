@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -58,9 +59,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				prior := buildSelectedAPICapabilities
 				var once sync.Once
 				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
-					if reset {
-						once.Do(func() { supervisors <- req.RuntimeSupervisor })
-					}
+					once.Do(func() { supervisors <- req.RuntimeSupervisor })
 					caps, err := prior(owner, req)
 					if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); err == nil && ok {
 						execute := executor.ExecuteSelectedContractRunFork
@@ -88,8 +87,8 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			publication := newExactOriginPublicationProbe(t)
 			writeSelectedForkAgentProofFixture(t, root, "loaded-decoy", "[receiver.closed]", "SOURCE CONFIGURATION MUST NOT EXECUTE IN THE FORK", "return {'text': 'Source-only delivery.', 'usage': {'input_tokens': 2, 'output_tokens': 2}}")
 			rt, gatewayFault := startSelectedForkTransportProofRuntime(t, backend, root, options)
+			supervisor := <-supervisors
 			if reset {
-				supervisor := <-supervisors
 				predecessor := supervisor.selected
 				params := map[string]any{"include_source_artifacts": false, "idempotency_key": "selected-reset"}
 				response := requestServedJSONRPC(t, rt.Endpoint, "runtime.nuke", params)
@@ -219,8 +218,11 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				return
 			}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
+			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("public fork lost execution/source evidence: %+v", fork)
+			}
+			if replay := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params); !reflect.DeepEqual(fork, replay) {
+				t.Fatalf("synchronous fork ACK changed on replay: first=%+v replay=%+v", fork, replay)
 			}
 			waitWorkspaceProofPipelineReceipt(t, rt.Events, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), "success")
 			waitServedRunDeliveryQuiescence(t, func(ctx context.Context, runID string) (deliverylifecycle.RunSummary, error) {
@@ -244,6 +246,11 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if len(diagnostics.Receipts) == 0 {
 				t.Fatal("selected agent lifecycle produced no diagnostic receipts")
 			}
+			ordinaryGrant, err := supervisor.CurrentRuntime().CurrentStartupGrantEvidence()
+			if err != nil || ordinaryGrant.SelectedFork != nil {
+				t.Fatalf("handoff lost its ordinary generation: %+v %v", ordinaryGrant, err)
+			}
+			selectedDiagnostics, ordinaryDiagnostics := 0, 0
 			for _, row := range diagnostics.Receipts {
 				id := row.OutboxID
 				var receipt map[string]any
@@ -258,13 +265,37 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				requireWorkspaceProofDiagnosticEventCount(t, diagnostics.Logs, id, fork.ForkRunID, 1)
 				payload, _ := receipt["payload"].(map[string]any)
 				details, _ := payload["details"].(map[string]any)
-				if receipt["run_id"] != fork.ForkRunID || receipt["parent_event_id"] != "" || receipt["lineage_disposition"] != "parentless" ||
-					details["runtime_lineage_run_id"] != fork.ForkRunID || details["runtime_lineage_selected_fork_context"] != true ||
-					details["runtime_lineage_owner"] != runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner {
+				if receipt["run_id"] != fork.ForkRunID || receipt["parent_event_id"] != "" || receipt["lineage_disposition"] != "parentless" {
 					t.Fatalf("selected lifecycle diagnostic %s lost its exact parentless producer authority: %+v", id, receipt)
 				}
+				provenance, _ := details["diagnostic_provenance"].(map[string]any)
+				origin, _ := provenance["origin"].(map[string]any)
+				switch origin["owner"] {
+				case string(manager.LifecycleDiagnosticSelectedFork):
+					selectedDiagnostics++
+					if details["runtime_lineage_run_id"] != fork.ForkRunID || details["runtime_lineage_selected_fork_context"] != true || details["runtime_lineage_owner"] != runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner {
+						t.Fatalf("selected diagnostic %s lost its exact owner: %+v", id, receipt)
+					}
+				case string(manager.LifecycleDiagnosticNormal):
+					ordinaryDiagnostics++
+					binding, _ := details["process_binding"].(map[string]any)
+					if binding["generation_grant_id"] != ordinaryGrant.GrantID || binding["bundle_hash"] != fact.BundleHash() || details["runtime_lineage_selected_fork_context"] == true {
+						t.Fatalf("ordinary diagnostic %s borrowed selected authority: %+v", id, receipt)
+					}
+				default:
+					t.Fatalf("lifecycle diagnostic %s has no exact execution owner: %+v", id, receipt)
+				}
 			}
-			if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
+			if selectedDiagnostics == 0 || ordinaryDiagnostics == 0 {
+				t.Fatalf("handoff did not retain both diagnostic owners: selected=%d ordinary=%d", selectedDiagnostics, ordinaryDiagnostics)
+			}
+			sourceAfter := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
+			if !reflect.DeepEqual(sourceBefore, sourceAfter) {
+				for table, before := range sourceBefore {
+					if !reflect.DeepEqual(before, sourceAfter[table]) {
+						t.Logf("R12 source %s: before=%v after=%v", table, before, sourceAfter[table])
+					}
+				}
 				t.Fatal("public selected execution changed source domain")
 			}
 			completionCount := 1

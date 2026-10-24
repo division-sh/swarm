@@ -7,20 +7,8 @@ import (
 	"sync"
 )
 
-// WithParkedRun joins process-local attempts without terminalizing the retained
-// instances. The existing attachment exclusion spans the caller's transaction.
-func (am *AgentManager) WithParkedRun(ctx context.Context, runID string, commit func() error) (result error) {
-	if am == nil || runID == "" || commit == nil {
-		return errors.New("run handoff requires its Manager, exact run and commit owner")
-	}
-	release, err := am.ParkLiveRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-	defer release()
-	return commit()
-}
-
+// ParkLiveRun joins process-local attempts without terminalizing the retained
+// instances. Its release ends the existing attachment exclusion.
 func (am *AgentManager) ParkLiveRun(ctx context.Context, runID string) (_ func(), result error) {
 	if am == nil || runID == "" {
 		return nil, errors.New("run handoff requires its Manager and exact run")
