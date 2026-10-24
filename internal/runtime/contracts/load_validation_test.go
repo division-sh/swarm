@@ -126,7 +126,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefine
 		"pattern refinement requires string/text type",
 		"equal_to references undeclared sibling field",
 		"length refinement requires string/text or list type",
-		"root entities.deploy.created_at pattern refinement requires string/text type",
+		"root entities.state.created_at pattern refinement requires string/text type",
 	} {
 		if !contractErrorContains(err, want) {
 			t.Fatalf("load validation error = %v, want %q", err, want)

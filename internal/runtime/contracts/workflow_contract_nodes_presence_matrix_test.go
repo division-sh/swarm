@@ -188,8 +188,8 @@ func TestW4HandlerContainerPresence(t *testing.T) {
 				t.Fatalf("query=%#v", h.Query)
 			}
 		}},
-		{"accumulate", "rows", "[rows]", "{into: rows}", [8]bool{true, false, false, false, false, false, true, true}, func(t *testing.T, h SystemNodeEventHandler) {
-			if h.Accumulate == nil || h.Accumulate.Into != "rows" {
+		{"accumulate", "rows", "[rows]", "{target: rows, key: id}", [8]bool{true, false, false, false, false, false, false, true}, func(t *testing.T, h SystemNodeEventHandler) {
+			if h.Accumulate == nil || h.Accumulate.Target != "rows" || h.Accumulate.Key != "id" {
 				t.Fatalf("accumulate=%#v", h.Accumulate)
 			}
 		}},

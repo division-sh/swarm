@@ -638,7 +638,7 @@ func TestEventCatalogEntryDecode_AcceptsFlatWave1PayloadGrammar(t *testing.T) {
 vertical_name: text
 composite_score:
   type: numeric
-  description: final score
+  # final score
 `)
 	if err != nil {
 		t.Fatalf("admit event catalog entry: %v", err)

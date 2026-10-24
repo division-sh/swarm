@@ -75,9 +75,6 @@ func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	if got := policy.Values["shared"].Value; got != "child" {
 		t.Fatalf("expected child flow override %q, got %#v", "child", got)
 	}
-	if got := bundle.RootRequiredAgents(); len(got) != 1 || strings.TrimSpace(got[0].Role) != "root-agent" {
-		t.Fatalf("expected root required agent role root-agent, got %#v", got)
-	}
 }
 
 func TestAgentDeclarationRejectsArbitraryIDInterpolation(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/testcatalog"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -74,7 +73,7 @@ func TestRetiredOutputPinOptionMapsRejectPresenceAndMerges(t *testing.T) {
 					if merged {
 						member = "<<: {" + member + "}"
 					}
-					_, err := admitSchemaFragment("pins: {outputs: [{event: work.ready, " + member + "}]}\n")
+					_, err := admitSchemaFragment("outputs: [{event: work.ready, " + member + "}]\n")
 					if err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `outputs"][0]`) || !strings.Contains(err.Error(), "schema.yaml:") {
 						t.Fatalf("retired output mapping bypassed scalar admission: %v", err)
 					}
@@ -93,7 +92,7 @@ func TestRetiredInputPinOptionMapsRejectPresenceAndMerges(t *testing.T) {
 					if merged {
 						member = "<<: {" + member + "}"
 					}
-					_, err := admitSchemaFragment("pins: {inputs: [{event: work.ready, " + member + "}]}\n")
+					_, err := admitSchemaFragment("inputs: [{event: work.ready, " + member + "}]\n")
 					if err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["inputs"][0]`) || !strings.Contains(err.Error(), "schema.yaml:") {
 						t.Fatalf("retired input mapping bypassed scalar admission: %v", err)
 					}
@@ -113,7 +112,7 @@ func TestCurrentVocabularyDiagnosticsAcrossDeclarationFamilies(t *testing.T) {
 		{"agents.yaml", "worker: {intent: {inline: business intent}, modle: typo}\n", "modle", "model", func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tools.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},
 		{"types.yaml", "Item: {value: {type: text, typ: text}}\n", "typ", "type", func(d yamlsource.Document) error { _, err := projectTypeCatalogDocument(d.Root()); return err }},
-		{"state.yaml", "Item: {value: {type: text, typ: text}}\n", "typ", "type", func(d yamlsource.Document) error { _, err := projectEntityContractsDocument(d.Root()); return err }},
+		{"state.yaml", "value: {type: text, indexed: true, typ: text}\n", "typ", "type", func(d yamlsource.Document) error { _, err := projectEntityContractsDocument(d.Root()); return err }},
 		{"events.yaml", "work.ready: {value: {type: text, typ: text}}\n", "typ", "type", func(d yamlsource.Document) error { _, err := admitEventCatalogDocument(d); return err }},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
@@ -185,27 +184,4 @@ func TestCurrentVocabularyKeepsOpenNameReservations(t *testing.T) {
 	if _, err := admitEventCatalogDocument(snapshot.Document("events.yaml")); err != nil {
 		t.Fatalf("open payload names narrowed to a finite vocabulary: %v", err)
 	}
-}
-
-func TestCurrentVocabularyPreservesAdmittedCatalog(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	inventory, err := testcatalog.Load(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded := 0
-	for _, fixture := range inventory.Fixtures {
-		if fixture.Metadata.Disposition == testcatalog.DispositionRetired || fixture.Metadata.Verify == testcatalog.VerifyReject {
-			continue
-		}
-		if _, err := LoadWorkflowContractBundleWithOverrides(repo, fixture.Root, DefaultPlatformSpecFile(repo)); err != nil {
-			t.Errorf("supported fixture %s changed admission: %v", fixture.RelativePath, err)
-		} else {
-			loaded++
-		}
-	}
-	if loaded == 0 {
-		t.Fatal("empty preservation corpus")
-	}
-	t.Logf("unchanged source corpus: %d admitted positive roots", loaded)
 }

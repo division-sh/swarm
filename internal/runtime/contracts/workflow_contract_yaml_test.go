@@ -1320,7 +1320,7 @@ rules:
       into: computed.template_path
       default: fail
 `,
-			contains: `unsupported root "entity"`,
+			contains: `unsupported root "state"`,
 		},
 		{
 			name: "lookup policy root unsupported",
@@ -2596,7 +2596,7 @@ fields:
 func TestAccumulateSpecDecode_RejectsUnknownFieldWithCanonicalOptions(t *testing.T) {
 	var spec AccumulateSpec
 	err := decodeNodeTestYAML([]byte(`
-into: state.items
+target: items
 source: payload.items
 `), &spec)
 	if err == nil {
@@ -2609,7 +2609,7 @@ source: payload.items
 	if got := diagnostic.Problem; got != `accumulate field "source" is not supported.` {
 		t.Fatalf("diagnostic problem = %q, want unknown accumulate field problem", got)
 	}
-	want := []string{"description", "from", "into", "key"}
+	want := []string{"key", "target"}
 	if !reflect.DeepEqual(diagnostic.ValidOptions, want) {
 		t.Fatalf("diagnostic valid options = %#v, want %#v", diagnostic.ValidOptions, want)
 	}
@@ -2930,7 +2930,7 @@ func TestAccumulateSpecDecodeRejectsRetiredFiniteBarrierFields(t *testing.T) {
 	for _, field := range []string{"expected_from", "completion", "threshold", "timeout_ms", "on_complete", "on_timeout", "window", "dedup_by"} {
 		t.Run(field, func(t *testing.T) {
 			var spec AccumulateSpec
-			err := decodeNodeTestYAML([]byte("into: items\n"+field+": retired\n"), &spec)
+			err := decodeNodeTestYAML([]byte("target: items\nkey: id\n"+field+": retired\n"), &spec)
 			if err == nil || !strings.Contains(err.Error(), `accumulate field "`+field+`" is not supported`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired field rejection", err)
 			}
@@ -3006,15 +3006,15 @@ emit:
 
 func TestTypeCatalogDecode_RejectsEmptyEnumKey(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte(": [\"low\"]\n"), &catalog)
-	if err == nil || !strings.Contains(err.Error(), "empty name") {
+	err := decodeNodeTestYAML([]byte("'': [\"low\"]\n"), &catalog)
+	if err == nil || !strings.Contains(err.Error(), "must be non-empty") {
 		t.Fatalf("empty enum key error = %v, want empty-name rejection", err)
 	}
 }
 
 func TestTypeCatalogDecode_RejectsWhitespacePaddedEnumKey(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte(" Mode: [\"low\"]\n"), &catalog)
+	err := decodeNodeTestYAML([]byte("' Mode ': [\"low\"]\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
 		t.Fatalf("whitespace-padded enum key error = %v, want whitespace rejection", err)
 	}
