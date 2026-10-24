@@ -16,6 +16,9 @@ const debtSelectedFixtureComposedOldSHA256 = "2abd9424b866dbda517bcd44726bf04179
 const debtSelectedFixtureComposedCurrentSHA256 = "cdb196a9aeb5f87d51e656249b6bb533003d0af1ed7322cc858a2d9bd9d81fae"
 const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
 
+// #2727/6388897450: source-pin validation for an already-landed composed endpoint.
+const debtSelectedFixtureLandedCollectorTo = "f6de132bfc26b4ab30133dedb26e1fa67d5cac5f00920179c311ebd3bed69eb3"
+
 func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]authorityDebtSite) {
 	old, current := debtControlSet(), debtControlSet()
 	for _, pair := range debtRunFixtureSignatureTransitions() {
@@ -199,6 +202,17 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 	}
 	landed := trusted
 	landed.Collector, landed.Sites = debtRunFixtureCollectorTo, current
+	composed := landed
+	composed.Collector = debtSelectedFixtureComposedCollectorTo
+	successor := composed
+	successor.Collector = debtSelectedFixtureLandedCollectorTo
+	changedSites := successor
+	changedSites.Sites = maps.Clone(successor.Sites)
+	delete(changedSites.Sites, legacy.identity())
+	replacement := debtControlSite("call:Exec", legacy.Multiplicity)
+	changedSites.Sites[replacement.identity()] = replacement
+	changedBootstrap := successor
+	changedBootstrap.BootstrapSource = strings.Repeat("d", 40)
 	for _, test := range []struct {
 		name, base, collector string
 		trusted, head         authorityDebtBaseline
@@ -209,6 +223,13 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 		{"foreign-base", strings.Repeat("b", 64), landed.Collector, trusted, landed, false},
 		{"foreign-destination", trusted.Collector, strings.Repeat("c", 64), trusted, landed, false},
 		{"unrotated-metadata", trusted.Collector, landed.Collector, trusted, trusted, false},
+		{"selected-forward", composed.Collector, successor.Collector, composed, successor, true},
+		{"selected-landed-inert", successor.Collector, successor.Collector, successor, successor, true},
+		{"selected-reverse", successor.Collector, composed.Collector, successor, composed, false},
+		{"selected-foreign-base", strings.Repeat("b", 64), successor.Collector, composed, successor, false},
+		{"selected-foreign-destination", composed.Collector, strings.Repeat("c", 64), composed, successor, false},
+		{"selected-changed-sites", composed.Collector, successor.Collector, composed, changedSites, false},
+		{"selected-changed-bootstrap", composed.Collector, successor.Collector, composed, changedBootstrap, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := debtValidateCollectorIdentity(test.base, test.collector, test.trusted, test.head, ""); (err == nil) != test.accept {
