@@ -80,6 +80,9 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}
 				}
 				ctx = originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
+				if err := any(selected).(channelnative.Store).RetireStaleNativeInboxConsumers(ctx); err != nil {
+					t.Fatalf("reconcile persisted empty native-inbox state: %v", err)
+				}
 				current := func(authority runtimeeffects.Authority) bool {
 					t.Helper()
 					var ok bool
