@@ -22,7 +22,7 @@ func TestDecisionCardSelectedControlMutationBoundariesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, control := range []string{"decide", "defer", "begin_input", "cancel_input", "partial_text", "final_text", "partial_skip", "final_skip"} {
 			t.Run(backend+"/"+control, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				store, runID := decisionCardTestStore(t, backend)
 				now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 				card := newDecisionCardTestCard(t, runID, now)

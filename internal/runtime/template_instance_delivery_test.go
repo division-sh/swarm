@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testsql"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -891,6 +892,10 @@ func seedRuntimeTestRunForSource(t *testing.T, selected *store.PostgresStore, so
 	fact := runtimeTestSourceArtifactFact(t, source)
 	ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	ctx, err := agentfixture.ProcessContext(t, runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), selected)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle, _ := semanticview.Bundle(source)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	return ctx

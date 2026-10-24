@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,7 +23,7 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)
 			now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
@@ -88,7 +89,7 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 func TestHumanTaskMutationsRejectForeignRequesterOwnerBeforeStateChange(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
@@ -237,7 +238,7 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 }
 
 func TestPostgresHumanTaskWeeklyBudgetSerializesConcurrentApprovals(t *testing.T) {
-	ctx := testAuthorActivityContext()
+	ctx := storeTestWorkContext(t, testAuthorActivityContext())
 	cardStore, runID := decisionCardTestStore(t, "postgres")
 	humanStore := cardStore.(decisioncard.HumanTaskStore)
 	postgres := cardStore.(*PostgresStore)
@@ -331,7 +332,7 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)
 			now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)

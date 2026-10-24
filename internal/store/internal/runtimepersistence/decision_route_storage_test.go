@@ -15,7 +15,7 @@ import (
 func TestDecisionRouteStoragePreservesExactEventAndOriginalReadBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cards, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)

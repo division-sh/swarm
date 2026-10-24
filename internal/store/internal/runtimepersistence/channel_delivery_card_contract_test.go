@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/packs"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/packs"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -25,7 +26,7 @@ import (
 func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cards, runID := decisionCardTestStore(t, backend)
 			selected := cards.(operatorchannel.Store)
 			delivery := cards.(render.Store)
@@ -415,7 +416,7 @@ func proveChannelCardResponsibility(t *testing.T, runTx func(func(context.Contex
 func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			var probe *cardIntentRecheckProbe
 			if backend == "postgres" {
 				probe = &cardIntentRecheckProbe{}

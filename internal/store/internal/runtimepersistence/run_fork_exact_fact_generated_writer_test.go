@@ -129,7 +129,7 @@ func TestRunForkExactFactsGeneratedWriterIDsBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			t.Run("settlement_receipt_ids", func(t *testing.T) {
 				f := newB10GroupFaultFixture(t, backend)
-				s := exactFactStore{db: f.db, postgres: backend == "postgres"}
+				s := exactFactStore{ctx: f.ctx, db: f.db, postgres: backend == "postgres", selected: f.raw.(runForkSelectedLifecycleStore)}
 				exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 					for _, member := range f.members {
 						var count int

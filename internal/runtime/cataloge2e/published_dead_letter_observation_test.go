@@ -11,6 +11,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -33,6 +34,12 @@ func TestCatalogPublishedDeadLetterCountUsesExactOriginalEventBothStores(t *test
 				h.sqlite = storetest.StartSQLiteRuntimeStore(t)
 				selected, setup, deadLetters, closeOwner = h.sqlite, h.sqlite, h.sqlite, h.sqlite.Close
 				registerTestAuthorActivityCatalog(t, h.sqlite, "fixture.deadletter")
+			}
+			if original, err := agentfixture.ProcessContext(t, ctx, setup.(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+				h.ctx = original
 			}
 			storetest.RequireRun(t, ctx, setup, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 			entityID := uuid.NewString()

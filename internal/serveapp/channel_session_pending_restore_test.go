@@ -15,10 +15,10 @@ import (
 
 func startPendingSessionFixture(t *testing.T, backend, key string) (*channelonboarding.Service, *serveSessionBootstrap, channelonboarding.Operation, func()) {
 	t.Helper()
-	service, sessions := installedSessionBootstrapFixture(t, backend)
+	service, sessions, ctx := installedSessionBootstrapFixture(t, backend)
 	adapter := sessions.(*serveSessionBootstrap)
 	cut, _, release := installSessionConstructionCut(t, adapter)
-	op, cancel := startHeldSessionRequest(t, service, adapter, cut, key)
+	op, cancel := startHeldSessionRequest(t, ctx, service, adapter, cut, key)
 	cancel()
 	return service, adapter, op, release
 }

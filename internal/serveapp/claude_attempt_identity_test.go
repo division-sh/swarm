@@ -48,7 +48,9 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -56,13 +58,6 @@ const (
 	claudeAttemptProofEventType events.EventType = "claude.attempt.proof.requested"
 	claudeAttemptProofRuntimeID                  = "77777777-7777-4777-8777-777777777777"
 )
-
-func claudeAttemptProofContext(source runtimecorrelation.SourceArtifactFact) context.Context {
-	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
-		claudeAttemptProofRuntimeID,
-		source.BundleHash(),
-	))
-}
 
 type claudeAttemptProofSurface struct {
 	name           string
@@ -191,6 +186,7 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event)
 }
 
 type claudeAttemptProofBackend struct {
+	ctx      context.Context
 	name     string
 	store    claudeAttemptProofStore
 	db       *sql.DB
@@ -200,7 +196,7 @@ type claudeAttemptProofBackend struct {
 }
 
 func (b claudeAttemptProofBackend) context() context.Context {
-	return claudeAttemptProofContext(b.source)
+	return runtimeauthoractivity.WithScope(b.ctx, runtimeauthoractivity.BundleScope(claudeAttemptProofRuntimeID, b.source.BundleHash()))
 }
 
 type claudeAttemptProofSpendProjection struct{}
@@ -613,7 +609,12 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		t.Fatalf("unknown Claude proof backend %q", name)
 		return claudeAttemptProofBackend{}
 	}
-	backend.source = requireServeTestSourceArtifactFact(t, backend.store)
+	var err error
+	backend.ctx, err = agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(context.Background(), claudeAttemptProofRuntimeID), worklifetime.NewProcess()), backend.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.source = sourceartifactfixture.Require(t, backend.ctx, backend.store)
 	return backend
 }
 
@@ -734,7 +735,7 @@ func newClaudeAttemptProofEventBus(
 	generation uint64,
 ) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence, *runtimedeliverycontinuation.Coordinator) {
 	t.Helper()
-	workOwner := newSupervisorTestRuntimeOccurrence(t, backend.source.BundleHash())
+	workOwner := newSupervisorTestRuntimeOccurrence(t, backend.source.BundleHash(), backend.ctx)
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(
 		backend.source,
 		"claude-attempt-proof-runtime",

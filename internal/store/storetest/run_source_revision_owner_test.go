@@ -10,6 +10,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -32,6 +33,11 @@ func TestSourceRevisionFixtureUsesExactSelectedOwner(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := context.Background()
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			original := sourceartifactfixture.Require(t, ctx, selected)
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(uuid.NewString(), original.BundleHash()))
 			changed := sourceartifactfixture.RequireArtifact(t, ctx, selected,

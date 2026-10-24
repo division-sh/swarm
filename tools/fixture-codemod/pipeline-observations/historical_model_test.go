@@ -72,20 +72,6 @@ func TestHistoricalMechanicalSnapshotsRejectInvalidAndCrossedCuts(t *testing.T) 
 	}
 }
 
-func historicalHandlerAssemblySource(source, name string) (string, error) {
-	if name != "workflowHandlerNativeFixtureFromSelected" {
-		return source, nil
-	}
-	for _, phase := range []string{"prepare", "commit"} {
-		current := "return fmt.Errorf(\"" + phase + " native handler construction: %w\", err)"
-		if strings.Count(source, current) != 1 {
-			return "", fmt.Errorf("missing exact %s construction error cause", phase)
-		}
-		source = strings.Replace(source, current, "return err", 1)
-	}
-	return source, nil
-}
-
 func historicalCurrentSourcePinned(source, digest string) bool {
 	value, err := canonicalFunction(source)
 	return err == nil && fmt.Sprintf("%x", sha256.Sum256([]byte(value))) == digest

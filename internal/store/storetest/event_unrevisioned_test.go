@@ -15,6 +15,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -31,11 +32,18 @@ func TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection(t *t
 			ctx := semanticFixtureContext(context.Background(), sourceartifactfixture.Fact())
 			rawStore := backend.open(t)
 			canonicalStore := backend.open(t)
+			rawContext, err := agentfixture.ProcessContext(t, ctx, rawStore.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonicalContext, err := agentfixture.ProcessContext(t, ctx, canonicalStore.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			at := time.Now().UTC().Truncate(time.Microsecond)
-			for _, selected := range []RunFixtureStore{rawStore, canonicalStore} {
-				RequireRun(t, ctx, selected, RunFixture{RunID: runID, Origin: ScenarioSetupOrigin(), StartedAt: at.Add(-time.Minute)})
-			}
+			RequireRun(t, rawContext, rawStore, RunFixture{RunID: runID, Origin: ScenarioSetupOrigin(), StartedAt: at.Add(-time.Minute)})
+			RequireRun(t, canonicalContext, canonicalStore, RunFixture{RunID: runID, Origin: ScenarioSetupOrigin(), StartedAt: at.Add(-time.Minute)})
 			node, err := runtimeidentity.ParseExecutableNode("flow_a", "fixture-node")
 			if err != nil {
 				t.Fatal(err)
@@ -61,7 +69,7 @@ func TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection(t *t
 				events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at,
 			)
 			beforeRevision := ReadSemanticEventFixtureEvidence(t, ctx, rawStore, runID, eventID).RevisionCount
-			if got := CommitSemanticEventWithRoutes(t, ctx, rawStore, event, routes, runtimepipelineobligation.ScopeSubscribed); got != runtimebus.EventAppendInserted {
+			if got := CommitSemanticEventWithRoutes(t, rawContext, rawStore, event, routes, runtimepipelineobligation.ScopeSubscribed); got != runtimebus.EventAppendInserted {
 				t.Fatalf("raw fixture outcome = %v, want inserted", got)
 			}
 			rawEvidence := ReadSemanticEventFixtureEvidence(t, ctx, rawStore, runID, eventID)
@@ -79,7 +87,7 @@ func TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection(t *t
 			}
 			canonicalRevision := ReadSemanticEventFixtureEvidence(t, ctx, canonicalStore, runID, eventID).RevisionCount
 			inserted, err := private.CommitRevisionedSemanticEventFixtureForTest(
-				ctx, canonicalStore, admitted, canonicalFixtureSettlement(t, admitted.Event(), routes),
+				canonicalContext, canonicalStore, admitted, canonicalFixtureSettlement(t, admitted.Event(), routes),
 				routes, runtimepipelineobligation.ScopeSubscribed, nil,
 			)
 			if err == nil && !inserted {
@@ -115,7 +123,7 @@ func TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection(t *t
 					t.Fatalf("unrevisioned delivery projection differs from canonical mutation: raw=%#v canonical=%#v", raw, canonical)
 				}
 			}
-			if got := CommitSemanticEventWithRoutes(t, ctx, rawStore, event, routes, runtimepipelineobligation.ScopeSubscribed); got != runtimebus.EventAppendExactDuplicate {
+			if got := CommitSemanticEventWithRoutes(t, rawContext, rawStore, event, routes, runtimepipelineobligation.ScopeSubscribed); got != runtimebus.EventAppendExactDuplicate {
 				t.Fatalf("exact duplicate outcome = %v, want exact duplicate", got)
 			}
 			duplicateEvidence := ReadSemanticEventFixtureEvidence(t, ctx, rawStore, runID, eventID)
@@ -143,8 +151,13 @@ func TestUnrevisionedSemanticDeliveryFixtureImmediateTerminalization(t *testing.
 		{"postgres", func(t *testing.T) terminalizingStore { return StartPostgresRuntimeStore(t) }},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx := semanticFixtureContext(context.Background(), sourceartifactfixture.Fact())
 			selected := backend.open(t)
+			ctx := semanticFixtureContext(context.Background(), sourceartifactfixture.Fact())
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			at := time.Now().UTC()
 			RequireRun(t, ctx, selected, RunFixture{RunID: runID, Origin: ScenarioSetupOrigin(), StartedAt: at.Add(-time.Minute)})

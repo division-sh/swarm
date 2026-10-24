@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -23,6 +24,11 @@ func TestStandaloneDiagnosticFixtureUsesOriginalNamedWriterBothStores(t *testing
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := semanticFixtureContext(context.Background(), sourceartifactfixture.Fact())
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			probe := CollectTransactions(t, selected, TransactionProbeOptions{})
 			at := time.Date(2026, 7, 7, 12, 0, 0, 123000000, time.UTC)
 			payload := []byte(`{"log_level":"error","message":"reader corruption control","details":"not-an-object"}`)

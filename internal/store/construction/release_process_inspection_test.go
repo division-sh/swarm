@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/construction"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -26,6 +27,10 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 		t.Run(backend, func(t *testing.T) {
 			ctx := context.Background()
 			writer, location, db := releaseInspectionWriter(t, backend)
+			ctx, err := agentfixture.ProcessContext(t, ctx, writer.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
 			identity := runtimeflowidentity.RunScopedFlowInstance{
 				RunID: "b3c04b72-07f1-4097-a1f0-779955000001",
 				Route: runtimeflowidentity.DeriveRoute("inspect", "one"),

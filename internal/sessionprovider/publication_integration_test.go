@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 
 	"github.com/division-sh/swarm/internal/store/sessionstate"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -94,10 +95,14 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		f.location = testutil.StartPostgresDSN(t)
 		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
-	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
 	runtimeID := uuid.NewString()
 	process := worklifetime.NewProcess()
-	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: source.BundleHash()})
+	ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeID), process), f.selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := sourceartifactfixture.Require(t, ctx, f.selected)
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: source.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +117,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 			t.Error(err)
 		}
 	})
-	f.ctx = runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
+	f.ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
 	f.ctx = runtimeauthoractivity.WithScope(f.ctx, runtimeauthoractivity.BundleScope(runtimeID, source.BundleHash()))
 	f.ctx = worklifetime.WithOccurrence(f.ctx, owner)
 	digest := sha256.Sum256(f.manifest.SourceBytes())

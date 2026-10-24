@@ -100,7 +100,7 @@ func TestChannelOnboardingCredentialStaleParentResetSelectedStoreParity(t *testi
 			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
 			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 			parent := rig.parent(t, begun.Operation.OperationID)
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			if _, err := rig.fixture.store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 				OperationID: parent.OperationID, ExpectedRevision: parent.Revision, Phase: channelonboarding.PhasePreparing,
 				ReplaceCredentialAdmissions: true, Now: rig.now,
@@ -120,7 +120,7 @@ func TestChannelOnboardingCredentialStaleRecoverySelectedStoreParity(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 			claimed := rig.claim(t, begun, "account-a")
 			if err := rig.file.Set(ctx, claimed.ProviderAuthority.Credential.Key, "rotated-token"); err != nil {

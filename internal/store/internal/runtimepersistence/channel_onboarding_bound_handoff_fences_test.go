@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -14,7 +13,7 @@ func TestChannelOnboardingBoundHandoffObservationAndCleanupReplaySelectedStorePa
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 			bound := rig.confirm(t, begun, "account-a")
 			before := rig.parent(t, begun.Operation.OperationID)
@@ -70,14 +69,14 @@ func TestChannelOnboardingBoundHandoffSelectedStoreFences(t *testing.T) {
 		for _, change := range []string{"retire_before", "retire_during_cleanup", "revision_before", "revision_during_cleanup", "replace_child", "replace_binding", "contradict_parent_binding"} {
 			t.Run(backend+"/"+change, func(t *testing.T) {
 				rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
-				ctx := context.Background()
+				ctx := rig.fixture.ctx
 				begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 				bound := rig.confirm(t, begun, "account-a")
 				parent := rig.parent(t, begun.Operation.OperationID)
 				mutate := func() {
 					current := rig.parent(t, parent.OperationID)
 					if change == "retire_before" || change == "retire_during_cleanup" {
-						retireChannelOnboardingParent(t, rig.fixture.store, current, rig.now)
+						retireChannelOnboardingParent(t, rig.fixture.ctx, rig.fixture.store, current, rig.now)
 						return
 					}
 					if change == "replace_binding" {
@@ -132,7 +131,7 @@ func TestChannelOnboardingBoundHandoffProofResponsibilityFencesSelectedStorePari
 		for _, status := range []operatorchannel.ProofStatus{operatorchannel.ProofPending, operatorchannel.ProofFailed} {
 			t.Run(backend+"/"+string(status), func(t *testing.T) {
 				rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
-				ctx := context.Background()
+				ctx := rig.fixture.ctx
 				begun := rig.start(t, channelonboarding.VerbConnect, "original-token", true)
 				claimed := rig.claim(t, begun, "account-a")
 				interrupted := errors.New("proof materialization interrupted")
@@ -186,7 +185,7 @@ func TestChannelOnboardingRetainedReconnectFencesSelectedStoreParity(t *testing.
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
-				ctx := context.Background()
+				ctx := rig.fixture.ctx
 				begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 				bound := rig.confirm(t, begun, "account-a")
 				if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "intervening-token"); err != nil {

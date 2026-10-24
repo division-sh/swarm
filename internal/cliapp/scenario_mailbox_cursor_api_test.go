@@ -12,9 +12,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -38,14 +40,24 @@ func TestScenarioMailboxActualServerContinuationBothStores(t *testing.T) {
 			ctx := correlation.WithSourceArtifactFact(correlation.WithRuntimeInstanceID(context.Background(), instance), fact)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(instance, fact.BundleHash()))
 			if backend == "sqlite" {
-				s := storetest.StartSQLiteRuntimeStore(t)
-				storetest.RequireRun(t, ctx, s, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
-				selected = s
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				s := storetest.StartPostgresRuntimeStore(t)
-				storetest.RequireRun(t, ctx, s, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
-				selected = s
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
+			work := worklifetime.NewProcess()
+			defer func() {
+				work.Retire()
+				wait, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if _, err := work.Join(wait); err != nil {
+					t.Error(err)
+				}
+			}()
+			ctx, err = agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, work), selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 			base := time.Now().UTC().Add(-time.Hour)
 			entity := uuid.NewString()
 			create := func(i int, decision string) decisioncard.Card {
@@ -76,7 +88,7 @@ func TestScenarioMailboxActualServerContinuationBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			handler, err := apiv1.NewHandler(apiv1.Options{Registry: registry, AuthTokens: []string{"test-token"}, Handlers: apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: selected, ProposedEffects: selected, Mailbox: selected})})
+			handler, err := apiv1.NewHandler(apiv1.Options{Registry: registry, AuthTokens: []string{"test-token"}, ProcessWorkOwner: work, Handlers: apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: selected, ProposedEffects: selected, Mailbox: selected})})
 			if err != nil {
 				t.Fatal(err)
 			}

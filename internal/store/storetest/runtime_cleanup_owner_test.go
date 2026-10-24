@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -16,6 +17,11 @@ func TestSQLiteRuntimeFixtureReopenJoinsConsumerBeforeClosingIndependentOwners(t
 	consumerJoined := false
 	t.Run("consumer", func(t *testing.T) {
 		primary, _ = StartSQLiteRuntimeStoreWithReopen(t, ctx)
+		if original, err := agentfixture.ProcessContext(t, ctx, any(primary).(agentfixture.Store)); err != nil {
+			t.Fatal(err)
+		} else {
+			ctx = original
+		}
 		peer, _ = StartSQLiteRuntimeStoreWithReopen(t, ctx, primary.Path())
 		if primary == peer || primary.Path() == "" || primary.Path() != peer.Path() {
 			t.Fatal("pair did not construct independent owners at one native location")

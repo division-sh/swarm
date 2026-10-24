@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 
 	runtime "github.com/division-sh/swarm/internal/runtime"
@@ -19,6 +20,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testcatalog"
 )
 
@@ -133,6 +135,14 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	cfg := testRuntimeConfig()
 	sourceArtifactFact := catalogSourceArtifactFact(t, bundle)
 	ctx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	ctx, err = agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), processOwner), selected)
+	if err != nil {
+		return nil, err
+	}
+	original, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		return nil, err
+	}
 	storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
 	deps := catalogSQLiteRuntimeDeps(
 		cfg,
@@ -149,7 +159,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	if err != nil {
 		return nil, err
 	}
-	installCatalogRuntimeStartupGrant(t, ctx, selected, rt, false)
+	installCatalogRuntimeStartupGrant(t, ctx, selected, rt, false, original)
 	return rt, nil
 
 }

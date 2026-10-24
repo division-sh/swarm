@@ -1111,7 +1111,7 @@ func replaceProviderOriginClaim(t *testing.T, fixture completionSettlementFixtur
 	if !ok {
 		t.Fatalf("completion store %T does not expose delivery reclaim", fixture.store)
 	}
-	ctx := testAuthorActivityContext()
+	ctx := fixture.context
 	snapshot, err := deliveryStore.Snapshot(ctx, claim.DeliveryID())
 	if err != nil {
 		t.Fatalf("load provider origin before reclaim: %v", err)

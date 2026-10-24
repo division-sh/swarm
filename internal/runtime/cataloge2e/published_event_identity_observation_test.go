@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -26,6 +27,12 @@ func TestCatalogPublishedEntityRefreshUsesCanonicalHeaderBothStores(t *testing.T
 				h.sqlite = storetest.StartSQLiteRuntimeStore(t)
 				setup, selected = h.sqlite, h.sqlite
 				registerTestAuthorActivityCatalog(t, h.sqlite, "fixture.identity")
+			}
+			if original, err := agentfixture.ProcessContext(t, ctx, setup.(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+				h.ctx = original
 			}
 			storetest.RequireRun(t, ctx, setup, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 			entityID := uuid.NewString()

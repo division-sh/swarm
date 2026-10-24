@@ -60,6 +60,7 @@ import (
 	runtimeworkspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -137,6 +138,11 @@ func acquireLiveConversationSession(t *testing.T, ctx context.Context, registry 
 func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
 	pg := storetest.StartPostgresRuntimeStore(t)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -205,6 +211,11 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	pg := storetest.StartPostgresRuntimeStore(t)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -285,6 +296,11 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -350,7 +366,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	claims := map[string]runtimedelivery.Claim{}
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base := runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "reused-live-session")
@@ -470,6 +486,11 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -551,7 +572,7 @@ printf '{"result":"ok"}'
 
 	var deliveryClaim runtimedelivery.Claim
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base := runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
@@ -638,6 +659,11 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
 	pg := storetest.StartPostgresRuntimeStore(t)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -697,6 +723,11 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	pg := storetest.StartPostgresRuntimeStore(t)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
@@ -989,6 +1020,11 @@ func loadConformanceWorkflowFixtureModule(t *testing.T, fixtureRoot string) conf
 func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	pg := storetest.StartPostgresRuntimeStore(t)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	if _, err := pg.AdmitGenericScheduleOutcome(ctx, runtimegenericschedule.AdmissionCommand{
@@ -1089,6 +1125,11 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	}
 	sourceArtifactFact := conformanceSourceArtifactFact(t, module.source)
 	ctx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 	storetest.RequireBundleDataCatalog(t, ctx, pg, bundle)
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	eventStore := conformanceRecoveryFailureEventStore{
@@ -1202,6 +1243,11 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -1331,6 +1377,11 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	pg := storetest.StartPostgresRuntimeStore(t)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	module := loadConformanceWorkflowFixtureModule(t, filepath.Join("..", "..", "..", "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
@@ -1468,6 +1519,11 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 	registerDifferentTestAuthorActivityCatalog(t, pg, "system.parent", "system.recover.replay", "system.recover.skip")
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -1662,6 +1718,11 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProjection(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
 	pg := storetest.StartPostgresRuntimeStore(t)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -1900,6 +1961,11 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 
 	requireMutationSurface(t, pg)
 
@@ -2184,6 +2250,11 @@ func newEntityToolConformanceHarness(t *testing.T, backend, flowID string) (cont
 	fact := conformanceSourceArtifactFact(t, source)
 	ctx := testAuthorActivityContextForBundle(context.Background(), fact)
 	selected := newMutationSurfaceConformanceStore(t, backend)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), selected); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 	runID := uuid.NewString()
 
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})

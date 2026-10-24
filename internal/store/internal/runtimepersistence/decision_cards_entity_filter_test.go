@@ -2,11 +2,12 @@ package runtimepersistence
 
 import (
 	"errors"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"reflect"
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -19,7 +20,7 @@ import (
 func TestDecisionCardEntityFilterParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			store, runID := decisionCardTestStore(t, backend)
 			otherRun, entityID, otherEntity := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)

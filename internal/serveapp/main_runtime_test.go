@@ -5404,29 +5404,6 @@ func requireServedRunStatusWithDebug(t *testing.T, endpoint string, db *sql.DB, 
 	t.Fatalf("run.get status for %s = %q, want %q\n%s", runID, last, want, servedEventPublishDebugSummary(t, db, backend, runID))
 }
 
-func requireServedRunDiagnoseOperationalState(t *testing.T, endpoint, runID, want string) {
-	t.Helper()
-	type servedRunDiagnose struct {
-		OperationalState string `json:"operational_state"`
-		Run              struct {
-			RunID  string `json:"run_id"`
-			Status string `json:"status"`
-		} `json:"run"`
-	}
-	var last servedRunDiagnose
-	deadline := time.Now().Add(servedProofPollDeadline)
-	for time.Now().Before(deadline) {
-		var result servedRunDiagnose
-		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
-		last = result
-		if result.Run.RunID == runID && result.Run.Status == want && result.OperationalState == want {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("run.diagnose for %s = %#v, want run/status and operational_state %q", runID, last, want)
-}
-
 func requireServedStatusCLIReadback(t *testing.T, endpoint, runID, want string) {
 	t.Helper()
 	var lastStdout, lastStderr string

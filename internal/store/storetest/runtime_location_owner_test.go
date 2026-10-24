@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -16,6 +17,11 @@ func TestPostgresRuntimeLocationFixtureRetainsOriginalWriterAndAdmitsIndependent
 		t.Fatal("empty sandbox location")
 	}
 	ctx := context.Background()
+	if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 	sourceartifactfixture.Require(t, ctx, selected)
 	probe := CollectTransactions(t, selected, TransactionProbeOptions{})
 	run := uuid.NewString()
@@ -44,6 +50,11 @@ func TestSQLiteRuntimeLocationFixtureRetainsOriginalWriterAndAdmitsIndependentPe
 	location := selected.Path()
 	if location == "" {
 		t.Fatal("empty constructor location")
+	}
+	if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
 	}
 	sourceartifactfixture.Require(t, ctx, selected)
 	probe := CollectTransactions(t, selected, TransactionProbeOptions{})

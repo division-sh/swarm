@@ -61,7 +61,7 @@ func TestCompoundEventFixturesAtomicReplayAndRevisionBothStores(t *testing.T) {
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				selected, runID := decisionCardTestStore(t, backend)
 				db, _ := decisionCardStoreDB(t, selected)
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				commit := func(event events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition) (bool, error) {
 					if revisioned {
@@ -228,7 +228,7 @@ func TestCompoundEventFixtureForkFrontierRetainsPostgresScope(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected, runID := decisionCardTestStore(t, backend)
 			db, _ := decisionCardStoreDB(t, selected)
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			eventID := uuid.NewString()
 			admitted, settlement, routes := compoundFixtureEvent(t, runID, eventID, `{}`, time.Now().UTC())
 			before := compoundFixtureCounts(t, db, runID, eventID)

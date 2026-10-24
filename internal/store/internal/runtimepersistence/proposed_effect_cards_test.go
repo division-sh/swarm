@@ -58,7 +58,7 @@ func TestProposedEffectNativeSelectionPersistenceBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			for range 2 {
 				if err := store.CreateProposedEffectCard(ctx, card, continuation); err != nil {
 					t.Fatal(err)
@@ -86,7 +86,7 @@ func TestProposedEffectCardLifecycleParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, verdict := range []string{"approve", "revise", "reject"} {
 			t.Run(backend+"/"+verdict, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				store := cards.(decisioncard.ProposedEffectStore)
 				now := time.Date(2026, 7, 14, 15, 0, 0, 0, time.UTC)
@@ -330,7 +330,7 @@ func TestProposedEffectContractPinParticipatesInDuplicateIdentityOnBothStores(t 
 			},
 		} {
 			t.Run(backend+"/"+mutate.name, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				proposed := cards.(decisioncard.ProposedEffectStore)
 				card, continuation := newProposedEffectTestCard(t, runID, time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC), attemptgeneration.Generation{})
@@ -369,7 +369,7 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 			runtimepipeline.ActivityAttemptStatusUncertain,
 		} {
 			t.Run(backend+"/"+status, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				store := cards.(decisioncard.ProposedEffectStore)
 				now := time.Date(2026, 7, 14, 17, 0, 0, 0, time.UTC)
@@ -515,7 +515,7 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, winner := range []string{"decision", "run_supersession", "loop_supersession"} {
 			t.Run(backend+"/"+winner, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				store := cards.(decisioncard.ProposedEffectStore)
 				now := time.Date(2026, 7, 14, 15, 30, 0, 0, time.UTC)
@@ -593,7 +593,7 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 func TestProposedEffectSupersessionScopesParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cards, runID := decisionCardTestStore(t, backend)
 			store := cards.(decisioncard.ProposedEffectStore)
 			now := time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC)

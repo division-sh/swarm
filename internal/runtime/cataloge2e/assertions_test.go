@@ -1,7 +1,6 @@
 package cataloge2e
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -52,13 +52,17 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "root.started", "child.started", "grandchild.done")
 	ctx := catalogRuntimeContext()
+	ctx, err := agentfixture.ProcessContext(t, ctx, pg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 	startedAt := time.Now().UTC().Add(-time.Second)
 
 	rootEventID := uuid.NewString()
 	childEventID := uuid.NewString()
 	grandchildEventID := uuid.NewString()
-	fixtureCtx := testAuthorActivityContext(context.Background())
+	fixtureCtx := ctx
 	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.ExistingRunRootIngress(
 		rootEventID,
 		"root.started",

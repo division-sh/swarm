@@ -24,6 +24,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -53,6 +54,11 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 			fact := sourceartifactfixture.Fact()
 			ctx := correlation.WithSourceArtifactFact(correlation.WithRuntimeInstanceID(context.Background(), instance), fact)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(instance, fact.BundleHash()))
+			work := worklifetime.NewProcess()
+			ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, work), selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# runtime-log-consumer-foreign\n"))
@@ -85,7 +91,6 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 			wanted := insert(runA, "wanted", "included-replay", base.Add(time.Second))
 			insert(runA, "other", "excluded-newer", base.Add(2*time.Second))
 			insert(runB, "wanted", "excluded-foreign", base.Add(3*time.Second))
-			work := worklifetime.NewProcess()
 			handler, err := apiv1.NewHandler(apiv1.Options{
 				AuthTokens: []string{"test-token"}, ProcessWorkOwner: work,
 				Handlers:      apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: selected}),

@@ -15,7 +15,7 @@ import (
 func TestDecisionCardInputProgressIsDurableAndOrderedBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 9, 27, 20, 0, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)

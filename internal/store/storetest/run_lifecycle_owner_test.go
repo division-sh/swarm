@@ -10,6 +10,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -38,6 +39,11 @@ func TestRunFixturesUseExactSelectedLifecycleOwner(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := context.Background()
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			sourceartifactfixture.Require(t, ctx, selected)
 			collector := CollectTransactions(t, selected, TransactionProbeOptions{})
 			for _, state := range []runtimerunlifecycle.State{
@@ -94,6 +100,11 @@ func TestRunFixtureCompletionRequiresSelectedCatalog(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := context.Background()
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			sourceartifactfixture.Require(t, ctx, selected)
 			collector := CollectTransactions(t, selected, TransactionProbeOptions{})
 			fixture := RunFixture{RunID: uuid.NewString(), Origin: ScenarioSetupOrigin(), State: runtimerunlifecycle.StateCompleted}
@@ -119,6 +130,11 @@ func TestRunFixtureReplayPreservesSelectedLifecycleFacts(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := context.Background()
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			fixture := RunFixture{RunID: uuid.NewString(), Origin: ScenarioSetupOrigin(), StartedAt: time.Now().UTC().Truncate(time.Microsecond)}
 			RequireRun(t, ctx, selected, fixture)
 			before, err := selected.LoadRunLifecycleSnapshot(ctx, fixture.RunID)
@@ -143,6 +159,11 @@ func TestRunFixtureRefusalsDoNotWrite(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := context.Background()
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			sourceartifactfixture.Require(t, ctx, selected)
 			collector := CollectTransactions(t, selected, TransactionProbeOptions{})
 			for _, refusal := range []struct {

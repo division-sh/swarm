@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -27,7 +26,7 @@ func TestChannelOnboardingPendingResetLifecycleSelectedStoreParity(t *testing.T)
 								t.Run(fmt.Sprintf("%s/proof=%t/inherited=%t/early=%t/%s", verb, proof, inherited, early, entry), func(t *testing.T) {
 									rig := newBoundHandoffRig(t, fixture)
 									begun, account, retained := beginPendingResetJourney(t, rig, verb, proof, inherited)
-									ctx := context.Background()
+									ctx := fixture.ctx
 									for cycle := 0; cycle < 2; cycle++ {
 										claimed := claimPendingResetJourney(t, rig, begun, account, early)
 										before := rig.parent(t, begun.Operation.OperationID)
@@ -160,7 +159,7 @@ func beginPendingResetJourney(t *testing.T, rig *boundHandoffRig, verb channelon
 		return begun, account, 0
 	}
 	bound := rig.confirm(t, begun, account)
-	ctx := context.Background()
+	ctx := rig.fixture.ctx
 	if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "bound-rotation"); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +178,7 @@ func claimPendingResetJourney(t *testing.T, rig *boundHandoffRig, begun channelo
 	if !early {
 		return rig.claim(t, begun, account)
 	}
-	settled, err := rig.fixture.settle(context.Background(), operatorChannelContractClaim(*begun.IdentityOperation, operatorchannel.ConversationScopeDirect, account, "conversation-"+account, uuid.NewString()), rig.now)
+	settled, err := rig.fixture.settle(rig.fixture.ctx, operatorChannelContractClaim(*begun.IdentityOperation, operatorchannel.ConversationScopeDirect, account, "conversation-"+account, uuid.NewString()), rig.now)
 	if err != nil {
 		t.Fatal(err)
 	}

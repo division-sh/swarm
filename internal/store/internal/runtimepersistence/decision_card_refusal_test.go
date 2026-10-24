@@ -27,7 +27,7 @@ func TestDecisionCardRefusalReasonAcrossAnchorsAndOperationsBothStores(t *testin
 		t.Run(backend, func(t *testing.T) {
 			cards, runID := decisionCardTestStore(t, backend)
 			db, postgres := decisionCardStoreDB(t, cards)
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 			for _, anchor := range []string{"stage_gate", "human_task", "proposed_effect"} {
 				for _, state := range []string{"superseded", "decided", "anchor_superseded"} {

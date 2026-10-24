@@ -40,13 +40,13 @@ func (f *activeInputFixture) restartBusinessConnection(t *testing.T) {
 	coordinate.RuntimeInstanceID = uuid.NewString()
 	coordinate.ContextPublicationGeneration++
 	var err error
-	f.operation, err = f.selected.AdvanceChannelOnboarding(context.Background(), channelonboarding.AdvanceRequest{
+	f.operation, err = f.selected.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
 		OperationID: f.operation.OperationID, ExpectedRevision: f.operation.Revision, Phase: f.operation.Phase,
 		RebindCoordinate: &coordinate, Now: time.Now().UTC().Truncate(time.Microsecond)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.activation, err = f.selected.GetConnectedChannelActivation(context.Background(), f.operation.SlotKey)
+	f.activation, err = f.selected.GetConnectedChannelActivation(f.ctx, f.operation.SlotKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func (f *activeInputFixture) restartBusinessConnection(t *testing.T) {
 
 func (f *activeInputFixture) republishBusinessStanding(t *testing.T) {
 	t.Helper()
-	sequence, err := f.selected.PublishStandingService(context.Background(), f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
+	sequence, err := f.selected.PublishStandingService(f.ctx, f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
 	if err != nil || sequence < 1 {
 		t.Fatalf("republish the original standing service: sequence=%d %v", sequence, err)
 	}
@@ -67,9 +67,21 @@ func (f *activeInputFixture) republishBusinessStanding(t *testing.T) {
 func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
 	t.Helper()
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
+	originalProcess, found := worklifetime.ProcessFromContext(f.ctx)
+	if !found {
+		t.Fatal("business fixture lost its retained original process")
+	}
+	original, bound := originalProcess.OriginalProcess()
+	if !bound {
+		t.Fatal("business fixture original process is unbound")
+	}
 	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source),
 		authoractivity.BundleScope(f.operation.Coordinate.RuntimeInstanceID, source.BundleHash()))
 	process := worklifetime.NewProcess()
+	if err := process.BindOriginalProcess(original); err != nil {
+		t.Fatal(err)
+	}
+	f.ctx = worklifetime.WithProcess(f.ctx, process)
 	owner, err := process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.operation.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})
 	if err != nil {
 		t.Fatal(err)

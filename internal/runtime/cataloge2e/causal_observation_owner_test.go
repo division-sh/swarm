@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +32,12 @@ func TestCatalogCausalObservationPreservesScopeOrderAndPayloadReferencesBothStor
 				h.sqlite = storetest.StartSQLiteRuntimeStore(t)
 				selected, setup, closeOwner = h.sqlite, h.sqlite, h.sqlite.Close
 				registerTestAuthorActivityCatalog(t, h.sqlite, "fixture.root", "fixture.child", "fixture.foreign", "fixture.history")
+			}
+			if original, err := agentfixture.ProcessContext(t, ctx, selected.(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+				h.ctx = original
 			}
 			foreignRun := uuid.NewString()
 			for _, runID := range []string{catalogRuntimeRunID, foreignRun} {

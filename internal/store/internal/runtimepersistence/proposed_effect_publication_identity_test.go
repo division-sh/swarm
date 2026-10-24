@@ -24,7 +24,7 @@ func TestProposedEffectCompletionUsesFrozenPublicationIdentityBothStores(t *test
 		} {
 			for _, verdict := range []string{"revise", "reject"} {
 				t.Run(backend+"/"+scope.name+"/"+verdict, func(t *testing.T) {
-					ctx := testAuthorActivityContext()
+					ctx := storeTestWorkContext(t, testAuthorActivityContext())
 					cards, runID := decisionCardTestStore(t, backend)
 					store := cards.(decisioncard.ProposedEffectStore)
 					now := time.Now().UTC()

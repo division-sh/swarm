@@ -6,6 +6,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -39,6 +40,11 @@ func TestRuntimeLocationReopenCleanupFollowsConsumerJoin(t *testing.T) {
 			t.Run("fixture", func(t *testing.T) {
 				var reopen func() reopenCleanupStore
 				original, reopen = backend.open(t)
+				var err error
+				ctx, err = agentfixture.ProcessContext(t, ctx, original.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
 				sourceartifactfixture.Require(t, ctx, original)
 				storetest.RequireRun(t, ctx, original, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 				t.Cleanup(func() {

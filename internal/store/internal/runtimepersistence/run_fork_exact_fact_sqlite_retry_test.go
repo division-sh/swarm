@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
@@ -23,15 +26,37 @@ func TestRunForkExactFactsSQLiteBusyRetryGeneratedIDs(t *testing.T) {
 			db := store.backend.ConstructionHandle()
 			db.SetMaxOpenConns(1)
 			db.SetMaxIdleConns(1)
-			s := exactFactStore{db: db, selected: store}
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
+			var original processbinding.LeaseStamp
+			acquired, err := store.backend.RunProcessAcquisitionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				var err error
+				original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, processbinding.LeaseIdentity{
+					LeaseID: uuid.NewString(), OwnerID: "native-statement-fixture", BootID: uuid.NewString(),
+					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, Backend: processbinding.SQLiteLeaseBackend,
+				}, true)
+				return err
+			})
+			if err != nil || !acquired {
+				t.Fatalf("acquire original statement process: committed=%v err=%v", acquired, err)
+			}
+			process, _ := worklifetime.ProcessFromContext(ctx)
+			if err := process.BindOriginalProcess(original); err != nil {
+				t.Fatal(err)
+			}
+			s := exactFactStore{ctx: ctx, db: db, selected: store}
 			f := newExactFactFixture(t, s)
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, f.eventID, f.at, false)
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,created_at,updated_at) VALUES ($1,$2,'retry','retry','Before Retry',$3,$3)`, f.runID, f.entityID, f.at)
 				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEvents, f.eventID), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), f.initialRevision+1, true)
 			})
-			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
-			ctx = storeTestOriginalProcessContext(t, ctx, store)
+			if phase == "commit" {
+				var mode string
+				if err := db.QueryRowContext(ctx, `PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+					t.Fatalf("rollback journal mode=%s err=%v", mode, err)
+				}
+			}
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
 				t.Fatal(err)
@@ -39,10 +64,6 @@ func TestRunForkExactFactsSQLiteBusyRetryGeneratedIDs(t *testing.T) {
 			var blocker *sql.Tx
 			if phase == "commit" {
 				// A real shared reader lock blocks physical COMMIT, not callback SQL.
-				var mode string
-				if err := db.QueryRowContext(ctx, `PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
-					t.Fatalf("rollback journal mode=%s err=%v", mode, err)
-				}
 				other, err := sql.Open("sqlite", "file:"+path)
 				if err != nil {
 					t.Fatal(err)

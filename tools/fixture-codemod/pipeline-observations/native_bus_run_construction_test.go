@@ -44,18 +44,3 @@ func normalizedBusRunConstruction(t *testing.T, source string) string {
 	}
 	return value
 }
-
-const busSelectedRunContextShape = `func eventBusTestRunContextForSource(t *testing.T,selected eventBusRunFixtureStore,source semanticview.Source) context.Context {
-t.Helper()
-ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(),source),eventBusTestRunID)
-if err := ensureTestEventBusSourceArtifact(selected,source,testSourceArtifactFact(source)); err != nil { t.Fatalf("persist exact event bus test source artifact: %v",err) }
-if err := storetest.EnsureEphemeralRun(ctx,selected,eventBusTestRunID,time.Date(2000,1,1,0,0,0,0,time.UTC)); err != nil { t.Fatalf("create event bus test run through lifecycle owner: %v",err) }
-return ctx
-}`
-
-func busSelectedRunContextPreserved(t *testing.T, source string) bool {
-	t.Helper()
-	want, err := canonicalFunction(busSelectedRunContextShape)
-	got, actualErr := canonicalFunction(source)
-	return err == nil && actualErr == nil && want == got
-}

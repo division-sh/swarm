@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -30,6 +31,11 @@ func TestRunNamedEventIdentityUsesOriginalReadAndExactScopeBothStores(t *testing
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := semanticFixtureContext(context.Background(), sourceartifactfixture.Fact())
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			run, sibling := uuid.NewString(), uuid.NewString()
 			for _, id := range []string{run, sibling} {
 				RequireRun(t, ctx, selected, RunFixture{RunID: id, Origin: ScenarioSetupOrigin()})

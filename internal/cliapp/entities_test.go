@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -110,6 +111,10 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	ctx := context.Background()
 	setCLIAPITestToken(t, "test-token")
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	ctx, err := agentfixture.ProcessContext(t, ctx, sqliteStore)
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID := "11111111-1111-1111-1111-111111111111"
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"

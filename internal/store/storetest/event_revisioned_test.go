@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -24,8 +25,13 @@ func TestRevisionedExistingRunRootFixturePreservesCanonicalEvidence(t *testing.T
 		{"postgres", func(t *testing.T) RunFixtureStore { return StartPostgresRuntimeStore(t) }},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx := semanticFixtureContext(context.Background(), sourceartifactfixture.Fact())
 			selected := backend.open(t)
+			ctx := semanticFixtureContext(context.Background(), sourceartifactfixture.Fact())
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			RequireRun(t, ctx, selected, RunFixture{RunID: runID, Origin: ScenarioSetupOrigin(), StartedAt: at.Add(-time.Minute)})
