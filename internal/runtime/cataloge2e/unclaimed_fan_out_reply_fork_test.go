@@ -47,7 +47,7 @@ func TestIssue642TwoOpenRepliesUnclaimedFanOutInputBothStores(t *testing.T) {
 			childRows, inner := requireUnclaimedFanOutReplyStaging(t, h.ctx, selected, staged.ForkRunID, cut)
 			t.Cleanup(func() { logUnclaimedFanOutReplyFailure(t, h.ctx, selected, owner, staged.ForkRunID) })
 			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 				t.Fatalf("activate the unclaimed inner request without a shortcut: activated=%t child=%s expected=%s error=%v", executed.Activation.Activated, executed.Materialization.ForkRunID, staged.ForkRunID, err)
@@ -80,7 +80,7 @@ func TestIssue642InheritedRequestPublicationReusesBothOpenRowsBothStores(t *test
 			childRows, inner := requireUnclaimedFanOutReplyStaging(t, h.ctx, selected, staged.ForkRunID, cut)
 			t.Cleanup(func() { logUnclaimedFanOutReplyFailure(t, h.ctx, selected, owner, staged.ForkRunID) })
 			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 				t.Fatalf("activate actual inherited request: result=%+v error=%v", executed.Activation, err)

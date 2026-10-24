@@ -72,7 +72,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
 				Owner: executionOwner, SourceLoader: loader, ContractSelection: selection,
-				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
+				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg), ExpectedBundleHash: selection.BundleHash,
 			})
 			if err != nil {
 				logSelectedForkRecoveryFailure(t, ctx, h, result.Materialization.ForkRunID, err)

@@ -320,7 +320,7 @@ func materializeCatalogSelectedForkForBootResume(
 	t.Helper()
 	prepared, err := owner.Prepare(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: plan.SourceRunID, At: sourceEventID, ContractSelection: selection,
-		SourceLoader: loader, AgentRuntime: agentRuntime,
+		SourceLoader: loader, AgentRuntime: agentRuntime, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil {
 		t.Fatalf("prepare selected-contract boot-resume: %v", err)

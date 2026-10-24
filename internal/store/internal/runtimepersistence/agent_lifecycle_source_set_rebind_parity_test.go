@@ -319,8 +319,8 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
 	runID := uuid.NewString()
 	readinessIdentity := mustTestAgentIdentityForRun(runID, "process-readiness-agent", "readiness/instance-1")
-	requireRunningRunForTest(t, ctx, store, staticIdentity.RunID, now)
-	requireRunningRunForTest(t, ctx, store, runID, now)
+	ctx = requireRunningRunForTest(t, ctx, store, staticIdentity.RunID, now)
+	ctx = requireRunningRunForTest(t, ctx, store, runID, now)
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: "process-static-agent", Identity: staticIdentity,

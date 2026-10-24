@@ -88,7 +88,7 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		Store: selected}
 	prepared, err := selectedContractExecutionOwnerForCatalogHarness(t, h).Prepare(h.ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: operation.SourceRunID, At: operation.ForkEventID, ForkOperation: &operation, AllowSourceFreeze: operation.AllowSourceFreeze,
-		SourceLoader: loader, ContractSelection: operation.ContractSelection, AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()),
+		SourceLoader: loader, ContractSelection: operation.ContractSelection, AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()), ExpectedBundleHash: operation.TargetBundleHash,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +103,8 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		t.Fatal(err)
 	}
 	readback.ForkOperation = nil
-	retry, err := selected.RequireMaterializedRunForkForSelectedContractExecution(correlation.WithSourceArtifactFact(h.ctx, readback.SourceArtifactFact), staged.ForkRunID, readback)
+	readbackCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(h.ctx, readback.SourceArtifactFact), readback.RootAdmission)
+	retry, err := selected.RequireMaterializedRunForkForSelectedContractExecution(readbackCtx, staged.ForkRunID, readback)
 	if err != nil {
 		t.Fatal(err)
 	}
