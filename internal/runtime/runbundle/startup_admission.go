@@ -46,6 +46,9 @@ func AdmitPinnedSources(ctx context.Context, reader ActiveAvailabilityReader, bo
 	}
 	var details []string
 	for _, availability := range availabilities {
+		if availability.Status == "paused" {
+			continue
+		}
 		if !availability.Available() {
 			continue // Artifact integrity is checked by startuprecovery.Inspect.
 		}
