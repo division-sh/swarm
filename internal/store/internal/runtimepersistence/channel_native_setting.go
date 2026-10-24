@@ -11,6 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
+const nativeInboxRetirementDemand = `SELECT
+	EXISTS (SELECT 1 FROM channel_native_setting_consumers WHERE state='current') OR
+	EXISTS (SELECT 1 FROM channel_native_settings WHERE state IN ('planned','installed'))`
+
 func (s *PostgresStore) AttachNativeInboxSetting(ctx context.Context, admission channelnative.Admission) (channelnative.Setting, error) {
 	if s == nil || s.backend == nil {
 		return channelnative.Setting{}, fmt.Errorf("postgres native inbox setting store is unavailable")
@@ -52,6 +56,13 @@ func (s *PostgresStore) RetireStaleNativeInboxConsumers(ctx context.Context) err
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
+	var needed bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(txctx, nativeInboxRetirementDemand).Scan(&needed)
+	})
+	if err != nil || !needed {
+		return err
+	}
 	var changed bool
 	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -66,6 +77,13 @@ func (s *SQLiteRuntimeStore) RetireStaleNativeInboxConsumers(ctx context.Context
 		return fmt.Errorf("sqlite native inbox setting store is unavailable")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	var needed bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(txctx, nativeInboxRetirementDemand).Scan(&needed)
+	})
+	if err != nil || !needed {
 		return err
 	}
 	var changed bool
