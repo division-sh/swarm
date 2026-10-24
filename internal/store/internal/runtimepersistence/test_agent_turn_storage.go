@@ -56,7 +56,10 @@ func ReadManagedAgentTurnStorageForTest(ctx context.Context, selected any, runID
 	return out, nil
 }
 
-type ManagedTurnEffectStorage struct{ Settled, Projected, ResponseConsumed, ProviderAttempts int }
+type ManagedTurnEffectStorage struct {
+	Settled, Projected, ResponseConsumed, ProviderAttempts int
+	ActiveProviderAttempts, LaunchedCandidateWorkAttempts  int
+}
 
 func ReadManagedTurnEffectStorageForTest(ctx context.Context, selected any, runID, agentID string) (ManagedTurnEffectStorage, error) {
 	var out ManagedTurnEffectStorage
@@ -76,7 +79,19 @@ func ReadManagedTurnEffectStorageForTest(ctx context.Context, selected any, runI
 			 LEFT JOIN run_fork_selected_contract_runtime_executions x ON x.execution_id=o.selected_execution_id
 			 WHERE o.effect_kind='provider_turn' AND
 			 ((o.authority_kind='normal_agent' AND o.agent_run_id=$1) OR
-			  (o.authority_kind='selected_contract_fork' AND x.fork_run_id=$1)))`, runID, agentID).Scan(&out.Settled, &out.Projected, &out.ResponseConsumed, &out.ProviderAttempts)
+			  (o.authority_kind='selected_contract_fork' AND x.fork_run_id=$1))),
+			(SELECT COUNT(*) FROM runtime_external_effect_operations o
+			 JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
+			 WHERE o.agent_run_id=$1 AND o.effect_kind='provider_turn'
+			 AND a.state IN ('authorized','launched','response_observed')),
+			(SELECT COUNT(*) FROM runtime_external_effect_operations o
+			 JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
+			 JOIN event_deliveries d ON d.delivery_id=a.origin_delivery_id
+			 JOIN events e ON e.event_id=d.event_id AND e.run_id=o.agent_run_id
+			 WHERE o.agent_run_id=$1 AND o.effect_kind='provider_turn'
+			 AND a.state IN ('launched','response_observed')
+			 AND e.event_name LIKE '%/candidate.work.requested')`, runID, agentID).Scan(&out.Settled, &out.Projected, &out.ResponseConsumed, &out.ProviderAttempts,
+			&out.ActiveProviderAttempts, &out.LaunchedCandidateWorkAttempts)
 	})
 	if err != nil {
 		return ManagedTurnEffectStorage{}, err

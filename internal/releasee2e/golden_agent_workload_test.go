@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -546,12 +548,13 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 }
 
 type goldenStoreSelection struct {
-	name                 string
-	configYAML           string
-	passwordEnv          string
-	diagnosticDB         *sql.DB
-	inspectionConnector  *pq.Connector
-	inspectionSQLitePath string
+	name                  string
+	configYAML            string
+	passwordEnv           string
+	diagnosticDB          *sql.DB
+	inspectionConnector   *pq.Connector
+	inspectionSQLitePath  string
+	inspectionPostgresDSN string
 }
 
 func goldenReleaseRoot(t *testing.T) string {
@@ -670,6 +673,19 @@ func goldenPostgresStore(t *testing.T, dsn string) goldenStoreSelection {
 		_ = admin.Close()
 	})
 	config.Database = databaseName
+	inspectionDSN := strings.TrimSpace(dsn)
+	if strings.HasPrefix(inspectionDSN, "postgres://") || strings.HasPrefix(inspectionDSN, "postgresql://") {
+		location, err := url.Parse(inspectionDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		query := location.Query()
+		query.Set("dbname", databaseName)
+		location.RawQuery = query.Encode()
+		inspectionDSN = location.String()
+	} else {
+		inspectionDSN += " dbname=" + databaseName
+	}
 	connector, err := pq.NewConnectorConfig(config)
 	if err != nil {
 		t.Fatalf("configure isolated PostgreSQL diagnostic connection: %v", err)
@@ -691,7 +707,7 @@ database:
   sslmode: %s
   pool_size: 5
 `, strconv.Quote(config.Host), config.Port, strconv.Quote(databaseName), strconv.Quote(config.User), goldenPostgresPass, strconv.Quote(sslMode))
-	return goldenStoreSelection{name: "postgres", configYAML: configYAML, passwordEnv: config.Password, diagnosticDB: diagnosticDB, inspectionConnector: connector}
+	return goldenStoreSelection{name: "postgres", configYAML: configYAML, passwordEnv: config.Password, diagnosticDB: diagnosticDB, inspectionConnector: connector, inspectionPostgresDSN: inspectionDSN}
 }
 
 func goldenDatabaseName(t *testing.T) string {
@@ -1081,11 +1097,19 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
-	db, err := openLifecycleFailureInspection(store)
+	location := store.inspectionSQLitePath
+	if store.name == "postgres" {
+		location = store.inspectionPostgresDSN
+	}
+	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(store.name, location)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := inspection.Close(); err != nil {
+			t.Errorf("close crash-cut inspection: %v", err)
+		}
+	}()
 	// A successful cut stays stopped until SIGKILL; failed inspection must not
 	// leave the ordinary child cleanup trying to stop a suspended process.
 	t.Cleanup(func() {
@@ -1126,7 +1150,7 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 				log.stringField("parent_event_id") == "" || log.stringField("source") == "" || log.stringField("agent_id") == "" {
 				continue
 			}
-			if ready, err := stopAtGoldenLaunchedCrashCut(ctx, process, db, runID); err != nil || !ready {
+			if ready, err := stopAtGoldenLaunchedCrashCut(ctx, process, inspection, runID); err != nil || !ready {
 				return false, err
 			}
 			selected = log
@@ -1143,23 +1167,16 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 	return selected
 }
 
-func stopAtGoldenLaunchedCrashCut(ctx context.Context, process *releaseServeProcess, db *sql.DB, runID string) (bool, error) {
+func stopAtGoldenLaunchedCrashCut(ctx context.Context, process *releaseServeProcess, inspection storetest.ReleaseProcessReadOnlyInspection, runID string) (bool, error) {
 	if err := process.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		return false, err
 	}
-	var active, launched int
-	readErr := db.QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(CASE
-			WHEN a.state IN ('launched', 'response_observed')
-				AND e.event_name LIKE '%/candidate.work.requested'
-			THEN 1 ELSE 0 END), 0)
-		FROM runtime_external_effect_operations o
-		JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
-		LEFT JOIN event_deliveries d ON d.delivery_id = a.origin_delivery_id
-		LEFT JOIN events e ON e.event_id = d.event_id AND e.run_id = o.agent_run_id
-		WHERE o.agent_run_id = $1 AND o.effect_kind = 'provider_turn'
-			AND a.state IN ('authorized', 'launched', 'response_observed')`, runID).Scan(&active, &launched)
-	if readErr == nil && active > 0 && launched == active {
+	var observed storetest.ManagedTurnEffectStorage
+	readErr := inspection.InspectSnapshot(ctx, func(ctx context.Context) (err error) {
+		observed, err = storetest.ReadManagedTurnEffectStorage(ctx, inspection, runID, "")
+		return err
+	})
+	if readErr == nil && observed.ActiveProviderAttempts > 0 && observed.LaunchedCandidateWorkAttempts == observed.ActiveProviderAttempts {
 		return true, nil
 	}
 	resumeErr := process.cmd.Process.Signal(syscall.SIGCONT)
