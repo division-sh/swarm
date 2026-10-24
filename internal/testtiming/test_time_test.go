@@ -128,7 +128,7 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reference.Roots) != 11809 || reference.PlanDigest != "ec5fee61b8f63c74570b64289e6358ea8da2b9a29201cb922fe67bd24c581da7" {
+	if len(reference.Roots) != 13699 || reference.PlanDigest != "c47c94acb13c5f98485ad081b02196ffbbeea5133aaab19e4b2daf2fd4ecbe53" {
 		t.Fatal("incomplete reference")
 	}
 	var total float64
@@ -140,13 +140,13 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 			soakCells++
 		}
 		if root.Package == "github.com/division-sh/swarm/internal/serveapp" && root.Root == "TestA9ReleaseKeyedIngressConstructionBothStores" {
-			if root.Seconds != 43.92 || root.Count != "count-1" || root.Environment != "ci-postgres-gateway-empty-v1" || !slices.Equal(root.Tiers, []string{"lifecycle", "full"}) {
+			if root.Seconds != 46.57 || root.Count != "count-1" || root.Environment != "ci-postgres-gateway-empty-v1" || !slices.Equal(root.Tiers, []string{"lifecycle", "full"}) {
 				t.Fatalf("approved A9 placement or observation changed: %+v", root)
 			}
 			approvedA9 = true
 		}
 	}
-	if math.Abs(total-15907.75) > 1e-6 || soakCells != 2 || !approvedA9 {
+	if math.Abs(total-17962.69) > 1e-6 || soakCells != 2 || !approvedA9 {
 		t.Fatalf("total=%f soak=%d approvedA9=%v", total, soakCells, approvedA9)
 	}
 	for _, want := range []struct {
@@ -154,9 +154,9 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 		cells   int
 		seconds float64
 	}{
-		{"core", 7610, 2385.24},
-		{"lifecycle", 11708, 12374.57},
-		{"full", 11809, 15907.75},
+		{"core", 8979, 3606.41},
+		{"lifecycle", 13681, 13890.02},
+		{"full", 13699, 17962.69},
 	} {
 		roots, problems := projectReferenceTimingRoots(reference.Roots, want.tier)
 		var seconds float64

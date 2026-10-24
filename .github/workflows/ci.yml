@@ -954,7 +954,7 @@ jobs:
         run: |
           go run ./cmd/swarm-test-timing -assert-execution-sha \
             -plan test-results/plan/proof-plan.json -execution-sha "$(git rev-parse HEAD)"
-          # An attempt-scoped jobs list can lag the completed needs result.
+          # Job and step metadata can lag the completed needs result.
           # Refresh evidence only; never rerun a proof or replace the evaluator's
           # exact run/attempt/head, success, timestamp, and missing-job checks.
           deadline=$((SECONDS + 600))
@@ -973,7 +973,9 @@ jobs:
                 | ([.[].jobs[] | select(.name | startswith("Go proof "))]) as $actual
                 | ($expected | length > 0) and all($expected[]; . as $name
                     | [$actual[] | select(.name == $name)]
-                    | length == 1 and .[0].status == "completed")
+                    | length == 1 and .[0].status == "completed"
+                      and (.[0].steps | type == "array" and length > 0
+                        and all(.[]; .conclusion == "skipped" or .status == "completed")))
               ' test-results/jobs.json >/dev/null; then
                 ready=true
                 break
@@ -996,7 +998,9 @@ jobs:
               jq -r --slurpfile plan test-results/plan/proof-plan.json '
                 [.[].jobs[]] as $actual | $plan[0].batches[].id | "Go proof " + . as $name
                 | [$actual[] | select(.name == $name)]
-                | select(length != 1 or .[0].status != "completed") | $name
+                | select(length != 1 or .[0].status != "completed"
+                    or (.[0].steps | type != "array" or length == 0
+                      or any(.[]; .conclusion != "skipped" and .status != "completed"))) | $name
               ' test-results/jobs.json >&2
             else
               jq -r '.batches[].id | "Go proof " + .' test-results/plan/proof-plan.json >&2

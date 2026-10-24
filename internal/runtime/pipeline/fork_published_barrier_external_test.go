@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -152,6 +153,13 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				t.Fatal(err)
 			}
 			waitPublishedBarrierPipelineReceipts(t, phase, selected.RuntimeDeps().DeliveryStore, original.id, sourceCompletedID)
+			if failingCompletion {
+				// Source business completion does not join its process-wide
+				// fan-out observer. Retire it before measuring the child's work.
+				if err := rt.ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 10 * time.Second}); err != nil {
+					t.Fatalf("join completed barrier source runtime: %v", err)
+				}
+			}
 			before, err := selected.Entities().LoadOperatorEntity(phase, runID, runID)
 			if err != nil {
 				t.Fatal(err)
@@ -205,6 +213,9 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				}
 			}
 			baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
+			if failingCompletion && baselineWork != 0 {
+				t.Fatalf("completed barrier source retained process work: %d", baselineWork)
+			}
 			var sourceDomain map[string]storetest.SelectedForkStorageTableSnapshot
 			if failingCompletion {
 				sourceDomain, err = storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, runID)
