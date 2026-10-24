@@ -34,6 +34,7 @@ type managerNativeDeliveryOwner interface {
 	deliverylifecycle.Store
 	storetest.RunFixtureStore
 	sourceartifactfixture.Writer
+	sourceartifactfixture.RootedWriter
 	PipelineObligations() pipelineobligation.Store
 	CommitPublication(context.Context, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
 	RegisterAuthorActivityEventCatalog(authoractivity.Scope, []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error)
@@ -80,7 +81,7 @@ func openManagerNativeDelivery(t *testing.T, backend string, sources ...semantic
 	default:
 		t.Fatalf("unsupported manager delivery fixture backend %q", backend)
 	}
-	artifact := sourceartifactfixture.Artifact()
+	var rooted sourceartifact.RootedSource
 	ctx := manager.TerminalPanicFixtureContext()
 	var semanticSource semanticview.Source
 	if len(sources) == 1 {
@@ -89,13 +90,16 @@ func openManagerNativeDelivery(t *testing.T, backend string, sources ...semantic
 		if !present || bundle == nil {
 			t.Fatal("native delivery fixture requires its compiled source")
 		}
-		rooted, err := bundle.RootedSource()
+		var err error
+		rooted, err = bundle.RootedSource()
 		if err != nil {
 			t.Fatal(err)
 		}
-		artifact = rooted.Artifact()
-		ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	} else {
+		rooted, _ = sourceartifactfixture.Rooted(t, "manager-delivery", sourceartifactfixture.Artifact())
 	}
+	artifact := rooted.Artifact()
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	source := sourceartifactfixture.FactFor(artifact)
 	ctx = correlation.WithSourceArtifactFact(ctx, source)
 	scope, present := authoractivity.ScopeFromContext(ctx)
@@ -119,7 +123,7 @@ func openManagerNativeDelivery(t *testing.T, backend string, sources ...semantic
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sourceartifactfixture.EnsureArtifact(ctx, selected, artifact); err != nil {
+	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
 	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
@@ -137,18 +141,10 @@ func openManagerNativeDelivery(t *testing.T, backend string, sources ...semantic
 		CarryMutationContext: startupownership.CarryMutationAuthority,
 		RequireRun: func(t *testing.T, runID string) {
 			t.Helper()
-			if semanticSource != nil {
-				rooted, err := artifact.RootedSource()
-				if err != nil {
-					t.Fatal(err)
-				}
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-					RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact,
-					RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
-				})
-			} else {
-				storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
-			}
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact,
+				RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
+			})
 		},
 		Publish: func(t *testing.T, ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 			t.Helper()
@@ -279,6 +275,11 @@ func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *test
 			fixture := openManagerNativeDelivery(t, backend)
 			source := sourceartifactfixture.Fact()
 			ctx := correlation.WithSourceArtifactFact(fixture.Context, source)
+			root, present, err := correlation.RootAdmissionFromContext(fixture.Context)
+			if err != nil || !present {
+				t.Fatalf("native publication requires its captured root: present=%t err=%v", present, err)
+			}
+			ctx = correlation.WithRootAdmission(ctx, root)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", source.BundleHash()))
 			runID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -333,7 +334,14 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 			}
 			// The shared fixture is now valid; this negative requires a declaration
 			// whose bytes can be stored but whose agent intent is not admitted.
-			storageRoot, _ := sourceartifactfixture.Rooted(t, "storage-only", sourceartifactfixture.New("agents.yaml", []byte("storage-only: {}\n")))
+			storageArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("storage-only: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			storageRoot, _ := sourceartifactfixture.Rooted(t, "storage-only", storageArtifact)
 			storageOnly := storageRoot.Artifact()
 			storageCtx := correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(storageOnly))
 			storageCtx = correlation.WithRootAdmission(storageCtx, storageRoot.Admission())

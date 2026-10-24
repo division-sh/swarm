@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -333,7 +334,14 @@ func TestAgentRowIndividualSourceSetReplacementBothStores(t *testing.T) {
 				if len(current.Sources) != 1 || current.Sources[0].Key() != primary.Key() {
 					t.Fatalf("native source set lost its exact captured root: %+v", current.Sources)
 				}
-				additional, _ := sourceartifactfixture.Rooted(t, "additional", sourceartifactfixture.New("events.yaml", []byte("additional.input:\n")))
+				additionalArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+					"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+					"events.yaml":   []byte("additional.input:\n"),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				additional, _ := sourceartifactfixture.Rooted(t, "additional", additionalArtifact)
 				sourceartifactfixture.RequireArtifact(t, ctx, selected, additional.Artifact())
 				coordinate, err := agenttopology.NewSourceCoordinate(additional.Admission())
 				if err != nil {

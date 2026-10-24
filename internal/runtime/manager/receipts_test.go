@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -318,6 +319,11 @@ func ProveNativeProcessEventConsumesDrainedCompletionObservationWithoutSecondRec
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, harness.Token.Identity.RunID, "", events.EventEnvelope{}, time.Now().UTC())
 			agent := drainedCompletionObservationAgent{id: harness.Token.AgentID, withOutput: test.withOutput, bypassDisposition: test.withOutput}
 			base := testAuthorActivityContext(harness.CompletionContext(t.Name()))
+			root, present, err := runtimecorrelation.RootAdmissionFromContext(nativeDelivery.Context)
+			if err != nil || !present {
+				t.Fatalf("native drained completion requires its captured root: present=%t err=%v", present, err)
+			}
+			base = runtimecorrelation.WithRootAdmission(base, root)
 			nativeDelivery.seedClaim(t, base, evt, agent.ID())
 			ctx := managerClaimedDeliveryContext(t, am, base, evt, agent.ID())
 			claim, ok := runtimedelivery.ClaimFromContext(ctx)
@@ -1394,7 +1400,9 @@ func ProveNativeWriteReceiptUsesCanonicalHandlerRetryBase(t *testing.T, newNativ
 		name   string
 		source semanticview.Source
 		want   time.Duration
-	}{{name: "default", want: time.Second}, {name: "configured", source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{"handler_retry_base_seconds": {Value: 37}}}}), want: 37 * time.Second}} {
+	}{{name: "default", want: time.Second}, {name: "configured", source: semanticview.Wrap(testFlowBundle(t, "", func(root string) {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "handler_retry_base_seconds: 37\n")
+	})), want: 37 * time.Second}} {
 		t.Run(test.name, func(t *testing.T) {
 			nativeDelivery := newNativeDelivery(t)
 			deliveryStore := nativeDelivery

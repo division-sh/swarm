@@ -1,4 +1,4 @@
-describe: source=golden-agent-workload@1.0.0
+describe: source=golden_agent_workload@1.0.0
 source authority: projection_only_existing_contract_owners
 validation: structural; live readiness: not evaluated
 events:

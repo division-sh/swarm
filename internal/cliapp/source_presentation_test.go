@@ -80,15 +80,11 @@ func Test2376HumanSourceIdentityConsumerTable(t *testing.T) {
 			})
 		}
 	}
-	for _, version := range []string{"", "1.2.3", "1.2.3+display"} {
+	for _, version := range []string{"1.2.3", "1.2.3+display"} {
 		t.Run(fmt.Sprintf("verify/version=%q", version), func(t *testing.T) {
 			root := outputModeVerifyFixture(t)
 			manifest := filepath.Join(root, "manifest.yaml")
-			if version != "" {
-				if err := os.WriteFile(manifest, []byte(fmt.Sprintf("version: %q\nplatform_version: '>=0.7.0 <0.8.0'\n", version)), 0600); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := os.Remove(manifest); err != nil && !os.IsNotExist(err) {
+			if err := os.WriteFile(manifest, []byte(fmt.Sprintf("version: %q\nplatform_version: '>=0.7.0 <0.8.0'\n", version)), 0600); err != nil {
 				t.Fatal(err)
 			}
 			artifact, err := sourceartifact.AdmitDirectory(root)

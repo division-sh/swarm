@@ -77,63 +77,57 @@ func Test2376SourceInvocationParity(t *testing.T) {
 }
 
 func Test2376VerifyJSONExactMemberTable(t *testing.T) {
-	for _, named := range []bool{false, true} {
-		t.Run(map[bool]string{false: "absent", true: "present"}[named], func(t *testing.T) {
-			root := outputModeVerifyFixture(t)
-			if named {
-				if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := os.Remove(filepath.Join(root, "manifest.yaml")); err != nil && !os.IsNotExist(err) {
-				t.Fatal(err)
+	t.Run("present", func(t *testing.T) {
+		root := outputModeVerifyFixture(t)
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := sourceartifact.AdmitDirectory(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out, errOut bytes.Buffer
+		opts := defaultVerifyCommandOptions()
+		opts.portable = true
+		opts.sourceRoot, opts.configPath, opts.output.asJSON = root, writeTestVerifyRuntimeConfig(t), true
+		if code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &out, &errOut); code != 0 {
+			t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
+		}
+		var got struct {
+			Hash    string `json:"bundle_hash"`
+			Members []struct {
+				Label       string `json:"label"`
+				Disposition string `json:"disposition"`
+				Bytes       int    `json:"bytes"`
+			} `json:"members"`
+			Manifest *sourceartifact.Manifest `json:"manifest"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		entries := artifact.Entries()
+		if got.Hash != artifact.BundleHash() || len(got.Members) != len(entries) || got.Manifest == nil {
+			t.Fatalf("missing exact evidence: %s", &out)
+		}
+		// Literal spec framing, independent of the artifact encoder.
+		var framing bytes.Buffer
+		framing.WriteString("swarm-bundle-v2\x00")
+		binary.Write(&framing, binary.BigEndian, uint64(len(entries)))
+		for i, entry := range entries {
+			member := got.Members[i]
+			if member.Label != entry.Label() || member.Disposition != entry.Disposition().String() || member.Bytes != entry.Size() {
+				t.Fatalf("member[%d]=%#v", i, member)
 			}
-			artifact, err := sourceartifact.AdmitDirectory(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var out, errOut bytes.Buffer
-			opts := defaultVerifyCommandOptions()
-			opts.portable = true
-			opts.sourceRoot, opts.configPath, opts.output.asJSON = root, writeTestVerifyRuntimeConfig(t), true
-			if code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &out, &errOut); code != 0 {
-				t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
-			}
-			var got struct {
-				Hash    string `json:"bundle_hash"`
-				Members []struct {
-					Label       string `json:"label"`
-					Disposition string `json:"disposition"`
-					Bytes       int    `json:"bytes"`
-				} `json:"members"`
-				Manifest *sourceartifact.Manifest `json:"manifest"`
-			}
-			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-				t.Fatal(err)
-			}
-			entries := artifact.Entries()
-			if got.Hash != artifact.BundleHash() || len(got.Members) != len(entries) || (got.Manifest != nil) != named {
-				t.Fatalf("missing exact evidence: %s", &out)
-			}
-			// Literal spec framing, independent of the artifact encoder.
-			var framing bytes.Buffer
-			framing.WriteString("swarm-bundle-v2\x00")
-			binary.Write(&framing, binary.BigEndian, uint64(len(entries)))
-			for i, entry := range entries {
-				member := got.Members[i]
-				if member.Label != entry.Label() || member.Disposition != entry.Disposition().String() || member.Bytes != entry.Size() {
-					t.Fatalf("member[%d]=%#v", i, member)
-				}
-				code := map[string]byte{"declaration": 1, "manifest": 2, "resource": 3, "document": 4}[member.Disposition]
-				framing.WriteByte(code)
-				binary.Write(&framing, binary.BigEndian, uint64(len(member.Label)))
-				framing.WriteString(member.Label)
-				binary.Write(&framing, binary.BigEndian, uint64(member.Bytes))
-				framing.Write(entry.Bytes())
-			}
-			digest := sha256.Sum256(framing.Bytes())
-			if got.Hash != "bundle-v2:sha256:"+hex.EncodeToString(digest[:]) {
-				t.Fatal("outsider framing differs")
-			}
-		})
-	}
+			code := map[string]byte{"declaration": 1, "manifest": 2, "resource": 3, "document": 4}[member.Disposition]
+			framing.WriteByte(code)
+			binary.Write(&framing, binary.BigEndian, uint64(len(member.Label)))
+			framing.WriteString(member.Label)
+			binary.Write(&framing, binary.BigEndian, uint64(member.Bytes))
+			framing.Write(entry.Bytes())
+		}
+		digest := sha256.Sum256(framing.Bytes())
+		if got.Hash != "bundle-v2:sha256:"+hex.EncodeToString(digest[:]) {
+			t.Fatal("outsider framing differs")
+		}
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -20,8 +21,14 @@ func TestInstanceClockHandoffRequiresAcknowledgmentAndExactBusBothStores(t *test
 		t.Run(backend.name, func(t *testing.T) {
 			selected, _, ctx := backend.open(t)
 			runID := correlation.RunIDFromContext(ctx)
-			registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
-			publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore))
+			catalogContext := testAuthorActivityContext()
+			var options bus.EventBusOptions
+			if scope, present := authoractivity.ScopeFromContext(ctx); present {
+				catalogContext = ctx
+				options.RuntimeInstanceID = scope.RuntimeInstanceID
+			}
+			registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), catalogContext)
+			publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), options)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -75,7 +82,7 @@ func TestInstanceClockHandoffRequiresAcknowledgmentAndExactBusBothStores(t *test
 			if err := dispatch.DispatchCommittedPublication(ctx, result.Publication); err == nil {
 				t.Fatal("receipt bypassed required outbox finalization")
 			}
-			foreign, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore))
+			foreign, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), options)
 			if err != nil {
 				t.Fatal(err)
 			}

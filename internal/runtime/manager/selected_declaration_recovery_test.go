@@ -6,6 +6,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -24,9 +25,17 @@ func selectedDeclarationRecoveryFixture(t *testing.T) (AgentLifecycleState, Pers
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, _ := identity.Plan()
-	declarations, err := agenttopology.NewSelectedDeclarationPlan(managerTestTopologyBundleHash, []agenttopology.DesiredAgent{{
-		Identity: plan, Source: agenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}, ConfigRevision: revision,
+	rooted, _ := sourceartifactfixture.Rooted(t, "selected-root", sourceartifactfixture.Artifact())
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := identity.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := agenttopology.NewSelectedDeclarationPlan(coordinate.BundleHash, []agenttopology.DesiredAgent{{
+		Identity: plan, Source: coordinate, ConfigRevision: revision,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +46,7 @@ func selectedDeclarationRecoveryFixture(t *testing.T) (AgentLifecycleState, Pers
 	}
 	previous := AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 7, Generation: 3,
 		Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeAuthoritativeDeliveryOnly, Topology: desired.Topology,
-		ProcessBinding: startupProcessBinding(managerTestTopologyBundleHash, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), 1)}
+		ProcessBinding: startupProcessBinding(coordinate.BundleHash, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), 1)}
 	return previous, desired
 }
 

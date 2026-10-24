@@ -17,7 +17,6 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
@@ -279,7 +278,18 @@ func TestStartupRecoversProviderDrainsBeforeStaticReintroductionAndDeliveryRepla
 	am := newTestAgentManager(t, bus, nil, store)
 
 	ctx := testAuthorActivityContext(context.Background())
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
+	bundle, present := semanticview.Bundle(am.semanticSource)
+	if !present || bundle == nil {
+		t.Fatal("startup recovery requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +304,7 @@ func TestStartupRecoversProviderDrainsBeforeStaticReintroductionAndDeliveryRepla
 	am.mu.Lock()
 	am.startupAgentsHydrated = false
 	am.mu.Unlock()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	source := am.semanticSource
 	recoveryErr := errors.New("effect recovery unavailable")
 	store.effectsErr = recoveryErr
 	if err := am.ReconcileStaticTopologyForStartup(ctx, source); !errors.Is(err, recoveryErr) {
@@ -551,8 +561,11 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		t.Fatalf("fixed-contract recovery gained current attachment authority: %d", len(am.dynamicFlowActiveAttempts))
 	}
 	am.workflowInstances = &flowActivationTestInstanceStore{}
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(testFlowBundle(t, "")))
-	state, err := am.RecoverableStateSnapshot(testAuthorActivityContext(context.Background()))
+	snapshotCtx, err := setFlowActivationManagerSemanticSource(am, testAuthorActivityContext(context.Background()), semanticview.Wrap(testFlowBundle(t, "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := am.RecoverableStateSnapshot(snapshotCtx)
 	if err != nil {
 		t.Fatalf("RecoverableStateSnapshot: %v", err)
 	}

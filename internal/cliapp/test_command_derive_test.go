@@ -11,9 +11,12 @@ import (
 )
 
 func TestDiscoverScenarioTestFilesIncludesExplicitDerivedDeclaration(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "scenario-discovery")
 	testsDir := filepath.Join(root, "tests")
 	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	derived := filepath.Join(testsDir, "derived.yaml")
@@ -37,7 +40,16 @@ func TestDiscoverScenarioTestFilesIncludesExplicitDerivedDeclaration(t *testing.
 }
 
 func TestDiscoverScenarioTestFilesUsesCanonicalTestsResourceBranches(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "scenario-resources")
+	for _, flow := range []string{".", "orders"} {
+		dir := filepath.Join(root, flow)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, label := range []string{
 		"tests/root.yaml",
 		"orders/tests/child.yaml",

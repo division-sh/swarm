@@ -15,10 +15,14 @@ import (
 
 func issue2567VerifySource(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "first-verify")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	for name, body := range map[string]string{
-		"schema.yaml": "name: first-verify\nstages: {waiting: {}, done: {final: true}}\npins: {inputs: [work.requested]}\n",
-		"events.yaml": "work.requested:\n", "entities.yaml": "work: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: {waiting: {}, done: {final: true}}\npins: {inputs: [work.requested]}\n",
+		"events.yaml":   "work.requested:\n", "entities.yaml": "work: {}\n",
 		"nodes.yaml": "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {advances_to: done}\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {

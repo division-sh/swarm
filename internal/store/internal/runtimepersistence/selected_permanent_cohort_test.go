@@ -67,7 +67,7 @@ func (r *permanentForkEvidenceRows) Next(values []driver.Value) error {
 			values[i] = "materialized"
 		case r.fault == "unsettled" && (column == "result_json" || column == "failure_json") && strings.Contains(r.query, "SELECT operation_id, actor,"):
 			values[i] = nil
-		case r.fault == "binding_cut" && column == "fork_revision" && len(r.Columns()) == 9:
+		case r.fault == "binding_cut" && column == "fork_revision" && strings.Contains(r.query, "FROM run_fork_selected_contract_bindings\n"):
 			values[i] = values[i].(int64) + 1
 		case r.fault == "typed_operation_cut" && column == "fork_revision" && strings.Contains(r.query, "SELECT operation_id, actor,"):
 			values[i] = values[i].(int64) + 1

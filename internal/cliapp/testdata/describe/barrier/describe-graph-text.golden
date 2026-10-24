@@ -1,4 +1,4 @@
-describe: source=fan-in-barrier@1.0.0
+describe: source=barrier@1.0.0
 source authority: projection_only_existing_contract_owners
 validation: structural; live readiness: not evaluated
 events:
@@ -81,7 +81,9 @@ stage graph:
     joins:
       - awaiting stage awaiting members state.expected_operating_ids by payload.operating_id output payload.revenue deadline 5m from stage_entry (portfolio-collector on period.reported)
 diagnostics:
-  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.period_state; event portfolio.setup payload; consider extracting or reusing a named type if these represent the same concept
+  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.period_state; event portfolio.setup payload; event portfolio/period.setup payload; consider extracting or reusing a named type if these represent the same concept
+  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: identical shape {operating_id:text, period_id:text, portfolio_id:text, revenue:integer} appears in event ingress/operating.report.requested payload; event operating.report.triggered payload; event portfolio/period.reported payload; consider extracting or reusing a named type if these represent the same concept
+  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: near-duplicate shapes share 4/5 field/type pairs (operating_id:text, period_id:text, portfolio_id:text, revenue:integer) between event operating/operating.reported payload and event ingress/operating.report.requested payload; event operating.report.triggered payload; event portfolio/period.reported payload; consider extracting or reusing a named type if these represent the same concept
   - [INFO] entity_reader_coverage @ operating/schema.yaml: flow operating entity_type operating_state declares field operating_instance_id with no detected internal reader coverage
   - [INFO] entity_reader_coverage @ portfolio/schema.yaml: flow portfolio entity_type portfolio_context declares field portfolio_id with no detected internal reader coverage
   - [INFO] entity_reader_coverage @ portfolio/period/schema.yaml: flow portfolio/period entity_type period_state declares field period_id with no detected internal reader coverage
