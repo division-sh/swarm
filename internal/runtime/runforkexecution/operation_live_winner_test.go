@@ -121,7 +121,7 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 				Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
 			})
 			event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0,
-				sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+				sourceID, events.EventEnvelope{}, eventtest.RootRoutingSource(sourceID), at, executionmode.Mock)
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
 				[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 			commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
@@ -134,7 +134,7 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			operation := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "bound-live-winner", TransportHash: "sha256:same-request",
 				SourceRunID: sourceID, ForkEventID: selector, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-				AllowSourceFreeze: true, ContractSelection: selection,
+				AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 			}
 			request := SelectedContractExecutionRequest{
 				Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: selector, AllowSourceFreeze: true,
@@ -351,7 +351,7 @@ func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRo
 		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
 	})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, events.EventType(eventName), "source-runtime", "", []byte(`{}`), 0,
-		sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+		sourceID, events.EventEnvelope{}, eventtest.RootRoutingSource(sourceID), at, executionmode.Mock)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
 		[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
@@ -360,7 +360,7 @@ func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRo
 	operation := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "ownerless-winner", TransportHash: "sha256:same-request",
 		SourceRunID: sourceID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		AllowSourceFreeze: true, ContractSelection: selection,
+		AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 	}
 	return ctx, SelectedContractExecutionRequest{
 		Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,

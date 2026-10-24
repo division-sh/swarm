@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -490,7 +491,12 @@ func TestRuntimeProcessCapabilityTransitionsPersistWithBackendParity(t *testing.
 			if err != nil || authority.Validate() != nil {
 				t.Fatalf("active capability = %#v err=%v", authority, err)
 			}
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
+			rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
+			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -614,7 +620,6 @@ func TestProcessGenerationIgnoresDiagnosticMetadataClockParity(t *testing.T) {
 }
 
 func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendParity(t *testing.T) {
-	const secondBundleHash = "bundle-v2:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	tests := []struct {
 		name  string
 		store func(*testing.T) startupAuthorityParityStore
@@ -637,8 +642,19 @@ func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendPari
 			}
 			t.Cleanup(func() { _ = capability.Release(context.Background()) })
 
-			firstSource := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
-			secondSource := runtimeagenttopology.SourceCoordinate{BundleHash: secondBundleHash}
+			firstRoot, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
+			secondRoot, _ := sourceartifactfixture.Rooted(t, "second", storeTestSourceArtifact("second-source"))
+			for _, root := range []sourceartifact.RootedSource{firstRoot, secondRoot} {
+				sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), root.Artifact())
+			}
+			firstSource, err := runtimeagenttopology.NewSourceCoordinate(firstRoot.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondSource, err := runtimeagenttopology.NewSourceCoordinate(secondRoot.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			firstIdentity, err := testAgentIdentity(t, "source-agent", "").Plan()
 			if err != nil {
 				t.Fatal(err)
@@ -715,7 +731,12 @@ func TestPostgresProcessCapabilitySessionLossRetiresAndAdmitsAtomicSuccessor(t *
 	if err != nil {
 		t.Fatalf("Evidence: %v", err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
+	rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
+	sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1599,7 +1620,12 @@ func TestProcessGenerationMissingRefusesReseedingParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("acquire predecessor: %v", err)
 			}
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
+			rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
+			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)

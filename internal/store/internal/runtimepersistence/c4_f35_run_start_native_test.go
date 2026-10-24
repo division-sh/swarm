@@ -1174,8 +1174,8 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (context.Context, bus.DeploymentRunCreationCommand) {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml": "name: c4-start\npins:\n  outputs:\n    - records.ready\n",
-		"events.yaml": "records.ready:\n  body: text\n",
+		"schema.yaml": "pins:\n  outputs:\n    - records.ready\n",
+		"events.yaml": "records.ready:\n  body: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if withTimer {
 		files["schema.yaml"] += "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n"

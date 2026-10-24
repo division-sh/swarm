@@ -162,7 +162,8 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			}
 			result, err := ExecuteSelectedContractRunFork(sourceCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
 				SourceLoader: loader, ContractSelection: selection,

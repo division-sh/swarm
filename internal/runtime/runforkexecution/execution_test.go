@@ -3364,7 +3364,9 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		if err := owner.BindSelectedProcess(ctx, process, processCapability); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := owner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); err != nil {
+		if _, err := owner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
+			SourceLoader: loader, AgentRuntime: baseRequest.AgentRuntime.Options,
+		}); err != nil {
 			t.Fatal(err)
 		}
 		prepared, err := prepareSelectedFork(ctx, operation, owner.ports, baseRequest.LoadedSource, fixedPlan, runfork.RunForkContractFrontierAdmission{}, planning, baseRequest.AgentRuntime)
@@ -4502,7 +4504,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	operation := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "scope-conflict-proof", IdempotencyKey: uuid.NewString(), TransportHash: "scope-conflict-proof",
 		SourceRunID: sourceRunID, ForkEventID: sourceEventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		ContractSelection: selection, AllowSourceFreeze: true,
+		ContractSelection: selection, AllowSourceFreeze: true, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 	}
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		ForkOperation:     &operation,

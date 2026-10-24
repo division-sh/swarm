@@ -60,6 +60,9 @@ func CopyInstanceDeclarations(t testing.TB, flows ...string) string {
 		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, flow+"/schema.yaml", "instance: instance_key\n")
 		writeClosedVariantFile(t, root, flow+"/entities.yaml", "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
 	}

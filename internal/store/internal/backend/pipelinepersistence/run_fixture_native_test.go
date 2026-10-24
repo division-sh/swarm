@@ -60,6 +60,7 @@ func requireStatementRun(t testing.TB, owner runlifecycle.OperationOwner, artifa
 }, ids ...string) {
 	t.Helper()
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
+	ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	if _, err := artifact.EnsureRootedSource(ctx, rooted); err != nil {

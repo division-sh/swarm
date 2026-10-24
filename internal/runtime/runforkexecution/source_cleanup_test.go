@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -340,7 +341,16 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 func TestSelectedSourceStagedCleanupOwnership(t *testing.T) {
 	for _, phase := range []string{"non_selected_compilation", "non_selected_activated", "selected_validation", "selected_original_compilation"} {
 		t.Run(phase, func(t *testing.T) {
-			owner, process, ctx := contextLifetimeOwner(t)
+			_, process, ctx := contextLifetimeOwner(t)
+			native := storetest.StartSQLiteRuntimeStore(t)
+			owner := newSelectedContractSQLiteExecutionOwnerForTest(t, native)
+			capability := selectedContractTestProcessCapability(t, ctx, native)
+			if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); err != nil {
+				t.Fatal(err)
+			}
 			store := &fakeSelectedContractActivationStore{originalRunID: uuid.NewString(), activation: runfork.RunForkActivation{Activated: true}}
 			binding := testSelectedContractBinding(uuid.NewString())
 			selected, original := rootedSourceCleanupFixture(t)

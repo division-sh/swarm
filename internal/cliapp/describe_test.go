@@ -777,11 +777,13 @@ func writeDescribeScalarTemplateInstanceContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
+	writeDescribeTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeDescribeTestFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeDescribeTestFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
-name: scoring
 instance: account_id
-`)
+`,
+	)
 	writeDescribeTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
 account:
   account_id: uuid
@@ -798,7 +800,8 @@ func writeDescribeRootPrimaryEntityContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
+	writeDescribeTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeDescribeTestFile(t, filepath.Join(root, "entities.yaml"), `
 workspace:
   org_id: text

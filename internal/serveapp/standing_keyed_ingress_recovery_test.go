@@ -58,7 +58,7 @@ func a9SetRawIngressCredential(t *testing.T) string {
 	if err := file.Set(t.Context(), "webhook_signing.partner", secret); err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Set(t.Context(), "webhook_signing.telegram", secret); err != nil {
+	if err := file.Set(t.Context(), "telegram.webhook_signing_secret", secret); err != nil {
 		t.Fatal(err)
 	}
 	return secret

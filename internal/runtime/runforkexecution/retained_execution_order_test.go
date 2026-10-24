@@ -244,7 +244,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			operation := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "retention-proof", IdempotencyKey: "fixed-cut",
 				TransportHash: "retention-proof-transport", SourceRunID: sourceID, ForkEventID: eventID,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection,
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 			}
 			request := SelectedContractExecutionRequest{
 				SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,

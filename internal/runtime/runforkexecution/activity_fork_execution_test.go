@@ -494,8 +494,7 @@ func selectedContractActivityDeclaredSourceWithResultConsumer(t *testing.T, serv
 		"flow_a/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":          "stages:\n  pending: {}\n",
 		"entities.yaml":        "root: {}\n",
-		"flow_a/schema.yaml": `name: flow_a
-stages:
+		"flow_a/schema.yaml": `stages:
   pending: {}
   review: {}
   closed: {final: true}
@@ -506,6 +505,7 @@ loops:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `,
+
 		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
 		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/nodes.yaml": `test-node:

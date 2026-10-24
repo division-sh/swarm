@@ -219,7 +219,8 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		SourceLoader: &fakeSelectedContractSourceLoader{loaded: loaded}, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut", TransportHash: "retained-crash-transport",
-			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}})
+			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}

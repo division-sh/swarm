@@ -21,7 +21,7 @@ func TestRunForkFreshInvocationsAtSameCutHaveIndependentChildrenBothStores(t *te
 			owner, db := fixture.store.(runForkSelectedLifecycleStore), fixture.db
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			at := time.Now().UTC().Truncate(time.Microsecond)
-			requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{
+			ctx = requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute),
 				BundleHash: authorActivityTestBundleHash,
 			})

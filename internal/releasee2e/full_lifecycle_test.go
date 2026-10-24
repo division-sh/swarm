@@ -757,7 +757,7 @@ func sendLifecycleTelegramUpdateWithSecret(t *testing.T, process *releaseServePr
 }
 
 func validateFullLifecycleIngressReceipt(receipt fullLifecycleIngressReceipt) error {
-	if receipt.Status != "accepted" || receipt.Generation <= 0 || receipt.FlowPath != "telegram-ingress" ||
+	if receipt.Status != "accepted" || receipt.Generation <= 0 || receipt.FlowPath != "." ||
 		receipt.Provider != "telegram" || receipt.ProviderEventID == "" {
 		return fmt.Errorf("lifecycle receipt lacks its exact declaration binding: %#v", receipt)
 	}

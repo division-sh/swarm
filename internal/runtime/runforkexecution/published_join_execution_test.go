@@ -135,6 +135,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 		ExecutionPosture: executionposture.MockOnly, WorkOwner: work, PipelineObligations: owner.ports.pipelineObligations,
 		ContractBundle: loaded.Source, SourceArtifactFact: loaded.SourceArtifactFact, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 		DeliveryAuthority: authority, ReceiverExecution: eventreceiver.NormalExecution(), Durable: owner.ports.busDurable,
+		PayloadAdmitter: rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +172,8 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	}
 	driver, dispatch := &publishedJoinSourceDriver{}, &publishedJoinSourceDispatch{}
 	schedules := selected.(genericschedule.Store)
-	logger := rootruntime.NewGenericScheduleRuntimeLogger(rootruntime.NewRuntimeLogger(owner.ports.logs, executionposture.MockOnly, nil))
+	logger := rootruntime.NewGenericScheduleRuntimeLogger(rootruntime.NewRuntimeLogger(owner.ports.logs, executionposture.MockOnly,
+		rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)))
 	clock, err := genericschedule.NewLifecycle(schedules, driver, eventBus, dispatch, logger, executionposture.MockOnly)
 	if err != nil {
 		t.Fatal(err)
@@ -455,7 +457,8 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-join", IdempotencyKey: "fixed-cut",
 				TransportHash: "published-join-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true,
 				Owner: owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability}})

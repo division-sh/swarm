@@ -26,7 +26,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, ".")
 				waitChannelAnchorReceipt(t, db, standingCard)
 				waitChannelDeliverySendsSettled(t, db, backend)
 				var arrived <-chan int

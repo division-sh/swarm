@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,8 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 func TestRuntimeProcessInboundHandlerTeachesUnknownStandingAlias(t *testing.T) {
@@ -64,32 +63,25 @@ func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
 }
 
 func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
-	catalog := testProviderTriggerCatalog(t)
 	makeContext := func(alias, runID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore, processIngressCredentialStore) {
-		contractsRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+		contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+		renamed := filepath.Join(filepath.Dir(contractsRoot), alias)
+		if err := os.Rename(contractsRoot, renamed); err != nil {
+			t.Fatal(err)
+		}
+		contractsRoot = renamed
+		disableChannelOnboardingBusinessConsumers(t, contractsRoot)
 		schemaPath := filepath.Join(contractsRoot, "schema.yaml")
-		snapshot, err := yamlsource.LoadFile(schemaPath)
+		schema, err := os.ReadFile(schemaPath)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var schema map[string]any
-		if err := snapshot.Decode(&schema); err != nil {
-			t.Fatal(err)
-		}
-		ingress, exists := schema["ingress"].(map[string]any)
-		if !exists {
-			t.Fatal("selected context fixture requires its declared ingress")
-		}
-		ingress["alias"] = alias
-		raw, err := yaml.Marshal(schema)
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeStandingCandidateFile(t, schemaPath, string(raw))
+		writeStandingCandidateFile(t, schemaPath, string(schema)+"\n# context: "+alias+"\n")
 		_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot)
 		if err != nil {
 			t.Fatalf("load standing fixture: %v", err)
 		}
+		rooted, catalog := registrationFixtureTriggerCatalog(t, bundle, ".")
 		source := processIngressTransportSource(t, bundle, catalog)
 		hash := bundle.SourceArtifact.BundleHash()
 		persistence := &processIngressProofStore{}
@@ -113,24 +105,26 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			}
 		})
 		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live, persistence)
-		credentialStore := processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"}
+		credentialStore := processIngressCredentialStore{"telegram.webhook_signing_secret": "telegram-secret"}
 		setTestInboundCredentialAdmission(t, gateway, credentialStore)
-		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
-		if err != nil {
-			t.Fatalf("CompileAdmission(%s): %v", alias, err)
+		declarations, err := runtimepkg.ResolveStandingTargetDeclarations(source, catalog, nil)
+		if err != nil || len(declarations) != 1 || len(declarations[0].Ingress) != 1 || declarations[0].Alias != alias {
+			t.Fatalf("standing declarations(%s): %+v err=%v", alias, declarations, err)
 		}
+		declaration := declarations[0]
+		binding := declaration.Ingress[0]
 		installed, err := catalog.InstalledCapabilitySubjects()
 		if err != nil {
 			t.Fatalf("InstalledCapabilitySubjects(%s): %v", alias, err)
 		}
 		contextDef := runtimepkg.BundleContext{
-			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash), Source: source,
+			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash), RootAdmission: rooted.Admission(), Source: source,
 			Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
-			PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
+			PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerCatalog: catalog, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			StandingTargets: []runtimepkg.StandingTarget{{
-				BundleHash: hash, ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".", Alias: alias, Provider: "telegram",
+				BundleHash: hash, ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".", Alias: alias, Provider: "telegram", SourcePath: declaration.SourcePath,
 				RunID:      runID,
-				Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+				Generation: 1, PublicationSequence: 1, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
 			}},
 		}
 		return contextDef, persistence, eventsStore, credentialStore
@@ -226,7 +220,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		t.Fatalf("selected event run_id = %q, want %q", got, contextB.StandingTargets[0].RunID)
 	}
 
-	credentialsB["webhook_signing.telegram"] = "telegram-secret-v2"
+	credentialsB["telegram.webhook_signing_secret"] = "telegram-secret-v2"
 	rotatedBody := `{"update_id":100,"message":{"message_id":8,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"rotated"}}`
 	stale := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(rotatedBody))
 	stale.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
@@ -261,7 +255,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 }
 
 func TestProcessIngressIndexRequiresSelectedScope(t *testing.T) {
-	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -304,7 +298,7 @@ func TestProcessIngressIndexRequiresSelectedScope(t *testing.T) {
 }
 
 func TestProcessIngressConstructionObservationRequiresExactOwner(t *testing.T) {
-	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -352,17 +346,6 @@ func TestProcessIngressConstructionObservationRequiresExactOwner(t *testing.T) {
 // conversation work. Full source-loaded delivery is covered by the HTTP matrix.
 func processIngressTransportSource(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, catalog *providertriggers.CatalogSnapshot) semanticview.Source {
 	t.Helper()
-	bundle.Agents = nil
-	for _, flow := range bundle.FlowTree.ByID {
-		if flow != nil {
-			flow.Agents = nil
-			flow.Nodes = nil
-			flow.Schema.Connect = nil
-		}
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
 	source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), catalog)
 	if err != nil {
 		t.Fatal(err)

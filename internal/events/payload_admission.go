@@ -224,7 +224,7 @@ func (a PayloadAdmission) Binding() PayloadSchemaBinding { return a.binding }
 func (a PayloadAdmission) Valid() bool                   { return json.Valid(a.payload) && a.binding.Validate() == nil }
 
 func joinOccurrencePayloadIdentity(producer PayloadProducer) bool {
-	return producer.IsPlatform() && producer.class == EventAdmissionRuntimeControl &&
+	return producer.IsPlatform() && (producer.class == EventAdmissionRuntimeControl || producer.class == EventAdmissionSelectedForkReplay) &&
 		producer.producer.Type() == EventProducerPlatform && producer.producer.ID() == "runtime.generic_schedule" &&
 		joinOccurrenceEventType(producer.event)
 }

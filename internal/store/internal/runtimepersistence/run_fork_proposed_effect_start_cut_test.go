@@ -24,7 +24,7 @@ func TestRunForkProposedEffectStartCutExcludesLaterCardsBothStores(t *testing.T)
 			t.Run(backend.name+"/"+offset.String(), func(t *testing.T) {
 				opened := backend.open(t)
 				f := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false,
-					map[string]string{"schema.yaml": "name: pending-effect-start-cut\nstages:\n  operating: {}\n"}, nil, ownStoreTestAgentManager, nil)
+					map[string]string{"schema.yaml": "stages:\n  operating: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}, nil, ownStoreTestAgentManager, nil)
 				target, err := contracts.BootBundleIdentity(f.bundle)
 				if err != nil {
 					t.Fatal(err)

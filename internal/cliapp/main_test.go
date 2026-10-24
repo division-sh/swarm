@@ -1282,7 +1282,8 @@ func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	chdirForTest(t, t.TempDir())
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: embedded-platform-spec\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
@@ -1338,7 +1339,10 @@ func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t 
 func testRuntimeSourceProjection(t *testing.T) *sourceartifact.RuntimeProjection {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: workspace-test\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+		t.Fatalf("write source schema: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o600); err != nil {
 		t.Fatalf("write source schema: %v", err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -3073,13 +3077,13 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		},
 		{
 			name:     "field valid options",
-			schema:   "name: invalid-schema-field\nbogus: true\n",
+			schema:   "bogus: true\n",
 			wants:    []string{"ERROR: schema field \"bogus\" is not supported.", "Valid options:", "stages", "Remediation:"},
 			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts", "terminal_states"},
 		},
 		{
 			name:   "duplicate activity after connector import",
-			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
+			schema: "imports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
 				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers:\n    z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n    a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
@@ -3089,7 +3093,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "duplicate activity on one YAML line",
-			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
+			schema: "imports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
 				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers: {z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}, a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}}\n",
@@ -3101,6 +3105,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), test.schema)
 			for name, body := range test.files {
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, name), body)
@@ -3409,11 +3414,12 @@ func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-boot-timer
-stages:
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   waiting: {}
   done: {final: true}
-`)
+`,
+	)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 ticket:
   ticket_id:
@@ -3513,12 +3519,15 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `stages:
   idle: {}
   done: {final: true}
-`)
+`,
+	)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
 case:
   business_brief:
@@ -3577,7 +3586,9 @@ Use save_entity_field for `+"`business_brief`"+`.
 func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages: []
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   execution_type: system_node
@@ -3677,14 +3688,15 @@ func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumul
 	t.Helper()
 	root := t.TempDir()
 
-	schema := `name: verify-accumulator-safety
-stages:
+	schema := `stages:
   collecting: {}
   done: {final: true}
 `
+
 	if opts.publicInput {
 		schema += "pins:\n  inputs: [item.arrived]\n"
 	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), schema)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.arrived:
@@ -3761,7 +3773,8 @@ func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: dead-event-schema\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 root.unused:
 `)

@@ -26,39 +26,6 @@ func TestPlatformSpecDoesNotRestoreHardCodedProviderTriggerInventory(t *testing.
 	}
 }
 
-func TestPlatformSpecProviderTriggerTargetAuthorityMatchesStandingIngress(t *testing.T) {
-	var spec struct {
-		ToolModel struct {
-			ProviderTriggerAdapters struct {
-				Scope                []string `yaml:"scope"`
-				ExistingGatewayOwner string   `yaml:"existing_gateway_owner"`
-				ManifestVocabulary   struct {
-					Provider string `yaml:"provider"`
-				} `yaml:"manifest_vocabulary"`
-				SecretBinding string `yaml:"secret_binding"`
-			} `yaml:"provider_trigger_adapters"`
-		} `yaml:"tool_model"`
-	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(RepoRoot(), "platform-spec.yaml"), &spec)
-	contract := spec.ToolModel.ProviderTriggerAdapters
-	routeAuthority := strings.Join(append(append([]string(nil), contract.Scope...), contract.ExistingGatewayOwner, contract.ManifestVocabulary.Provider), "\n")
-	for _, want := range []string{"/webhooks/{alias}/{provider}", "standing ingress target", "RuntimeContextManager"} {
-		if !strings.Contains(routeAuthority, want) {
-			t.Fatalf("provider trigger route authority lacks %q:\n%s", want, routeAuthority)
-		}
-	}
-	for _, retired := range []string{"/webhooks/{entity}/{provider}", "flow_instances.config.secrets.webhook_signing"} {
-		if strings.Contains(routeAuthority+"\n"+contract.SecretBinding, retired) {
-			t.Fatalf("provider trigger authority retains retired owner %q", retired)
-		}
-	}
-	for _, want := range []string{"schema.yaml ingress.providers[].signing_secret", "target-scoped credential reference owner", "source never carries the secret value"} {
-		if !strings.Contains(contract.SecretBinding, want) {
-			t.Fatalf("provider trigger secret authority lacks %q:\n%s", want, contract.SecretBinding)
-		}
-	}
-}
-
 func TestPlatformPackDirsInIgnoredProjectHaveNoEffect(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()

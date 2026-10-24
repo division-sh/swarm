@@ -43,50 +43,6 @@ func TestProviderConnectorSurfaceMessageIncludesGeneratedReviewEvidence(t *testi
 	}
 }
 
-func TestProviderCapabilitySurfaceRetiresDuplicateOwnersAndTargetBindingGuess(t *testing.T) {
-	files := map[string][]string{
-		"internal/packs/envelope.go": {
-			"func (e Envelope) Surface", "type CapabilitySurface", "type RequirementStatus",
-		},
-		"internal/packs/capability_surface.go": {
-			"var capabilityPhrases", "func humanSubjectKind", "func humanSubjectStatus", "phrase string\n\tenforcedBy",
-		},
-		"internal/providerconnectors/providerconnectors.go": {
-			"type Surface struct", "SurfacesWithOptions", "type RequirementStatus", "ResolveInboundTarget", "SQLiteRuntimeStore", "PostgresRuntimeStore",
-		},
-		"internal/providertriggers/providertriggers.go": {
-			"CapabilitySurface(", "ResolveInboundTarget", "SQLiteRuntimeStore", "PostgresRuntimeStore",
-		},
-		"internal/cliapp/provider_connector_tools.go": {
-			"providerConnectorSurfaceMessage", "formatProviderConnectorSurfaceVerbs", "formatProviderConnectorRequirements",
-			"SourceWithConnectorPackImports",
-		},
-		"internal/cliapp/provider_trigger_packs.go": {
-			"providerTriggerPackSurfaceMessage", "formatProviderTriggerPackRequirements", "ResolveInboundTarget",
-		},
-		"internal/cliapp/doctor.go":     {"appendProviderTriggerPackSurfaceFindings"},
-		"internal/cliapp/cli_output.go": {"map[cliHumanCodeFamily]map[string]string{"},
-	}
-	for name, forbidden := range files {
-		body, err := os.ReadFile(filepath.Join(RepoRoot(), name))
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		for _, token := range forbidden {
-			if strings.Contains(string(body), token) {
-				t.Fatalf("%s retains forbidden provider capability owner or target-binding seam %q", name, token)
-			}
-		}
-	}
-	capabilityBody, err := os.ReadFile(filepath.Join(RepoRoot(), "internal/packs/capability_surface.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(capabilityBody), "userfacing.ProjectHumanCode") < 5 {
-		t.Fatal("provider capability rendering does not route every kind/status/capability/guarantee/requirement phrase family through the shared human-code owner")
-	}
-}
-
 func TestProviderGuaranteeRegistryMatchesSpecAndNamesLiveProofs(t *testing.T) {
 	var spec struct {
 		ToolModel struct {

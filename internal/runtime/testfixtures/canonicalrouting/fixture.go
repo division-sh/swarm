@@ -106,7 +106,10 @@ func ExampleRoot(t testing.TB, id ArtifactID) string {
 // CopyExample materializes a canonical example for a focused overlay or negative mutation.
 func CopyExample(t testing.TB, id ArtifactID) string {
 	t.Helper()
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), string(id))
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if root, ok := canonicalExamplePath(id); ok && root == telegramAgentExamplePath {
 		// Consume release bytes so ignored runtime state cannot enter test fixtures.
 		copyFS(t, swarmassets.EmbeddedTelegramAgentExample(), ".", target)

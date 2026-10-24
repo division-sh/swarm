@@ -26,7 +26,7 @@ func CopyMailboxCompletionMatrix(t testing.TB) string {
 	t.Helper()
 	root := CopyGateCompletionDiagnostic(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "        reject:\n", "        reject:\n          input:\n            reason: {type: text, required: true}\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "stages:\n", "imports:\n  connector_packs:\n    - provider: telegram\n      tool: telegram.send_message\nstages:\n")
+	copyTree(t, filepath.Join(RepoRoot(t), "packs/providers/telegram"), filepath.Join(root, "telegram"))
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - work.requested\n", "    - work.requested\n    - effect.requested\n    - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n")
 	nodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
 	if err != nil {

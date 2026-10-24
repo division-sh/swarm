@@ -90,7 +90,7 @@ func runStandingOrphanRestorationPublic(t *testing.T, binary, lifecycle, root st
 	// Cold declaration removal must remove its dependent producer/consumer
 	// graph as well. Keep the authored bytes outside the admitted source root
 	// for exact restoration; never fake a raw-provider consumer or input source.
-	for _, flow := range []string{"telegram-ingress", "telegram-chat"} {
+	for _, flow := range []string{".", "telegram-chat"} {
 		if err := os.Rename(filepath.Join(spec.WorkingDir, spec.Source, flow), filepath.Join(root, "removed-"+flow)); err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +122,7 @@ func runStandingOrphanRestorationPublic(t *testing.T, binary, lifecycle, root st
 		t.Fatalf("orphan stop: %v\n%s", err, p.output.String())
 	}
 	writeReleaseFile(t, schemaPath, string(original))
-	for _, flow := range []string{"telegram-ingress", "telegram-chat"} {
+	for _, flow := range []string{".", "telegram-chat"} {
 		if err := os.Rename(filepath.Join(root, "removed-"+flow), filepath.Join(spec.WorkingDir, spec.Source, flow)); err != nil {
 			t.Fatal(err)
 		}

@@ -102,7 +102,7 @@ func proveA9AliasChannelRegistration(t *testing.T, backend servedparity.Backend,
 		alias = "registered-override"
 	}
 	a9RewriteAliasSchema(t, filepath.Join(h.opts.SourceRoot, "schema.yaml"), "shop", "")
-	a9RewriteAliasSchema(t, filepath.Join(h.opts.SourceRoot, "telegram-ingress", "schema.yaml"), "", map[bool]string{false: "", true: alias}[override])
+	a9RewriteAliasSchema(t, filepath.Join(h.opts.SourceRoot, ".", "schema.yaml"), "", map[bool]string{false: "", true: alias}[override])
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	begun := startChannelOnboardingRPC(t, h, channelonboarding.VerbConnect, "rooted-registration-token", nil)

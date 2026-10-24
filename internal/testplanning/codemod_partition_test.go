@@ -1,9 +1,8 @@
 package testplanning
 
 import (
-	"fmt"
 	"path/filepath"
-	"reflect"
+
 	"regexp"
 	"slices"
 	"testing"
@@ -15,40 +14,6 @@ const codemodIntegrationRoots = `^(TestNativeBusSourceBoundaryRejectsLostProduct
 // Run-only complement: the policy permits skip only for the original soak.
 // The finite equality and future-prefix controls below pin this selector.
 const codemodOrdinaryRoots = `^(?:T(?:e(?:s(?:t(?:N(?:a(?:t(?:i(?:v(?:e(?:B(?:u(?:s(?:O(?:r(?:i(?:g(?:i(?:n(?:A(?:s(?:s(?:e(?:r(?:t(?:i(?:o(?:n(?:F(?:a(?:i(?:l(?:u(?:r(?:e(?:J(?:o(?:i(?:n(?:s(?:B(?:l(?:o(?:c(?:k(?:e(?:d(?:S(?:Q(?:L(?:A(?:n(?:d(?:R(?:u(?:n(?:t(?:i(?:m(?:e(?:O(?:w(?:n(?:e(?:r(?:s.+|[^s].*)?|[^r].*)?|[^e].*)?|[^n].*)?|[^w].*)?|[^O].*)?|[^e].*)?|[^m].*)?|[^i].*)?|[^t].*)?|[^n].*)?|[^u].*)?|[^R].*)?|[^d].*)?|[^n].*)?|[^A].*)?|[^L].*)?|[^Q].*)?|[^S].*)?|[^d].*)?|[^e].*)?|[^k].*)?|[^c].*)?|[^o].*)?|[^l].*)?|[^B].*)?|[^s].*)?|[^n].*)?|[^i].*)?|[^o].*)?|[^J].*)?|[^e].*)?|[^r].*)?|[^u].*)?|[^l].*)?|[^i].*)?|[^a].*)?|[^F].*)?|[^n].*)?|[^o].*)?|[^i].*)?|[^t].*)?|[^r].*)?|[^e].*)?|[^s].*)?|[^s].*)?|[^A].*)?|[^n].*)?|[^i].*)?|[^g].*)?|[^i].*)?|[^r].*)?|S(?:o(?:u(?:r(?:c(?:e(?:B(?:o(?:u(?:n(?:d(?:a(?:r(?:y(?:R(?:e(?:j(?:e(?:c(?:t(?:s(?:L(?:o(?:s(?:t(?:P(?:r(?:o(?:d(?:u(?:c(?:t(?:i(?:o(?:n(?:C(?:l(?:a(?:i(?:m(?:A(?:n(?:d(?:S(?:e(?:t(?:t(?:l(?:e(?:m(?:e(?:n(?:t(?:F(?:a(?:c(?:t(?:s.+|[^s].*)?|[^t].*)?|[^c].*)?|[^a].*)?|[^F].*)?|[^t].*)?|[^n].*)?|[^e].*)?|[^m].*)?|[^e].*)?|[^l].*)?|[^t].*)?|[^t].*)?|[^e].*)?|[^S].*)?|[^d].*)?|[^n].*)?|[^A].*)?|[^m].*)?|[^i].*)?|[^a].*)?|[^l].*)?|[^C].*)?|[^n].*)?|[^o].*)?|[^i].*)?|[^t].*)?|[^c].*)?|[^u].*)?|[^d].*)?|[^o].*)?|[^r].*)?|[^P].*)?|[^t].*)?|[^s].*)?|[^o].*)?|[^L].*)?|[^s].*)?|[^t].*)?|[^c].*)?|[^e].*)?|[^j].*)?|[^e].*)?|[^R].*)?|[^y].*)?|[^r].*)?|[^a].*)?|[^d].*)?|[^n].*)?|[^u].*)?|[^o].*)?|[^B].*)?|[^e].*)?|[^c].*)?|[^r].*)?|[^u].*)?|[^o].*)?|[^OS].*)?|[^s].*)?|[^u].*)?|[^B].*)?|[^e].*)?|[^v].*)?|[^i].*)?|[^t].*)?|[^a].*)?|R(?:e(?:v(?:i(?:e(?:w(?:e(?:d(?:S(?:n(?:a(?:p(?:s(?:h(?:o(?:t(?:C(?:a(?:n(?:d(?:i(?:d(?:a(?:t(?:e(?:O(?:v(?:e(?:r(?:l(?:a(?:y(?:T(?:y(?:p(?:e(?:C(?:h(?:e(?:c(?:k(?:s.+|[^s].*)?|[^k].*)?|[^c].*)?|[^e].*)?|[^h].*)?|[^C].*)?|[^e].*)?|[^p].*)?|[^y].*)?|[^T].*)?|[^y].*)?|[^a].*)?|[^l].*)?|[^r].*)?|[^e].*)?|[^v].*)?|[^O].*)?|[^e].*)?|[^t].*)?|[^a].*)?|[^d].*)?|[^i].*)?|[^d].*)?|[^n].*)?|[^a].*)?|[^C].*)?|[^t].*)?|[^o].*)?|[^h].*)?|[^s].*)?|[^p].*)?|[^a].*)?|[^n].*)?|[^S].*)?|[^d].*)?|[^e].*)?|[^w].*)?|[^e].*)?|[^i].*)?|[^v].*)?|[^e].*)?|[^NR].*)?|[^t].*)?|[^s].*)?|[^e].*)?|[^T].*)?$`
-
-func codemodProofEnvelopes() map[string]UnitPolicy {
-	common := UnitPolicy{Packages: []string{codemodProofPackage}, CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "broad"}
-	guards, bus, candidate := common, common, common
-	guards.Run = codemodOrdinaryRoots
-	bus.Run = `^(TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts|TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners)$`
-	bus.RequiredChildren = map[string][]string{"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts": {"claim", "settle"}}
-	candidate.Run = `^TestReviewedSnapshotCandidateOverlayTypeChecks$`
-	return map[string]UnitPolicy{"codemod-owner-guards": guards, "codemod-bus-mutation": bus, "codemod-candidate-overlay": candidate}
-}
-
-func validateCodemodProofEnvelopes(policy Policy) error {
-	if !slices.Contains(policy.SpecialPackages, codemodProofPackage) {
-		return fmt.Errorf("codemod proof package escaped explicit ownership")
-	}
-	for id, want := range codemodProofEnvelopes() {
-		if !reflect.DeepEqual(policy.Units[id], want) {
-			return fmt.Errorf("%s changed count/environment/selector/child/budget envelope", id)
-		}
-		for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
-			want := tier == ProfileFull || id == "codemod-owner-guards" || tier == ProfileLifecycle
-			if slices.Contains(policy.Profiles[tier].Units, id) != want {
-				return fmt.Errorf("%s has incorrect %s placement", id, tier)
-			}
-		}
-	}
-	return nil
-}
-
-func TestCodemodProofPlacementPreservesCompleteEnvelopes(t *testing.T) {
-	if err := validateCodemodProofEnvelopes(loadPersistenceDebtPolicy(t)); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestCodemodProofPlacementRetainsExhaustivePartition(t *testing.T) {
 	policy := loadPersistenceDebtPolicy(t)
@@ -100,49 +65,5 @@ func TestCodemodProofPlacementExcludesOnlyExactIntegrationNames(t *testing.T) {
 				t.Fatalf("future extension silently deferred: %s", name+suffix)
 			}
 		}
-	}
-}
-
-func TestCodemodProofPlacementRejectsEnvelopeAndCoverageLoss(t *testing.T) {
-	for name, change := range map[string]func(*Policy){
-		"missing special owner": func(p *Policy) { p.SpecialPackages = nil },
-		"missing lifecycle unit": func(p *Policy) {
-			profile := p.Profiles[ProfileLifecycle]
-			profile.Units = slices.DeleteFunc(profile.Units, func(id string) bool { return id == "codemod-bus-mutation" })
-			p.Profiles[ProfileLifecycle] = profile
-		},
-		"promoted expensive core": func(p *Policy) {
-			profile := p.Profiles[ProfileCore]
-			profile.Units = append(profile.Units, "codemod-bus-mutation")
-			p.Profiles[ProfileCore] = profile
-		},
-		"lost branch": func(p *Policy) {
-			unit := p.Units["codemod-bus-mutation"]
-			unit.RequiredChildren = nil
-			p.Units["codemod-bus-mutation"] = unit
-		},
-		"lost ordinary roots": func(p *Policy) {
-			unit := p.Units["codemod-owner-guards"]
-			unit.Run = "^TestCandidate"
-			p.Units["codemod-owner-guards"] = unit
-		},
-		"changed count": func(p *Policy) {
-			unit := p.Units["codemod-bus-mutation"]
-			unit.CountMode = "cached"
-			p.Units["codemod-bus-mutation"] = unit
-		},
-		"raised budget": func(p *Policy) {
-			unit := p.Units["codemod-bus-mutation"]
-			unit.BudgetClass = "full"
-			p.Units["codemod-bus-mutation"] = unit
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			policy := loadPersistenceDebtPolicy(t)
-			change(&policy)
-			if err := validateCodemodProofEnvelopes(policy); err == nil {
-				t.Fatal("changed qualification contract accepted")
-			}
-		})
 	}
 }

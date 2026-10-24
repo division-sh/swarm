@@ -276,22 +276,22 @@ func rootInputSourceViews(source semanticview.Source) ([]RootInputSource, error)
 			return out, err
 		}
 		for _, definition := range consumed {
-			entry, _ := catalog.EntryByProvider(definition.Provider().Key())
+			entry, present := catalog.EntryByProvider(definition.Provider().Key())
+			if !present {
+				return out, fmt.Errorf("flow %q consumed provider %q is absent from its scoped catalog", flowPath, definition.Provider().Key())
+			}
 			secret := ""
 			if required := providertriggers.DerivedRequires(entry.Manifest).Secrets; len(required) > 0 {
 				secret = required[0]
 			}
-			plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: definition.Provider().Key(), SigningSecret: secret})
+			auth, err := entry.Manifest.RequestAuthentication()
 			if err != nil {
 				return out, err
 			}
 			item := RootInputSource{
 				Kind: RootInputSourceStandingIngress, Alias: alias, Provider: definition.Provider().Key(), SigningSecret: secret,
 				Target: RootInputTarget{FlowPath: flowPath}, AuthoredLocation: entry.SourcePath,
-				Admission: RootInputAdmission{Kind: string(providertriggers.AdmissionKindPack), DeclaredAuthentication: string(plan.RequestAuthentication())},
-			}
-			if identity, present := plan.PackIdentity(); present {
-				item.Admission.PackID = identity.ID
+				Admission: RootInputAdmission{Kind: string(providertriggers.AdmissionKindPack), DeclaredAuthentication: string(auth), PackID: entry.Identity.ID},
 			}
 			item.ID = rootInputSourceID(item)
 			out = append(out, item)

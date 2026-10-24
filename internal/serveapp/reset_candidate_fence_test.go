@@ -171,7 +171,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 						}
 					}
 				})
-				credentials := processIngressCredentialStore{"telegram_bot_token": "reset-test-token", "webhook_signing.telegram": "reset-test-secret"}
+				credentials := processIngressCredentialStore{"telegram.telegram_bot_token": "reset-test-token", "telegram.webhook_signing_secret": "reset-test-secret"}
 				probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 				binding, err := createServeToolGatewayBinding(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8081})
 				if err != nil {

@@ -186,7 +186,8 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			selection := runforkadmission.SelectedContractSelection(target.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-template-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-template-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: target.RootedSource.Admission().Reference(),
+			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
 				SourceLoader: loader, ContractSelection: selection,

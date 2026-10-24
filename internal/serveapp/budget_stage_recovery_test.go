@@ -232,9 +232,9 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 func stageRecoveryArtifact(t *testing.T, stages string) *sourceartifact.AdmittedSourceArtifact {
 	t.Helper()
 	root := t.TempDir()
-	childSchema := "name: child\nstages:\n  " + stages + "\n"
+	childSchema := "# fixture: child\nstages:\n  " + stages + "\n"
 	if stages == "[]" {
-		childSchema = "name: child\nstages: []\n"
+		childSchema = "stages: []\n"
 	}
 	for path, contents := range map[string]string{
 		"schema.yaml":       "stages: []\n",

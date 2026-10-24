@@ -376,7 +376,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := credentials.Set(context.Background(), "telegram_bot_token", token); err != nil {
+	if err := credentials.Set(context.Background(), "telegram.telegram_bot_token", token); err != nil {
 		t.Fatal(err)
 	}
 	h.start(t)

@@ -87,7 +87,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 }
 
 func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *testing.T) {
-	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), ".")
 	copyRegistrationFixtureTelegram(t, sourceRoot)
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
@@ -482,7 +482,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 }
 
 func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T) {
-	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), ".")
 	copyRegistrationFixtureTelegram(t, sourceRoot)
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
@@ -619,7 +619,7 @@ func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
 		map[string]string{"telegram.telegram_bot_token": "bot", "telegram.webhook_signing_secret": "signing"},
-		"ingress:telegram-ingress:telegram",
+		"ingress:.:telegram",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -654,18 +654,18 @@ func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
 func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T) {
 	ctx := context.Background()
 	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	for _, flow := range []string{".", "telegram-ingress", "telegram-chat"} {
+	for _, flow := range []string{".", ".", "telegram-chat"} {
 		copyRegistrationFixtureTelegram(t, filepath.Join(sourceRoot, flow))
 	}
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rooted, catalog := registrationFixtureTriggerCatalog(t, bundle, "telegram-ingress")
+	rooted, catalog := registrationFixtureTriggerCatalog(t, bundle, ".")
 	source := processIngressTransportSource(t, bundle, catalog)
 	plan := loadSupportedTelegramChannelPlan(t)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration("telegram", plan, "42", nil,
-		map[string]string{"telegram.telegram_bot_token": "bot", "telegram.webhook_signing_secret": "webhook_signing.telegram"}, "ingress:telegram-ingress:telegram")
+		map[string]string{"telegram.telegram_bot_token": "bot", "telegram.webhook_signing_secret": "webhook_signing.telegram"}, "ingress:.:telegram")
 	if err != nil {
 		t.Fatal(err)
 	}

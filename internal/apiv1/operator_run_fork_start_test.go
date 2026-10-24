@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestRunForkStartParamsRequireExplicitExclusiveBoolean(t *testing.T) {
@@ -116,9 +117,10 @@ func TestSelectedForkRunStartSelectorAndPermanentPoint(t *testing.T) {
 
 func TestOperatorRunForkStartReadbackAndMaterializedRetry(t *testing.T) {
 	operations := newRecordingRunForkOperations()
+	selectedTarget, _ := sourceartifactfixture.Rooted(t, "review", runForkTestArtifact)
 	result := runForkActivatedTestResult()
 	result.ForkPointKind, result.ForkRevision, result.ForkEventID = string(runfork.RunForkPointRunStart), 7, ""
-	executor := &recordingRunForkExecutor{operations: operations, result: result}
+	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: result}
 	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
 		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}

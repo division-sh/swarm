@@ -94,8 +94,8 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			owner.ports.busDurable.RunLifecycle = nestedDeadlineServingContext{OperationOwner: owner.ports.busDurable.RunLifecycle, sourceRun: runID, contexts: contexts}
 			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-				Instance: flowidentity.Stored(loaded.Source, ".", runID, runID, "", ""), OccurredAt: at})
+			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
+				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", runID, runID, "", ""), OccurredAt: at})
 			if err != nil || !created {
 				t.Fatalf("construct pending reply source: created=%t error=%v", created, err)
 			}
@@ -158,7 +158,8 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 				ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-reply-proof", IdempotencyKey: uuid.NewString(),
 					TransportHash: "pending-reply-proof", SourceRunID: staged.ForkRunID, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-					AllowSourceFreeze: true, ContractSelection: selection}})
+					AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+				}})
 			if err != nil || !result.Activation.Activated {
 				t.Fatalf("activate pending effect child: %+v error=%v", result, err)
 			}

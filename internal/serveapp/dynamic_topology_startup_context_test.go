@@ -172,7 +172,14 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 			var coordinates []runtimeagenttopology.SourceCoordinate
 			var desired []runtimeagenttopology.DesiredAgent
 			for index, rt := range runtimes {
-				coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: facts[index].BundleHash()}
+				rooted, err := loaded[index].bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
 				agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(loaded[index].source, coordinate)
 				if err != nil {
 					t.Fatal(err)

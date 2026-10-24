@@ -491,8 +491,8 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at})
 	rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
 	ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-	created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-		Instance: flowidentity.Stored(loaded.Source, ".", sourceRun, sourceRun, "", ""), OccurredAt: at})
+	created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
+		Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", sourceRun, sourceRun, "", ""), OccurredAt: at})
 	if err != nil || !created {
 		t.Fatalf("construct pending recovery source: created=%t error=%v", created, err)
 	}
@@ -541,7 +541,8 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-reply-crash", IdempotencyKey: "before-journal",
 			TransportHash: "pending-reply-crash-transport", SourceRunID: staged.ForkRunID, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-			AllowSourceFreeze: true, ContractSelection: selection}})
+			AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		}})
 	if err != nil || !result.Activation.Activated || !result.Activation.SourceFrozen {
 		t.Fatalf("pending crash child did not activate/freeze its immediate source: %+v error=%v", result, err)
 	}

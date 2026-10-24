@@ -869,7 +869,19 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 		PersistenceRoles:   conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend)
 	ctx := runtimecorrelation.WithRuntimeInstanceID(baseCtx, authorActivityTestRuntimeInstanceID)
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("fan-in source requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)

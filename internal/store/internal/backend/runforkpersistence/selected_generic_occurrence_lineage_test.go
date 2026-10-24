@@ -49,14 +49,14 @@ func selectedGenericPublicationFixture(t *testing.T, root, completion bool) (gen
 		Envelope:      events.EventEnvelope{EntityID: activation.Command.EntityID, FlowInstance: activation.Command.FlowInstance},
 		RoutingSource: activation.Command.RoutingSource, CreatedAt: activation.CurrentDueAt, ExecutionMode: activation.Command.ExecutionMode,
 	})
-	flowID := activation.Command.RoutingSource.Route().FlowID
-	if flowID == "" {
-		flowID = "."
+	digest, err := events.JoinOccurrencePayloadDigest(event)
+	if err != nil {
+		t.Fatal(err)
 	}
-	schema, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowID: flowID, EventKey: activation.Command.EventType,
-		SchemaDigest: "sha256:" + strings.Repeat("b", 64), SchemaClass: events.PayloadSchemaPlatform,
-	})
+	schema, err := events.NewPlatformPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), EventKey: activation.Command.EventType,
+		SchemaDigest: digest, SchemaClass: events.PayloadSchemaPlatform,
+	}, events.EventPayloadProducer(event, ""), events.JoinOccurrencePayloadReference)
 	if err != nil {
 		t.Fatal(err)
 	}

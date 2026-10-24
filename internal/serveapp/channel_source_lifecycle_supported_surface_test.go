@@ -34,7 +34,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, ".")
 				waitChannelAnchorReceipt(t, db, standingCard)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
@@ -169,7 +169,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						restore := installChannelOnboardingCLIInput(t, "source-reset-signing-secret\n")
 						t.Cleanup(restore)
 						code := executeCLI(context.Background(), []string{
-							"--config", h.opts.ConfigPath, "secrets", "set", "webhook_signing.telegram", "--stdin",
+							"--config", h.opts.ConfigPath, "secrets", "set", "telegram.webhook_signing_secret", "--stdin",
 						}, stdout, stderr, nil)
 						restore()
 						if code != 0 {
@@ -181,7 +181,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&successorRun); err != nil {
 							t.Fatal(err)
 						}
-						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, ".")
 						if freshCard == standingCard {
 							t.Fatal("retained reset reused predecessor standing card")
 						}

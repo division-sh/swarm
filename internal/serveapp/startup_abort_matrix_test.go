@@ -113,7 +113,7 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 			}
 		}
 	})
-	credentials := processIngressCredentialStore{"telegram_bot_token": "abort-test-token", "webhook_signing.telegram": "abort-test-secret"}
+	credentials := processIngressCredentialStore{"telegram.telegram_bot_token": "abort-test-token", "telegram.webhook_signing_secret": "abort-test-secret"}
 	roots := []string{
 		writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"),
 		writeServedEventPublishFollowUpFixture(t),

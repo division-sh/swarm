@@ -41,10 +41,10 @@ func TestSelectedFixtureCloseRequiresCurrentRetainedOccurrence(t *testing.T) {
 	for _, phase := range []string{"current_join", "missing_binding", "wrong_run", "unavailable", "retired", "unreconciled", "ambiguous", "retiring", "closed", "stale_binding", "unready", "ordinary_occurrence", "stale_generation", "canceled", "retirement_race", "native_fence"} {
 		t.Run(phase, func(t *testing.T) {
 			runID, executionID := uuid.NewString(), uuid.NewString()
-			binding := testSelectedContractBinding(runID)
+			binding, loaded := rootedDirectAdmissionFixture(t, runID)
 			binding.BindingID = uuid.NewString()
 			fingerprint := "sha256:" + strings.Repeat("a", 64)
-			admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, executionID, 1, runID, fingerprint, runForkTestBundleHash, nil)
+			admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, executionID, 1, runID, fingerprint, loaded.SourceArtifactFact.BundleHash(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,7 +69,7 @@ func TestSelectedFixtureCloseRequiresCurrentRetainedOccurrence(t *testing.T) {
 			fence := errors.New("native selected generation fenced")
 			grant := &fixtureCloseGrantProbe{refusal: fence, evidence: startupownership.GrantEvidence{
 				GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "fixture-process", ProcessBootID: uuid.NewString(),
-				BundleHash: runForkTestBundleHash, RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1, StateVersion: 3, State: startupownership.GrantAdmitted,
+				BundleHash: loaded.SourceArtifactFact.BundleHash(), RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1, StateVersion: 3, State: startupownership.GrantAdmitted,
 				SelectedFork: &startupownership.SelectedForkGrantBinding{BindingID: binding.BindingID, ForkRunID: runID,
 					ExecutionID: executionID, ExecutionGeneration: 1, FenceGeneration: 3, ExecutionOwner: authority.ExecutionOwner,
 					AdmissionFingerprint: fingerprint, ContainerPlanFingerprint: fingerprint, ActorCensusFingerprint: fingerprint,

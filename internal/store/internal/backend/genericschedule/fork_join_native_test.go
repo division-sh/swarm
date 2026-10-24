@@ -68,6 +68,7 @@ type forkJoinNativeFixture struct {
 	}
 	artifact interface {
 		EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+		EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
 	}
 }
 
@@ -238,11 +239,13 @@ func forkJoinNativeRunContext(t *testing.T, f *forkJoinNativeFixture, runID stri
 	fact := sourceartifactfixture.Fact()
 	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
-	if _, err := f.artifact.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	if _, err := f.artifact.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
 	disposition, err := f.lifecycle.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: fact,
+		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: fact, RootAdmission: rooted.Admission(),
 		StartedAt: runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-2 * time.Hour)),
 	})
 	if err != nil || disposition != runtimerunlifecycle.MutationApplied {

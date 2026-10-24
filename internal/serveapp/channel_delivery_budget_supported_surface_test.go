@@ -58,7 +58,7 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for key, value := range map[string]string{"telegram_bot_token": "budget-token", "ANTHROPIC_API_KEY": "anthropic-key"} {
+			for key, value := range map[string]string{"telegram.telegram_bot_token": "budget-token", "ANTHROPIC_API_KEY": "anthropic-key"} {
 				if err := credentials.Set(context.Background(), key, value); err != nil {
 					t.Fatal(err)
 				}
