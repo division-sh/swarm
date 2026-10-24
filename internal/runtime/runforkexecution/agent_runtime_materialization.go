@@ -719,12 +719,12 @@ func (r *selectedContractAgentRuntime) startExecution(ctx context.Context, pipel
 		if err := r.manager.AdoptSelectedFlowActivation(ctx, activation.identity, activation.attempt, activation.timersProjected); err != nil {
 			return err
 		}
+		r.pendingActivations = r.pendingActivations[1:]
 		if recoverTopology {
 			if err := r.manager.PrepareAdmittedDynamicFlowInstanceForStart(topologyCtx, activation.identity); err != nil {
 				return fmt.Errorf("restore selected flow agents %s: %w", activation.identity.Route.InstancePath, err)
 			}
 		}
-		r.pendingActivations = r.pendingActivations[1:]
 	}
 	if err := r.manager.RunAuthoritativeDeliveryOnly(ctx); err != nil {
 		return err
