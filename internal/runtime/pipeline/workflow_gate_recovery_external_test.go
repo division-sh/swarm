@@ -454,8 +454,7 @@ func testApprovedActivityFrozenInputBothStores(t *testing.T, method, terminalOut
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "drafting", StageDefined: true,
 					Mode:           bundle.RootSchema.EffectiveMode(),
 					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-					Fields:     map[string]any{},
-					EntityType: "state",
+					Fields: map[string]any{},
 				}, construction430At)
 				if err != nil {
 					t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -913,8 +912,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "drafting", StageDefined: true,
 					Mode:           bundle.RootSchema.EffectiveMode(),
 					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-					Fields:     map[string]any{},
-					EntityType: "state",
+					Fields: map[string]any{},
 				}, construction852At)
 				if err != nil {
 					t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1202,8 +1200,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), StageDefined: true,
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", EnteredStageAt: at,
-			Fields:     map[string]any{},
-			EntityType: "state",
+			Fields: map[string]any{},
 		}, construction1118At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1346,8 +1343,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", StageDefined: true, EnteredStageAt: enteredAt,
-			Fields:     map[string]any{},
-			EntityType: "state",
+			Fields: map[string]any{},
 		}, construction1236At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1467,8 +1463,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), StageDefined: true,
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
-			Fields:     map[string]any{},
-			EntityType: "state",
+			Fields: map[string]any{},
 		}, construction1336At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)

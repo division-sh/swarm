@@ -985,6 +985,19 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		current == debtR18FixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil
 	}
+	// Composes the R18 fixture repins above with B's landed-inert correction
+	// delivered by #2806/#2808. LEAD authorization 2026-10-25 (via orchestrator):
+	// 1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646 ->
+	// b5c7d8e4376463cc95cdac0c6e8ae26e4457434645d7921be154751dcb4aff0a.
+	// Both prior authorizations remain: #2727/6388897450 for the landed-inert
+	// correction and LEAD 2026-10-24 ~21:40Z for the two fixture repins, confirmed
+	// by reviewer-d at #2293/6389824000 and 6389945653. The pre-registration
+	// aec7535b4fe81046b1b4bd9e398f152743438bc860dc1fb577d14434fa2614b0
+	// is not sealed. Baseline byte-identical; no allowance, debt credit or dual seal.
+	if base == debtSelectedFixtureLandedCollectorTo && trusted.Collector == base &&
+		current == debtR18FixtureComposedCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil
+	}
 	if base == debtDeploymentRegistrationCollectorFrom && trusted.Collector == base &&
 		current == debtDeploymentRegistrationCollectorTo && head.Collector == current &&
 		authorityDebtCount(head.Sites) == authorityDebtCount(trusted.Sites)+2 &&

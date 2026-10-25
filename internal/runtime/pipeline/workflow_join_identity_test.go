@@ -423,7 +423,7 @@ func VerifyNativeSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothSt
 			t.Run(storeCase.name+"/"+order.name, func(t *testing.T) {
 				files := workflowJoinLifecycleFixtureFiles(false, "")
 				const expectedField = "expected: [text]\n"
-				for _, name := range []string{"orders/state.yaml"} {
+				for _, name := range []string{"state.yaml", "orders/state.yaml"} {
 					if strings.Count(files[name], expectedField) != 1 {
 						t.Fatalf("%s requires its exact expected-member declaration", name)
 					}
