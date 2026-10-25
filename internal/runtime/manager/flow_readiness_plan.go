@@ -87,21 +87,28 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 	if observedAt.IsZero() {
 		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact occurrence time")
 	}
-	items, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, admittedSource.fact)
-	if err != nil {
-		return err
-	}
-	requests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, len(items))
-	plansByKey := make(map[runtimepipeline.DynamicFlowRuntimeReadinessKey]runtimepipeline.DynamicFlowRuntimeReadinessPlan, len(items))
-	for _, item := range items {
-		expected, err := am.deriveCurrentDynamicFlowRuntimeReadinessPlan(ctx, item, admittedSource)
+	var plansByKey map[runtimepipeline.DynamicFlowRuntimeReadinessKey]runtimepipeline.DynamicFlowRuntimeReadinessPlan
+	// Attachment admission changes the observed attempt. Keep plan reconciliation
+	// under its existing exclusion, then release before attaching revised plans.
+	results, err := func() ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+		am.dynamicFlowAttachmentMu.Lock()
+		defer am.dynamicFlowAttachmentMu.Unlock()
+		items, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, admittedSource.fact)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		requests = append(requests, runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{Observed: item, Expected: expected})
-		plansByKey[runtimepipeline.DynamicFlowRuntimeReadinessKey{RunID: expected.RunID, InstancePath: expected.Identity.InstancePath}] = expected
-	}
-	results, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, observedAt)
+		requests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, len(items))
+		plansByKey = make(map[runtimepipeline.DynamicFlowRuntimeReadinessKey]runtimepipeline.DynamicFlowRuntimeReadinessPlan, len(items))
+		for _, item := range items {
+			expected, err := am.deriveCurrentDynamicFlowRuntimeReadinessPlan(ctx, item, admittedSource)
+			if err != nil {
+				return nil, err
+			}
+			requests = append(requests, runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{Observed: item, Expected: expected})
+			plansByKey[runtimepipeline.DynamicFlowRuntimeReadinessKey{RunID: expected.RunID, InstancePath: expected.Identity.InstancePath}] = expected
+		}
+		return am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, observedAt)
+	}()
 	if err != nil {
 		return fmt.Errorf("reconcile dynamic flow runtime readiness plan set: %w", err)
 	}

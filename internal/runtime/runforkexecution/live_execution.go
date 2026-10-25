@@ -244,11 +244,22 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 			return out, err
 		}
 		if found {
-			_, release, err := req.LiveRuntime.ParkLiveRun(ctx, live)
+			use, err := acquireLivePredecessor(p.operation.Context(), req.LiveContexts, live)
 			if err != nil {
 				return out, err
 			}
-			defer release()
+			parked, parkCtx := use.Runtime(), use.WorkContext()
+			_, release, err := parked.ParkLiveRun(parkCtx, live)
+			if err != nil {
+				return out, errors.Join(err, use.Done())
+			}
+			defer func() {
+				release()
+				if !out.Activation.Activated {
+					finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
+				}
+				finalErr = errors.Join(finalErr, use.Done())
+			}()
 		}
 	}
 	activation, err := c.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
