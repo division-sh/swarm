@@ -100,7 +100,7 @@ func TestSelectedOperationSuccessorReturnsRecoveredWinnerBothStores(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			request.LiveRuntime, request.LiveContexts = liveForkRuntimeFixture(t, ctx, selected, successor, loaded, request.SourceRunID)
+			request.LiveRuntime, request.LiveContexts = liveForkRuntimeFixture(t, ctx, selected, successor, loaded, request.SourceRunID, executionposture.MockOnly)
 			acquire := func(ctx context.Context, bundleHash string) (*runtimepkg.RuntimeContextUse, error) {
 				use, _, err := request.LiveContexts.AcquireBundleHash(ctx, bundleHash)
 				return use, err

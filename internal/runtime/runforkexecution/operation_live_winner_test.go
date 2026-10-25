@@ -123,7 +123,7 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 				LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
 				Artifact:  selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
 			})
-			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceID)
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceID, executionposture.MockOnly)
 			event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0,
 				sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
@@ -357,7 +357,7 @@ func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRo
 		LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
 		Artifact:  selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
 	})
-	liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceID)
+	liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceID, executionposture.MockOnly)
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, events.EventType(eventName), "source-runtime", "", []byte(`{}`), 0,
 		sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,

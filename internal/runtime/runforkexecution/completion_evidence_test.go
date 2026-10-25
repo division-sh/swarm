@@ -136,7 +136,7 @@ func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
 					t.Fatalf("source flow construction: %+v, %v", committed, err)
 				}
 				storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
-				result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+				result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 					SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime: SelectedContractAgentRuntimeOptions{Config: selectedForkAPIProviderConfig(protocol.backend, "request-A", provider.URL), ProviderCredentials: credentialStore,
