@@ -3,7 +3,6 @@ package runforkexecution
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
@@ -338,29 +337,4 @@ func q1ComponentRowsWithIdentity(t *testing.T, snapshot map[string]storetest.Sel
 		}
 	}
 	return matched
-}
-
-func q1ComponentBranchPoint(t *testing.T, snapshot map[string]storetest.SelectedForkStorageTableSnapshot, child string) runfork.RunForkPoint {
-	t.Helper()
-	rows := q1ComponentBranchRows(t, snapshot, child)
-	if len(rows) != 1 {
-		t.Fatalf("branch rows=%d, want exactly one", len(rows))
-	}
-	row := rows[0]
-	kind, err := row["fork_point_kind"].Text()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var revision int64
-	if err := json.Unmarshal(row["fork_revision"].Value, &revision); err != nil {
-		t.Fatal(err)
-	}
-	event, err := row["fork_event_id"].Text()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if (string(row["fork_event_id"].Value) != "null") != (runfork.RunForkPointKind(kind) == runfork.RunForkPointEvent) {
-		t.Fatal("stored event nullability differs from typed point kind")
-	}
-	return runfork.RunForkPoint{Kind: runfork.RunForkPointKind(kind), Revision: revision, EventID: event}
 }
