@@ -85,6 +85,7 @@ WHERE es.run_id=$1 AND es.flow_instance='producer' AND fi.current_state='active'
 					firstProducer = producer
 					firstRun = seed.RunID
 					waitServedPublicationSettlement(t, probe, seed)
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": firstRun})
 					requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": firstRun})
 					firstSnapshot = repeatedStaticRunSnapshot(t, rt.DB, firstRun)
 				} else {
