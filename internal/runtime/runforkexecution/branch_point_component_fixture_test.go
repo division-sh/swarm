@@ -150,6 +150,7 @@ func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, 
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.ForkOperation = nil
 	observed, err := p.owner.ports.fork.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, request)
 	if err != nil || observed.ForkRunID != materialized.ForkRunID || !observed.ForkPoint.SameIdentity(materialized.ForkPoint) {
 		t.Fatalf("component lost its original child/cut: %+v err=%v", observed, err)
