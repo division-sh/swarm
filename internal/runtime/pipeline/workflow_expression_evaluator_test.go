@@ -455,10 +455,10 @@ func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEnti
 		workflowExpressionContext{
 			Entity: map[string]any{
 				"current_state": "business-current-state",
-				"reviewed": true,
+				"reviewed":      true,
 			},
 			PlatformEntity: map[string]any{
-				"id":            "ent-1",
+				"id":    "ent-1",
 				"stage": "platform-current-state",
 			},
 			Payload: map[string]any{},
