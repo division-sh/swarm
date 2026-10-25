@@ -93,8 +93,17 @@ func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, 
 
 func observeSelectedRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, fact runtimecorrelation.SourceArtifactFact, owner runAuthorityOwner) (bool, error) {
 	state, err := executionRunState(ctx, q, postgres, runID)
-	if err != nil || state != runtimerunlifecycle.StateRunning {
+	if err != nil {
 		return false, err
+	}
+	if state != runtimerunlifecycle.StateRunning {
+		if state != runtimerunlifecycle.StatePaused {
+			return false, nil
+		}
+		materialized, err := observeMaterializedSelectedExecution(ctx, q, runID, fact.BundleHash())
+		if err != nil || !materialized {
+			return false, err
+		}
 	}
 	authority, err := selectedRunAuthority(ctx, runID, fact.BundleHash())
 	if err != nil || owner == nil {
@@ -164,7 +173,16 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 		}
 	}
 	if state != runtimerunlifecycle.StateRunning {
-		return fmt.Errorf("%w: selected run %s is %s", runtimerunlifecycle.ErrRunExecutionAuthority, runID, state)
+		materialized := false
+		if state == runtimerunlifecycle.StatePaused {
+			materialized, err = observeMaterializedSelectedExecution(ctx, tx, runID, fact.BundleHash())
+			if err != nil {
+				return err
+			}
+		}
+		if !materialized {
+			return fmt.Errorf("%w: selected run %s is %s", runtimerunlifecycle.ErrRunExecutionAuthority, runID, state)
+		}
 	}
 	return requireSelectedRunAuthorityTx(ctx, tx, runID, fact.BundleHash(), owner)
 }

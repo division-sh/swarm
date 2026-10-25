@@ -45,19 +45,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type publishedJoinMutationDiagnostic struct {
-	pipeline.WorkflowPersistenceOwner
-	t *testing.T
-}
-
-func (p publishedJoinMutationDiagnostic) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
-	result, err := p.WorkflowPersistenceOwner.CommitWorkflowEngineMutation(ctx, command)
-	if err != nil {
-		p.t.Logf("PUBLISHED_JOIN_NATIVE_MUTATION committed=%t error=%v", result.Committed, err)
-	}
-	return result, err
-}
-
 type publishedJoinSourceDriver struct {
 	callback func(context.Context, genericschedule.Wakeup)
 	wakeup   genericschedule.Wakeup
@@ -494,7 +481,6 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-join", IdempotencyKey: "fixed-cut",
 				TransportHash: "published-join-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
-			owner.ports.workflow = pipeline.NewWorkflowPersistence(publishedJoinMutationDiagnostic{selected.(pipeline.WorkflowPersistenceOwner), t})
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
 			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
 			if err != nil {

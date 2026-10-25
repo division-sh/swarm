@@ -90,10 +90,15 @@ func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any
 }
 
 func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture) (*rootruntime.Runtime, func()) {
-	return nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, false)
+	t.Helper()
+	rt, close, err := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt, close
 }
 
-func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool) (*rootruntime.Runtime, func()) {
+func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool) (*rootruntime.Runtime, func(), error) {
 	t.Helper()
 	nodes, err := pipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
@@ -194,14 +199,12 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	}
 	if live {
 		ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
-		if err := rt.Start(ctx); err != nil {
-			t.Fatal(err)
-		}
+		err := rt.Start(ctx)
 		return rt, func() {
 			if err := rt.Shutdown(); err != nil {
 				t.Error(err)
 			}
-		}
+		}, err
 	}
 	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
 		t.Fatal(err)
@@ -234,7 +237,7 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	}
 	rt.Pipeline.InstallFanOutWorkNotifier(serving)
 	t.Cleanup(serving.Close)
-	return rt, serving.Close
+	return rt, serving.Close, nil
 }
 
 func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string, posture executionposture.Posture) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
@@ -270,7 +273,10 @@ func ordinaryForkRuntimeFixture(t *testing.T, ctx context.Context, selected any,
 		t.Fatal("ordinary fork fixture requires its retained source artifact")
 	}
 	storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), selected.(storetest.DurableDataCatalogStore), bundle)
-	rt, _ := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, true)
+	rt, _, err := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	definition := rootruntime.BundleContext{
 		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source,
 		Runtime: rt, WorkOwner: rt.WorkOccurrence(),
