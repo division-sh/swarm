@@ -192,7 +192,7 @@ func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, s
 	return seedRuntimeTestPreparedInstance(t, ctx, selected, pc, runtimepipeline.WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: runtimeflowidentity.EntityID("operating/inst-1"),
 		WorkflowName: "operating", WorkflowVersion: source.WorkflowVersion(), Mode: "template", InstanceKey: "inst-1",
-		CurrentState: "initializing", StageDefined: true, EntityType: "operating_state", Fields: map[string]any{"instance_id": "inst-1"},
+		CurrentState: "initializing", StageDefined: true, EntityType: "state", Fields: map[string]any{"instance_id": "inst-1"},
 	})
 }
 

@@ -12,7 +12,7 @@ import (
 
 func reviewedSource(t *testing.T) []byte {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join("testdata", "original.go.txt"))
+	body, err := os.ReadFile(filepath.Join("testdata", "approved.go.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
