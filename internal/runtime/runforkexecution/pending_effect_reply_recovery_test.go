@@ -478,6 +478,23 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 				RequestHash: "pending-reply-" + decisionID, IdempotencyKey: uuid.NewString(), Now: at, TTL: time.Hour}
 			mutation := pipeline.NewDecisionCardDecision(decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: principal.ID,
 				ObservedContentHash: card.CardContentHash, Fields: semanticvalue.EmptyObject(), DecisionEventID: decisionID, Now: at})
+			selectedAdmission, ok := managedexecution.FromContext(selectedContext)
+			if !ok {
+				t.Fatal("pre-ACK control lost its original selected admission")
+			}
+			selectedGrant, ok := startupownership.GenerationGrantEvidenceFromContext(selectedContext)
+			if !ok || selectedGrant.SelectedFork == nil {
+				t.Fatal("pre-ACK control lost its original selected grant")
+			}
+			for _, mixed := range []context.Context{
+				managedexecution.WithAdmission(owned, selectedAdmission),
+				startupownership.WithGenerationGrantEvidence(owned, selectedGrant),
+			} {
+				if _, _, err := ordinary.Pipeline.CommitDecisionCardMutation(mixed, request, mutation); err == nil {
+					t.Fatal("mixed selected/ordinary custody approved the live child's effect")
+				}
+				requirePendingReplyBeforeJournal(t, wait, selected, card.RunID, pending)
+			}
 			if _, replayed, err := ordinary.Pipeline.CommitDecisionCardMutation(owned, request, mutation); err != nil || replayed {
 				t.Fatalf("approve only the live child's pending effect: replay=%t error=%v", replayed, err)
 			}
