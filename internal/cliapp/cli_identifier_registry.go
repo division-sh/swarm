@@ -327,6 +327,7 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm event replay", Selector: "arg:event-id", Family: cliIdentifierFamilyEvent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm agent replay", Selector: "flag:event-id", Family: cliIdentifierFamilyEvent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm run fork", Selector: "flag:at-event", Family: cliIdentifierFamilyEvent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
+	{Command: "swarm run fork", Selector: "flag:publication", Family: cliIdentifierFamilyEvent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm forkchat new", Selector: "flag:event-id", Family: cliIdentifierFamilyEvent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm event publish", Selector: "flag:source-event-id", Family: cliIdentifierFamilyEvent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 

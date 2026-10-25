@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,7 +34,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 
@@ -172,11 +172,17 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatalf("selected activity source has no descriptor for %s: %#v", tt.resultEventType, descriptors)
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
-			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			request := SelectedContractExecutionRequest{
 				SourceRunID: sourceRunID, At: sourceRequestEventID, AllowSourceFreeze: true, Owner: fixture.owner,
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: fixture.owner.ports.contexts.capability},
-			})
+			}
+			var result SelectedContractExecutionResult
+			if tt.wantError != "" {
+				result, err = executeLiveSelectedContractRunFork(ctx, request)
+			} else {
+				result, err = q1ExecuteSelectedPhaseComponent(t, ctx, request)
+			}
 			if tt.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantError) || connectorCalls.Load() != beforeCalls || result.Activation.Activated {
 					t.Fatalf("unsupported root executed: calls=%d result=%+v err=%v", connectorCalls.Load()-beforeCalls, result, err)
@@ -283,9 +289,8 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatalf("exact child lost bound source preparation: count=%d err=%v", len(reloaded), err)
 			}
 			rejected, refusal := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, sourceRunID, []string{sourceRequestEventID}, original)
-			var inactive *runlifecycle.RunNotActiveError
-			if !errors.As(refusal, &inactive) || inactive.RunID != sourceRunID || inactive.State != runlifecycle.StateForked || len(rejected) != 0 {
-				t.Fatalf("frozen source gained execution preparation: count=%d refusal=%v", len(rejected), refusal)
+			if !errors.Is(refusal, sql.ErrNoRows) || len(rejected) != 0 {
+				t.Fatalf("original source gained the selected child's binding: count=%d refusal=%v", len(rejected), refusal)
 			}
 			repeated := loadSelectedContractActivityRequest(t, selected, result.Materialization.ForkRunID, forkEventID)
 			if !reflect.DeepEqual(forkRequest, repeated) {
@@ -406,8 +411,8 @@ func (f activityForkFixture) capture(t *testing.T, ctx context.Context, runID st
 
 func waitSelectedContractActivityInputAccounting(t *testing.T, ctx context.Context, fixture activityForkFixture, result SelectedContractExecutionResult, sourceRequestID string) string {
 	t.Helper()
-	if !result.Activation.Activated || result.Materialization.ForkRunID == "" {
-		t.Fatalf("fork did not acknowledge exact child activation: %+v", result)
+	if result.Materialization.ForkRunID == "" || result.SelectedContractExecutionAdmission == nil || result.ForkLocalRuntimeContainer == nil {
+		t.Fatalf("selected input lacks its exact native child and execution admission: %+v", result)
 	}
 	id := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, sourceRequestID)
 	wait, cancel := context.WithTimeout(ctx, 30*time.Second)

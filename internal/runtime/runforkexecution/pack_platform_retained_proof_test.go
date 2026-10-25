@@ -97,11 +97,12 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				}
 				cleanupLoadedSelectedContractSource(retained)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 			})
+
 			if err != nil {
 				t.Fatalf("retained selected fork execution: %v", err)
 			}

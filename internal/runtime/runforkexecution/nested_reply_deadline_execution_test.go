@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -185,10 +186,23 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
 	t.Helper()
 	rt, _ := nodeReplyRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, true)
-	contexts, err := rootruntime.NewRuntimeContextManager(owner.ports.fork, rootruntime.BundleContext{
+	definition := rootruntime.BundleContext{
 		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source,
 		Runtime: rt, WorkOwner: rt.WorkOccurrence(),
-	})
+	}
+	if bundle, ok := semanticview.Bundle(loaded.Source); ok && bundle.PackInventory != nil {
+		definition.PackInventoryDigest = bundle.PackInventory.Digest()
+		projection, err := packadmission.FromBundle(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition.ProviderTriggerGeneration = projection.ProviderTriggers.Generation()
+		definition.InstalledTriggerSubjects, err = projection.ProviderTriggers.InstalledCapabilitySubjects()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	contexts, err := rootruntime.NewRuntimeContextManager(owner.ports.fork, definition)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +210,10 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 	if err != nil || !lookup.Loaded() || use == nil {
 		t.Fatalf("acquire original live fixture: loaded=%t err=%v", lookup.Loaded(), err)
 	}
-	result, err := rt.RunControl.Pause(use.WorkContext(), runcontrol.TransitionRequest{RunID: sourceRunID, Reason: "retained fork source", ControlledBy: "native fixture"})
+	controlCtx := correlation.WithRuntimeInstanceID(use.WorkContext(), rt.Options.RuntimeInstanceID)
+	controlCtx = correlation.WithSourceArtifactFact(controlCtx, rt.Options.SourceArtifactFact)
+	controlCtx = authoractivity.WithScope(controlCtx, authoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.SourceArtifactFact.BundleHash()))
+	result, err := rt.RunControl.Pause(controlCtx, runcontrol.TransitionRequest{RunID: sourceRunID, Reason: "retained fork source", ControlledBy: "native fixture"})
 	if doneErr := use.Done(); err != nil || doneErr != nil || result.Status != runcontrol.StatusPaused {
 		t.Fatalf("park retained native source: result=%+v err=%v join=%v", result, err, doneErr)
 	}

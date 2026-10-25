@@ -240,8 +240,8 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			owner.ports.contexts.mu.Lock()
 			remaining := len(owner.ports.contexts.entries)
 			owner.ports.contexts.mu.Unlock()
-			if remaining != 1 {
-				t.Fatalf("observer preparation leaked: got %d entries, want retained winner only", remaining)
+			if remaining != 0 {
+				t.Fatalf("handoff retained %d selected contexts after the ordinary winner took over", remaining)
 			}
 			if observed, err := observeSelectedRetainedExecution(t, ctx, owner, selected, winner.result.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 {
 				t.Fatalf("join retained winner before replay conservation: %+v err=%v", observed, err)
