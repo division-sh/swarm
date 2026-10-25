@@ -203,7 +203,7 @@ func seedNativeLoopActivityInstance(t *testing.T, fixture WorkflowActivityNative
 		WorkflowName: "validation", WorkflowVersion: "1.0.0",
 		CurrentState: stage, EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 		StateBuckets: carrier.PersistedStateBuckets(),
-		EntityType:   "test_entity",
+		EntityType:   "state",
 	})); err != nil {
 		t.Fatal(err)
 	}

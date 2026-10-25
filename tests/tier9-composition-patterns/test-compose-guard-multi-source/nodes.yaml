@@ -7,13 +7,13 @@ gatekeeper:
       guard:
         checks:
           - id: depth_check
-            check: has(entity.depth) && entity.depth <= policy.max_depth
+            check: has(state.depth) && state.depth <= policy.max_depth
           - id: count_check
-            check: has(entity.child_count) && entity.child_count < 2
+            check: has(state.child_count) && state.child_count < 2
           - id: score_floor
             check: payload.score >= policy.min_score
           - id: no_flags
-            check: has(entity.flag_count) && entity.flag_count == 0
+            check: has(state.flag_count) && state.flag_count == 0
           - id: name_unique
             check: query_entities(name == payload.name).count == 0
         on_fail: discard

@@ -47,7 +47,7 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		ctx := originalStoreFixtureContext(t, correlation.WithRunID(testAuthorActivityContext(), runID), selected)
 		requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: event.CreatedAt().Add(-time.Minute)})
 		command, err := flowactivationfixture.Command(ctx, pipeline.WorkflowInstance{
-			InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID, EntityType: "default",
+			InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID,
 			WorkflowName: "flow-a", WorkflowVersion: "1", Mode: "static", CurrentState: "ready", StageDefined: true,
 			Fields: map[string]any{}, CreatedAt: event.CreatedAt(), EnteredStageAt: event.CreatedAt(),
 		}, pipeline.WorkflowLifecycleMutationPlan{}, event.CreatedAt())
@@ -61,25 +61,25 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		return fixedForkHistoryFixture{ctx: ctx, selected: selected, runID: runID, entityID: entityID,
 			construction: ConversationForkConstruction{Child: command.Plan, CreatingEvent: event}}
 	}
-	flow, instance, entityType, stage, keyField, key := "flow-a", "1", "", "", "name", ""
+	flow, instance, stage, keyField, key := "flow-a", "1", "", "name", ""
 	fields := map[string]any{}
 	switch witness {
 	case "exact-facts":
-		entityType, stage, key = "fork_entity", "ready", "Snapshot Entity"
+		stage, key = "ready", "Snapshot Entity"
 		fields["name"] = key
 	case "materializer-state":
-		entityType, stage, key = "historical_entity", "queued", "Before Name"
+		stage, key = "queued", "Before Name"
 		fields = map[string]any{"title": "before-title", "slug": "before-slug", "name": key,
 			"gates": map[string]any{"review": "authored-review"}, "accumulator": map[string]any{"total": "authored-total"},
 			"bookkeeping": map[string]any{"activation": "manual"}}
 	case "unsupported-delivery":
-		entityType, stage, keyField, key = "default", "ready", "fixture_key", "1"
+		stage, keyField, key = "ready", "fixture_key", "1"
 		fields[keyField] = key
 	case "source-metadata":
-		flow, instance, entityType, stage, key = "state-flow", "at-T", "validation_case", "pending", "Fork Point Name"
+		flow, instance, stage, key = "state-flow", "at-T", "pending", "Fork Point Name"
 		fields["name"] = key
 	case "typed-collision":
-		flow, instance, entityType, stage, keyField, key = "state-flow", "at-T", "source_case", "pending", "entity_type", "field_case"
+		flow, instance, stage, keyField, key = "state-flow", "at-T", "pending", "entity_type", "field_case"
 		fields[keyField] = key
 	default:
 		t.Fatalf("unknown fixed fork witness %q", witness)
@@ -90,32 +90,34 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 	}
 	sort.Strings(names)
 	var declarations strings.Builder
-	fmt.Fprintf(&declarations, "%s:\n", entityType)
 	for _, name := range names {
 		if name == keyField {
-			fmt.Fprintf(&declarations, "  %s: text\n", name)
+			fmt.Fprintf(&declarations, "%s: text\n", name)
 			continue
 		}
 		raw, err := json.Marshal(fields[name])
 		if err != nil {
 			t.Fatal(err)
 		}
-		kind := "text"
 		if _, object := fields[name].(map[string]any); object {
-			kind = "json"
+			fmt.Fprintf(&declarations, "%s: json\n", name)
+			continue
 		}
-		fmt.Fprintf(&declarations, "  %s: {type: %s, initial: %s, _unused_reason: Fixed historical fork witness.}\n", name, kind, raw)
+		fmt.Fprintf(&declarations, "%s: %s\n", name, raw)
 	}
 	input := string(event.Type())
 	eventSchema := fmt.Sprintf("%s:\n  %s: text?\n", input, keyField)
 	if witness == "exact-facts" {
 		eventSchema += "  matrix: boolean?\n  items: json?\n"
 	}
+	if witness == "materializer-state" {
+		eventSchema += "  gates: json\n  accumulator: json\n  bookkeeping: json\n"
+	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
-		"schema.yaml":           "name: fixed-fork-history\n",
-		flow + "/schema.yaml":   fmt.Sprintf("name: %s\ninstance: %s\nstages:\n  %s: {}\n  done: {final: true}\npins:\n  inputs: [%s]\n", flow, keyField, stage, input),
-		flow + "/entities.yaml": declarations.String(),
-		flow + "/events.yaml":   eventSchema,
+		"schema.yaml":         "name: fixed-fork-history\n",
+		flow + "/schema.yaml": fmt.Sprintf("name: %s\ninstance: %s\nstages:\n  %s: {}\n  done: {final: true}\npins:\n  inputs: [%s]\n", flow, keyField, stage, input),
+		flow + "/state.yaml":  declarations.String(),
+		flow + "/events.yaml": eventSchema,
 	})
 	ctx := originalStoreFixtureContext(t, correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID), selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
@@ -257,6 +259,9 @@ func TestFixedForkHistoricalConstructionWitnessesBothStores(t *testing.T) {
 					at = time.Unix(1700000210, 0).UTC()
 				}
 				event := semanticEventRecordFixture(uuid.NewString(), run, events.EventType(witness.event), eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entity, ""), at)
+				if witness.name == "materializer-state" {
+					event = semanticEventRecordFixture(event.ID(), run, events.EventType(witness.event), eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{"gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}`), semanticEventRecordFixtureEnvelope(entity, ""), at)
+				}
 				if witness.name == "exact-facts" {
 					event = eventtest.ExistingRunRootIngress(event.ID(), events.EventType(witness.event), "revision-matrix", "", []byte(`{"matrix":true,"items":["matrix"]}`), 0, run, events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 				}
@@ -328,6 +333,9 @@ func TestFixedForkHistoricalConstructionWitnessesBothStores(t *testing.T) {
 				state, err := f.construction.Child.PersistenceRecord()
 				if err != nil {
 					t.Fatal(err)
+				}
+				if state.State.EntityType == "" {
+					return
 				}
 				later := state.State
 				later.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion

@@ -32,15 +32,15 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml":           "name: q10-readback\nstages:\n  unknown: {}\n  done:\n    final: true\n",
-				"entities.yaml":         "record:\n  marker: text?\n  current_state: text?\n",
+				"state.yaml":            "marker: text?\ncurrent_state: text?\n",
 				"nostage/schema.yaml":   "name: nostage\n",
-				"nostage/entities.yaml": "record:\n  marker: text?\n  current_state: text?\n  score: integer?\n",
+				"nostage/state.yaml":    "marker: text?\ncurrent_state: text?\nscore: integer?\n",
 				"fieldless/schema.yaml": "name: fieldless\n",
 			}, nil)
 			runID, importID := uuid.NewString(), uuid.NewString()
 			ctx := correlation.WithRunID(f.ctx, runID)
 			at := time.Now().UTC().Truncate(time.Microsecond)
-			seed := pipeline.ScenarioSetupEntityRequest{Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "record",
+			seed := pipeline.ScenarioSetupEntityRequest{Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "state",
 				CurrentState: mutationlog.PresentLifecycleState("unknown"), Fields: map[string]any{"marker": "root", "current_state": "business"}, Gates: map[string]bool{}}
 			source := semanticview.Wrap(f.bundle)
 			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
@@ -51,7 +51,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			command := runtimebus.ScenarioSetupCommand{Setup: pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{
-				seed, {Alias: "import", EntityID: importID, FlowInstance: "nostage/import", EntityType: "record", Fields: map[string]any{"marker": "import", "current_state": "business-import", "score": int64(12)}},
+				seed, {Alias: "import", EntityID: importID, FlowInstance: "nostage/import", EntityType: "state", Fields: map[string]any{"marker": "import", "current_state": "business-import", "score": int64(12)}},
 			}}, Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}}}
 			result, err := f.store.(runtimebus.ScenarioSetupCommitOwner).CommitScenarioSetup(ctx, command)
 			if err != nil || !result.Acknowledged {
@@ -245,7 +245,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 			}{
 				{"real stage does not select absent metadata", entityquery.Predicate{Field: "current_state", Op: "==", Value: "unknown"}, 0},
 				{"absent stage differs from real stage", entityquery.Predicate{Field: "workflow_state", Op: "!=", Value: "unknown"}, 2},
-				{"declared same-name field is not metadata", entityquery.Predicate{Field: "entity.current_state", Op: "==", Value: "business-import"}, 1},
+				{"declared same-name field is not metadata", entityquery.Predicate{Field: "state.current_state", Op: "==", Value: "business-import"}, 1},
 				{"numeric fields retain numeric comparison", entityquery.Predicate{Field: "score", Op: ">", Value: int64(2)}, 1},
 			} {
 				t.Run(tc.name, func(t *testing.T) {

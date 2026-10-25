@@ -154,7 +154,7 @@ func executeExistingOwnerBehavior(
 		CurrentState:    "active",
 		Fields:          seedMetadata,
 		StateBuckets:    stateBuckets,
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("seed %s workflow instance: %v", name, err)
 	}

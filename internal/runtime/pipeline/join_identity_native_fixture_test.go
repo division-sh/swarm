@@ -71,7 +71,7 @@ func newNativeExactWorkflowJoinHarness(t *testing.T, backend, flowID, initial st
 		// A caller-supplied component prerequisite, without root entry effects.
 		if err := h.fixture.Construct(h.ctx, materializedWorkflowInstanceForSource(t, source, h.ctx, WorkflowInstance{
 			InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-			CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+			CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "state",
 		})); err != nil {
 			t.Fatalf("construct explicit parent component: %v", err)
 		}
@@ -83,7 +83,7 @@ func newNativeExactWorkflowJoinHarness(t *testing.T, backend, flowID, initial st
 	h.route = testRunScopedWorkflowInstanceFromContext(h.ctx, h.path).Route
 	instance := materializedWorkflowInstanceForSource(t, source, h.ctx, WorkflowInstance{
 		InstanceID: h.route.InstanceID, StorageRef: h.path, WorkflowName: flow, WorkflowVersion: bundle.WorkflowVersion(),
-		EntityID: h.entityID, CurrentState: initial, EnteredStageAt: time.Now().UTC(), Fields: fields, EntityType: "test_entity",
+		EntityID: h.entityID, CurrentState: initial, EnteredStageAt: time.Now().UTC(), Fields: fields, EntityType: "state",
 	})
 	if err := h.fixture.Construct(h.ctx, instance); err != nil {
 		t.Fatal(err)

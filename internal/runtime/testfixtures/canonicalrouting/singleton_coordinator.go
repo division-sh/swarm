@@ -48,7 +48,7 @@ pins:
     - item.received
 `)
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "events.yaml"), "item.received:\n  items: [text]\n")
-		entities := "state: {}\n"
+		entities := ""
 		nodes := `
 shared-node:
   execution_type: system_node
@@ -57,7 +57,7 @@ shared-node:
     item.received: {}
 `
 		if flowID == "a" {
-			entities = "state:\n  items:\n    type: '[text]'\n    initial: []\n"
+			entities = "items: [text]\n"
 			nodes = `
 shared-node:
   execution_type: system_node
@@ -69,7 +69,9 @@ shared-node:
           - {source_field: items, target_field: items}
 `
 		}
-		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "entities.yaml"), entities)
+		if entities != "" {
+			writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "state.yaml"), entities)
+		}
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "nodes.yaml"), nodes)
 	}
 	return root
@@ -105,16 +107,14 @@ types:
     ref: text
     action: text
 `)
-	entities := `
-coordinator_state:
-  coordinator_id: text
-  lead_index: map[text]LeadScore
-  audit_log: [AuditEntry]
+	entities := `coordinator_id: text
+lead_index: map[text]LeadScore
+audit_log: [AuditEntry]
 `
 	if variant == SingletonCoordinatorPilotDemandProjection {
-		entities += "  unused_index: map[text]json\n"
+		entities += "unused_index: map[text]json\n"
 	}
-	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", entities)
+	writeSingletonCoordinatorFile(t, root, "coordinator/state.yaml", entities)
 	writeSingletonCoordinatorFile(t, root, "events.yaml", `
 lead.observed:
   coordinator_id: text
@@ -135,7 +135,7 @@ coordinator-indexer:
 ` + singletonCoordinatorWritesYAML(t, variant)
 	if variant == SingletonCoordinatorPilotDemandProjection {
 		nodes += `      fan_out:
-        items_from: entity.audit_log
+        items_from: state.audit_log
         as: entry
         identity: entry.ref
         emit: lead.observed
@@ -159,7 +159,7 @@ pins:
     - job.received
 `)
 	writeSingletonCoordinatorFile(t, root, "coordinator/types.yaml", singletonCoordinatorTypesYAMLForFixture())
-	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")
+	removeClosedVariantFiles(t, root, "coordinator/state.yaml")
 	writeSingletonCoordinatorFile(t, root, "coordinator/nodes.yaml", `
 coordinator-node:
   execution_type: system_node
@@ -190,7 +190,7 @@ types:
 func writeRetiredFanInSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", RetiredFanInCoordinatorSchema())
-	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")
+	removeClosedVariantFiles(t, root, "coordinator/state.yaml")
 	writeSingletonCoordinatorFile(t, root, "coordinator/events.yaml", "job.received:\n  vertical_id: text\n")
 }
 
@@ -216,33 +216,33 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
 	case SingletonCoordinatorPilotDefault:
 		return singletonCoordinatorValidWritesYAML()
 	case SingletonCoordinatorPilotDynamicBracketTarget:
-		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index[payload.lead_id]", "key: payload.lead_id", `
+		return singletonCoordinatorFirstMapWriteYAML("set", "state.lead_index[payload.lead_id]", "key: payload.lead_id", `
             value:
               status: "active"
               score: 0
               observations: []
 `)
 	case SingletonCoordinatorPilotMissingMapKey:
-		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index", "", `
+		return singletonCoordinatorFirstMapWriteYAML("set", "state.lead_index", "", `
             value:
               status: "active"
               score: 0
               observations: []
 `)
 	case SingletonCoordinatorPilotWrongValueShape:
-		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index", "key: payload.lead_id", `
+		return singletonCoordinatorFirstMapWriteYAML("set", "state.lead_index", "key: payload.lead_id", `
             value:
               undeclared: true
 `)
 	case SingletonCoordinatorPilotUndeclaredTarget:
-		return singletonCoordinatorFirstMapWriteYAML("set", "entity.missing_index", "key: payload.lead_id", `
+		return singletonCoordinatorFirstMapWriteYAML("set", "state.missing_index", "key: payload.lead_id", `
             value:
               status: "active"
               score: 0
               observations: []
 `)
 	case SingletonCoordinatorPilotUnsupportedOperation:
-		return singletonCoordinatorFirstMapWriteYAML("replace", "entity.lead_index", "key: payload.lead_id", `
+		return singletonCoordinatorFirstMapWriteYAML("replace", "state.lead_index", "key: payload.lead_id", `
             value:
               status: "active"
               score: 0
@@ -250,7 +250,7 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
 `)
 	case SingletonCoordinatorPilotBadListIndex:
 		return singletonCoordinatorDirectWriteYAML() + singletonCoordinatorValidWritesPrefixYAML() + `          - op: update
-            target: entity.audit_log
+            target: state.audit_log
             index: -1
             value: payload.corrected_audit
 `
@@ -266,7 +266,7 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
 
 func singletonCoordinatorValidWritesYAML() string {
 	return singletonCoordinatorDirectWriteYAML() + singletonCoordinatorValidWritesPrefixYAML() + `          - op: update
-            target: entity.audit_log
+            target: state.audit_log
             index: 0
             value: payload.corrected_audit
 `
@@ -274,26 +274,26 @@ func singletonCoordinatorValidWritesYAML() string {
 
 func singletonCoordinatorValidWritesPrefixYAML() string {
 	return `          - op: set
-            target: entity.lead_index
+            target: state.lead_index
             key: payload.lead_id
             value:
               status: "active"
               score: 0
               observations: []
           - op: merge
-            target: entity.lead_index
+            target: state.lead_index
             key: payload.lead_id
             value:
               score: 1
           - op: append
-            target: entity.lead_index.observations
+            target: state.lead_index.observations
             key: payload.lead_id
             value: payload.observation
           - op: append
-            target: entity.audit_log
+            target: state.audit_log
             value: payload.audit
           - op: append
-            target: entity.audit_log
+            target: state.audit_log
             value: payload.followup_audit
 `
 }

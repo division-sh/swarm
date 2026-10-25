@@ -27,14 +27,12 @@ type entityListCommandOptions struct {
 
 	runID        string
 	flow         string
-	entityType   string
 	currentState string
 	limit        int
 	cursor       string
 
 	runIDSet        bool
 	flowSet         bool
-	entityTypeSet   bool
 	currentStateSet bool
 	limitSet        bool
 	cursorSet       bool
@@ -51,13 +49,11 @@ type entityViewCommandOptions struct {
 type entityAggregateCommandOptions struct {
 	apiOptions rootCommandOptions
 
-	runID    string
-	groupBy  string
-	typeName string
+	runID   string
+	groupBy string
 
 	runIDSet   bool
 	groupBySet bool
-	typeSet    bool
 }
 
 type entityListResult struct {
@@ -135,8 +131,6 @@ var (
 		"flow_instance":    {},
 		"workflow_name":    {},
 		"workflow_version": {},
-		"type":             {},
-		"entity_type":      {},
 		"slug":             {},
 		"name":             {},
 	}
@@ -171,7 +165,6 @@ func newEntitiesListCommand(opts rootCommandOptions) *cobra.Command {
 			}
 			listOpts.runIDSet = cmd.Flags().Changed("run-id")
 			listOpts.flowSet = cmd.Flags().Changed("flow")
-			listOpts.entityTypeSet = cmd.Flags().Changed("type")
 			listOpts.currentStateSet = cmd.Flags().Changed("current-state")
 			listOpts.limitSet = cmd.Flags().Changed("limit")
 			listOpts.cursorSet = cmd.Flags().Changed("cursor")
@@ -180,7 +173,6 @@ func newEntitiesListCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&listOpts.runID, "run-id", "", "Filter by run id")
 	cmd.Flags().StringVar(&listOpts.flow, "flow", "", "Filter by flow instance")
-	cmd.Flags().StringVar(&listOpts.entityType, "type", "", "Filter by entity type")
 	cmd.Flags().StringVar(&listOpts.currentState, "current-state", "", "Filter by current entity state")
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-500")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Pagination cursor")
@@ -221,13 +213,11 @@ func newEntityAggregateCommand(opts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			aggregateOpts.runIDSet = cmd.Flags().Changed("run-id")
 			aggregateOpts.groupBySet = cmd.Flags().Changed("group-by")
-			aggregateOpts.typeSet = cmd.Flags().Changed("type")
 			return runEntityAggregateCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), aggregateOpts)
 		},
 	}
 	cmd.Flags().StringVar(&aggregateOpts.runID, "run-id", "", "Filter by run id")
-	cmd.Flags().StringVar(&aggregateOpts.groupBy, "group-by", "", "Group by current_state, flow, flow_instance, workflow_name, workflow_version, type, entity_type, slug, name, or fields.<path>")
-	cmd.Flags().StringVar(&aggregateOpts.typeName, "type", "", "Filter by entity type")
+	cmd.Flags().StringVar(&aggregateOpts.groupBy, "group-by", "", "Group by current_state, flow, flow_instance, workflow_name, workflow_version, slug, name, or fields.<path>")
 	bindCLIAPIConnectionFlags(cmd, &aggregateOpts.apiOptions)
 	return cmd
 }
@@ -348,13 +338,6 @@ func (opts entityListCommandOptions) params() (map[string]any, error) {
 		}
 		params["flow"] = flow
 	}
-	if opts.entityTypeSet {
-		entityType, err := entityNonEmptyFlag("--type", opts.entityType)
-		if err != nil {
-			return nil, err
-		}
-		params["type"] = entityType
-	}
 	if opts.currentStateSet {
 		currentState, err := entityNonEmptyFlag("--current-state", opts.currentState)
 		if err != nil {
@@ -400,13 +383,6 @@ func (opts entityAggregateCommandOptions) params() (map[string]any, error) {
 		}
 		params["group_by"] = groupBy
 	}
-	if opts.typeSet {
-		entityType, err := entityNonEmptyFlag("--type", opts.typeName)
-		if err != nil {
-			return nil, err
-		}
-		params["type"] = entityType
-	}
 	return params, nil
 }
 
@@ -451,7 +427,7 @@ func validateEntityGroupBy(groupBy string) error {
 	if entityFieldGroupPattern.MatchString(groupBy) {
 		return nil
 	}
-	return fmt.Errorf("--group-by must be one of current_state, flow, flow_instance, workflow_name, workflow_version, type, entity_type, slug, name, or fields.<path>")
+	return fmt.Errorf("unsupported --group-by; use current_state, flow, flow_instance, workflow_name, workflow_version, slug, name, or fields.<path>")
 }
 
 func validateEntityListResult(result entityListResult) error {

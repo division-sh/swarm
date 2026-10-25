@@ -7,7 +7,7 @@ reduce-node:
       reduce:
         items_from: payload.scores
         operation: weighted_average
-        store_as: entity.composite
+        store_as: state.composite
       emit:
         event: scores.aggregated
       advances_to: done

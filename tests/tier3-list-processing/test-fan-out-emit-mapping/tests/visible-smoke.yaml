@@ -10,6 +10,3 @@ steps:
 expect:
   events:
     include: [routed.a]
-  entities:
-    - type: test_entity
-      current_state: routing

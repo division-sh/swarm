@@ -38,18 +38,18 @@ func declareSuppliedFields(t *testing.T, bundle *runtimecontracts.WorkflowContra
 	t.Helper()
 	root := t.TempDir()
 	var state strings.Builder
-	state.WriteString("review_item:\n  instance_key: text\n")
+	state.WriteString("instance_key: text\n")
 	keys := make([]string, 0, len(fields))
 	for key := range fields {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		fmt.Fprintf(&state, "  %s: %s\n", key, fields[key].Type)
+		fmt.Fprintf(&state, "%s: %s\n", key, fields[key].Type)
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: supplied-state-fixture\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/schema.yaml"), "name: review\ninstance: instance_key\npins: {inputs: [construction.requested]}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/entities.yaml"), state.String())
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/state.yaml"), state.String())
 	repo := runtimepipeline.WorkflowRepoRoot()
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

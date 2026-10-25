@@ -276,7 +276,10 @@ func newEntityFilterEnv(schema entityToolSchema) (*workflowexpr.StructuralPredic
 	for _, field := range structural.Fields {
 		roots[field.Name] = struct{}{}
 	}
-	decls := []cel.EnvOption{cel.Variable("entity", cel.DynType)}
+	var decls []cel.EnvOption
+	if _, declared := roots["state"]; !declared {
+		decls = append(decls, cel.Variable("state", cel.DynType))
+	}
 	keys := map[string]struct{}{}
 	for key := range entityStateTopLevelFields {
 		keys[key] = struct{}{}
@@ -304,7 +307,7 @@ type entityFilterSelectorReference struct {
 
 func (r entityFilterSelectorReference) rootName() string {
 	if r.EntityScoped {
-		return "entity"
+		return "state"
 	}
 	return strings.SplitN(r.Path, ".", 2)[0]
 }
@@ -315,7 +318,7 @@ func (r entityFilterSelectorReference) display() string {
 		return ""
 	}
 	if r.EntityScoped {
-		return "entity." + path
+		return "state." + path
 	}
 	return path
 }
@@ -461,7 +464,7 @@ func entityFilterSelectorBase(expr celast.Expr) (entityFilterSelectorReference, 
 		if name == "" {
 			return entityFilterSelectorReference{}, false
 		}
-		if name == "entity" {
+		if name == "state" {
 			return entityFilterSelectorReference{EntityScoped: true}, true
 		}
 		return entityFilterSelectorReference{Path: name}, true
@@ -473,12 +476,16 @@ func entityFilterSelectorBase(expr celast.Expr) (entityFilterSelectorReference, 
 }
 
 func validateEntityFilterSelectorReference(schema entityToolSchema, ref entityFilterSelectorReference) error {
+	if _, businessField := schema.Contract.Entity.Fields["state"]; businessField && ref.EntityScoped {
+		ref.EntityScoped = false
+		ref.Path = strings.TrimSuffix("state."+ref.Path, ".")
+	}
 	if ref.EntityScoped {
 		path := strings.TrimSpace(ref.Path)
 		if path == "" {
 			return fmt.Errorf("%w: query filter selectors must not use the entity root", ErrUnknownEntityField)
 		}
-		return fmt.Errorf("%w: query filter selectors must not use entity.%s; use %s instead", ErrUnknownEntityField, path, path)
+		return fmt.Errorf("%w: query filter selectors must not use state.%s; use %s instead", ErrUnknownEntityField, path, path)
 	}
 	if _, envelope := entityStateTopLevelFields[ref.Path]; envelope {
 		return nil
@@ -544,7 +551,7 @@ func nearestEntityFilterSelector(schema entityToolSchema, ref entityFilterSelect
 		return ""
 	}
 	if ref.EntityScoped {
-		return "entity." + best
+		return "state." + best
 	}
 	return best
 }
@@ -617,7 +624,7 @@ func minEntityFilterDistance(values ...int) int {
 
 func entityCELActivation(row map[string]any, schema entityToolSchema) map[string]any {
 	activation := map[string]any{
-		"entity": row,
+		"state": row,
 	}
 	for key, value := range row {
 		activation[key] = value

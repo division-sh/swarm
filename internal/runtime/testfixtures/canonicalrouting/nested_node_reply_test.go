@@ -140,15 +140,15 @@ func TestNestedNodeReplyFixturesPassBootAndRetainExactPairedGraph(t *testing.T) 
 			requireNestedNodeReplyGuardEmit(t, source, "t", "t-node", "u.replied", "t.replied")
 			requireNestedNodeReplyGuardEmit(t, source, "u", "u-node", "u.requested", "u.replied")
 			for _, flow := range append([]string{"provider", "t", "u"}, tc.requesters...) {
-				for _, file := range []string{"entities.yaml", "agents.yaml"} {
+				for _, file := range []string{"state.yaml", "agents.yaml"} {
 					path := filepath.Join(root, flow, file)
 					if _, err := os.Stat(path); !os.IsNotExist(err) {
 						t.Fatalf("payload-only receiver must omit %s: %v", path, err)
 					}
 				}
 			}
-			if entities, err := os.ReadFile(filepath.Join(root, "entities.yaml")); err != nil || string(entities) != "request_state: {}\n" {
-				t.Fatalf("inherited root state changed: %q, %v", entities, err)
+			if _, err := os.Stat(filepath.Join(root, "state.yaml")); !os.IsNotExist(err) {
+				t.Fatalf("stateless root must omit state.yaml: %v", err)
 			}
 		})
 	}

@@ -362,7 +362,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 				WorkflowName: coordinate.flow, WorkflowVersion: source.WorkflowVersion(), InstanceKey: coordinate.key, CreatedAt: createdAt,
 			}
 			if coordinate.flow != "." {
-				instance.EntityType = "work"
+				instance.EntityType = "state"
 				instance.Fields = map[string]any{"instance_key": coordinate.key}
 			}
 			seedComponentFlowConstruction(t, constructionCtx, selected.(componentFlowConstructionStore), source, instance)

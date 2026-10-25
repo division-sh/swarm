@@ -27,7 +27,7 @@ func TestPreparedExpressionPreservesExactSchemas(t *testing.T) {
 		{"wrong_sink", "row.score", ValueExpressionOptions{ItemAlias: "row", ItemType: object(integer, false), ResultType: &text}, true},
 		{"required_sink", "row.?score", ValueExpressionOptions{ItemAlias: "row", ItemType: object(integer, true), ResultType: &integer}, true},
 		{"optional_sink", "row.?score", ValueExpressionOptions{ItemAlias: "row", ItemType: object(integer, true), ResultType: &integer, ResultOptional: true}, false},
-		{"missing_entity_schema", "entity.score", ValueExpressionOptions{}, true},
+		{"missing_entity_schema", "state.score", ValueExpressionOptions{}, true},
 		{"missing_payload_schema", "payload.score", ValueExpressionOptions{}, true},
 		{"undeclared_field", "row.other", ValueExpressionOptions{ItemAlias: "row", ItemType: object(integer, false)}, true},
 		{"wrong_alias", "other.score", ValueExpressionOptions{ItemAlias: "row", ItemType: object(integer, false)}, true},
@@ -46,7 +46,7 @@ func TestPreparedExpressionPreservesExactSchemas(t *testing.T) {
 func TestPreparedExpressionFreshActivationAndSchemaOwnership(t *testing.T) {
 	integer := rc.ResolvedCatalogType{Kind: rc.CatalogTypeInteger}
 	entity := rc.ResolvedCatalogType{Kind: rc.CatalogTypeObject, Fields: []rc.ResolvedCatalogField{{Name: "score", Type: integer}}}
-	prepared, err := PrepareValueExpression("entity.score + row", ValueExpressionOptions{EntityType: &entity, ItemAlias: "row", ItemType: &integer})
+	prepared, err := PrepareValueExpression("state.score + row", ValueExpressionOptions{EntityType: &entity, ItemAlias: "row", ItemType: &integer})
 	if err != nil {
 		t.Fatal(err)
 	}

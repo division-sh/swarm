@@ -108,6 +108,7 @@ type scenarioRunState struct {
 type scenarioSetupEntityBinding struct {
 	Alias        string
 	EntityID     string
+	FlowID       string
 	FlowInstance string
 	EntityType   string
 	CurrentState string
@@ -822,12 +823,14 @@ func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestF
 		params["scenario_execution"] = selector
 	}
 	entities := make([]any, 0, len(setup.Entities))
+	flows := make(map[string]string, len(setup.Entities))
 	for _, entity := range setup.Entities {
 		evaluated, err := r.evaluateScenarioSetupEntity(file, evaluator, entity)
 		if err != nil {
 			return scenarioTestValidationError{err: err}
 		}
 		entityID := scenarioSetupEntityID(evaluator.Seed(), runID, evaluated)
+		flows[evaluated.Alias] = evaluated.FlowID
 		flowInstance := evaluated.FlowID
 		if flowInstance == "." {
 			// Setup persistence owns the root runtime coordinate (the run ID), not the authored dot path.
@@ -858,6 +861,7 @@ func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestF
 		state.SetupEntities[alias] = scenarioSetupEntityBinding{
 			Alias:        alias,
 			EntityID:     strings.TrimSpace(entity.EntityID),
+			FlowID:       flows[alias],
 			FlowInstance: strings.Trim(strings.TrimSpace(entity.FlowInstance), "/"),
 			EntityType:   strings.TrimSpace(entity.EntityType),
 			CurrentState: strings.TrimSpace(entity.CurrentState),
@@ -1914,14 +1918,14 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scen
 		if !ok {
 			return fmt.Errorf("expect.entities ref %q is not declared in setup.entities", expect.Ref)
 		}
-		if expect.EntityType != "" && expect.EntityType != binding.EntityType {
-			return fmt.Errorf("expect.entities ref %q type = %q, want %q", expect.Ref, binding.EntityType, expect.EntityType)
+		if expect.Flow != "" && expect.Flow != binding.FlowID {
+			return fmt.Errorf("expect.entities ref %q flow = %q, want %q", expect.Ref, binding.FlowID, expect.Flow)
 		}
 		return r.assertEntityDetailExpectation(ctx, runID, binding.EntityID, binding.EntityType, evaluator, expect)
 	}
 	params := map[string]any{
 		"run_id": runID,
-		"type":   expect.EntityType,
+		"flow":   expect.Flow,
 		"limit":  500,
 	}
 	entities := []entitySummary{}
@@ -1947,15 +1951,15 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scen
 	}
 	count := len(entities)
 	if expect.Count != nil && count != *expect.Count {
-		return fmt.Errorf("entity expectation for type %s got count %d, want %d", expect.EntityType, count, *expect.Count)
+		return fmt.Errorf("entity expectation for flow %s got count %d, want %d", expect.Flow, count, *expect.Count)
 	}
 	if !expect.HasDetailAssertion() {
 		return nil
 	}
 	if count != 1 {
-		return fmt.Errorf("entity detail expectation for type %s returned %d entities, want exactly one", expect.EntityType, count)
+		return fmt.Errorf("entity detail expectation for flow %s returned %d entities, want exactly one", expect.Flow, count)
 	}
-	return r.assertEntityDetailExpectation(ctx, runID, entities[0].EntityID, expect.EntityType, evaluator, expect)
+	return r.assertEntityDetailExpectation(ctx, runID, entities[0].EntityID, "state", evaluator, expect)
 }
 
 func (r scenarioRunner) assertEntityDetailExpectation(ctx context.Context, runID string, entityID string, entityType string, evaluator *scenarioExpressionEvaluator, expect scenarioEntityExpect) error {

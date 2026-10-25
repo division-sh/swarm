@@ -113,7 +113,6 @@ type OperatorEntityListOptions struct {
 	RunID        string
 	EntityID     string
 	Flow         string
-	Type         string
 	CurrentState string
 	Limit        int
 	Cursor       string
@@ -153,7 +152,6 @@ type OperatorEntityFull struct {
 type OperatorEntityAggregateOptions struct {
 	RunID   string
 	GroupBy string
-	Type    string
 }
 
 type OperatorEntityAggregateResult struct {

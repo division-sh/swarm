@@ -215,7 +215,7 @@ func stageCompletionAssertStoredState(t *testing.T, selected runtimepipeline.Wor
 		Route: flowidentity.StoredRoute("discovery", "discovery", "discovery")}
 	stored, found, err := selected.LoadWorkflowInstance(context.Background(), owner)
 	if err != nil || !found || stored.EntityID != runtimepipeline.FlowInstanceEntityID("discovery") ||
-		stored.StorageRef != "discovery" || stored.WorkflowName != "discovery" || stored.EntityType != "discovery" {
+		stored.StorageRef != "discovery" || stored.WorkflowName != "discovery" || stored.EntityType != "" {
 		t.Fatalf("stored selected stage identity: found=%t instance=%+v err=%v", found, stored, err)
 	}
 	if !stored.StageDefined || stored.CurrentState != want || stored.Revision < 1 || stored.CreatedAt.IsZero() ||

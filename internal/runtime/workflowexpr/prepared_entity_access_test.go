@@ -15,11 +15,11 @@ func TestPreparedEntityAccessChecksCurrentEntity(t *testing.T) {
 	}}
 	entity := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "profile", Type: profile}}}
 	for _, expression := range []string{
-		`entity.profile.id`,
-		`entity.profile.?note.orValue("")`,
-		`has(entity.profile.note) && entity.profile.note != ""`,
-		`[{}].exists(entity, has(entity.note))`,
-		`"entity.profile.nope" == ""`,
+		`state.profile.id`,
+		`state.profile.?note.orValue("")`,
+		`has(state.profile.note) && state.profile.note != ""`,
+		`[{}].exists(state, has(state.note))`,
+		`"state.profile.nope" == ""`,
 	} {
 		t.Run(expression, func(t *testing.T) {
 			prepared, err := PrepareValueExpression(expression, ValueExpressionOptions{EntityType: &entity})
@@ -45,7 +45,7 @@ func TestPreparedEntityAccessChecksCurrentEntity(t *testing.T) {
 					}
 				} else if err != nil {
 					t.Fatal(err)
-				} else if expression == `entity.profile.id` && result.Value() != current["profile"].(map[string]any)["id"] {
+				} else if expression == `state.profile.id` && result.Value() != current["profile"].(map[string]any)["id"] {
 					t.Fatalf("prepared expression retained an earlier value: %#v", result)
 				}
 			}
@@ -54,7 +54,7 @@ func TestPreparedEntityAccessChecksCurrentEntity(t *testing.T) {
 }
 
 func BenchmarkPreparedEntityAccesses(b *testing.B) {
-	const expression = `entity.threshold >= 70 && has(entity.profile.note)`
+	const expression = `state.threshold >= 70 && has(state.profile.note)`
 	entity := map[string]any{"threshold": int64(75), "profile": map[string]any{}}
 	accesses := entityExpressionAccesses(expression)
 	b.Run("parse_each_eval", func(b *testing.B) {

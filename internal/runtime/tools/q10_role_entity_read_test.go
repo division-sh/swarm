@@ -24,12 +24,12 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 			bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 				"review": {
 					SchemaYAML:   "name: review\ninstance: fixture_key\nstages:\n  unknown: {}\n  done: {final: true}\n",
-					EntitiesYAML: "accounts:\n  current_state: text\n",
+					EntitiesYAML: "current_state: text\n",
 					AgentsYAML:   entityToolAgentYAML(actor),
 				},
 				"nostage": {
 					SchemaYAML:   "name: nostage\ninstance: fixture_key\nstages: []\n",
-					EntitiesYAML: "accounts:\n  current_state: text\n",
+					EntitiesYAML: "current_state: text\n",
 					AgentsYAML:   entityToolAgentYAML(noStageActor),
 				},
 			})
@@ -83,7 +83,7 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 						uuid.NewString(), events.EventType(tc.flowID+"/read.requested"), "test", "", nil, 0, entityToolTestRunID, "",
 						events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), path), time.Now().UTC(),
 					))
-					output, err := executor.Execute(current, "read_accounts", map[string]any{})
+					output, err := executor.Execute(current, "read_state", map[string]any{})
 					if err != nil {
 						t.Fatal(err)
 					}

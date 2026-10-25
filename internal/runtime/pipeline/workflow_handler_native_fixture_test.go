@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -125,10 +126,11 @@ func nativeHandlerEngineExistingEntityWithModuleForTest(t *testing.T, open func(
 		t.Fatal(err)
 	}
 	run := correlation.RunIDFromContext(ctx)
+	state, _ := entityruntime.ResolveForFlow(pc.SemanticSource(), ".")
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 		InstanceID: run, StorageRef: run, EntityID: entityID, WorkflowName: ".",
 		WorkflowVersion: pc.SemanticSource().WorkflowVersion(), CurrentState: "queued",
-		Fields: cloneMap(fields), EntityType: "test_entity",
+		Fields: cloneMap(fields), EntityType: state.EntityType,
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -192,10 +194,10 @@ type WorkflowEnginePhysicalCountsForTest struct {
 func declarativeEmitContractSourceForTest(t *testing.T, emittedEvents string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
-		"entities.yaml": "test_entity:\n  legacy_entity: text?\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
-		"events.yaml":   emittedEvents + "custom.trigger:\n  reason: text\n  score: float\nbatch.submitted:\n  items: {type: \"[json]?\"}\n",
+		"schema.yaml": "name: test\nstages:\n  queued: {}\n",
+		"state.yaml":  "legacy_entity: text?\n",
+		"nodes.yaml":  "node-a:\n  execution_type: system_node\n",
+		"events.yaml": emittedEvents + "custom.trigger:\n  reason: text\n  score: float\nbatch.submitted:\n  items: {type: \"[json]?\"}\n",
 	})
 }
 
@@ -225,7 +227,7 @@ func TestNativeDeclarativeEmissionSourcePreservesBusinessCatalogAndHostileField(
 			if len(batch.Payload.Properties) != 1 || batch.Payload.Properties["items"].Type != "[json]" || len(batch.Payload.Required) != 0 {
 				t.Fatal("original optional batch catalog changed")
 			}
-			if bundle.SourceArtifact == nil || !reflect.DeepEqual(bundle.Events, bundle.FlowTree.Root.Events) || bundle.RootEntities["test_entity"].Fields["legacy_entity"].Type != "text" {
+			if bundle.SourceArtifact == nil || !reflect.DeepEqual(bundle.Events, bundle.FlowTree.Root.Events) || bundle.RootEntities["state"].Fields["legacy_entity"].Type != "text" {
 				t.Fatal("source does not own complete catalog and hostile persisted field")
 			}
 		})

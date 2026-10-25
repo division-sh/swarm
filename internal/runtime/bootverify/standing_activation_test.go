@@ -16,13 +16,13 @@ func TestStandingFlowConstructorEligibility(t *testing.T) {
 	}{
 		{name: "keyless root", eligible: true},
 		{name: "keyed root", schema: "instance: tenant\n", fields: "  tenant: text\n"},
-		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: {check: entity.brief != ''}\n"},
+		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: {check: state.brief != ''}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: standing-root\nstages: []\n"+tc.schema)
 			if tc.fields != "" {
-				writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "root_state:\n"+tc.fields)
+				writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), tc.fields)
 			}
 			if tc.handler != "" {
 				writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work:\n")

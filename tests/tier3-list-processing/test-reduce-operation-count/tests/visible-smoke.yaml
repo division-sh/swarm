@@ -11,7 +11,7 @@ expect:
   events:
     include: [batch.counted]
   entities:
-    - type: core
+    - flow: .
       current_state: done
       fields:
         item_count: 4

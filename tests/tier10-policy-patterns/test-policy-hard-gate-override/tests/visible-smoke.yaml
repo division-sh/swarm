@@ -8,7 +8,7 @@ expect:
   events:
     include: [result.demoted]
   entities:
-    - type: core
+    - flow: .
       current_state: demoted
       fields:
         main_score: 80

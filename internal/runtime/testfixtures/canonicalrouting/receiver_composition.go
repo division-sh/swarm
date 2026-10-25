@@ -12,7 +12,7 @@ func CopyWorkflowStateDiagnostic(t testing.TB, stage string) string {
 	}
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", "name: workflow-state-diagnostic\nstages:\n  '"+stage+"': {}\n  done: {final: true}\npins:\n  inputs: [work.completed]\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "work: {}\n")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "events.yaml", "work.completed:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed:\n      advances_to: done\n")
 	return root
@@ -41,8 +41,7 @@ pins:
 connect:
   - {event: work.completed, from: ., to: sink}
 `,
-		"events.yaml":   "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n" + seedSchema,
-		"entities.yaml": "work: {}\n",
+		"events.yaml": "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n" + seedSchema,
 		"nodes.yaml": `controller:
   execution_type: system_node
   subscribes_to: [work.requested` + func() string {
@@ -62,7 +61,6 @@ pins:
   inputs:
     - work.completed
 `,
-		"sink/entities.yaml": "receipt: {}\n",
 		"sink/nodes.yaml": `collector:
   execution_type: system_node
   subscribes_to: [work.completed]
@@ -89,7 +87,7 @@ pins:
   inputs:
     - work.completed
 `,
-		"sink/entities.yaml": "receipt:\n  result: text\n",
+		"sink/state.yaml": "result: text\n",
 		"sink/nodes.yaml": `collector:
   execution_type: system_node
   subscribes_to: [work.completed]
@@ -123,7 +121,7 @@ func CopyReceiverMixedPolicies(t testing.TB, optionalFirst bool) string {
 	}
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), creating, edges)
 	writeClosedVariantFile(t, root, optionalScope+"/schema.yaml", "name: "+optionalScope+"\npins:\n  inputs: [work.completed]\n")
-	writeClosedVariantFile(t, root, optionalScope+"/entities.yaml", "receipt: {}\n")
+	removeClosedVariantFiles(t, root, optionalScope+"/state.yaml")
 	writeClosedVariantFile(t, root, optionalScope+"/nodes.yaml", "collector:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed: {}\n")
 	return root
 }
@@ -142,8 +140,8 @@ pins:
     - work.seeded
     - work.requested
 `,
-		"events.yaml":   "work.seeded:\n  seed: boolean\nwork.requested:\n  seed: boolean\n",
-		"entities.yaml": "work:\n  marker: text\n",
+		"events.yaml": "work.seeded:\n  seed: boolean\nwork.requested:\n  seed: boolean\n",
+		"state.yaml":  "marker: text\n",
 		"nodes.yaml": `controller:
   execution_type: system_node
   subscribes_to:
@@ -198,7 +196,7 @@ pins:
   inputs:
     - child.finished
 `,
-		"sink/tail/entities.yaml": "receipt:\n  result: text\n",
+		"sink/tail/state.yaml": "result: text\n",
 		"sink/tail/nodes.yaml": `collector:
   execution_type: system_node
   subscribes_to: [child.finished]
@@ -234,7 +232,7 @@ pins:
   inputs:
     - work.completed
 `)
-	writeClosedVariantFile(t, root, "sink/entities.yaml", "receipt:\n  result: text\n")
+	writeClosedVariantFile(t, root, "sink/state.yaml", "result: text\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
   execution_type: system_node
   subscribes_to: [work.completed]
@@ -359,6 +357,6 @@ connect:
         event: work.completed
         fields: {result: "emitted"}
 `)
-	removeClosedVariantFiles(t, root, "entities.yaml", "sink/entities.yaml")
+	removeClosedVariantFiles(t, root, "state.yaml", "sink/state.yaml")
 	return root
 }

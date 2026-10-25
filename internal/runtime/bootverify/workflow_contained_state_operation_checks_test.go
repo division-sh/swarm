@@ -20,7 +20,7 @@ func TestRun_RootContainedStateDoesNotRequireChildCoordinator(t *testing.T) {
 func TestRun_ValidatesTypedContainedStateOperations(t *testing.T) {
 	source := semanticview.Wrap(containedStateOperationBundle(runtimecontracts.WorkflowDataWrite{
 		Operation: runtimecontracts.WorkflowDataOperationAppend,
-		TargetRef: "entity.verticals.active_jobs",
+		TargetRef: "state.verticals.active_jobs",
 		Key:       runtimecontracts.RefExpression("payload.vertical_id"),
 		Value:     runtimecontracts.RefExpression("payload.job"),
 	}))
@@ -35,7 +35,7 @@ func TestRun_ValidatesTypedContainedStateOperations(t *testing.T) {
 func TestRun_FailsClosedOnInvalidContainedStateOperationValue(t *testing.T) {
 	source := semanticview.Wrap(containedStateOperationBundle(runtimecontracts.WorkflowDataWrite{
 		Operation: runtimecontracts.WorkflowDataOperationSet,
-		TargetRef: "entity.verticals",
+		TargetRef: "state.verticals",
 		Key:       runtimecontracts.LiteralExpression("north"),
 		Value: runtimecontracts.LiteralExpression(map[string]any{
 			"undeclared":  "field",
@@ -54,7 +54,7 @@ func TestRun_FailsClosedOnInvalidContainedStateOperationValue(t *testing.T) {
 func TestRun_FailsClosedOnDynamicContainedStateOperationTargetPath(t *testing.T) {
 	source := semanticview.Wrap(containedStateOperationBundle(runtimecontracts.WorkflowDataWrite{
 		Operation: runtimecontracts.WorkflowDataOperationSet,
-		TargetRef: "entity.verticals[payload.vertical_id]",
+		TargetRef: "state.verticals[payload.vertical_id]",
 		Key:       runtimecontracts.LiteralExpression("north"),
 		Value: runtimecontracts.LiteralExpression(map[string]any{
 			"status":      "active",
@@ -81,7 +81,7 @@ func TestRun_FailsClosedOnContainedSetOrMergeIndex(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			source := semanticview.Wrap(containedStateOperationBundle(runtimecontracts.WorkflowDataWrite{
 				Operation: tc.op,
-				TargetRef: "entity.verticals",
+				TargetRef: "state.verticals",
 				Key:       runtimecontracts.LiteralExpression("north"),
 				Index:     runtimecontracts.LiteralExpression(0),
 				Value: runtimecontracts.LiteralExpression(map[string]any{
@@ -108,24 +108,24 @@ func TestRun_FailsClosedOnContainedStateOperationRefOperandsToUnknownEntityField
 			name: "key ref",
 			write: runtimecontracts.WorkflowDataWrite{
 				Operation: runtimecontracts.WorkflowDataOperationSet,
-				TargetRef: "entity.verticals",
-				Key:       runtimecontracts.RefExpression("entity.bad_key"),
+				TargetRef: "state.verticals",
+				Key:       runtimecontracts.RefExpression("state.bad_key"),
 				Value: runtimecontracts.LiteralExpression(map[string]any{
 					"status":      "active",
 					"active_jobs": []any{},
 				}),
 			},
-			want: "entity.bad_key",
+			want: "state.bad_key",
 		},
 		{
 			name: "value ref",
 			write: runtimecontracts.WorkflowDataWrite{
 				Operation: runtimecontracts.WorkflowDataOperationAppend,
-				TargetRef: "entity.verticals.active_jobs",
+				TargetRef: "state.verticals.active_jobs",
 				Key:       runtimecontracts.LiteralExpression("north"),
-				Value:     runtimecontracts.RefExpression("entity.missing"),
+				Value:     runtimecontracts.RefExpression("state.missing"),
 			},
-			want: "entity.missing",
+			want: "state.missing",
 		},
 	}
 	for _, tc := range tests {
@@ -167,7 +167,7 @@ func containedStateOperationBundle(write runtimecontracts.WorkflowDataWrite) *ru
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"subject": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"verticals": {Type: "map[text]VerticalState"},
 				},

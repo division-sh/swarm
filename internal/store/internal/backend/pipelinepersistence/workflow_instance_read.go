@@ -92,15 +92,14 @@ func (s *PipelinePostgresOwner) QueryWorkflowEntityCollection(ctx context.Contex
 	rows, err := s.backend.QueryContext(ctx, postgresWorkflowEntityStateSelect+`
 		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = $1::uuid
-		  AND es.entity_type = $2
 		  AND EXISTS (
 			SELECT 1 FROM runs run
-			WHERE run.run_id = es.run_id AND run.status IN ($5, $6, $8)
+			WHERE run.run_id = es.run_id AND run.status IN ($4, $5, $7)
 		  )
-		  AND (es.flow_instance = $3 OR es.flow_instance LIKE $4 OR ($7::boolean AND es.flow_instance = $1::text))
+		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3 OR ($6::boolean AND es.flow_instance = $1::text))
 		  AND (fi.instance_path IS NULL OR (LOWER(BTRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
 		ORDER BY es.created_at ASC, es.entity_id ASC
-	`, runID, owner.EntityType(), owner.ScopeKey(), owner.ScopeKey()+"/%", string(activeStates[0]), string(activeStates[1]), owner.ScopeKey() == runID, string(activeStates[2]))
+	`, runID, owner.ScopeKey(), owner.ScopeKey()+"/%", string(activeStates[0]), string(activeStates[1]), owner.ScopeKey() == runID, string(activeStates[2]))
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +440,6 @@ func (s *PipelineSQLiteOwner) QueryWorkflowEntityCollection(ctx context.Context,
 	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowEntityStateSelect+`
 		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = ?
-		  AND es.entity_type = ?
 		  AND EXISTS (
 			SELECT 1 FROM runs run
 			WHERE run.run_id = es.run_id AND run.status IN (?, ?, ?)
@@ -449,7 +447,7 @@ func (s *PipelineSQLiteOwner) QueryWorkflowEntityCollection(ctx context.Context,
 		  AND (es.flow_instance = ? OR es.flow_instance LIKE ? OR (? AND es.flow_instance = ?))
 		  AND (fi.instance_path IS NULL OR (LOWER(TRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
 		ORDER BY es.created_at ASC, es.entity_id ASC
-	`, runID, owner.EntityType(), string(activeStates[0]), string(activeStates[1]), string(activeStates[2]), owner.ScopeKey(), owner.ScopeKey()+"/%", owner.ScopeKey() == runID, runID)
+	`, runID, string(activeStates[0]), string(activeStates[1]), string(activeStates[2]), owner.ScopeKey(), owner.ScopeKey()+"/%", owner.ScopeKey() == runID, runID)
 	if err != nil {
 		return nil, err
 	}

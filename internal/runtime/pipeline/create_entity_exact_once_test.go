@@ -159,7 +159,7 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{SourceField: "amount", TargetField: "amount"},
 				{SourceField: "who", TargetField: "who"},
-				{TargetField: "counter", Value: runtimecontracts.CELExpression("entity.counter + 1")},
+				{TargetField: "counter", Value: runtimecontracts.CELExpression("state.counter + 1")},
 			},
 		},
 		SetsGate:   &runtimecontracts.GateSpec{Name: "ready"},
@@ -167,8 +167,8 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 		Emit: runtimecontracts.EmitSpec{
 			Event: "thing.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
-				"amount": runtimecontracts.CELExpression("entity.amount"),
-				"who":    runtimecontracts.CELExpression("entity.who"),
+				"amount": runtimecontracts.CELExpression("state.amount"),
+				"who":    runtimecontracts.CELExpression("state.who"),
 			},
 		},
 	}

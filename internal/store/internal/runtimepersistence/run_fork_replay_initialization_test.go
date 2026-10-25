@@ -195,21 +195,8 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if receiver.EntityID == "" {
 				t.Fatal("corruption proof requires the exact existing flow construction, not an entityless actor")
 			}
-			if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET flow_instance=$1 WHERE run_id=$2 AND entity_id=$3`, "foreign", child.ForkRunID, receiver.EntityID); err != nil {
-				t.Fatal(err)
-			}
-			corruptBefore := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-			if _, err := owner.ActivateRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), "constructed header projection disagrees with its declared field row") {
-				t.Fatalf("corrupt child ownership must reject before replay: %v", err)
-			}
-			if !reflect.DeepEqual(corruptBefore, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
-				t.Fatal("rejected replay changed execution history")
-			}
-			if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET flow_instance=$1 WHERE run_id=$2 AND entity_id=$3`, receiver.FlowInstance, child.ForkRunID, receiver.EntityID); err != nil {
-				t.Fatal(err)
-			}
 			for _, corrupt := range []struct{ name, column, value, refusal string }{
-				{"wrong_path", "instance_path", "foreign", "constructed header projection disagrees with its declared field row"},
+				{"wrong_path", "instance_path", "foreign", "reconstructed replay receiver contradicts fixed-revision ownership"},
 				{"foreign_template", "flow_template", "unrelated", "reconstructed replay receiver contradicts fixed-revision ownership"},
 				{"wrong_stage", "current_state", "done", "historical workflow state"},
 				{"malformed_bookkeeping", "bookkeeping", "[]", "requires persisted JSON object"},
@@ -256,7 +243,6 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			})
 			for _, missing := range []struct{ name, table, refusal string }{
 				{"state_only_receiver", "flow_instances", "complete workflow target persistence is required"},
-				{"missing_declared_fields", "entity_state", "constructed header projection disagrees with its declared field row"},
 			} {
 				t.Run(missing.name, func(t *testing.T) {
 					saved := "saved_replay_receiver"

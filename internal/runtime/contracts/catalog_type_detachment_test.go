@@ -17,12 +17,13 @@ func loadDetachedCatalogFixture(t *testing.T) *WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
 	types := "enums:\n  Choice: {values: [alpha, beta], default: alpha}\ntypes:\n  Probe:\n" + bytesToIndented(detachedCatalogFields) + "  Outer:\n    child: Probe\n"
+	state := "label: text\npeer: text\nscore: numeric\nother: numeric\nnote: text?\nmembers: map[text]Probe\n"
 	for name, body := range map[string]string{
 		"schema.yaml": "name: detached-catalog\nstages: {done: {final: true}}\n",
-		"types.yaml":  types, "entities.yaml": "person:\n" + detachedCatalogFields + "  members: map[text]Probe\n",
+		"types.yaml":  types, "state.yaml": state,
 		"events.yaml":       "audit.record:\n" + detachedCatalogFields + "batch.ready:\n  rows: [Probe]\n  label: text\n  result: Probe\n",
 		"child/schema.yaml": "name: child\nstages: {done: {final: true}}\n",
-		"child/types.yaml":  types, "child/entities.yaml": "person:\n" + detachedCatalogFields,
+		"child/types.yaml":  types, "child/state.yaml": state,
 		"child/events.yaml": "audit.record:\n" + detachedCatalogFields,
 	} {
 		writeFixtureFile(t, filepath.Join(root, name), body)
@@ -105,9 +106,6 @@ func detachedCatalogObservations(t *testing.T, b *WorkflowContractBundle, bound 
 	addCatalog := func(label string, get func() TypeCatalogDocument) {
 		out[label] = catalogDetachedObservation{func() any { return get() }, func() SchemaRefinements { return get().Types["Probe"].Fields[name].Refinements }}
 	}
-	addEntities := func(label string, get func() EntityContractsDocument) {
-		out[label] = catalogDetachedObservation{func() any { return get() }, func() SchemaRefinements { return get()["person"].Fields[name].Refinements }}
-	}
 	addCatalog("D03/root", b.RootTypeCatalog)
 	addCatalog("D03/flow", func() TypeCatalogDocument {
 		v, ok := b.FlowTypeCatalogByID("child")
@@ -117,36 +115,6 @@ func detachedCatalogObservations(t *testing.T, b *WorkflowContractBundle, bound 
 		return v
 	})
 	addCatalog("D03/resolved", func() TypeCatalogDocument { return b.ResolvedTypeCatalogForFlow("child") })
-	addEntities("D05/root", b.RootEntityContracts)
-	addEntities("D05/flow", func() EntityContractsDocument {
-		v, ok := b.FlowEntityContractsByID("child")
-		if !ok {
-			t.Fatal("missing child entities")
-		}
-		return v
-	})
-	addEntities("D05/resolved", func() EntityContractsDocument { return b.ResolvedEntityContractsForFlow("child") })
-	addEntities("D06/root-wrapper", func() EntityContractsDocument {
-		name, contract, ok := b.RootPrimaryEntityContract()
-		if !ok {
-			t.Fatal("missing root primary wrapper")
-		}
-		return EntityContractsDocument{name: contract}
-	})
-	addEntities("D06/flow-wrapper", func() EntityContractsDocument {
-		name, contract, ok := b.FlowPrimaryEntityContract("child")
-		if !ok {
-			t.Fatal("missing flow primary wrapper")
-		}
-		return EntityContractsDocument{name: contract}
-	})
-	addEntities("D06/test-setup", func() EntityContractsDocument {
-		primary, err := b.ResolveTestSetupPrimaryEntity("child", "person")
-		if err != nil {
-			t.Fatal(err)
-		}
-		return EntityContractsDocument{primary.EntityType: primary.Contract}
-	})
 	for _, flow := range []string{".", "child"} {
 		primary := func() PrimaryEntityContract {
 			v, err := b.ResolveFlowPrimaryEntity(flow)
@@ -155,7 +123,7 @@ func detachedCatalogObservations(t *testing.T, b *WorkflowContractBundle, bound 
 			}
 			return v
 		}
-		out["D06/primary/"+flow] = catalogDetachedObservation{func() any { return primary() }, func() SchemaRefinements { return primary().Contract.Fields[name].Refinements }}
+		out["D06/primary/"+flow] = catalogDetachedObservation{func() any { return primary() }, func() SchemaRefinements { return primary().Types.Types["Probe"].Fields[name].Refinements }}
 		out["D07/structural/"+flow] = catalogDetachedObservation{func() any {
 			v, err := primary().StructuralType()
 			if err != nil {
@@ -167,7 +135,7 @@ func detachedCatalogObservations(t *testing.T, b *WorkflowContractBundle, bound 
 			if err != nil {
 				t.Fatal(err)
 			}
-			return detachedTypeField(t, v, name).Refinements
+			return detachedTypeField(t, detachedTypeField(t, v, "members").Type, name).Refinements
 		}}
 	}
 	for _, ref := range []string{"Probe", "[Probe]", "map[text]Probe", "Outer"} {
@@ -335,7 +303,7 @@ func TestCatalogTypeDetachmentPrimaryAndResolverInputCapture(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					input = primary.Contract.Fields[detachedBoundField(bound)].Refinements
+					input = primary.Types.Types["Probe"].Fields[detachedBoundField(bound)].Refinements
 				}
 				before := detachedSnapshot(t, typ)
 				mutateDetachedBound(input, bound)

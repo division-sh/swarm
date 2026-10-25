@@ -233,8 +233,8 @@ func CopySelectedForkLocalReadiness(t testing.TB, declarations int, frontier str
 	childNodes := read("worker-flow/nodes.yaml")
 	if declarations == 2 && frontier == "agent" {
 		events = replaceSelectedReadiness(t, events, "worker.ready:\n  worker_id: text\n", "worker.ready:\n  worker_id: text\n  observed_count: integer?\n")
-		childNodes = replaceSelectedReadiness(t, childNodes, "    worker.observed:\n      advances_to: complete\n", "    worker.observed:\n      data_accumulation:\n        writes:\n          - target_field: observed_count\n            value: entity.observed_count + 1\n      on_complete:\n        - condition: entity.observed_count == 1\n          advances_to: complete\n")
-		writeClosedVariantFile(t, root, "worker-flow/entities.yaml", read("worker-flow/entities.yaml")+"  observed_count: {type: integer, initial: 0}\n")
+		childNodes = replaceSelectedReadiness(t, childNodes, "  worker.observed:\n    advances_to: complete\n", "  worker.observed:\n    data_accumulation:\n      writes:\n        - target_field: observed_count\n          value: state.observed_count + 1\n    on_complete:\n      - condition: state.observed_count == 1\n        advances_to: complete\n")
+		writeClosedVariantFile(t, root, "worker-flow/state.yaml", read("worker-flow/state.yaml")+"observed_count: 0\n")
 	}
 	if frontier == "mixed" {
 		childNodes = replaceSelectedReadiness(t, childNodes, "    worker.ready:\n      advances_to: complete\n", "    worker.ready:\n      guard: {id: admitted, check: true}\n")

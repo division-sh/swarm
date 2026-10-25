@@ -148,8 +148,7 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			"TestDeploymentConstructionNativeCommitBothStores": {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
 		},
 		"store-runtime-s-z-rest": {
-			"TestScenarioConstructionNativeCommitBothStores":   {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
-			"TestScenarioConstructionFieldlessStateBothStores": {"sqlite", "postgres"},
+			"TestScenarioConstructionNativeCommitBothStores": {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
 		},
 		"store-runtime-selected": {
 			"TestSelectedContractOrdinarySourceStatePresenceBothStores": {

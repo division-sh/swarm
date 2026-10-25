@@ -80,7 +80,7 @@ func seedNativeActivityBoringSourceFlowForTest(t *testing.T, fixture nativeActiv
 	if err := fixture.native.RequireRun(ctx, event.RunID()); err != nil {
 		t.Fatal(err)
 	}
-	instance := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: event.EntityID(), StorageRef: event.TargetRoute().FlowInstance, EntityID: event.EntityID(), WorkflowName: "research", WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(), CurrentState: "pending", EnteredStageAt: event.CreatedAt(), CreatedAt: event.CreatedAt(), Fields: map[string]any{"marker": event.EntityID()}, EntityType: "test_entity"})
+	instance := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: event.EntityID(), StorageRef: event.TargetRoute().FlowInstance, EntityID: event.EntityID(), WorkflowName: "research", WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(), CurrentState: "pending", EnteredStageAt: event.CreatedAt(), CreatedAt: event.CreatedAt(), Fields: map[string]any{"marker": event.EntityID()}, EntityType: "state"})
 	if err := fixture.native.Construct(ctx, instance); err != nil {
 		t.Fatal(err)
 	}

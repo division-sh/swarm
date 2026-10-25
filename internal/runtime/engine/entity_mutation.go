@@ -41,7 +41,7 @@ func (e *Executor) resetNodeEntityProjections(frame *executionFrame) error {
 			continue
 		}
 		if err := e.appendEntityMutation(frame, entityruntime.Mutation{
-			Target: "entity." + binding.TargetField, Value: []any{}, ProjectionSource: binding.TargetDecl.MaterializeFrom,
+			Target: "state." + binding.TargetField, Value: []any{}, ProjectionSource: binding.TargetDecl.MaterializeFrom,
 		}); err != nil {
 			return err
 		}

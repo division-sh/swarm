@@ -4,6 +4,5 @@ steps:
     payload:
       score: 50
 expect:
-  entities:
-    - type: test_entity
-      current_state: pending
+  events:
+    include: [check.requested]

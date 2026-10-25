@@ -3009,7 +3009,7 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.ExecutionFlowID.String(), target); err != nil {
 		return err
 	} else if entityTarget {
-		return e.appendEntityMutation(frame, entityruntime.Mutation{Target: "entity." + resolved.Path, Value: value})
+		return e.appendEntityMutation(frame, entityruntime.Mutation{Target: "state." + resolved.Path, Value: value})
 	}
 	return fmt.Errorf("unsupported write target %s; use an entity field or an explicit evaluation-private scope", target)
 }

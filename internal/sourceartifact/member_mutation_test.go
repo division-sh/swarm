@@ -8,7 +8,7 @@ import (
 
 func Test2376MemberDispositionMutationParity(t *testing.T) {
 	for _, label := range []string{
-		"schema.yaml", "types.yaml", "entities.yaml", "nodes.yaml", "events.yaml", "agents.yaml", "tools.yaml", "policy.yaml", "rules.yaml",
+		"schema.yaml", "types.yaml", "state.yaml", "nodes.yaml", "events.yaml", "agents.yaml", "tools.yaml", "policy.yaml", "rules.yaml",
 		"manifest.yaml", "child/manifest.yaml", "prompts/worker.md", "tests/journey.yaml", "data/rows.jsonl", "mocks/worker.yaml", "modules/worker.py", "packs/pack.yaml", "docs/manifest.yaml", "README", "README.md", "LICENSE", "LICENSE.md",
 	} {
 		t.Run(label, func(t *testing.T) {

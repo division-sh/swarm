@@ -13,6 +13,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -89,7 +90,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	rootNodeID := identitytest.FlowNode(t, ".", "root-completion").Key()
 	assertSystemNodeOutcomePersisted(t, db, eventID, rootNodeID)
 	assertSystemNodeDeliverySettled(t, db, eventID, rootNodeID)
-	assertFlowEntityTerminal(t, pg, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "discovery", "done")
+	assertFlowEntityTerminal(t, pg, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "done")
 
 	diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":%q}}`, runID))
 	if diagnose.Error != nil {
@@ -256,21 +257,15 @@ func assertPipelineReceiptSucceeded(t *testing.T, db *sql.DB, eventID string) {
 	}
 }
 
-func assertFlowEntityTerminal(t *testing.T, selected EntityReadStore, runID, entityID, flowInstance, wantEntityType, wantState string) {
+func assertFlowEntityTerminal(t *testing.T, selected runtimepipeline.WorkflowInstancePersistenceReader, runID, entityID, flowInstance, wantState string) {
 	t.Helper()
-	full, err := selected.LoadOperatorEntity(context.Background(), entityID, runID)
-	if err != nil {
-		t.Fatalf("load flow entity terminal state: %v", err)
+	owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(flowInstance, flowInstance, flowInstance)}
+	instance, found, err := selected.LoadWorkflowInstance(context.Background(), owner)
+	if err != nil || !found || instance.EntityID != entityID || instance.StorageRef != flowInstance || instance.WorkflowName != flowInstance || instance.EntityType != "" {
+		t.Fatalf("fieldless flow identity = %+v, found=%t err=%v, want %s/%s/%s", instance, found, err, runID, entityID, flowInstance)
 	}
-	entity := full.Entity
-	if entity.RunID != runID || entity.EntityID != entityID || entity.FlowInstance != flowInstance || entity.EntityType != wantEntityType {
-		t.Fatalf("flow entity identity = %+v, want %s/%s/%s/%s", entity, runID, entityID, flowInstance, wantEntityType)
-	}
-	if entity.StageDefined == nil || !*entity.StageDefined || entity.CurrentState == nil || *entity.CurrentState != wantState ||
-		entity.Revision == nil || *entity.Revision < 1 || entity.EnteredStateAt == nil || entity.EnteredStateAt.IsZero() ||
-		entity.LifecycleCreatedAt == nil || entity.LifecycleCreatedAt.IsZero() ||
-		entity.LifecycleUpdatedAt == nil || entity.LifecycleUpdatedAt.IsZero() {
-		t.Fatalf("flow entity terminal lifecycle = %+v, want present named stage %q", entity, wantState)
+	if !instance.StageDefined || instance.CurrentState != wantState || instance.Revision < 1 || instance.EnteredStageAt.IsZero() || instance.CreatedAt.IsZero() || instance.UpdatedAt.IsZero() {
+		t.Fatalf("fieldless flow terminal lifecycle = %+v, want present named stage %q", instance, wantState)
 	}
 }
 
@@ -309,7 +304,7 @@ func writeRunCompletionFixtureFile(t *testing.T, path, contents string) {
 
 func isRunCompletionOptionalDeclarationFixture(path string) bool {
 	switch filepath.Base(path) {
-	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+	case "agents.yaml", "state.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
 		return true
 	default:
 		return false

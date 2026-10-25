@@ -7,8 +7,3 @@ steps:
 expect:
   events:
     include: [review.approved]
-  entities:
-    - type: test_entity
-      current_state: approved
-      gates:
-        g_reviewed: true

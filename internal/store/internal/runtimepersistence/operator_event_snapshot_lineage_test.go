@@ -57,7 +57,7 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 		t.Fatalf("expected one compiled fan-out plan: %d", len(plans))
 	}
 	constructed := commitPreparedWorkflowAggregateFixture(t, ctx, f.store.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "root", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+		InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "state", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
 		Mode: "static", StageDefined: true, CurrentState: "pending", Fields: map[string]any{}, CreatedAt: at, EnteredStageAt: at,
 	}, at)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID})}
@@ -82,7 +82,7 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 	state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	state.ExpectedState, state.ExpectedRevision = "pending", 1
 	state.UpdatedAt = at.Add(time.Second)
-	state.CurrentState, state.EntityType, state.Mode = "review", "root", "static"
+	state.CurrentState, state.EntityType, state.Mode = "review", "state", "static"
 	if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
 		State: state, FanOutIntent: &intent, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 	}); err != nil {

@@ -20,7 +20,7 @@ func VerifyWorkflowInstanceStore_RequiresRunContextForTest(t *testing.T, open fu
 		WorkflowName:    "run-scope",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	}))
 	if err == nil || err.Error() != "prepare native component construction: flow instance activation readiness: dynamic flow runtime readiness requires run_id" {
 		t.Fatalf("Upsert error = %v, want missing run_id", err)
@@ -46,7 +46,7 @@ func VerifyWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleedForTest(t *t
 		WorkflowName:    "run-scope",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "source_state",
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("upsert source state: %v", err)
 	}
@@ -57,7 +57,7 @@ func VerifyWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleedForTest(t *t
 		WorkflowName:    "run-scope",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "fork_state",
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("upsert fork state: %v", err)
 	}
