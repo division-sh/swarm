@@ -1,4 +1,0 @@
-worker_state:
-  batch_id: {type: text}
-  item_id: {type: text}
-  value: {type: text}

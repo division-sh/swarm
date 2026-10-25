@@ -341,8 +341,8 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 	}
 	assume := func(condition string, truth bool) {
 		for _, path := range workflowexpr.ConditionPresenceFacts(condition, truth) {
-			if strings.HasPrefix(path, "entity.") {
-				facts[strings.TrimPrefix(path, "entity.")] = struct{}{}
+			if strings.HasPrefix(path, "state.") {
+				facts[strings.TrimPrefix(path, "state.")] = struct{}{}
 			}
 		}
 	}
@@ -382,7 +382,7 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		}
 		bindings, _ := accprojection.ForExecutableHandler(a.source, node, event)
 		for _, binding := range bindings {
-			assign("entity." + binding.TargetField)
+			assign("state." + binding.TargetField)
 		}
 		projected = true
 	}
@@ -507,7 +507,7 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 				}
 				for _, binding := range accprojection.Resolve(a.source).Bindings {
 					if binding.SourceNode.Equal(node) {
-						assign("entity." + binding.TargetField)
+						assign("state." + binding.TargetField)
 					}
 				}
 			}
@@ -634,7 +634,7 @@ func entityAssignmentEdgeSelects(edge c.WorkflowStageTopologyEdge, handler c.Sys
 func EntityAssignmentPresencePaths(facts entityruntime.AssignmentFacts) []string {
 	paths := make([]string, 0, len(facts))
 	for path := range facts {
-		paths = append(paths, "entity."+path)
+		paths = append(paths, "state."+path)
 	}
 	sort.Strings(paths)
 	return paths

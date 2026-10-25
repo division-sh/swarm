@@ -6,10 +6,14 @@ import "testing"
 // actual keyed constructor and declared advance. It has no agents or autonomous work.
 func ConversationForkConstructionDocuments() map[string]string {
 	return map[string]string{
-		"flow/schema.yaml":   "name: flow\ninstance: name\nstages:\n  draft: {}\n  after: {}\npins:\n  inputs: [conversation.created]\n",
-		"flow/entities.yaml": "default:\n  name: text\n  current_state: {type: 'text?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  gates: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  accumulator: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  bookkeeping: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n",
-		"flow/nodes.yaml":    "advance:\n  execution_type: system_node\n  event_handlers:\n    conversation.created:\n      advances_to: after\n",
+		"flow/schema.yaml": "name: flow\ninstance: name\nstages:\n  draft: {}\n  after: {}\npins:\n  inputs: [conversation.created]\n",
+		"flow/state.yaml":  "name: text\ncurrent_state: text?\ngates: json?\naccumulator: json?\nbookkeeping: json?\n",
+		"flow/nodes.yaml":  "advance:\n  execution_type: system_node\n  event_handlers:\n    conversation.created:\n      advances_to: after\n",
 	}
+}
+
+func ConversationForkCreatedEventDocument() string {
+	return "conversation.created:\n  name: text\n  current_state: text?\n  gates: json?\n  accumulator: json?\n  bookkeeping: json?\n"
 }
 
 func ConversationForkHistoryRootDocument() string {
@@ -20,7 +24,7 @@ func CopyConversationForkHistory(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", ConversationForkHistoryRootDocument())
-	writeClosedVariantFile(t, root, "events.yaml", "conversation.created:\n  name: text\n")
+	writeClosedVariantFile(t, root, "events.yaml", ConversationForkCreatedEventDocument())
 	addConversationForkConstruction(t, root)
 	return root
 }

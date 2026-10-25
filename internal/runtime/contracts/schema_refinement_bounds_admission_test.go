@@ -16,8 +16,6 @@ func loadRefinementBound(t *testing.T, family, kind, refinement, source string) 
 	switch family {
 	case "types":
 		text = "types:\n  Probe:\n    " + field + "\n"
-	case "entities":
-		text = "probe:\n  " + field + "\n"
 	case "events":
 		text = "probe.ready:\n  " + field + "\n"
 	default:
@@ -31,7 +29,7 @@ func loadRefinementBound(t *testing.T, family, kind, refinement, source string) 
 }
 
 func TestSharedRefinementBoundPresenceMatrix(t *testing.T) {
-	for _, family := range []string{"types", "entities", "events"} {
+	for _, family := range []string{"types", "events"} {
 		for _, bound := range []string{"min", "max"} {
 			for _, tc := range []struct {
 				name, source    string
@@ -74,8 +72,6 @@ func TestSharedRefinementBoundPresenceMatrix(t *testing.T) {
 							switch family {
 							case "types":
 								r = bundle.RootTypes.Types["Probe"].Fields["value"].Refinements
-							case "entities":
-								r = bundle.RootEntities["probe"].Fields["value"].Refinements
 							case "events":
 								r = bundle.Events["probe.ready"].Payload.Properties["value"].Refinements
 							}
@@ -101,7 +97,7 @@ func TestSharedRefinementBoundPresenceMatrix(t *testing.T) {
 }
 
 func TestSharedRefinementBoundMappingAndOrdering(t *testing.T) {
-	for _, family := range []string{"types", "entities", "events"} {
+	for _, family := range []string{"types", "events"} {
 		for _, refinement := range []string{"length", "range"} {
 			for _, source := range []string{"{}", "null", "[]", "{min: 2, max: 1}", "{min: 0, min: 1}", "{other: 0}"} {
 				t.Run(family+"/"+refinement+"/"+source, func(t *testing.T) {

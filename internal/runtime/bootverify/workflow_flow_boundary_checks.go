@@ -406,8 +406,8 @@ func bootverifyAccumulateReferencesEntity(spec *runtimecontracts.AccumulateSpec)
 	if spec == nil {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(spec.From), "entity.") ||
-		strings.HasPrefix(strings.TrimSpace(spec.Key), "entity.")
+	return strings.HasPrefix(strings.TrimSpace(spec.From), "state.") ||
+		strings.HasPrefix(strings.TrimSpace(spec.Key), "state.")
 }
 
 func bootverifyNormalizeEntityWriteTarget(target string) string {

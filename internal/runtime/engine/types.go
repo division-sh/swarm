@@ -193,7 +193,7 @@ func (s StateSnapshot) EntityContext() map[string]any {
 }
 
 func (s StateSnapshot) PlatformEntityContext(flowInstance string) map[string]any {
-	return platformcontext.EntityMetadata(s.EntityID.String(), s.CurrentState, flowInstance, s.StateCarrier.Gates)
+	return platformcontext.EntityMetadata(s.EntityID.String(), s.CurrentState, flowInstance)
 }
 
 func (s *StateSnapshot) SetGate(name string, value bool) {

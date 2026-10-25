@@ -105,13 +105,13 @@ func applyMaterializedEngineStateMutationForTest(
 }
 
 func TestApplyEngineStateMutationUsesOnlyCanonicalEntityFields(t *testing.T) {
-	source := testRootEntityContractSource("root", "test_entity")
+	source := testRootEntityContractSource("root")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["test_entity"].Fields["research_context"] = runtimecontracts.EntityFieldDecl{Type: "json"}
+	bundle.RootEntities["state"].Fields["research_context"] = runtimecontracts.EntityFieldDecl{Type: "json"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"research_context": map[string]any{"summary": "done"}},
 		StateBuckets: map[string]any{},
-		EntityType:   "test_entity",
+		EntityType:   "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"research_context": map[string]any{"summary": "done"},
@@ -143,7 +143,7 @@ func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing
 	instance := &WorkflowInstance{
 		Fields:     map[string]any{},
 		Gates:      map[string]bool{"g_a": true, "g_b": true},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_c": true}, nil)
 	mutation.SetGate = "g_c"
@@ -173,7 +173,7 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	})
 	instance := &WorkflowInstance{
 		Fields:     map[string]any{},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_validated": true}, nil)
 	mutation.SetGate = "g_validated"
@@ -200,9 +200,7 @@ stages:
 stages:
   queued: {}
 `,
-		"child/entities.yaml": `
-child_entity:
-  request_id: text
+		"child/state.yaml": `request_id: text
 `,
 		"child/events.yaml": `
 request.received:
@@ -232,7 +230,7 @@ request.received:
 			"request_id": "req-existing",
 			"flow_path":  "child/existing",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	})); err != nil {
 		t.Fatalf("seed child workflow instance: %v", err)
 	}
@@ -256,14 +254,14 @@ request.received:
 }
 
 func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *testing.T) {
-	source := testRootEntityContractSource("root", "test_entity")
+	source := testRootEntityContractSource("root")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["test_entity"].Fields["flow_path"] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	bundle.RootEntities["state"].Fields["flow_path"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	instance := &WorkflowInstance{
 		Fields: map[string]any{
 			"flow_path": "child/inst-1",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_ready": true}, nil)
 	mutation.SetGate = "g_ready"
@@ -276,10 +274,10 @@ func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *
 }
 
 func authoredControlCollisionSource() semanticview.Source {
-	source := testRootEntityContractSource("root", "test_entity")
+	source := testRootEntityContractSource("root")
 	bundle, _ := semanticview.Bundle(source)
 	for _, name := range []string{"business_status", "parent_flow_id", "parent_flow_instance", "parent_entity_id"} {
-		bundle.RootEntities["test_entity"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "text"}
+		bundle.RootEntities["state"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	}
 	return source
 }
@@ -300,7 +298,7 @@ func TestApplyEngineStateMutationPreservesTypedControlAcrossAuthoredCollisions(t
 			"parent_entity_id": "authored-parent",
 			"business_status":  "old",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"parent_flow_id":       "wrong",
@@ -339,7 +337,7 @@ func TestApplyEngineStateMutationDoesNotPromoteAuthoredParentRouteNames(t *testi
 		Fields: map[string]any{
 			"business_status": "old",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"business_status":      "new",
@@ -371,7 +369,7 @@ func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) 
 			"parent_entity_id": "legacy-parent",
 			"business_status":  "old",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"business_status":      "new",
@@ -438,15 +436,15 @@ func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
 }
 
 func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(t *testing.T) {
-	source := testRootEntityContractSource("root", "test_entity")
+	source := testRootEntityContractSource("root")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["test_entity"].Fields["composite_score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
-	bundle.RootEntities["test_entity"].Fields["scoring_rubric"] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	bundle.RootEntities["state"].Fields["composite_score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	bundle.RootEntities["state"].Fields["scoring_rubric"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"composite_score": 0},
 		Gates:        map[string]bool{"g_ready": true},
 		StateBuckets: map[string]any{},
-		EntityType:   "test_entity",
+		EntityType:   "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"composite_score": 71,
@@ -470,7 +468,7 @@ func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(
 }
 
 func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.T) {
-	instance := &WorkflowInstance{EntityType: "test_entity"}
+	instance := &WorkflowInstance{EntityType: "state"}
 	mutation := testEngineStateMutation(map[string]any{}, nil, nil)
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, "")
@@ -507,11 +505,10 @@ func VerifyUpdateEntityState_ReturnsWorkflowStoreMutationErrorForTest(t *testing
 
 func VerifyPipelineEngineMutationOwnerRejectsForeignFlowWriteForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":          "name: foreign-flow-write\n",
-		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {}\n",
-		"flow-a/entities.yaml": "test_entity: {}\n",
-		"flow-b/schema.yaml":   "name: flow-b\nstages:\n  pending: {}\n",
-		"flow-b/entities.yaml": "test_entity: {}\n",
+		"schema.yaml":        "name: foreign-flow-write\n",
+		"flow-a/schema.yaml": "name: flow-a\nstages:\n  pending: {}\n",
+
+		"flow-b/schema.yaml": "name: flow-b\nstages:\n  pending: {}\n",
 	})
 	fixture := open(t, source)
 	store := fixture.Persistence.store
@@ -531,7 +528,7 @@ func VerifyPipelineEngineMutationOwnerRejectsForeignFlowWriteForTest(t *testing.
 		WorkflowVersion: source.WorkflowVersion(),
 		CurrentState:    "pending",
 		Fields:          map[string]any{},
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("upsert flow-a entity: %v", err)
 	}
@@ -573,7 +570,7 @@ func VerifyPipelineEngineMutationOwnerRejectsWrongRunRootAddressBeforeMutationOn
 	entityID := eventtest.UUID("wrong-run-root-engine-" + backend)
 	address := testEngineStateAddress(".", wrongRunID, entityID)
 	mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
-	mutation.StateCarrier.Control.EntityType = "test_entity"
+	mutation.StateCarrier.Control.EntityType = "state"
 	mutation.TriggeredAt = time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
 
 	repo := pipelineEngineStateRepo{coordinator: coordinator}
@@ -627,7 +624,7 @@ func VerifyWorkflowEngineMutationRejectsEntityContractDriftOnBothStoresForTest(t
 	}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
 		Address: address, EvaluatedState: evaluated, State: mutation,
 	})
-	if err == nil || !strings.Contains(err.Error(), `entity_type "wrong_entity" disagrees with canonical contract "test_entity"`) {
+	if err == nil || !strings.Contains(err.Error(), `entity_type "wrong_entity" disagrees with canonical contract "state"`) {
 		t.Fatalf("entity contract drift mutation error = %v", err)
 	}
 	stored, found, loadErr := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID))
@@ -699,11 +696,7 @@ func VerifyPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaul
 stages:
   queued: {}
 `,
-		"review/entities.yaml": `
-review_entity:
-  status:
-    type: text
-    initial: pending
+		"review/state.yaml": `status: "pending"
 `,
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -731,8 +724,8 @@ review_entity:
 
 func VerifyPipelineEngineMutationOwnerRoundTripsTypedCarrierForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: root\n",
-		"entities.yaml": "test_entity:\n  score: integer\n  subject_id: text\n",
+		"schema.yaml": "name: root\n",
+		"state.yaml":  "score: integer\nsubject_id: text\n",
 	})
 	fixture := open(t, source)
 	ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
@@ -755,7 +748,7 @@ func VerifyPipelineEngineMutationOwnerRoundTripsTypedCarrierForTest(t *testing.T
 		CurrentState:    "pending",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -807,7 +800,7 @@ func VerifyPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrierForTe
 			StateBuckets: map[string]any{
 				"evidence": "bad",
 			},
-			EntityType: "test_entity",
+			EntityType: "state",
 		})); err != nil {
 			t.Fatalf("upsert malformed state bucket instance: %v", err)
 		}
@@ -829,33 +822,6 @@ func VerifyAccumulatorAppend_ReturnsWorkflowStoreMutationErrorForTest(t *testing
 	}
 	if err.Error() != closedErr.Error() {
 		t.Fatalf("accumulator append did not propagate original closed-owner read: got=%v want=%v", err, closedErr)
-	}
-}
-
-func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {
-	eval := pipelineEngineEvaluator{evaluator: newWorkflowExpressionEvaluator()}
-	ok, err := eval.EvalBool(
-		`accumulated.filter(d, d.score >= 70 && d.tier == 1).size() >= 2`,
-		runtimeengine.BaseContext{
-			Entity:  values.Wrap(map[string]any{}),
-			Payload: values.Wrap(map[string]any{}),
-			Policy:  values.Wrap(map[string]any{}),
-			Accumulated: values.Wrap(map[string]any{
-				"items": []any{
-					map[string]any{"dimension": "build_complexity", "score": 74, "tier": 1},
-					map[string]any{"dimension": "automation_completeness", "score": 72, "tier": 1},
-					map[string]any{"dimension": "retention_architecture", "score": 68, "tier": 3},
-				},
-				"received_count": 3,
-			}),
-		},
-		workflowexpr.ValueExpressionOptions{},
-	)
-	if err != nil {
-		t.Fatalf("EvalBool error = %v", err)
-	}
-	if !ok {
-		t.Fatal("expected CEL accumulated scope to expose the accumulated item list explicitly")
 	}
 }
 
@@ -1099,9 +1065,9 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\n",
 
-		"child/schema.yaml":   "name: child\ninstance: entity_id\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.done\n",
-		"child/entities.yaml": "work:\n  entity_id: text\n",
-		"child/events.yaml":   "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
+		"child/schema.yaml": "name: child\ninstance: entity_id\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.done\n",
+		"child/state.yaml":  "entity_id: text\n",
+		"child/events.yaml": "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1450,25 +1416,25 @@ func (r *pipelineTestEntityCollectionPersistenceReader) QueryWorkflowEntityColle
 func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *testing.T) {
 	runID := uuid.NewString()
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: work\nstages:\n  active: {}\n",
-		"entities.yaml": "items:\n  id: text\n  status: text\n",
+		"schema.yaml": "name: work\nstages:\n  active: {}\n",
+		"state.yaml":  "id: text\nstatus: text\n",
 	})
 	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{
-		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "items", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},
+		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "state", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},
 	}}
 	reader := pipelineEngineEntityCollectionReader{coordinator: &PipelineCoordinator{
 		module:        &pipelineFixtureWorkflowModule{source: source},
 		workflowStore: &workflowInstanceStore{entityCollectionReader: persisted},
 	}}
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
-	rows, err := reader.QueryEntityCollection(ctx, runID, ".", "items")
+	rows, err := reader.QueryEntityCollection(ctx, runID, ".", "state")
 	if err != nil {
 		t.Fatalf("QueryEntityCollection: %v", err)
 	}
 	if persisted.calls != 1 || len(rows) != 1 || rows[0]["id"] != "a" || rows[0]["status"] != "queued" {
 		t.Fatalf("rows = %#v", rows)
 	}
-	if _, err := reader.QueryEntityCollection(ctx, "", ".", "items"); err == nil || persisted.calls != 1 {
+	if _, err := reader.QueryEntityCollection(ctx, "", ".", "state"); err == nil || persisted.calls != 1 {
 		t.Fatalf("missing explicit run read persistence: error=%v calls=%d", err, persisted.calls)
 	}
 	if _, survives := rows[0]["undeclared"]; survives {

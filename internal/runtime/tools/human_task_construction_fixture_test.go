@@ -101,7 +101,7 @@ func humanTaskImportedSource(t *testing.T, actor actors.AgentConfig) semanticvie
 		"gateway": {SchemaYAML: "name: gateway\n"},
 		"gateway/provider": {
 			SchemaYAML:   "name: provider\nstages:\n  queued: {}\n",
-			EntitiesYAML: "provider_record:\n  status: text\n", AgentsYAML: entityToolAgentYAML(actor),
+			EntitiesYAML: "status: text\n", AgentsYAML: entityToolAgentYAML(actor),
 		},
 	})
 	return semanticview.Wrap(bundle)

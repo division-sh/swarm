@@ -71,8 +71,8 @@ func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, 
 				out.MaxTurnsPerTask, err = agentValueInteger(field)
 			case "turn_timeout":
 				out.TurnTimeout, err = projectAgentTurnTimeoutValue(field)
-			case "entity_writes":
-				out.EntityWrites, err = projectAgentWritesValue(field)
+			case "writes":
+				out.Writes, err = projectAgentWritesValue(field)
 			case "native_tools":
 				out.NativeTools, err = projectAgentNativeValue(field)
 			case "mock":
@@ -223,63 +223,32 @@ func agentValueTextList(value yamlsource.Value) ([]string, error) {
 	return out, nil
 }
 
-func projectAgentWritesValue(value yamlsource.Value) (map[string]AgentEntityWriteDecl, error) {
-	entities, err := uniqueYAMLMappingFields(value, "entity_writes")
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]AgentEntityWriteDecl{}
-	for _, entity := range entities {
-		fields, err := nodeValueFields(entity.Value, "entity_writes", map[string]struct{}{"create": {}, "save": {}})
-		if err != nil {
-			return nil, err
-		}
-		var declaration AgentEntityWriteDecl
-		for _, branch := range []struct {
-			name   string
-			target *AgentEntityWriteRule
-		}{{"create", &declaration.Create}, {"save", &declaration.Save}} {
-			if field, present := fields[branch.name]; present {
-				*branch.target, err = projectAgentWriteRuleValue(field)
-				if err != nil {
-					return nil, nodeValueError(field, err)
-				}
-			}
-		}
-		out[entity.Name] = declaration
-	}
-	return out, nil
-}
-
-func projectAgentWriteRuleValue(value yamlsource.Value) (AgentEntityWriteRule, error) {
+func projectAgentWritesValue(value yamlsource.Value) (AgentWriteGrant, error) {
 	if value.Presence() == yamlsource.PresenceScalar {
 		text, err := agentValueText(value)
 		if err != nil {
-			return AgentEntityWriteRule{}, err
+			return AgentWriteGrant{}, err
 		}
 		if strings.TrimSpace(text) == "all" {
-			return AgentEntityWriteRule{All: true}, nil
+			return AgentWriteGrant{All: true}, nil
 		}
-		return AgentEntityWriteRule{}, fmt.Errorf("entity write rule must be all or an explicit field list")
+		return AgentWriteGrant{}, fmt.Errorf("writes: must be the scalar all or a nonempty list of fields in this agent's flow")
 	}
 	fields, err := agentValueTextList(value)
 	if err != nil {
-		return AgentEntityWriteRule{}, err
+		return AgentWriteGrant{}, err
 	}
-	out := AgentEntityWriteRule{}
+	out := AgentWriteGrant{}
 	seen := map[string]bool{}
 	for _, field := range fields {
 		field = strings.TrimSpace(field)
-		if field == "all" {
-			return out, fmt.Errorf("entity write rule cannot mix reserved keyword all with explicit fields")
-		}
 		if field != "" && !seen[field] {
 			out.Fields = append(out.Fields, field)
 			seen[field] = true
 		}
 	}
 	if len(out.Fields) == 0 {
-		return out, fmt.Errorf("entity write rule explicit field list must not be empty")
+		return out, fmt.Errorf("writes: field list must not be empty; omit writes: to grant no save or update tools")
 	}
 	return out, nil
 }

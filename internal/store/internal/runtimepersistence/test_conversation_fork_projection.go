@@ -47,9 +47,9 @@ func conversationForkProjectionStatements(fixture ConversationForkSourceFixture,
 		}
 		statements = append(statements, conversationForkFixtureStatement{query, args})
 	}
-	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?,?,?,'default',?,?,?)`
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?,?,?,'state',?,?,?)`
 	if postgres {
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid,$2::uuid,$3,'default',$4::jsonb,$5,$6)`
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid,$2::uuid,$3,'state',$4::jsonb,$5,$6)`
 	}
 	args := []any{fixture.RunID, fixture.EntityID, path, fields, advancedAt, advancedAt}
 	if kind != conversationForkDataOnlyChat {

@@ -1460,7 +1460,6 @@ units:
       TestWorkflowEmitEntitylessSourceBothStores: [sqlite, postgres]
       TestWorkflowEmitHandlerFeedbackBothStores: [sqlite/healthy, sqlite/post_commit_error, postgres/healthy, postgres/post_commit_error]
       TestScenarioConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
-      TestScenarioConstructionFieldlessStateBothStores: [sqlite, postgres]
       TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
       TestWorkflowEngineConstructedTransitionAtomicOnBothStores: [postgres/contenders, postgres/exact, postgres/foreign_header_owner, postgres/invalid_transition, postgres/paired_reload, postgres/stale_revision, sqlite/contenders, sqlite/exact, sqlite/foreign_header_owner, sqlite/invalid_transition, sqlite/paired_reload, sqlite/stale_revision]
       TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores: [sqlite, postgres]

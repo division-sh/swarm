@@ -190,7 +190,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
 		SET flow_instance = 'selected-state-flow/at-t',
-		    entity_type = 'selected_case',
+		    entity_type = 'state',
 		    updated_at = $3
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
 	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
@@ -1777,7 +1777,7 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 	// Native fixed-history adapter proof, not public constructor eligibility.
 	// Include the entire declared keyless tree and its canonical parent facts.
 	for _, owner := range []struct{ parent, local, entityType string }{
-		{"flow-a", "1", "default"}, {"selected-state-flow", "at-t", "selected_case"},
+		{"flow-a", "1", "state"}, {"selected-state-flow", "at-t", "state"},
 	} {
 		parent, err := runtimeflowidentity.KeylessChild(source, root, owner.parent)
 		if err != nil {
@@ -1856,7 +1856,7 @@ func seedImportedSelectedContractSourceWithEvent(t *testing.T, ctx context.Conte
 			run_id, entity_id, flow_instance, entity_type, name, fields, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $4, 'default', 'Selected Store Entity',
+			$1::uuid, $2::uuid, $4, 'state', 'Selected Store Entity',
 			'{"name":"Selected Store Entity"}'::jsonb, $3, $3
 		)
 	`, sourceRunID, entityID, at, flowInstance); err != nil {

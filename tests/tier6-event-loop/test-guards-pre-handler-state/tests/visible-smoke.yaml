@@ -2,7 +2,7 @@ name: test-guards-pre-handler-state setup visible smoke
 setup:
   entities:
   - as: entity
-    type: core
+    type: state
     current_state: active
     fields:
       counter: 5

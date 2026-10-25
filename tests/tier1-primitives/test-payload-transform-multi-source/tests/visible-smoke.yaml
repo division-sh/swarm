@@ -2,7 +2,7 @@ name: test-payload-transform-multi-source setup visible smoke
 setup:
   entities:
   - as: entity
-    type: core
+    type: state
     fields:
       name: test-entity
 steps:

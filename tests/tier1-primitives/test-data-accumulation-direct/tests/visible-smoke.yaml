@@ -8,7 +8,7 @@ expect:
   events:
     include: [item.stored]
   entities:
-    - type: core
+    - flow: .
       current_state: done
       fields:
         item_name: test

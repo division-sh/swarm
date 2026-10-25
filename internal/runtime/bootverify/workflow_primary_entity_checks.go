@@ -18,17 +18,6 @@ func checkPrimaryEntityValidation(c *checkerContext) []Finding {
 	}
 	findings := []Finding{}
 	demands := primaryEntityOperationDemands(c.source)
-	rootEntities := bundle.RootEntityContracts()
-	if len(rootEntities) > 1 {
-		if _, err := bundle.ResolveRootPrimaryEntity(); err != nil {
-			findings = append(findings, Finding{
-				CheckID:  "primary_entity_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("flow <root> primary entity invalid: %v", err),
-				Location: "<root>",
-			})
-		}
-	}
 	for flowID := range c.source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
 		if flowID == "" {
@@ -64,9 +53,6 @@ func primaryEntityOperationDemands(source semanticview.Source) map[string]bool {
 			continue
 		}
 		for event, handler := range record.Entry.EventHandlers {
-			if bootverifyHandlerUsesCanonicalEntity(source, node, event, node.FlowPath(), handler) {
-				demands[node.FlowPath()] = true
-			}
 			for _, expression := range handlerExecutableReaderExpressionsForSource(source, node, event, handler) {
 				if len(runtimepipeline.WorkflowEntityReferences(expression.Expression)) > 0 {
 					demands[node.FlowPath()] = true

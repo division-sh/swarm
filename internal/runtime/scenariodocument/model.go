@@ -69,7 +69,7 @@ type EventExpect struct {
 }
 type EntityExpect struct {
 	Ref          string
-	EntityType   string
+	Flow         string
 	Count        *int
 	CurrentState any
 	StateSet     bool

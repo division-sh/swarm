@@ -48,8 +48,8 @@ func TestFanOutExecutionSourcesLoadExactOverlays(t *testing.T) {
 				return nil
 			})
 			wantFiles := 7
-			if tc.name == "served-reporter" {
-				wantFiles = 8
+			if tc.name == "mixed-agent" {
+				wantFiles = 6
 			}
 			if err != nil || files != wantFiles {
 				t.Fatalf("overlay inventory: files=%d err=%v", files, err)

@@ -32,7 +32,7 @@
       "mode": "template",
       "source_files": {
         "schema": "telegram-chat/schema.yaml",
-        "entities": "telegram-chat/entities.yaml",
+        "entities": "telegram-chat/state.yaml",
         "nodes": "telegram-chat/nodes.yaml",
         "events": "telegram-chat/events.yaml",
         "agents": "telegram-chat/agents.yaml"
@@ -92,15 +92,15 @@
         ]
       },
       "primary_entity": {
-        "type": "chat",
+        "type": "state",
         "fields": {
           "conversation_reference": "text"
         },
-        "source_file": "telegram-chat/entities.yaml"
+        "source_file": "telegram-chat/state.yaml"
       },
       "template_instance": {
         "field": "conversation_reference",
-        "primary_entity": "chat",
+        "primary_entity": "state",
         "identity": "run + flow + instance_key",
         "source_file": "telegram-chat/schema.yaml"
       },
@@ -138,17 +138,13 @@
         ]
       },
       "source_files": {
-        "schema": "telegram-ingress/schema.yaml",
-        "entities": "telegram-ingress/entities.yaml"
+        "schema": "telegram-ingress/schema.yaml"
       },
       "required_agents": {
         "source": "inferred",
         "agents": []
       },
-      "primary_entity": {
-        "type": "telegram_service",
-        "source_file": "telegram-ingress/entities.yaml"
-      },
+      "primary_entity_error": "flow telegram-ingress has no state.yaml",
       "input_pins": [
         {
           "event": "inbound.telegram",
@@ -762,7 +758,7 @@
       "severity": "lint_evidence",
       "location": "telegram-chat",
       "authored_location": "telegram-chat/schema.yaml",
-      "message": "flow telegram-chat entity_type chat declares field conversation_reference with no detected internal reader coverage"
+      "message": "flow telegram-chat entity_type state declares field conversation_reference with no detected internal reader coverage"
     }
   ],
   "equivalence": {

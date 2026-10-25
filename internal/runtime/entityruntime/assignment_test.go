@@ -13,15 +13,15 @@ func TestEntityMutationPrerequisitesDistinguishMapKeysFromRecordPaths(t *testing
 		write c.WorkflowDataWrite
 		want  []string
 	}{
-		{"root map insertion constructs", c.WorkflowDataWrite{Operation: "set", TargetRef: "entity.by_id", Key: c.RefExpression("payload.id")}, nil},
-		{"map member set requires map", c.WorkflowDataWrite{Operation: "set", TargetRef: "entity.by_id.note", Key: c.RefExpression("payload.id")}, []string{"by_id"}},
-		{"map-held list requires map", c.WorkflowDataWrite{Operation: "append", TargetRef: "entity.by_id.items", Key: c.RefExpression("payload.id")}, []string{"by_id"}},
-		{"map merge requires map", c.WorkflowDataWrite{Operation: "merge", TargetRef: "entity.by_id", Key: c.RefExpression("payload.id")}, []string{"by_id"}},
-		{"root list append constructs", c.WorkflowDataWrite{Operation: "append", TargetRef: "entity.items"}, nil},
-		{"nested list append requires record", c.WorkflowDataWrite{Operation: "append", TargetRef: "entity.record.items"}, []string{"record"}},
-		{"list update requires list", c.WorkflowDataWrite{Operation: "update", TargetRef: "entity.record.items"}, []string{"record.items"}},
-		{"record leaf set requires record", c.WorkflowDataWrite{TargetPathRef: "entity.record.name"}, []string{"record"}},
-		{"clear may be absent", c.WorkflowDataWrite{Operation: "clear", TargetRef: "entity.record.note"}, nil},
+		{"root map insertion constructs", c.WorkflowDataWrite{Operation: "set", TargetRef: "state.by_id", Key: c.RefExpression("payload.id")}, nil},
+		{"map member set requires map", c.WorkflowDataWrite{Operation: "set", TargetRef: "state.by_id.note", Key: c.RefExpression("payload.id")}, []string{"by_id"}},
+		{"map-held list requires map", c.WorkflowDataWrite{Operation: "append", TargetRef: "state.by_id.items", Key: c.RefExpression("payload.id")}, []string{"by_id"}},
+		{"map merge requires map", c.WorkflowDataWrite{Operation: "merge", TargetRef: "state.by_id", Key: c.RefExpression("payload.id")}, []string{"by_id"}},
+		{"root list append constructs", c.WorkflowDataWrite{Operation: "append", TargetRef: "state.items"}, nil},
+		{"nested list append requires record", c.WorkflowDataWrite{Operation: "append", TargetRef: "state.record.items"}, []string{"record"}},
+		{"list update requires list", c.WorkflowDataWrite{Operation: "update", TargetRef: "state.record.items"}, []string{"record.items"}},
+		{"record leaf set requires record", c.WorkflowDataWrite{TargetPathRef: "state.record.name"}, []string{"record"}},
+		{"clear may be absent", c.WorkflowDataWrite{Operation: "clear", TargetRef: "state.record.note"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := MutationRequiredPaths(tc.write); !reflect.DeepEqual(got, tc.want) {

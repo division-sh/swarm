@@ -199,7 +199,7 @@ func VerifyIssue2564SiblingEntityFenceForTest(t *testing.T, factory WorkflowTime
 			at := canonicalWorkflowTimerTime(time.Now())
 			fixture.CommitConstruction(ctx, owner, WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: ".", WorkflowVersion: semanticview.Wrap(bundle).WorkflowVersion(),
-				Mode: "static", EntityType: "test_entity", CurrentState: "awaiting_review", StageDefined: true,
+				Mode: "static", CurrentState: "awaiting_review", StageDefined: true,
 				Fields: map[string]any{}, CreatedAt: at, EnteredStageAt: at,
 			}, at)
 			rows, _, err := pc.decisionCards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, EntityID: runID, Limit: 10})

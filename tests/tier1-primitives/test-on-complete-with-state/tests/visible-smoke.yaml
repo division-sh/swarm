@@ -2,7 +2,7 @@ name: test-on-complete-with-state setup visible smoke
 setup:
   entities:
   - as: entity
-    type: core
+    type: state
     fields:
       priority: high
 steps:

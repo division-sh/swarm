@@ -8,14 +8,13 @@ import (
 
 func TestLeadReview7StockOptionalToolExecution(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Role: "operator", Tools: []string{"create_entity", "query_entities", "query_metrics"}}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
-types:
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `types:
   Metadata:
     region: text?
 `, `
-accounts:
-  metadata: Metadata
-`)
+metadata: Metadata
+`,
+	)
 	ctx, executor := newEntityToolTestExecutorWithBundle(t, actor, bundle)
 	for _, populated := range []bool{false, true} {
 		if populated {

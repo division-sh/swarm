@@ -8,26 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestRun_ReportsNodeStateJSONBWithTypedCounterpart(t *testing.T) {
-	for _, fieldType := range []string{"jsonb", "json"} {
-		t.Run(fieldType, func(t *testing.T) {
-			bundle := nodeStateSchemaTypingBundle()
-			bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
-				StateTable: "scoring_state",
-				StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
-					{Name: "dimensions_received", Type: fieldType},
-				}},
-			}
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if !reportContains(report.HardInvalidities(), "node_state_schema_typed_counterpart", "dimensions_received is jsonb but has typed downstream counterpart entity_type vertical scores:[DimensionScore]") {
-				t.Fatalf("expected node-state typed-counterpart hard invalidity, got %#v", report.HardInvalidities())
-			}
-		})
-	}
-}
-
 func TestRun_ReportsNodeStateJSONBLintEvidenceWithoutCounterpart(t *testing.T) {
 	bundle := nodeStateSchemaTypingBundle()
 	bundle.Nodes["build-node"] = runtimecontracts.SystemNodeContract{
@@ -120,7 +100,7 @@ func nodeStateSchemaTypingBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"vertical": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"scores": {Type: "[DimensionScore]", Initial: []any{}},
 				},

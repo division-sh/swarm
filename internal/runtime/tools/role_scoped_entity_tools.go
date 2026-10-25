@@ -133,7 +133,7 @@ func roleScopedEntityMutationInputSchema(contract entityruntime.Contract, path, 
 	whole := ObjectSchema(map[string]any{"op": setOp, "value": wholeValue}, "value")
 	props := map[string]any{"op": setOp, "value": map[string]any{}}
 	branches := []any{whole}
-	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "entity."+path, entityruntime.ContainedOperationAppend, false, false); err == nil {
+	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "state."+path, entityruntime.ContainedOperationAppend, false, false); err == nil {
 		item := entityContractJSONSchema(contract, target.ListItemType, map[string]struct{}{})
 		index := map[string]any{"type": "integer", "minimum": 0}
 		props["op"] = map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationSet, entityruntime.ContainedOperationAppend, entityruntime.ContainedOperationUpdate}}
@@ -143,7 +143,7 @@ func roleScopedEntityMutationInputSchema(contract entityruntime.Contract, path, 
 			ObjectSchema(map[string]any{"op": map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationUpdate}}, "index": index, "value": item}, "op", "index", "value"),
 		)
 	}
-	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "entity."+path, entityruntime.ContainedOperationSet, true, false); err == nil {
+	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "state."+path, entityruntime.ContainedOperationSet, true, false); err == nil {
 		key := entityContractJSONSchema(contract, target.MapKeyType, map[string]struct{}{})
 		key["minLength"] = 1
 		props["key"] = key
@@ -196,13 +196,13 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {
 	switch spec.Kind {
 	case roleScopedEntityToolReadWhole:
-		return fmt.Sprintf("Read the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.EntityType)
+		return "Read this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted."
 	case roleScopedEntityToolReadField:
-		return fmt.Sprintf("Read %s from the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		return fmt.Sprintf("Read %s from this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field)
 	case roleScopedEntityToolSaveField:
-		return fmt.Sprintf("Save %s on the current turn %s entity. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		return fmt.Sprintf("Save %s on this flow's state. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field)
 	case roleScopedEntityToolUpdatePath:
-		return fmt.Sprintf("Update %s.%s on the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath, spec.EntityType)
+		return fmt.Sprintf("Update %s.%s on this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath)
 	default:
 		return "Role-scoped entity tool."
 	}
@@ -264,19 +264,17 @@ func roleScopedWritableFields(source semanticview.Source, actor models.AgentConf
 	if !ok {
 		return nil
 	}
-	decl, ok := roleScopedEntityWriteDecl(entry, contract)
-	if !ok {
+	grant := entry.Writes
+	if !grant.Declared() {
 		return nil
 	}
 	seen := map[string]struct{}{}
-	add := func(rule runtimecontracts.AgentEntityWriteRule) {
-		if rule.All {
-			for _, field := range entityruntime.FieldNames(contract) {
-				seen[field] = struct{}{}
-			}
-			return
+	if grant.All {
+		for _, field := range entityruntime.FieldNames(contract) {
+			seen[field] = struct{}{}
 		}
-		for _, field := range rule.Fields {
+	} else {
+		for _, field := range grant.Fields {
 			field = strings.TrimSpace(field)
 			if field == "" {
 				continue
@@ -286,26 +284,12 @@ func roleScopedWritableFields(source semanticview.Source, actor models.AgentConf
 			}
 		}
 	}
-	add(decl.Save)
 	out := make([]string, 0, len(seen))
 	for field := range seen {
 		out = append(out, field)
 	}
 	sort.Strings(out)
 	return out
-}
-
-func roleScopedEntityWriteDecl(entry runtimecontracts.AgentRegistryEntry, contract entityruntime.Contract) (runtimecontracts.AgentEntityWriteDecl, bool) {
-	if len(entry.EntityWrites) == 0 {
-		return runtimecontracts.AgentEntityWriteDecl{}, false
-	}
-	if contract.FlowID != "" {
-		if decl, ok := entry.EntityWrites[contract.FlowID+"."+contract.EntityType]; ok {
-			return decl, true
-		}
-	}
-	decl, ok := entry.EntityWrites[contract.EntityType]
-	return decl, ok
 }
 
 func roleScopedTopLevelSubpaths(contract entityruntime.Contract, field string) []string {

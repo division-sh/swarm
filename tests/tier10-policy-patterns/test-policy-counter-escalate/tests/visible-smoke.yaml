@@ -2,7 +2,7 @@ name: test-policy-counter-escalate setup visible smoke
 setup:
   entities:
   - as: entity
-    type: core
+    type: state
     current_state: pending
     fields:
       attempt_count: 3

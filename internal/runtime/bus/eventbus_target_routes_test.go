@@ -593,10 +593,10 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
 		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
-			ItemsFrom: "entity.items", As: "row_item", Identity: "row_item", Emit: runtimecontracts.EmitSpec{Event: "item.ready"},
+			ItemsFrom: "state.items", As: "row_item", Identity: "row_item", Emit: runtimecontracts.EmitSpec{Event: "item.ready"},
 		}}},
 		{name: "group by", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{
-			ItemsFrom: "entity.items", Key: "item.kind", StoreAs: "computed.groups",
+			ItemsFrom: "state.items", Key: "item.kind", StoreAs: "computed.groups",
 		}}},
 		{name: "on success emit", handler: runtimecontracts.SystemNodeEventHandler{OnSuccess: runtimecontracts.HandlerOnSuccessSpec{
 			Emit: runtimecontracts.EmitSpec{Event: "work.done", From: "entity"},
@@ -813,7 +813,7 @@ func TestEventBusCompositionReceiverSettlesBeforePersistence(t *testing.T) {
 	matching := runtimepipeline.WorkflowInstance{
 		EntityID: eventtest.UUID("keyed-selected-owner"), WorkflowName: "review", InstanceID: "one", StorageRef: "review/one",
 		Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	tests := []struct {
 		name      string
@@ -824,7 +824,7 @@ func TestEventBusCompositionReceiverSettlesBeforePersistence(t *testing.T) {
 		{name: "zero owners", wantError: "owner is missing"},
 		{name: "multiple matches", instances: []runtimepipeline.WorkflowInstance{
 			matching,
-			{EntityID: eventtest.UUID("keyed-selected-owner-two"), WorkflowName: "review", InstanceID: "one", StorageRef: "review/one", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"}, EntityType: "test_entity"},
+			{EntityID: eventtest.UUID("keyed-selected-owner-two"), WorkflowName: "review", InstanceID: "one", StorageRef: "review/one", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"}, EntityType: "state"},
 		}, wantError: "receiver inventory repeats a native coordinate"},
 	}
 	for _, test := range tests {
@@ -898,8 +898,8 @@ func TestEventBusTargetedDeclaredKeyHandlerPreservesExactOwner(t *testing.T) {
 			store := newTargetRouteMemoryStore()
 			store.setTargetOwnerRoutes(exact, competing)
 			store.workflowInstances = []runtimepipeline.WorkflowInstance{
-				{EntityID: exact.EntityID, WorkflowName: "review", InstanceID: "exact", StorageRef: exact.FlowInstance, Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "exact-owner-key"}, EntityType: "test_entity"},
-				{EntityID: competing.EntityID, WorkflowName: "review", InstanceID: "competing", StorageRef: competing.FlowInstance, Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "payload-key"}, EntityType: "test_entity"},
+				{EntityID: exact.EntityID, WorkflowName: "review", InstanceID: "exact", StorageRef: exact.FlowInstance, Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "exact-owner-key"}, EntityType: "state"},
+				{EntityID: competing.EntityID, WorkflowName: "review", InstanceID: "competing", StorageRef: competing.FlowInstance, Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "payload-key"}, EntityType: "state"},
 			}
 			node := testFlowNode(t, "review", "target-node")
 			source := semanticview.Wrap(materializedTargetBundleWithHandler(t, "review", "target-node", eventType, test.handler))
@@ -980,7 +980,7 @@ func TestEventBusInitializedReceiverIsImmutableAfterPrepublicationLinearization(
 		return runtimepipeline.WorkflowInstance{
 			EntityID: route.EntityID, WorkflowName: "review", InstanceID: path.Base(route.FlowInstance), StorageRef: route.FlowInstance,
 			Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": accountID},
-			EntityType: "test_entity",
+			EntityType: "state",
 		}
 	}
 	t.Run("missing constructor header refuses before persistence", func(t *testing.T) {
@@ -1022,7 +1022,7 @@ func TestEventBusInitializedReceiverIsImmutableAfterPrepublicationLinearization(
 		store.workflowInstances = append(store.workflowInstances, runtimepipeline.WorkflowInstance{
 			EntityID: eventtest.UUID("later-duplicate-match"), WorkflowName: "review", InstanceID: "later", StorageRef: "review/later",
 			Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
-			EntityType: "test_entity",
+			EntityType: "state",
 		})
 		observeTarget(t, store, events.RouteIdentity{FlowID: "review", FlowInstance: "review/later", EntityID: eventtest.UUID("later-duplicate-match")})
 		if err := eb.Publish(context.Background(), evt); err != nil {
@@ -1302,10 +1302,10 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: flow.Schema},
 	}
 	admitted := loadTargetRouteTempBundle(t, map[string]string{
-		"manifest.yaml":                        "name: target-route-test\nversion: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":                          "name: target-route-test\n",
-		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID),
-		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n  expected:\n    type: '[text]'\n",
+		"manifest.yaml":                      "name: target-route-test\nversion: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                        "name: target-route-test\n",
+		filepath.Join(flowID, "schema.yaml"): fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID),
+		filepath.Join(flowID, "state.yaml"):  "items: [text]\nexpected: [text]\n",
 	})
 	admitted.FlowTree = base.FlowTree
 	admitted.FlowSchemas = base.FlowSchemas
@@ -1655,15 +1655,15 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":           "name: per-target-internal-delivery\n",
-		"child-a/schema.yaml":   "instance: instance_key\n",
-		"child-a/events.yaml":   "output.done:\n",
-		"child-a/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
-		"child-a/nodes.yaml":    "child-a-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
-		"child-b/schema.yaml":   "instance: instance_key\n",
-		"child-b/events.yaml":   "output.done:\n",
-		"child-b/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
-		"child-b/nodes.yaml":    "child-b-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
+		"schema.yaml":         "name: per-target-internal-delivery\n",
+		"child-a/schema.yaml": "instance: instance_key\n",
+		"child-a/events.yaml": "output.done:\n",
+		"child-a/state.yaml":  "instance_key: text\n",
+		"child-a/nodes.yaml":  "child-a-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
+		"child-b/schema.yaml": "instance: instance_key\n",
+		"child-b/events.yaml": "output.done:\n",
+		"child-b/state.yaml":  "instance_key: text\n",
+		"child-b/nodes.yaml":  "child-b-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
 	}))
 	runID := uuid.NewString()
 	for _, flow := range []string{"child-a", "child-b"} {
@@ -1738,11 +1738,11 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 	workerTwoID := eventtest.UUID("worker/w-002")
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":          "name: same-node-target-set\n",
-		"worker/schema.yaml":   "instance: instance_key\n",
-		"worker/events.yaml":   "work.assign:\n",
-		"worker/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
-		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
+		"schema.yaml":        "name: same-node-target-set\n",
+		"worker/schema.yaml": "instance: instance_key\n",
+		"worker/events.yaml": "work.assign:\n",
+		"worker/state.yaml":  "instance_key: text\n",
+		"worker/nodes.yaml":  "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
 	}))
 	for key, entityID := range map[string]string{"w-001": workerOneID, "w-002": workerTwoID} {
 		installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "worker", key, busInternalTestRunID, entityID), key)
@@ -1800,11 +1800,11 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 	workerID := eventtest.UUID("worker/w-001")
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":          "name: targeted-route-node\n",
-		"worker/schema.yaml":   "instance: instance_key\n",
-		"worker/events.yaml":   "work.assign:\n",
-		"worker/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
-		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
+		"schema.yaml":        "name: targeted-route-node\n",
+		"worker/schema.yaml": "instance: instance_key\n",
+		"worker/events.yaml": "work.assign:\n",
+		"worker/state.yaml":  "instance_key: text\n",
+		"worker/nodes.yaml":  "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
 	}))
 	installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "worker", "w-001", busInternalTestRunID, workerID), "w-001")
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -3524,7 +3524,7 @@ platform_version: '*'
     opco.spinup_requested:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `,
 	}
 }
@@ -3595,7 +3595,7 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
     thing.created:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `,
 	})
 }
@@ -3603,16 +3603,16 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 func routedNodeTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":             "name: concrete-node-proof\n",
-		"operating/schema.yaml":   "instance: instance_key\nauto_emit_on_create: {event: opco.product_initialization_requested}\n",
-		"operating/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
-		"operating/events.yaml":   "opco.product_initialization_requested:\n",
+		"schema.yaml":           "name: concrete-node-proof\n",
+		"operating/schema.yaml": "instance: instance_key\nauto_emit_on_create: {event: opco.product_initialization_requested}\n",
+		"operating/state.yaml":  "instance_key: text\n",
+		"operating/events.yaml": "opco.product_initialization_requested:\n",
 		"operating/nodes.yaml": `lifecycle-orchestrator:
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   event_handlers:
     opco.product_initialization_requested:
-      guard: {id: selected_owner, check: _entity.id != ""}
+      guard: {id: selected_owner, check: instance.id != ""}
 `,
 	})
 }
@@ -3620,18 +3620,18 @@ func routedNodeTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContractBu
 func routedCallbackTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":                 "name: callback-node-proof\n",
-		"repo-scaffold/schema.yaml":   "instance: instance_key\n",
-		"repo-scaffold/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
-		"repo-scaffold/events.yaml":   "repo_scaffold.repo_commit_succeeded:\nrepo_scaffold.repo_commit_failed:\n",
+		"schema.yaml":               "name: callback-node-proof\n",
+		"repo-scaffold/schema.yaml": "instance: instance_key\n",
+		"repo-scaffold/state.yaml":  "instance_key: text\n",
+		"repo-scaffold/events.yaml": "repo_scaffold.repo_commit_succeeded:\nrepo_scaffold.repo_commit_failed:\n",
 		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
   execution_type: system_node
   subscribes_to: [repo_scaffold.repo_commit_succeeded, repo_scaffold.repo_commit_failed]
   event_handlers:
     repo_scaffold.repo_commit_succeeded:
-      guard: {id: selected_owner, check: _entity.id != ""}
+      guard: {id: selected_owner, check: instance.id != ""}
     repo_scaffold.repo_commit_failed:
-      guard: {id: selected_owner, check: _entity.id != ""}
+      guard: {id: selected_owner, check: instance.id != ""}
 `,
 	})
 }

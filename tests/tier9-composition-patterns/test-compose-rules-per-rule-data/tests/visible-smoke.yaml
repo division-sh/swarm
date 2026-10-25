@@ -9,7 +9,7 @@ expect:
   events:
     include: [conflict.resolved]
   entities:
-    - type: core
+    - flow: .
       current_state: resolved
       fields:
         resolved_value: high

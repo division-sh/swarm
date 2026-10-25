@@ -36,9 +36,9 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 			}))
 			defer server.Close()
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: published-read-accounting\nstages:\n  review: {}\n  drafting: {}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n",
-				"entities.yaml": "work: {}\n",
-				"events.yaml":   "read.requested:\n  revision_id: text\n",
+				"schema.yaml": "name: published-read-accounting\nstages:\n  review: {}\n  drafting: {}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n",
+
+				"events.yaml": "read.requested:\n  revision_id: text\n",
 				"nodes.yaml": `reader:
   execution_type: system_node
   subscribes_to: [read.requested, read.succeeded, read.failed]
@@ -64,7 +64,7 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 			if err := loopruntime.Store(buckets, activation); err != nil {
 				t.Fatal(err)
 			}
-			instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work", CurrentState: "review", CreatedAt: time.Now().UTC(), EnteredStageAt: time.Now().UTC(), Fields: map[string]any{}, StateBuckets: engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()})
+			instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "review", CreatedAt: time.Now().UTC(), EnteredStageAt: time.Now().UTC(), Fields: map[string]any{}, StateBuckets: engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()})
 			if err := fixture.Construct(ctx, instance); err != nil {
 				t.Fatal(err)
 			}

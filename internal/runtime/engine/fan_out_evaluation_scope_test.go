@@ -74,9 +74,9 @@ func TestFanOutEvaluationScopeExactWrapperDiagnostics(t *testing.T) {
 		name, expression string
 		item             any
 	}{
-		{"projection", "row + entity.offset", math.Inf(1)},
+		{"projection", "row + state.offset", math.Inf(1)},
 		{"evaluation", "row / 0", int64(1)},
-		{"normalization", "row + entity.offset", int64(9007199254740991)},
+		{"normalization", "row + state.offset", int64(9007199254740991)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			exec, intent, trigger, _ := preparedFanOutFixture(t)

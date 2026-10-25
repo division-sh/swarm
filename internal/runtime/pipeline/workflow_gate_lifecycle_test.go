@@ -29,7 +29,7 @@ func TestStageGateOwnerRequiresAuthoritativeWorkflowInstance(t *testing.T) {
 	instance := WorkflowInstance{
 		InstanceID: "standing-one", StorageRef: instancePath, EntityID: entityID, WorkflowName: "telegram-ingress",
 		Fields:     map[string]any{},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	anchor := decisioncard.StageGateAnchor{
 		Route:  runtimeflowidentity.StoredRoute("telegram-ingress", "standing-one", instancePath),
@@ -491,8 +491,8 @@ stages:
   drafting: {}
   operating: {}
 `,
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "launch.approved:\ndraft.ready:\nordinary.transition:\nreview.expired:\n",
+
+		"events.yaml": "launch.approved:\ndraft.ready:\nordinary.transition:\nreview.expired:\n",
 		"nodes.yaml": `reviewer:
   execution_type: system_node
   event_handlers:
@@ -514,12 +514,12 @@ func TestRootDeclarationConsumersUseAuthoredExecutionFlowNotDisplayName(t *testi
 	pc := &PipelineCoordinator{module: &pipelineFixtureWorkflowModule{source: source}}
 
 	flowID, plan, ok := workflowGatePlanForInstance(pc, WorkflowInstance{WorkflowName: ".",
-		EntityType: "test_entity"}, "awaiting_review")
+		EntityType: "state"}, "awaiting_review")
 	if !ok || flowID != "." || plan.Decision != "launch_review" {
 		t.Fatalf("authored-root gate = flow:%q plan:%#v ok:%t", flowID, plan, ok)
 	}
 	if _, _, ok := workflowGatePlanForInstance(pc, WorkflowInstance{WorkflowName: "gate-test",
-		EntityType: "test_entity"}, "awaiting_review"); ok {
+		EntityType: "state"}, "awaiting_review"); ok {
 		t.Fatal("display workflow name was accepted as root gate authority")
 	}
 	if !loopFlowIDMatches(source, ".", ".") || loopFlowIDMatches(source, ".", "gate-test") {

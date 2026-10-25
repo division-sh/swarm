@@ -122,12 +122,10 @@ func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRes
 				first := pipelineFlowPathNode(t, "a", "shared")
 				second := pipelineFlowPathNode(t, "b", "shared")
 				files := map[string]string{
-					"schema.yaml":   "name: workflow-timer-sibling-identity\nstages:\n  waiting: {}\n",
-					"entities.yaml": "test_entity: {}\n",
+					"schema.yaml": "name: workflow-timer-sibling-identity\nstages:\n  waiting: {}\n",
 				}
 				for _, flow := range []string{"a", "b"} {
 					files[flow+"/schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting: {}\n", flow)
-					files[flow+"/entities.yaml"] = "test_entity: {}\n"
 					files[flow+"/events.yaml"] = fmt.Sprintf("timer.arm:\ntimer.%s:\n", flow)
 					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  execution_type: system_node\n  timers:\n    - {id: same, event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", flow, flow)
 				}
@@ -143,7 +141,7 @@ func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRes
 				run := runtimecorrelation.RunIDFromContext(ctx)
 				if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 					InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-					CurrentState: "waiting", CreatedAt: createdAt, EnteredStageAt: createdAt, EntityType: "test_entity",
+					CurrentState: "waiting", CreatedAt: createdAt, EnteredStageAt: createdAt,
 				})); err != nil {
 					t.Fatal(err)
 				}
@@ -229,7 +227,6 @@ func VerifyNativeWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadin
 				InstanceID: runID, StorageRef: runID, EntityID: entityID,
 				WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "waiting", CreatedAt: createdAt,
-				EntityType: "test_entity",
 			}), createdAt)
 			if err != nil {
 				t.Fatalf("prepare fixture lifecycle: %v", err)
@@ -640,7 +637,7 @@ func VerifyNativeWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStoresFo
 				active, draining := workflowTimerScheduledCounts(scheduler)
 				return active == 2 && draining == 0
 			}, "initial retry and preserved event wakeups")
-			if changed, err := fixture.MissingFields(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID); err != nil || changed != 1 {
+			if changed, err := fixture.MissingHeader(ctx, runtimecorrelation.RunIDFromContext(ctx), rootRoute.InstancePath); err != nil || changed != 1 {
 				t.Fatalf("remove exact instance projection: changed=%d err=%v", changed, err)
 			}
 			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
@@ -1150,7 +1147,6 @@ func VerifyNativeWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothSto
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".",
 				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting", EnteredStageAt: createdAt,
 				CreatedAt: createdAt, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -1260,7 +1256,7 @@ func VerifyNativeWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnB
 			createdAt := canonicalWorkflowTimerTime(time.Now())
 			instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, EntityID: entityID, WorkflowName: ".",
-				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting", EntityType: "test_entity", CreatedAt: createdAt,
+				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting", CreatedAt: createdAt,
 			})
 			prepared, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), instance, createdAt)
 			if err != nil {
@@ -1538,10 +1534,10 @@ func VerifyNativeWorkflowTimerLifecycleCommitOrdersConvergeOnBothStoresForTest(t
 						}
 					case "unrelated":
 						if err := store.mutateE(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx)), func(instance *WorkflowInstance) error {
-							if instance.Fields == nil {
-								instance.Fields = map[string]any{}
+							if instance.Bookkeeping == nil {
+								instance.Bookkeeping = map[string]any{}
 							}
-							instance.Fields["unrelated_timer_order_proof"] = test.name
+							instance.Bookkeeping["unrelated_timer_order_proof"] = test.name
 							return nil
 						}); err != nil {
 							t.Fatalf("unrelated workflow mutation: %v", err)
@@ -1558,8 +1554,8 @@ func VerifyNativeWorkflowTimerLifecycleCommitOrdersConvergeOnBothStoresForTest(t
 				}
 				if unrelatedApplied {
 					instance, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx)))
-					if err != nil || !found || instance.Fields["unrelated_timer_order_proof"] != test.name {
-						t.Fatalf("unrelated mutation found=%v value=%#v err=%v", found, instance.Fields["unrelated_timer_order_proof"], err)
+					if err != nil || !found || instance.Bookkeeping["unrelated_timer_order_proof"] != test.name {
+						t.Fatalf("unrelated mutation found=%v value=%#v err=%v", found, instance.Bookkeeping["unrelated_timer_order_proof"], err)
 					}
 				}
 			})
@@ -2008,7 +2004,7 @@ func VerifyNativeWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStor
 			instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, EntityID: entityID, WorkflowName: ".",
 				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting",
-				EntityType: "test_entity", CreatedAt: createdAt,
+				CreatedAt: createdAt,
 			})
 			preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), instance, createdAt)
 			if err != nil {
@@ -2350,9 +2346,8 @@ func workflowTimerOwnerBundleWithDelay(t *testing.T, recurring bool, delay strin
 
 func workflowTimerOwnerSourceFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n  done: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "timer.timeout:\nwork.completed:\nwork.reopened:\nreview.reopened:\ntest.workflow_progressed:\n",
+		"schema.yaml": "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n  done: {}\n",
+		"events.yaml": "timer.timeout:\nwork.completed:\nwork.reopened:\nreview.reopened:\ntest.workflow_progressed:\n",
 		"nodes.yaml": `timer-owner:
   execution_type: system_node
   event_handlers:
@@ -2373,9 +2368,8 @@ func workflowTimerSourceRevisionBundle(t *testing.T, revised bool) *runtimecontr
 		timers += "      - {id: waiting.changed, after: 1h, emit: timer.changed.v1}\n      - {id: waiting.removed, after: 1h, emit: timer.removed}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-source-revision\nstages:\n  waiting:\n    timers:\n" + timers,
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.added:\ntimer.removed:\n",
+		"schema.yaml": "name: workflow-timer-source-revision\nstages:\n  waiting:\n    timers:\n" + timers,
+		"events.yaml": "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.added:\ntimer.removed:\n",
 	})
 }
 
@@ -2386,9 +2380,8 @@ func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *ru
 		schema = "name: workflow-timer-first-revision\nstages:\n  waiting:\n    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   schema,
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "timer.first:\n",
+		"schema.yaml": schema,
+		"events.yaml": "timer.first:\n",
 	})
 }
 
@@ -2409,10 +2402,9 @@ func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *ru
 func workflowTimerInitialAndEventBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-initial-event\nstages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "timer.arm:\ntimer.initial:\ntimer.event:\n",
-		"nodes.yaml":    "timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n",
+		"schema.yaml": "name: workflow-timer-initial-event\nstages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
+		"events.yaml": "timer.arm:\ntimer.initial:\ntimer.event:\n",
+		"nodes.yaml":  "timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n",
 	})
 }
 
@@ -2427,7 +2419,6 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 			armEvent = "timer.arm"
 		}
 		files[path+"schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", name, prefix)
-		files[path+"entities.yaml"] = "test_entity: {}\n"
 		files[path+"events.yaml"] = fmt.Sprintf("timer.arm:\n%s.initial:\n%s.event:\n", prefix, prefix)
 		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", prefix, armEvent)
 	}
@@ -2437,19 +2428,17 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "timer.arm:\nwork.noted:\ntimer.state_entry:\ntimer.event_armed:\n",
-		"nodes.yaml":    "observer:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  event_handlers:\n    timer.arm: {}\n    work.noted: {}\n",
+		"schema.yaml": "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
+		"events.yaml": "timer.arm:\nwork.noted:\ntimer.state_entry:\ntimer.event_armed:\n",
+		"nodes.yaml":  "observer:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  event_handlers:\n    timer.arm: {}\n    work.noted: {}\n",
 	})
 }
 
 func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  ready: {}\n  waiting: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "loop.start:\nloop.repeat:\n  revision_id: text\ntimer.arm:\n  revision_id: text\ntimer.event_armed:\n",
+		"schema.yaml": "name: workflow-timer-owner-test\nstages:\n  ready: {}\n  waiting: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n",
+		"events.yaml": "loop.start:\nloop.repeat:\n  revision_id: text\ntimer.arm:\n  revision_id: text\ntimer.event_armed:\n",
 		"nodes.yaml": `observer:
   execution_type: system_node
   timers:
@@ -2470,9 +2459,8 @@ func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContra
 func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
+		"schema.yaml": "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n",
+		"events.yaml": "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
   execution_type: system_node
   timers:

@@ -26,12 +26,12 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":           "name: q10-cursor\nstages:\n  ready: {}\n  done: {final: true}\n",
-				"entities.yaml":         "cursor_item:\n  count: integer?\n",
-				"imports/schema.yaml":   "name: imports\ninstance: item_id\n",
-				"imports/entities.yaml": "cursor_item:\n  item_id: text\n  count: integer?\n",
-				"others/schema.yaml":    "name: others\ninstance: item_id\n",
-				"others/entities.yaml":  "other_item:\n  item_id: text\n",
+				"schema.yaml":         "name: q10-cursor\nstages:\n  ready: {}\n  done: {final: true}\n",
+				"state.yaml":          "count: integer?\n",
+				"imports/schema.yaml": "name: imports\ninstance: item_id\n",
+				"imports/state.yaml":  "item_id: text\ncount: integer?\n",
+				"others/schema.yaml":  "name: others\ninstance: item_id\n",
+				"others/state.yaml":   "item_id: text\n",
 			}, nil)
 			const (
 				runA   = "91000000-0000-4000-8000-000000000001"
@@ -46,7 +46,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 				t.Helper()
 				ctx := correlation.WithRunID(f.ctx, runID)
 				seed := pipeline.ScenarioSetupEntityRequest{
-					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "cursor_item",
+					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "state",
 					CurrentState: mutationlog.PresentLifecycleState("ready"), Fields: map[string]any{"count": int64(1)}, Gates: map[string]bool{},
 				}
 				plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
@@ -57,11 +57,11 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				entities := []pipeline.ScenarioSetupEntityRequest{
-					seed, {Alias: "shared", EntityID: shared, FlowInstance: "imports/shared", EntityType: "cursor_item", Fields: map[string]any{"item_id": "shared", "count": int64(3)}},
-					{Alias: "other", EntityID: other, FlowInstance: "others/other", EntityType: "other_item", Fields: map[string]any{"item_id": "other"}},
+					seed, {Alias: "shared", EntityID: shared, FlowInstance: "imports/shared", EntityType: "state", Fields: map[string]any{"item_id": "shared", "count": int64(3)}},
+					{Alias: "other", EntityID: other, FlowInstance: "others/other", EntityType: "state", Fields: map[string]any{"item_id": "other"}},
 				}
 				if withTail {
-					entities = append(entities, pipeline.ScenarioSetupEntityRequest{Alias: "tail", EntityID: tail, FlowInstance: "imports/tail", EntityType: "cursor_item", Fields: map[string]any{"item_id": "tail", "count": int64(4)}})
+					entities = append(entities, pipeline.ScenarioSetupEntityRequest{Alias: "tail", EntityID: tail, FlowInstance: "imports/tail", EntityType: "state", Fields: map[string]any{"item_id": "tail", "count": int64(4)}})
 				}
 				command := runtimebus.ScenarioSetupCommand{
 					Setup:       pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: entities},
@@ -101,7 +101,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 					t.Fatalf("unauthorized request reached entity reader: status=%d calls=%d body=%s", recorder.Code, readCalls, recorder.Body.String())
 				}
 			}
-			missingScope := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"missing-scope","method":"entity.list","params":{"type":"cursor_item"}}`)).WithContext(f.ctx)
+			missingScope := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"missing-scope","method":"entity.list","params":{}}`)).WithContext(f.ctx)
 			missingScope.Header.Set("Authorization", "Bearer q10-cursor-token")
 			missingRecorder := httptest.NewRecorder()
 			handler.ServeHTTP(missingRecorder, missingScope)
@@ -145,7 +145,6 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 			}
 			page := func(opts operatorread.OperatorEntityListOptions) operatorread.OperatorEntityListResult {
 				t.Helper()
-				opts.Type = "cursor_item"
 				result, err := f.store.(apiv1.EntityReadStore).ListOperatorEntities(f.ctx, opts)
 				if err != nil {
 					t.Fatal(err)
@@ -170,21 +169,19 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 					t.Fatalf("data cursor identity order: got %v, want %v", identities, expected)
 				}
 			}
-			initialOrder := [][2]string{{runA, runA}, {runB, runB}, {shared, runA}, {shared, runB}, {tail, runA}}
+			initialOrder := [][2]string{{runA, runA}, {runB, runB}, {shared, runA}, {shared, runB}, {tail, runA}, {other, runA}, {other, runB}}
 			assertRows(page(operatorread.OperatorEntityListOptions{}).Entities, initialOrder)
-			// Prove the excluded type is really stored and publicly readable;
-			// the item-only pages below must not leak it into either cursor.
-			assertRows(publicPage(map[string]any{"type": "other_item", "run_id": runB}).Entities, [][2]string{{other, runB}})
+			assertRows(publicPage(map[string]any{"flow": "others", "run_id": runB}).Entities, [][2]string{{other, runB}})
 			unfiltered, err := f.store.(apiv1.EntityReadStore).ListOperatorEntities(f.ctx, operatorread.OperatorEntityListOptions{RunID: runB})
-			if err != nil || len(unfiltered.Entities) != 3 || unfiltered.Entities[2].EntityID != other || unfiltered.Entities[2].EntityType != "other_item" {
-				t.Fatalf("mixed-type exclusion control is missing: %+v %v", unfiltered, err)
+			if err != nil || len(unfiltered.Entities) != 3 || unfiltered.Entities[2].EntityID != other || unfiltered.Entities[2].EntityType != "state" {
+				t.Fatalf("same-state flow membership control is missing: %+v %v", unfiltered, err)
 			}
 			first := page(operatorread.OperatorEntityListOptions{Limit: 1})
 			assertRows(first.Entities, initialOrder[:1])
 			if first.NextCursor == "" {
 				t.Fatal("first page omitted its remaining-data cursor")
 			}
-			publicFirst := publicPage(map[string]any{"type": "cursor_item", "run_id": runB, "limit": 1})
+			publicFirst := publicPage(map[string]any{"run_id": runB, "limit": 1})
 			assertRows(publicFirst.Entities, initialOrder[1:2])
 			if publicFirst.NextCursor == "" {
 				t.Fatal("run-scoped first page omitted its remaining import cursor")
@@ -208,12 +205,12 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 			if again := page(operatorread.OperatorEntityListOptions{Limit: 1}); again.NextCursor != first.NextCursor {
 				t.Fatalf("lifecycle-only mutation changed first cursor: %q != %q", again.NextCursor, first.NextCursor)
 			}
-			publicAgain := publicPage(map[string]any{"type": "cursor_item", "run_id": runB, "limit": 1})
+			publicAgain := publicPage(map[string]any{"run_id": runB, "limit": 1})
 			assertRows(publicAgain.Entities, initialOrder[1:2])
 			if publicAgain.NextCursor != publicFirst.NextCursor || !publicAgain.Entities[0].UpdatedAt.Equal(at) || publicAgain.Entities[0].Revision == nil || *publicAgain.Entities[0].Revision != 2 {
 				t.Fatalf("public lifecycle-only cursor changed or lost header revision: %+v", publicAgain)
 			}
-			assertRows(publicPage(map[string]any{"type": "cursor_item", "run_id": runB, "limit": 1, "cursor": publicFirst.NextCursor}).Entities, [][2]string{{shared, runB}})
+			assertRows(publicPage(map[string]any{"run_id": runB, "limit": 1, "cursor": publicFirst.NextCursor}).Entities, [][2]string{{shared, runB}})
 			// Keyset pagination is not a run-wide snapshot: an actual data write
 			// can move a not-yet-read row ahead of the already issued cursor.
 			state.ExpectedRevision, state.UpdatedAt = 2, at.Add(2*time.Minute)
@@ -234,27 +231,27 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 			}
 			assertRows(remaining, initialOrder[2:])
 			fresh := page(operatorread.OperatorEntityListOptions{})
-			assertRows(fresh.Entities, [][2]string{{runB, runB}, {runA, runA}, {shared, runA}, {shared, runB}, {tail, runA}})
+			assertRows(fresh.Entities, [][2]string{{runB, runB}, {runA, runA}, {shared, runA}, {shared, runB}, {tail, runA}, {other, runA}, {other, runB}})
 			if !fresh.Entities[0].UpdatedAt.Equal(state.UpdatedAt) || fresh.Entities[0].Revision == nil || *fresh.Entities[0].Revision != 3 {
 				t.Fatalf("real data mutation did not move data cursor: %+v", fresh.Entities[0])
 			}
-			publicFresh := publicPage(map[string]any{"type": "cursor_item", "run_id": runB, "limit": 1})
+			publicFresh := publicPage(map[string]any{"run_id": runB, "limit": 1})
 			if publicFresh.NextCursor == publicFirst.NextCursor || !publicFresh.Entities[0].UpdatedAt.Equal(state.UpdatedAt) {
 				t.Fatalf("public data mutation did not change data cursor: %+v", publicFresh)
 			}
 			for _, cursor := range []string{publicFirst.NextCursor, publicFresh.NextCursor} {
-				assertRows(publicPage(map[string]any{"type": "cursor_item", "run_id": runB, "limit": 1, "cursor": cursor}).Entities, [][2]string{{shared, runB}})
+				assertRows(publicPage(map[string]any{"run_id": runB, "limit": 1, "cursor": cursor}).Entities, [][2]string{{shared, runB}})
 			}
-			assertRows(publicPage(map[string]any{"type": "cursor_item", "run_id": runA}).Entities, [][2]string{{runA, runA}, {shared, runA}, {tail, runA}})
-			assertRows(publicPage(map[string]any{"type": "cursor_item", "run_id": runB}).Entities, [][2]string{{runB, runB}, {shared, runB}})
-			assertRows(page(operatorread.OperatorEntityListOptions{Flow: "imports"}).Entities, initialOrder[2:])
-			assertRows(publicPage(map[string]any{"type": "cursor_item", "run_id": runA, "flow": "imports"}).Entities, [][2]string{{shared, runA}, {tail, runA}})
+			assertRows(publicPage(map[string]any{"run_id": runA}).Entities, [][2]string{{runA, runA}, {shared, runA}, {tail, runA}, {other, runA}})
+			assertRows(publicPage(map[string]any{"run_id": runB}).Entities, [][2]string{{runB, runB}, {shared, runB}, {other, runB}})
+			assertRows(page(operatorread.OperatorEntityListOptions{Flow: "imports"}).Entities, initialOrder[2:5])
+			assertRows(publicPage(map[string]any{"run_id": runA, "flow": "imports"}).Entities, [][2]string{{shared, runA}, {tail, runA}})
 			full, err := f.store.(apiv1.EntityReadStore).LoadOperatorEntity(f.ctx, runB, runB)
 			if err != nil || full.Fields["count"] != json.Number("2") || !full.Gates["approved"] || full.Entity.EnteredStateAt == nil || !full.Entity.EnteredStateAt.Equal(at) || !full.Entity.CreatedAt.Equal(at) || !full.Entity.UpdatedAt.Equal(state.UpdatedAt) {
 				t.Fatalf("cursor changes lost typed data, gate, stage entry or independent clocks: %+v %v", full, err)
 			}
-			groups, err := f.store.(apiv1.EntityReadStore).AggregateOperatorEntities(f.ctx, operatorread.OperatorEntityAggregateOptions{Type: "cursor_item", GroupBy: "current_state"})
-			if err != nil || len(groups.Counts) != 1 || groups.Counts["ready"] != 2 || groups.AbsentCount != 3 {
+			groups, err := f.store.(apiv1.EntityReadStore).AggregateOperatorEntities(f.ctx, operatorread.OperatorEntityAggregateOptions{GroupBy: "current_state"})
+			if err != nil || len(groups.Counts) != 1 || groups.Counts["ready"] != 2 || groups.AbsentCount != 5 {
 				t.Fatalf("mutations changed staged/imported data membership: %+v %v", groups, err)
 			}
 		})

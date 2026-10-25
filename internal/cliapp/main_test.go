@@ -3183,7 +3183,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 		t.Fatalf("verify stdout contains advisory diagnostics:\n%s", out)
 	}
 	errText := stderr.String()
-	if !strings.Contains(errText, "[INFO] entity_reader_coverage @ root: flow root entity_type case declares field untouched with no detected internal reader coverage") {
+	if !strings.Contains(errText, "[INFO] entity_reader_coverage @ root: flow root entity_type state declares field untouched with no detected internal reader coverage") {
 		t.Fatalf("verify stderr missing lint evidence:\n%s", errText)
 	}
 	if strings.Contains(errText, "lint_evidence:") {
@@ -3414,11 +3414,7 @@ stages:
   waiting: {}
   done: {final: true}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-ticket:
-  ticket_id:
-    type: string
-    initial: ""
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), `ticket_id: ""
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 timer.reminder:
@@ -3510,70 +3506,6 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 	}
 }
 
-func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
-	root := t.TempDir()
-
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
-  idle: {}
-  done: {final: true}
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
-case:
-  business_brief:
-    type: text
-    _unused_reason: verify prompt writer proof field
-  research_context:
-    type: text
-    _unused_reason: verify prompt writer proof field
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
-writer:
-  type: factory
-  role: writer
-  intent: prompts/writer.md
-  model: regular
-  subscriptions: []
-  entity_writes:
-    case:
-      save:
-      - research_context
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
-task.assigned:
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
-closer:
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      advances_to: done
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "prompts", "writer.md"), `
-Use save_entity_field for `+"`business_brief`"+`.
-`)
-
-	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
-		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
-	}
-	errText := stderr.String()
-	for _, want := range []string{
-		"[BLOCKER] entity_writer_coverage @",
-		"business_brief",
-	} {
-		if !strings.Contains(errText, want) {
-			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
-		}
-	}
-}
-
 func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
 	root := t.TempDir()
 
@@ -3598,22 +3530,6 @@ accumulator:
 
 func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
 	root := canonicalrouting.CopyVerifyStateSchemaFloat(t)
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &buf)
-	if code != 0 {
-		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
-	}
-	if out := buf.String(); !strings.Contains(out, "verify ok: source=") {
-		t.Fatalf("verify output missing success marker:\n%s", out)
-	}
-}
-
-func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
-
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
-
-	root := canonicalrouting.CopyVerifyAccumulatorEntityProjection(t)
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &buf)
@@ -3690,7 +3606,6 @@ stages:
 item.arrived:
   expected_count: integer
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item: {}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   execution_type: system_node
@@ -3750,7 +3665,7 @@ func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 
 func isOptionalWorkflowDeclarationFixture(path string) bool {
 	switch filepath.Base(path) {
-	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+	case "agents.yaml", "state.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
 		return true
 	default:
 		return false
@@ -4215,7 +4130,7 @@ func TestExecutionValidation_CreateEntityAccumulatePreemptsDynamicComputeWarning
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	bundle.RootEntities = runtimecontracts.EntityContractsDocument{
-		"tracking": {
+		"state": {
 			Fields: map[string]runtimecontracts.EntityFieldDecl{
 				"expected_count":  {Type: "integer", Initial: 1},
 				"composite_score": {Type: "numeric"},
@@ -4233,7 +4148,7 @@ func TestExecutionValidation_CreateEntityAccumulatePreemptsDynamicComputeWarning
 	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "entity.composite_score",
+		StoreAs:   "state.composite_score",
 	}
 	node.EventHandlers[eventType] = handler
 	bundle.Nodes[nodeID] = node
@@ -4257,7 +4172,7 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Platform: runtimecontracts.PlatformSpecDocument{},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"scan": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"scan_id":   {Type: "string"},
 					"geography": {Type: "string"},

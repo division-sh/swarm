@@ -87,6 +87,7 @@ type EventPublicationOptions struct {
 	SourceArtifact            SourceArtifactAdmitter
 	Runs                      RunReadStore
 	Entities                  EntityReadStore
+	Instances                 runtimepipeline.FlowInstanceIndexReader
 	Observability             ObservabilityReadStore
 	RunBundleContext          RunBundleContextStore
 	RuntimeContexts           *runtime.RuntimeContextManager

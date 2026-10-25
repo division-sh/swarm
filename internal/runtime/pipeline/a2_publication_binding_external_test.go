@@ -185,7 +185,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				now := time.Now().UTC()
 				parent := commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-					CurrentState: "active", EntityType: "root_state", Fields: map[string]any{"work_count": int64(0)},
+					CurrentState: "active", EntityType: "state", Fields: map[string]any{"work_count": int64(0)},
 				}, now)
 				keys := []string{uuid.NewString(), uuid.NewString()}
 				if multipleRecipients {
@@ -223,7 +223,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					constructed := commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
 						InstanceID: keys[index], StorageRef: path, EntityID: flowidentity.EntityID(path), WorkflowName: flows[index], WorkflowVersion: source.WorkflowVersion(),
 						ParentFlowID: parent.Identity.TemplateID, ParentFlowInstance: parent.Identity.InstancePath, ParentEntityID: parent.Identity.EntityID,
-						Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "order_state", Fields: map[string]any{"order_id": keys[index], "expected": []any{"a", "b"}},
+						Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "state", Fields: map[string]any{"order_id": keys[index], "expected": []any{"a", "b"}},
 					}, now)
 					markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
 					requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed.Identity)

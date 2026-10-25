@@ -1,4 +1,0 @@
-requester_state:
-  account_id:
-    type: text
-    _unused_reason: requester instance identity
