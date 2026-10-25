@@ -60,7 +60,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 	}
 	if opts.Flow != "" {
 		n := add(opts.Flow)
-		where = append(where, fmt.Sprintf("(fi.flow_template = $%d OR fi.flow_template LIKE $%d || '/%%')", n, n))
+		where = append(where, fmt.Sprintf("(es.flow_instance = $%d OR es.flow_instance LIKE $%d || '/%%')", n, n))
 	}
 	if opts.CurrentState != "" {
 		n := add(opts.CurrentState)
@@ -157,7 +157,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 	if opts.Flow != "" {
 		add(opts.Flow)
 		add(opts.Flow + "/%")
-		where = append(where, "(fi.flow_template = ? OR fi.flow_template LIKE ?)")
+		where = append(where, "(es.flow_instance = ? OR es.flow_instance LIKE ?)")
 	}
 	if opts.CurrentState != "" {
 		add(opts.CurrentState)

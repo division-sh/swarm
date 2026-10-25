@@ -27518,7 +27518,7 @@ test_specification:
         rule: >
           Entity assertions consume canonical entity read owners. The runner may
           match by explicit setup alias ref, by explicit entity id, by current
-          run plus declared entity type plus field predicates, or by a
+          run plus a flow selector plus field predicates, or by a
           mailbox/event-derived id. Zero or multiple matches fail closed unless
           the assertion explicitly expects a count.
         ref: >
@@ -27526,8 +27526,11 @@ test_specification:
           to exactly one setup-created entity and consumes `entity.get` directly
           with that entity_id and the current scenario run_id. Unknown aliases
           fail before readback. `ref` MUST NOT be combined with `count`; when
-          `type` is also supplied, it must match the setup binding's entity
-          type.
+          `flow` is also supplied, it must match the setup binding's flow.
+        flow: >
+          Without `ref`, `flow` selects through the canonical `entity.list`
+          flow-instance filter in the current run. The root spelling `.` uses
+          that run's canonical root coordinate. Entity-type selectors are retired.
         current_state: >
           A row with `current_state` is a detail assertion, not a count
           assertion. Expected values consume the scenario literal model, so
@@ -27553,7 +27556,7 @@ test_specification:
           differently-valued gates fail the scenario.
         count_interaction: >
           `count` is a count-only assertion and MUST NOT be combined with
-          `current_state`, `fields`, or `gates`. A type-only entity row is not a
+          `current_state`, `fields`, or `gates`. A flow-only entity row is not a
           valid assertion. This prevents the runner from preserving two
           different interpretations of the same `expect.entities` row.
       mailbox:
