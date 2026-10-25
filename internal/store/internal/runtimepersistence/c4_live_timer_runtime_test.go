@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -118,9 +120,22 @@ func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, sourceR
 	if err := rt.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	contexts, err := runtimepkg.NewRuntimeContextManager(selected.(runforkexecution.SelectedContractForkLifecycle), runtimepkg.BundleContext{
+	definition := runtimepkg.BundleContext{
 		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source, Runtime: rt, WorkOwner: rt.WorkOccurrence(),
-	})
+	}
+	if bundle, found := semanticview.Bundle(loaded.Source); found && bundle.PackInventory != nil {
+		definition.PackInventoryDigest = bundle.PackInventory.Digest()
+		projection, err := packadmission.FromBundle(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition.ProviderTriggerGeneration = projection.ProviderTriggers.Generation()
+		definition.InstalledTriggerSubjects, err = projection.ProviderTriggers.InstalledCapabilitySubjects()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	contexts, err := runtimepkg.NewRuntimeContextManager(selected.(runforkexecution.SelectedContractForkLifecycle), definition)
 	if err != nil {
 		t.Fatal(err)
 	}
