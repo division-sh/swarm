@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -26,27 +26,19 @@ import (
 // Fail the first restore read after the exact ready attempt is verified for adoption.
 type selectedRecoveryRestoreFailure struct {
 	pipeline.WorkflowPersistenceOwner
-	ready sync.Map
 	armed atomic.Bool
 	fired atomic.Bool
 	seen  chan struct{}
 	cause error
 }
 
-func (p *selectedRecoveryRestoreFailure) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
-	if err := p.WorkflowPersistenceOwner.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); err != nil {
-		return err
-	}
-	if _, ready := p.ready.Load(attempt); ready {
-		p.armed.Store(true)
-	}
-	return nil
-}
-
 func (p *selectedRecoveryRestoreFailure) AdvanceFlowAttachment(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, previous pipeline.FlowAttachmentPhase, at time.Time) (pipeline.FlowAttachmentAdvanceResult, error) {
 	result, err := p.WorkflowPersistenceOwner.AdvanceFlowAttachment(ctx, attempt, previous, at)
 	if result.Admitted() && result.Phase == pipeline.FlowAttachmentReady {
-		p.ready.Store(attempt, struct{}{})
+		if verifyErr := p.WorkflowPersistenceOwner.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); verifyErr != nil {
+			return result, errors.Join(err, verifyErr)
+		}
+		p.armed.Store(true)
 	}
 	return result, err
 }
@@ -98,6 +90,10 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				sourceDelivery := pendingSourceDeliveryForReboot(t, t.Context(), selected, before, checkpoint.SourceRun)
+				if cut != "restore_failure_after_adoption" && sourceDelivery.EventID != original.Request.ForkEventID {
+					t.Fatalf("crash source changed its exact deferred input: %+v", sourceDelivery)
+				}
 				ctx := runForkTestContext(t)
 				capability := selectedContractTestProcessCapability(t, ctx, selected)
 				owner := construct()
@@ -146,15 +142,23 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					expectedRecovery = runfork.SelectedForkRecoveryResume
 				}
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != expectedRecovery {
+					diagnostic, diagnosticErr := storetest.ReadServedRunDebugSummary(context.WithoutCancel(ctx), selected, checkpoint.ForkRun)
+					t.Logf("PRE_ACK_RECOVERY_NATIVE_STATE %s err=%v", diagnostic, diagnosticErr)
 					t.Fatalf("retained recovery failed: %+v %v", recovered, err)
 				}
 				wait, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
 				if restoreFailure != nil {
 					var startErr error
-					ordinary, _, startErr = nodeReplyRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, true)
+					var rebootGrant startupownership.GrantEvidence
+					ordinary, _, startErr = nodeReplyRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, true, func(grant startupownership.GrantEvidence) { rebootGrant = grant })
 					if startErr != nil && !errors.Is(startErr, restoreFailure.cause) {
 						t.Fatalf("ordinary recovery returned an independent startup error: %v", startErr)
+					}
+					if startErr == nil {
+						if err := ordinary.ReconcileLiveRun(ctx, checkpoint.ForkRun); !errors.Is(err, restoreFailure.cause) {
+							t.Fatalf("actual post-adoption restoration did not return its injected failure: %v", err)
+						}
 					}
 					select {
 					case <-restoreFailure.seen:
@@ -163,6 +167,10 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					}
 					if err := owner.RetireSelectedContexts(wait); err != nil {
 						t.Fatalf("join exact recovery cleanup after adoption: %v", err)
+					}
+					rebootAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, rebootGrant.GrantID, rebootGrant.RuntimeGeneration)
+					if err != nil {
+						t.Fatal(err)
 					}
 					if err := ordinary.Shutdown(); err != nil {
 						t.Fatalf("join ordinary recovery after failed restoration: %v", err)
@@ -174,10 +182,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					if err != nil || !found || !reflect.DeepEqual(original, retry) {
 						t.Fatalf("restoration failure changed the original acknowledgment: %+v %v", retry, err)
 					}
-					after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
-					if err != nil || !reflect.DeepEqual(before, after) {
-						t.Fatalf("restoration failure changed source business state: %v", err)
-					}
+					requirePendingSourceRebootConservation(t, wait, selected, before, sourceDelivery, rebootAuthority)
 					return
 				}
 				ack, found, err := operations.LoadForkOperation(wait, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)
@@ -230,6 +235,14 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					case <-time.After(10 * time.Millisecond):
 					}
 				}
+				rebootGrant, err := ordinary.CurrentStartupGrantEvidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rebootAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, rebootGrant.GrantID, rebootGrant.RuntimeGeneration)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if err := ordinary.Shutdown(); err != nil || process.ActiveCount() != baselineLeases {
 					t.Fatalf("ordinary recovery retained its resources: work=%d baseline=%d err=%v", process.ActiveCount(), baselineLeases, err)
 				}
@@ -242,10 +255,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 				if err != nil || !found || !reflect.DeepEqual(ack, retry) {
 					t.Fatalf("recovery changed the original acknowledgment: %+v %v", retry, err)
 				}
-				after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
-				if err != nil || !reflect.DeepEqual(before, after) {
-					t.Fatalf("child recovery changed source business state: %v", err)
-				}
+				requirePendingSourceRebootConservation(t, wait, selected, before, sourceDelivery, rebootAuthority)
 			})
 		}
 	}

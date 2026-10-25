@@ -98,7 +98,8 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				sourceID, eventID := uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, selected, loaded, sourceID, eventID, false)
+				seedSelectedOperationSource(t, ctx, selected, loaded, sourceID, eventID, true)
+				ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceID, executionposture.MockOnly)
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				retireRuntime := func() {
 					t.Helper()
@@ -119,14 +120,16 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 					if !ok || bound == nil || process.ActiveCount() == 0 {
 						t.Fatal("activation lost selected process ownership")
 					}
-					if point == "process_shutdown" {
+					if point == "process_shutdown" || point == "activation_failure" {
 						var err error
 						interruptedSnapshot, err = storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 						if err != nil {
 							t.Fatal(err)
 						}
-						process.Retire()
-						<-ctx.Done()
+						if point == "process_shutdown" {
+							process.Retire()
+							<-ctx.Done()
+						}
 					}
 					if point != "before_execution" && point != "after_event_commit" {
 						retireRuntime()
@@ -149,6 +152,12 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 					SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+					LiveRuntime:       ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+				}
+				request.ForkOperation = &runfork.ForkOperationRequest{
+					OperationID: uuid.NewString(), Actor: "operation-lifetime", IdempotencyKey: point,
+					TransportHash: "operation-lifetime-" + point, SourceRunID: sourceID, ForkEventID: eventID,
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
 				}
 				result, err := ExecuteSelectedContractRunFork(ctx, request)
 				if point == "activation_failure" || point == "process_shutdown" {
@@ -156,44 +165,39 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 						t.Fatalf("activation failure: %v", err)
 					}
 					var sourceState, forkState, executionState string
-					wantFork, wantExecution := "cancelled", "closed"
-					if point == "process_shutdown" {
-						wantFork, wantExecution = "paused", "running"
-					}
-					if err := db.QueryRow(`SELECT s.status, f.status, e.state FROM runs s JOIN runs f ON f.forked_from_run_id=s.run_id JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=f.run_id WHERE s.run_id=$1`, sourceID).Scan(&sourceState, &forkState, &executionState); err != nil || sourceState != "running" || forkState != wantFork || executionState != wantExecution {
+					wantFork, wantExecution := "paused", "running"
+					if err := db.QueryRow(`SELECT s.status, f.status, e.state FROM runs s JOIN runs f ON f.forked_from_run_id=s.run_id JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=f.run_id WHERE s.run_id=$1`, sourceID).Scan(&sourceState, &forkState, &executionState); err != nil || sourceState != "paused" || forkState != wantFork || executionState != wantExecution {
 						t.Fatalf("failure disposition source/fork/execution = %s/%s/%s: %v", sourceState, forkState, executionState, err)
 					}
 					var afterRetirement map[string]storetest.SelectedForkStorageTableSnapshot
-					if point == "process_shutdown" {
-						var err error
-						afterRetirement, err = storetest.ReadSelectedForkApplicationStorageSnapshot(context.WithoutCancel(ctx), selected)
-						if err != nil {
-							t.Fatal(err)
-						}
+					afterRetirement, err = storetest.ReadSelectedForkApplicationStorageSnapshot(context.WithoutCancel(ctx), selected)
+					if err != nil {
+						t.Fatal(err)
 					}
 					for _, table := range []string{"events", "event_deliveries", "entity_state", "entity_mutations"} {
-						if point == "process_shutdown" {
-							if !reflect.DeepEqual(interruptedSnapshot[table], afterRetirement[table]) {
-								t.Fatalf("retired process dispatched or discarded retained %s", table)
-							}
-							continue
+						if !reflect.DeepEqual(interruptedSnapshot[table], afterRetirement[table]) {
+							t.Fatalf("unacknowledged handoff dispatched or discarded retained %s", table)
 						}
-						var remaining int
-						if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, result.Materialization.ForkRunID).Scan(&remaining); err != nil || remaining != 0 {
-							t.Fatalf("failure left %d %s rows: %v", remaining, table, err)
-						}
+					}
+					record, found, err := selected.(liveWinnerOperationReader).LoadForkOperation(context.WithoutCancel(ctx), request.ForkOperation.Actor, point, request.ForkOperation.TransportHash)
+					if err != nil || !found || record.Status != runfork.ForkOperationMaterialized || record.Result != nil || record.ForkRunID != result.Materialization.ForkRunID {
+						t.Fatalf("unacknowledged operation lost recoverable materialization: %+v found=%t err=%v", record, found, err)
 					}
 				} else {
 					if err != nil {
 						t.Fatal(err)
 					}
 					observed, err := observeSelectedRetainedExecution(t, context.WithoutCancel(ctx), owner, selected, result.Materialization.ForkRunID)
-					if err != nil || observed.ExecutedEventCount != 1 || result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus || discards != 0 {
+					if err != nil || observed.ExecutedEventCount != 1 || result.Activation.ForkRunStatus != string(runlifecycle.StateLive) || discards != 0 {
 						t.Fatalf("retained execution count=%d activation=%s discards=%d: %v", observed.ExecutedEventCount, result.Activation.ForkRunStatus, discards, err)
 					}
 					var status, executionStatus string
-					if err := db.QueryRow(`SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, result.Materialization.ForkRunID).Scan(&status, &executionStatus); err != nil || status != "completed" || executionStatus != "closed" {
+					if err := db.QueryRow(`SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, result.Materialization.ForkRunID).Scan(&status, &executionStatus); err != nil || status != string(runlifecycle.StateLive) || executionStatus != "closed" {
 						t.Fatalf("durable activation/execution = %s/%s: %v", status, executionStatus, err)
+					}
+					stage := storetest.ObserveWriterStage(t, context.WithoutCancel(ctx), selected, result.Materialization.ForkRunID, result.Materialization.ForkRunID, "done")
+					if stage.State != "done" {
+						t.Fatalf("live successor did not retain its ended instance: %+v", stage)
 					}
 					var lineage int
 					if err := db.QueryRow(`SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE source_run_id=$1 AND fork_run_id=$2`, sourceID, result.Materialization.ForkRunID).Scan(&lineage); err != nil || lineage != 1 {
@@ -208,6 +212,9 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				}
 				if _, err := bound.Begin(context.Background()); !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("operation did not release selected execution: %v", err)
+				}
+				if err := ordinary.Shutdown(); err != nil {
+					t.Fatal(err)
 				}
 				if process.ActiveCount() != 0 {
 					t.Fatalf("operation leaked %d process leases", process.ActiveCount())

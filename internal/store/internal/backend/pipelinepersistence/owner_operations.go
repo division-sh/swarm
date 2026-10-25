@@ -844,6 +844,10 @@ func (s *postgresPipelineObligationStore) ClaimBatch(ctx context.Context, scan r
 	}
 	batch, err := claimPipelineBatch(ctx, state, limit, pipelineBatchBackend{
 		parked: func(ctx context.Context, runID string) (bool, error) {
+			owned, err := s.ObserveRunExecution(ctx, s.backend, runID)
+			if err != nil || !owned {
+				return !owned, err
+			}
 			return runstate.DispatchParked(ctx, s.backend, true, runID)
 		},
 		reserve:    s.postgresPipelineClaims().recoveryTransitions.reserve,
@@ -874,6 +878,10 @@ func (s *sqlitePipelineObligationStore) ClaimBatch(ctx context.Context, scan run
 	}
 	batch, err := claimPipelineBatch(ctx, state, limit, pipelineBatchBackend{
 		parked: func(ctx context.Context, runID string) (bool, error) {
+			owned, err := s.ObserveRunExecution(ctx, s.backend, runID)
+			if err != nil || !owned {
+				return !owned, err
+			}
 			return runstate.DispatchParked(ctx, s.backend, false, runID)
 		},
 		reserve:    s.recoveryTransitions.reserve,

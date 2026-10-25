@@ -98,7 +98,7 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 	return rt, close
 }
 
-func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool) (*rootruntime.Runtime, func(), error) {
+func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool, observeGrant ...func(startupownership.GrantEvidence)) (*rootruntime.Runtime, func(), error) {
 	t.Helper()
 	nodes, err := pipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
@@ -196,6 +196,13 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	}
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)
+	}
+	for _, observe := range observeGrant {
+		evidence, err := grant.Evidence()
+		if err != nil {
+			t.Fatal(err)
+		}
+		observe(evidence)
 	}
 	if live {
 		ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))

@@ -421,47 +421,80 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 				if err != nil || !reflect.DeepEqual(sourceSettlement, afterSourceSettlement) {
 					t.Fatalf("timeout recovery changed its original source delivery obligation: %+v err=%v", afterSourceSettlement, err)
 				}
-				after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
-				if err != nil {
-					t.Fatal(err)
-				}
-				recoveredDelivery, err := selected.(deliverylifecycle.Store).Snapshot(wait, sourceDeliveryID)
-				if err != nil || !recoveredDelivery.Authority.Equal(rebootAuthority) || recoveredDelivery.UpdatedAt.Before(sourceDelivery.UpdatedAt) {
-					t.Fatalf("pending source delivery lacks exact reboot custody: %+v err=%v", recoveredDelivery, err)
-				}
-				preservedDelivery := sourceDelivery
-				preservedDelivery.Authority, preservedDelivery.UpdatedAt = recoveredDelivery.Authority, recoveredDelivery.UpdatedAt
-				if !reflect.DeepEqual(preservedDelivery, recoveredDelivery) {
-					t.Fatalf("reboot changed source pending delivery beyond authority/time: before=%+v after=%+v", sourceDelivery, recoveredDelivery)
-				}
-				comparison := maps.Clone(after)
-				table := after["event_deliveries"]
-				if len(table.Rows) != 1 {
-					t.Fatalf("reboot changed exact source delivery row count: %d", len(table.Rows))
-				}
-				var cells []storetest.SelectedForkSnapshotCell
-				if err := json.Unmarshal([]byte(table.Rows[0]), &cells); err != nil {
-					t.Fatal(err)
-				}
-				for i, column := range table.Columns {
-					if column == "execution_authority_id" || column == "updated_at" {
-						cells[i] = sourceRows[0][column]
-					}
-				}
-				row, err := json.Marshal(cells)
-				if err != nil {
-					t.Fatal(err)
-				}
-				table.Rows = []string{string(row)}
-				comparison["event_deliveries"] = table
-				if !reflect.DeepEqual(before, comparison) {
-					t.Fatalf("timeout recovery changed source business facts: %v", err)
-				}
+				requirePendingSourceRebootConservation(t, wait, selected, before, sourceDelivery, rebootAuthority)
 				retry, found, err := operations.LoadForkOperation(wait, acknowledged.Request.Actor, acknowledged.Request.IdempotencyKey, acknowledged.Request.TransportHash)
 				if err != nil || !found || !reflect.DeepEqual(acknowledged, retry) {
 					t.Fatalf("timeout recovery changed permanent acknowledgment: %+v err=%v", retry, err)
 				}
 			})
 		}
+	}
+}
+
+func pendingSourceDeliveryForReboot(t *testing.T, ctx context.Context, selected any, before map[string]storetest.SelectedForkStorageTableSnapshot, runID string) deliverylifecycle.Snapshot {
+	t.Helper()
+	rows, err := storetest.DecodeSelectedForkSnapshotRows(before["event_deliveries"])
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("original pending source delivery: rows=%d err=%v", len(rows), err)
+	}
+	id, err := rows[0]["delivery_id"].Text()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := selected.(deliverylifecycle.Store).Snapshot(ctx, id)
+	if err != nil || snapshot.Status != deliverylifecycle.StatusPending || snapshot.RunID != runID {
+		t.Fatalf("source lost its exact deferred delivery: %+v err=%v", snapshot, err)
+	}
+	return snapshot
+}
+
+func requirePendingSourceRebootConservation(t *testing.T, ctx context.Context, selected any, before map[string]storetest.SelectedForkStorageTableSnapshot, sourceDelivery deliverylifecycle.Snapshot, rebootAuthority deliverylifecycle.ExecutionAuthority) {
+	t.Helper()
+	if sourceDelivery.Status != deliverylifecycle.StatusPending || sourceDelivery.RunID == "" || sourceDelivery.DeliveryID == "" {
+		t.Fatal("reboot conservation requires its exact previously pending source delivery")
+	}
+	sourceRows, err := storetest.DecodeSelectedForkSnapshotRows(before["event_deliveries"])
+	if err != nil || len(sourceRows) != 1 {
+		t.Fatalf("original pending source row: rows=%d err=%v", len(sourceRows), err)
+	}
+	id, err := sourceRows[0]["delivery_id"].Text()
+	if err != nil || id != sourceDelivery.DeliveryID {
+		t.Fatalf("original source snapshot differs from its canonical delivery: %s err=%v", id, err)
+	}
+	recoveredDelivery, err := selected.(deliverylifecycle.Store).Snapshot(ctx, id)
+	if err != nil || !recoveredDelivery.Authority.Equal(rebootAuthority) || recoveredDelivery.UpdatedAt.Before(sourceDelivery.UpdatedAt) {
+		t.Fatalf("pending source delivery lacks exact reboot custody: %+v err=%v", recoveredDelivery, err)
+	}
+	preservedDelivery := sourceDelivery
+	preservedDelivery.Authority, preservedDelivery.UpdatedAt = recoveredDelivery.Authority, recoveredDelivery.UpdatedAt
+	if !reflect.DeepEqual(preservedDelivery, recoveredDelivery) {
+		t.Fatalf("reboot changed source pending delivery beyond authority/time: before=%+v after=%+v", sourceDelivery, recoveredDelivery)
+	}
+	after, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceDelivery.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparison := maps.Clone(after)
+	table := after["event_deliveries"]
+	if len(table.Rows) != 1 || !reflect.DeepEqual(table.Columns, before["event_deliveries"].Columns) {
+		t.Fatalf("reboot changed exact source delivery shape: rows=%d", len(table.Rows))
+	}
+	var cells []storetest.SelectedForkSnapshotCell
+	if err := json.Unmarshal([]byte(table.Rows[0]), &cells); err != nil {
+		t.Fatal(err)
+	}
+	for i, column := range table.Columns {
+		if column == "execution_authority_id" || column == "updated_at" {
+			cells[i] = sourceRows[0][column]
+		}
+	}
+	row, err := json.Marshal(cells)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table.Rows = []string{string(row)}
+	comparison["event_deliveries"] = table
+	if !reflect.DeepEqual(before, comparison) {
+		t.Fatal("reboot changed source business facts outside its exact pending-delivery custody")
 	}
 }

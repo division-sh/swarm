@@ -155,19 +155,13 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true, AllowSourceFreeze: true,
+			childAttachment := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true, AllowSourceFreeze: true,
 				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 				ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-reply-proof", IdempotencyKey: uuid.NewString(),
 					TransportHash: "pending-reply-proof", SourceRunID: staged.ForkRunID, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
 					AllowSourceFreeze: true, ContractSelection: selection}})
-			if err != nil || !result.Activation.Activated {
-				t.Fatalf("activate pending effect child: %+v error=%v", result, err)
-			}
-			if !result.Activation.SourceFrozen {
-				t.Fatal("current staged frontier did not retain its mandatory source freeze")
-			}
-			stagedCard = requirePendingReplySourceFreeze(t, ctx, store, stagedCard)
-			child := result.Materialization.ForkRunID
+			childAttachment.serveSelectedControls(t)
+			child := childAttachment.materialized.ForkRunID
 			projected := requirePendingReplyCard(t, ctx, store, child)
 			pending, err := store.LoadProposedEffectContinuation(ctx, projected.CardID)
 			childRows, rowsErr := storetest.ReadReplyContextRecords(ctx, selected, child)
