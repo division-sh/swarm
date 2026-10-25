@@ -136,7 +136,7 @@ func declaredMethodNames(pkg *packages.Package, named *types.Named) map[string]b
 
 func constructionBinding(name string) bool {
 	switch name {
-	case "BindDecisionCards", "BindDelivery", "BindDirectiveDependencies", "BindPipeline", "BindRunFork", "BindSelectedForkWriter", "BindPreparedProcessOwner", "RunPreparedProcessOperation", "BeginFanOutEvaluation":
+	case "BindActivityGrant", "BindActivityJournalRole", "BindDecisionCards", "BindDelivery", "BindDirectiveDependencies", "BindLifecycleCandidates", "BindPipeline", "BindRunFork", "BindSelectedForkWriter", "BindPreparedProcessOwner", "RunPreparedProcessOperation", "BeginFanOutEvaluation", "DeploymentOperations", "ValidateDisplacedRecovery":
 		return true
 	default:
 		return false
