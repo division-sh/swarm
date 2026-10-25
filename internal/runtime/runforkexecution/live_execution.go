@@ -46,6 +46,12 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
 		defer releaseSelection()
 		req.liveSelectionHeld = true
+		live, found, err = req.LiveRuns.LoadLiveRun(ctx, scope)
+		if err != nil {
+			return out, err
+		}
+	}
+	if found {
 		use, err := acquireLivePredecessor(ctx, req.LiveContexts, live)
 		if err != nil {
 			return out, err
@@ -198,6 +204,21 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	if !req.liveSelectionHeld {
 		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
 		defer releaseSelection()
+		scope, err := req.LiveRuns.LoadRunLiveScope(ctx, p.plan.SourceRunID)
+		if err != nil {
+			return out, err
+		}
+		live, found, err := req.LiveRuns.LoadLiveRun(ctx, scope)
+		if err != nil {
+			return out, err
+		}
+		if found {
+			_, release, err := req.LiveRuntime.ParkLiveRun(ctx, live)
+			if err != nil {
+				return out, err
+			}
+			defer release()
+		}
 	}
 	activation, err := c.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation, DataPins: result.Materialization.DataPins,
