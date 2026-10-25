@@ -941,7 +941,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtCompletedSelectedFixturePinCollectorTo && reviewedTransition == current && head.Collector == current &&
-		debtSitesEqual(head.Sites, trusted.Sites) {
+		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
 		return nil // #2728/6392837709: delete the completed migration pin; no permission change.
 	}
 	if base == debtDeploymentRegistrationCollectorTo && trusted.Collector == base &&
