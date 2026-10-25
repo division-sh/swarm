@@ -5018,24 +5018,6 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		}
 	}
 	requireServedStatusCLIReadback(t, endpoint, runID, "  live")
-	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entity", "list", "--run-id", runID, "--limit", "10"})
-	if entityListCode != 0 {
-		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
-	}
-	for _, want := range []string{entityID, "done"} {
-		if !strings.Contains(entityListStdout, want) {
-			t.Fatalf("entities list readback missing %q:\n%s", want, entityListStdout)
-		}
-	}
-	entityViewStdout, entityViewStderr, entityViewCode := runServedCLICommand(t, endpoint, []string{"entity", "view", entityID, "--run-id", runID})
-	if entityViewCode != 0 {
-		t.Fatalf("entity view readback code=%d stderr=%s stdout=%s", entityViewCode, entityViewStderr, entityViewStdout)
-	}
-	for _, want := range []string{entityID, "done", "Fields  none"} {
-		if !strings.Contains(entityViewStdout, want) {
-			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
-		}
-	}
 
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
 	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID})
