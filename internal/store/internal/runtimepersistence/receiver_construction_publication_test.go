@@ -132,7 +132,7 @@ func TestReceiverConstructionPublicationObservesStandingTypedAbsenceBothStores(t
 					"service/schema.yaml": "name: service\n",
 				}
 				if fielded {
-					documents["state.yaml"] = "receipt:\n  marker: {type: text, initial: unchanged}\n"
+					documents["state.yaml"] = "marker: \"unchanged\"\n"
 					documents["service/state.yaml"] = documents["state.yaml"]
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)

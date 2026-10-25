@@ -375,7 +375,7 @@ instance: chat_id
 inputs:
   - inbound.telegram.text_message
 `,
-		"consumer/state.yaml": "type: text\nindexed: true\n",
+		"consumer/state.yaml": "chat_id: {type: text, indexed: true}\n",
 		"consumer/nodes.yaml": nodes,
 	}
 	if nodes == "" {
@@ -424,7 +424,7 @@ func CopyProviderRollbackSyntheticCollision(t testing.TB, mint CreateMint) strin
 		"    resolution: select-or-create\n",
 		"    resolution: create\n    key_from: "+source+"\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "state.yaml"),
-		"    type: text", "    type: uuid")
+		"type: text", "type: uuid")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"  chat_id: text", "  chat_id: uuid")
 	return root

@@ -21,7 +21,7 @@ func CopyConstructedGateForkControl(t testing.TB, fields bool) string {
 		"nodes.yaml":  "frontier:\n  item.received:\n    guard: true\n",
 	}
 	if fields {
-		files["state.yaml"] = "default:\n  name: text\n"
+		files["state.yaml"] = "name: text\n"
 	}
 	for name, body := range files {
 		writeClosedVariantFile(t, root, name, body)

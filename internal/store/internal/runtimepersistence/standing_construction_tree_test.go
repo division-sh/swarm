@@ -28,7 +28,7 @@ func TestA9KeyedStandingGenerationDoesNotConstructBothStores(t *testing.T) {
 					"parent/service/schema.yaml": "name: service\n",
 				}
 				documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
-				documents[filepath.Join(keyed, "state.yaml")] = "owner:\n  tenant: text\n"
+				documents[filepath.Join(keyed, "state.yaml")] = "tenant: text\n"
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				source := semanticview.Wrap(f.bundle)
 				fact, found := correlation.SourceArtifactFactFromContext(f.ctx)

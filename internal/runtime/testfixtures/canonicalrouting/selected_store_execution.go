@@ -40,8 +40,8 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "flow-a/schema.yaml", "name: flow-a\n")
 	writeClosedVariantFile(t, root, "selected-state-flow/schema.yaml", "name: selected-state-flow\n")
-	for _, owner := range []struct{ path, entity string }{{"flow-a/1", "default"}, {"selected-state-flow/at-t", "selected_case"}} {
-		writeClosedVariantFile(t, root, owner.path+"/schema.yaml", `name: selected-store-state
+	for _, owner := range []string{"flow-a/1", "selected-state-flow/at-t"} {
+		writeClosedVariantFile(t, root, owner+"/schema.yaml", `name: selected-store-state
 stages:
   pending: {}
   done: {final: true}
@@ -49,8 +49,8 @@ inputs:
   - state.seeded
   - state.closed
 `)
-		writeClosedVariantFile(t, root, owner.path+"/state.yaml", owner.entity+":\n  name: text\n")
-		writeClosedVariantFile(t, root, owner.path+"/nodes.yaml", `state-owner:
+		writeClosedVariantFile(t, root, owner+"/state.yaml", "name: text\n")
+		writeClosedVariantFile(t, root, owner+"/nodes.yaml", `state-owner:
   state.seeded:
     advances_to: pending
     data_accumulation:

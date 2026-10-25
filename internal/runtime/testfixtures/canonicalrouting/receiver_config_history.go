@@ -15,6 +15,6 @@ instance: vertical_id
 inputs:
   - deploy.done
 `)
-	applyClosedReplacement(t, filepath.Join(root, "consumer/state.yaml"), "  vertical_id:", "  nested: json?\n  status: boolean?\n  flow_path: json?\n  vertical_id:")
+	applyClosedReplacement(t, filepath.Join(root, "consumer/state.yaml"), "vertical_id:", "nested: json?\nstatus: boolean?\nflow_path: json?\nvertical_id:")
 	return root
 }

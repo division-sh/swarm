@@ -14,7 +14,7 @@ func CopyNestedNodeReplyDeadlines(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "inputs: [request.started, request.stop]", "inputs: [request.started, request.stop, provider.replied]")
 	for _, flow := range []string{"", "provider", "t"} {
 		if flow != "" {
-			applyClosedReplacement(t, filepath.Join(root, flow, "schema.yaml"), "pins:\n", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\npins:\n")
+			applyClosedReplacement(t, filepath.Join(root, flow, "schema.yaml"), "inputs:", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\ninputs:")
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "state.yaml"), `expected: ["same-business-key"]
 `)
@@ -91,7 +91,7 @@ func CopyTwoOpenFanOutReplyDeadlines(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "inputs: [request.started, request.stop]", "inputs: [request.started, request.stop, provider.replied]")
 	writeClosedVariantFile(t, root, "state.yaml", `expected: ["same-business-key"]
 `)
-	applyClosedReplacement(t, filepath.Join(root, "provider/schema.yaml"), "pins:\n", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\npins:\n")
+	applyClosedReplacement(t, filepath.Join(root, "provider/schema.yaml"), "inputs:", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\ninputs:")
 	writeClosedVariantFile(t, root, "provider/state.yaml", `expected: ["same-business-key"]
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `  provider.replied:

@@ -33,7 +33,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 					entitySchema := "marker: text\n"
 					if empty {
 						authoredFields = map[string]any{}
-						entitySchema = "record:\n  marker: text?\n"
+						entitySchema = "marker: text?\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 						"schema.yaml": "name: imported-history\nstages:\n  pending: {}\n",

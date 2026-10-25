@@ -37,7 +37,7 @@ func TestR7DirectoryScalarSelectorsBothStores(t *testing.T) {
 					"schema.yaml":        "name: scalar-index\n",
 					"events.yaml":        "checkpoint:\n",
 					"worker/schema.yaml": "name: worker\ninstance: item_id\ninputs:\n  - item.created\n",
-					"worker/state.yaml":  "item:\n  item_id: " + scalar.kind + "\n",
+					"worker/state.yaml":  "item_id: " + scalar.kind + "\n",
 					"worker/events.yaml": "item.created:\n  item_id: " + scalar.kind + "\n",
 				}, nil)
 				runID := correlation.RunIDFromContext(f.ctx)

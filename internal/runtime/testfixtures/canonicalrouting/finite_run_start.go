@@ -37,12 +37,11 @@ func CopyRootInputFeed(t testing.TB, kind DeploymentFeedRoot) string {
 		delete(files, "registry/state.yaml")
 		delete(files, "registry/nodes.yaml")
 		files["schema.yaml"] = "stages: {pending: {}, done: {final: true}}\ninputs: [item.registered]\n"
-		files["state.yaml"] = "Item: {}\n"
 		files["nodes.yaml"] = "register:\n  item.registered: {advances_to: done}\n"
 		if kind == DeploymentFeedKeyedRoot {
 			files["schema.yaml"] = "instance: account_id\nstages: {pending: {}, done: {final: true}}\ninputs: [account.opened, item.registered]\n"
 			files["events.yaml"] += "account.opened:\n  account_id: text\n"
-			files["state.yaml"] = "Account:\n  account_id: text\n"
+			files["state.yaml"] = "account_id: text\n"
 			files["nodes.yaml"] += "open:\n  account.opened: {}\n"
 		}
 	case DeploymentFeedOutputOnlyRoot:

@@ -28,13 +28,13 @@ func CopyParentConnectEventMetadataAuthority(t testing.TB) string {
 	root := CopyExample(t, ParentConnect)
 	producerSchema := filepath.Join(root, "producer", "schema.yaml")
 	consumerSchema := filepath.Join(root, "consumer", "schema.yaml")
-	applyClosedReplacement(t, producerSchema, "pins:\n", "auto_emit_on_create:\n  event: flow.started\npins:\n")
+	applyClosedReplacement(t, producerSchema, "inputs:\n", "auto_emit_on_create:\n  event: flow.started\ninputs:\n")
 	applyClosedReplacement(t, producerSchema,
-		"    - work.ready\n",
-		"    - work.ready\n    - deploy.done\n")
+		"  - work.ready\n",
+		"  - work.ready\n  - deploy.done\n")
 	applyClosedReplacement(t, consumerSchema,
-		"    - work.ready\n",
-		"    - work.ready\n    - deploy.completed\n")
+		"  - work.ready\n",
+		"  - work.ready\n  - deploy.completed\n")
 	return root
 }
 

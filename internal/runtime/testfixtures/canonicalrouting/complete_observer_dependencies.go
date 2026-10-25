@@ -77,7 +77,7 @@ observer.create:
 			if flow == "other" {
 				local = "other.ready"
 			}
-			outputs = "  outputs: [" + local + "]\n"
+			outputs = "outputs: [" + local + "]\n"
 		}
 		schema := "name: " + flow + "\ninstance: item_id\nstages:\n  active: {}\n  done: {final: true}\ninputs: " + inputs + "\n" + outputs
 		events := ""
@@ -88,7 +88,7 @@ observer.create:
 		if flow == "observer" {
 			nodes += "observe:\n  work.ready:\n    guard: true\n  other.ready:\n    guard: true\n"
 		}
-		writeLegacyInstanceFlow(t, root, flow, schema, events, flow+"_state:\n  item_id: {type: text}\n", nodes)
+		writeLegacyInstanceFlow(t, root, flow, schema, events, "item_id: text\n", nodes)
 	}
 	return root
 }

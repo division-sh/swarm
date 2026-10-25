@@ -11,7 +11,7 @@ func CopyWorkflowStateDiagnostic(t testing.TB, stage string) string {
 		t.Fatalf("unsupported diagnostic stage %q", stage)
 	}
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", "name: workflow-state-diagnostic\nstages:\n  '"+stage+"': {}\n  done: {final: true}\npins:\n  inputs: [work.completed]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: workflow-state-diagnostic\nstages:\n  '"+stage+"': {}\n  done: {final: true}\ninputs: [work.completed]\n")
 	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "events.yaml", "work.completed:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "controller:\n  work.completed:\n    advances_to: done\n")
@@ -25,35 +25,29 @@ func CopyReceiverOptionalChild(t testing.TB, existing bool) string {
 	activeStage := ""
 	if existing {
 		activeStage = "  active: {}\n"
-		seedPin = "    - work.seeded\n"
+		seedPin = "  - work.seeded\n"
 		seedSchema = "work.seeded:\n  seed: boolean\n"
-		seedHandler = "    work.seeded:\n      advances_to: active\n"
+		seedHandler = "  work.seeded:\n    advances_to: active\n"
 	}
 	files := map[string]string{
 		"schema.yaml": `name: receiver-composition
 stages:
   waiting: {}
 ` + activeStage + `  done: {final: true}
-pins:
-  inputs:
-    - work.requested
-` + seedPin + `  outputs: [work.completed]
+inputs:
+  - work.requested
+` + seedPin + `outputs: [work.completed]
 connect:
   - {event: work.completed, from: ., to: sink}
 `,
 		"events.yaml": "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n" + seedSchema,
 
 		"nodes.yaml": `controller:
-` + func() string {
-			if existing {
-				return ", work.seeded"
-			}
-			return ""
-		}() + `]
-` + seedHandler + "    work.requested:\n" + `      advances_to: done
-      emit:
-        event: work.completed
-        fields: {result: "emitted"}
+` + seedHandler + `  work.requested:
+    advances_to: done
+    emit:
+      event: work.completed
+      fields: {result: "emitted"}
 `,
 		"sink/schema.yaml": `name: sink
 inputs:
@@ -272,7 +266,7 @@ inputs:
   - work.completed
   - child.closed
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - work.requested\n", "    - work.requested\n    - child.closed\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - work.requested\n", "  - work.requested\n  - child.closed\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.completed, child.seeded]", "outputs: [work.completed, child.seeded, child.closed]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: child.closed, from: ., to: sink}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.seeded:\n", "child.closed:\n  seed: boolean\nwork.seeded:\n")

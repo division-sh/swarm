@@ -86,7 +86,7 @@ func CopyMixedReplyRequest(t testing.TB) string {
 	t.Helper()
 	root := CopyRootReplyBoundary(t, true, true)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  outputs: [request.finished]\n", "  outputs: [request.finished, request.observed]\n")
+		"outputs: [request.finished]\n", "outputs: [request.finished, request.observed]\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.finished:\n", "request.observed:\n  request_id: text\nrequest.finished:\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `request-observer:
@@ -163,7 +163,7 @@ const (
 func ApplyRootReplyBoundaryNegativeMutation(t testing.TB, root string, rootRequester bool, mutation RootReplyNegativeMutation) {
 	t.Helper()
 	if mutation == RootReplyExportPinAbsent {
-		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs: [request.finished]\n", "")
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [request.finished]\n", "")
 		return
 	}
 	if mutation == RootReplyLocalConsumerAbsent || mutation == RootReplyExportObserverAbsent {

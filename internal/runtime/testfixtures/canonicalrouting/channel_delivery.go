@@ -44,7 +44,7 @@ func CopyChannelLearnedObjectControlPagesJourney(t testing.TB) string {
 func CopyChannelNoticeJourney(t testing.TB) string {
 	t.Helper()
 	root := CopyChannelLearnedObjectJourney(t)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - work.requested\n", "    - work.requested\n    - notice.requested\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - work.requested\n", "  - work.requested\n  - notice.requested\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: work.requested, from: ., to: reviews}\n",
 		"  - {event: work.requested, from: ., to: reviews}\n  - {event: notice.requested, from: ., to: notices}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  detail: text\nnotice.requested:\n  seed: boolean\n")
@@ -86,7 +86,7 @@ func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {
 	copyTree(t, filepath.Join(mailbox, "observers"), filepath.Join(root, "observers"))
 	removeClosedVariantFiles(t, root, "reviews/observers/mocks/observer.py", "reviews/observers/mocks", "reviews/observers/agents.yaml", "reviews/observers/state.yaml", "reviews/observers/nodes.yaml", "reviews/observers/schema.yaml", "reviews/observers")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "provider: telegram\n      tool: telegram.send_message", "provider: mock\n      tool: mock.deliver")
-	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "    - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "  - observer.requested\noutputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "tool: telegram.send_message", "tool: mock.deliver")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "        chat_id: \"42\"\n        text: \"review\"", "        queue: \"queue-b\"\n        body: \"approved-effect\"\n        controls: []")
 	writeClosedVariantFile(t, root, "reviews/events.yaml", "work.completed:\n  result: text\n")
@@ -133,8 +133,7 @@ stages:
           input: {reason: {type: `+inputType+`, required: true}}
           advances_to: done
   done: {final: true}
-pins:
-  inputs: [work.requested]
+inputs: [work.requested]
 `)
 	writeClosedVariantFile(t, root, "reviews/state.yaml", "detail: text\n")
 	writeClosedVariantFile(t, root, "reviews/nodes.yaml", `requester:

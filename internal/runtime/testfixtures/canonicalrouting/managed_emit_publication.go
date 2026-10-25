@@ -34,7 +34,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		if sibling {
 			kind, value, role = "boolean", "True", "sibling-writer"
 		}
-		input := "    - work.requested\n"
+		input := "  - work.requested\n"
 		modeDecl := ""
 		if mode == "template" && !sibling {
 			modeDecl = "instance: case_id\n"
@@ -45,9 +45,9 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		schema := "name: emit-proof\n" + modeDecl + "inputs:\n" + input
 		extraEvent, extraOutput, extraEmit := "", "", ""
 		if sibling {
-			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "  outputs:\n    - work.ack\n", ", foreign.only"
+			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "outputs:\n  - work.ack\n", ", foreign.only"
 		} else if scope != "." {
-			extraOutput = "  outputs: [work.ack]\n"
+			extraOutput = "outputs: [work.ack]\n"
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "schema.yaml"), schema+extraOutput)
 		events := "work.requested:\n  case_id: text\nwork.started:\n  case_id: text\nwork.result:\n  value: " + kind + "\nwork.ack:\n  value: " + kind + "\n" + extraEvent
@@ -78,8 +78,8 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 	}
 	rootSchema := "name: managed-driver\ninputs:\n  - work.requested\n  - sibling.requested\n  - sibling.ack\noutputs:\n  - work.requested\n  - sibling.requested\n  - sibling.ack\n  - work.ack\nconnect:\n  - {event: sibling.requested, from: ., to: sibling}\n  - {event: work.ack, from: sibling, to: ., rename: sibling.ack}\n"
 	if scope != "." {
-		rootSchema = strings.Replace(rootSchema, "    - sibling.ack\n  outputs:", "    - sibling.ack\n    - source.ack\n  outputs:", 1)
-		rootSchema = strings.Replace(rootSchema, "    - work.ack\nconnect:", "    - source.ack\nconnect:", 1)
+		rootSchema = strings.Replace(rootSchema, "  - sibling.ack\noutputs:", "  - sibling.ack\n  - source.ack\noutputs:", 1)
+		rootSchema = strings.Replace(rootSchema, "  - work.ack\nconnect:", "  - source.ack\nconnect:", 1)
 		rootSchema += "  - {event: work.requested, from: ., to: " + scope + "}\n"
 		rootSchema += "  - {event: work.ack, from: " + scope + ", to: ., rename: source.ack}\n"
 	}

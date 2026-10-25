@@ -40,7 +40,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 			runID, importID := uuid.NewString(), uuid.NewString()
 			ctx := correlation.WithRunID(f.ctx, runID)
 			at := time.Now().UTC().Truncate(time.Microsecond)
-			seed := pipeline.ScenarioSetupEntityRequest{Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "record",
+			seed := pipeline.ScenarioSetupEntityRequest{Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "state",
 				CurrentState: mutationlog.PresentLifecycleState("unknown"), Fields: map[string]any{"marker": "root", "current_state": "business"}, Gates: map[string]bool{}}
 			source := semanticview.Wrap(f.bundle)
 			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
@@ -51,7 +51,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			command := runtimebus.ScenarioSetupCommand{Setup: pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{
-				seed, {Alias: "import", EntityID: importID, FlowInstance: "nostage/import", EntityType: "record", Fields: map[string]any{"marker": "import", "current_state": "business-import", "score": int64(12)}},
+				seed, {Alias: "import", EntityID: importID, FlowInstance: "nostage/import", EntityType: "state", Fields: map[string]any{"marker": "import", "current_state": "business-import", "score": int64(12)}},
 			}}, Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}}}
 			result, err := f.store.(runtimebus.ScenarioSetupCommitOwner).CommitScenarioSetup(ctx, command)
 			if err != nil || !result.Acknowledged {

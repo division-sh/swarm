@@ -795,7 +795,7 @@ func seedLifecycleReadinessOwner(
 		"schema.yaml":           "name: lifecycle-readiness-proof\n",
 		flowID + "/schema.yaml": "name: " + flowID + "\ninstance: fixture_key\nstages:\n  pending: {}\ninputs: [lifecycle.constructed]\n",
 		flowID + "/events.yaml": "lifecycle.constructed:\n  fixture_key: text\n",
-		flowID + "/state.yaml":  "item:\n  fixture_key: text\n",
+		flowID + "/state.yaml":  "fixture_key: text\n",
 	})
 	bundle.Semantics.Version = plan.WorkflowVersion
 	source := semanticview.Wrap(bundle)

@@ -83,7 +83,7 @@ func copyInboundTransport(t testing.TB, flows []string, observe bool) string {
 		default:
 			t.Fatalf("unclassified inbound transport flow %q", flow)
 		}
-		write(flow+"/schema.yaml", "name: "+flow+"\npins:\n  inputs: ["+strings.Join(events, ", ")+"]\n")
+		write(flow+"/schema.yaml", "name: "+flow+"\ninputs: ["+strings.Join(events, ", ")+"]\n")
 		if observe {
 			catalog := make(map[string]any, len(events))
 			handlers := make(map[string]any, len(events))
@@ -97,7 +97,7 @@ func copyInboundTransport(t testing.TB, flows []string, observe bool) string {
 			}
 			for name, document := range map[string]any{
 				"events.yaml": catalog,
-				"nodes.yaml":  map[string]any{"observer": map[string]any{"execution_type": "system_node", "subscribes_to": events, "event_handlers": handlers}},
+				"nodes.yaml":  map[string]any{"observer": handlers},
 			} {
 				raw, err := yaml.Marshal(document)
 				if err != nil {

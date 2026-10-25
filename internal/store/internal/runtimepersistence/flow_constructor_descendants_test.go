@@ -32,7 +32,7 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 				if keyed {
 					documents["schema.yaml"] = "name: root-construction\ninstance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n"
 					documents["events.yaml"] = "task.started:\n  request_id: text\n"
-					documents["state.yaml"] = "request:\n  request_id: text\n"
+					documents["state.yaml"] = "request_id: text\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				runID := correlation.RunIDFromContext(f.ctx)

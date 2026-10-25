@@ -14341,26 +14341,6 @@
                 "pattern": "^bundle-v2:sha256:[a-f0-9]{64}$",
                 "type": "string"
               },
-              "criteria": {
-                "additionalProperties": false,
-                "properties": {
-                  "identity": {
-                    "pattern": "^agent-criteria:v1:sha256:[a-f0-9]{64}$",
-                    "type": "string"
-                  },
-                  "references": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "references",
-                  "identity"
-                ],
-                "type": "object"
-              },
               "flow_id": {
                 "type": "string"
               },
@@ -14423,7 +14403,6 @@
               "authored_flow",
               "agent_identity",
               "intent",
-              "criteria",
               "provider",
               "provider_prompt"
             ],

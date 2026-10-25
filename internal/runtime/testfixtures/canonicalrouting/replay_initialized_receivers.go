@@ -22,7 +22,7 @@ connect:
 	writeClosedVariantFile(t, root, "events.yaml", "start:\nwork.ready:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "source:\n  start:\n    emit: work.ready\n")
 	for _, flow := range []string{"left", "right"} {
-		writeClosedVariantFile(t, root, flow+"/schema.yaml", fmt.Sprintf("name: %s\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [work.ready]\n", flow))
+		writeClosedVariantFile(t, root, flow+"/schema.yaml", fmt.Sprintf("name: %s\nstages:\n  active: {}\n  done: {final: true}\ninputs: [work.ready]\n", flow))
 		removeClosedVariantFiles(t, root, flow+"/state.yaml")
 		writeClosedVariantFile(t, root, flow+"/nodes.yaml", "initialize:\n  work.ready: {}\n")
 		writeClosedVariantFile(t, root, flow+"/agents.yaml", "worker:\n  model: regular\n  intent: {inline: Observe initialized work.}\n  subscriptions: [work.ready]\n")

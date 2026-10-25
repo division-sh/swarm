@@ -42,7 +42,7 @@ func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at t
 	f := newReceiverConfigActivationFixtureForStore(t, selected, false, map[string]string{
 		"schema.yaml":           "name: workflow-mutation\n",
 		flowID + "/schema.yaml": "name: " + flowID + "\ninstance: receiver_key\nstages:\n  active: {}\n  done: {}\ninputs: [construct.requested]\n",
-		flowID + "/state.yaml":  "review_item:\n  receiver_key: text\n  account_id: {type: text, initial: preserved}\n  handled: boolean?\n",
+		flowID + "/state.yaml":  "receiver_key: text\naccount_id: \"preserved\"\nhandled: boolean?\n",
 		flowID + "/events.yaml": "construct.requested:\n",
 	}, nil, ownStoreTestAgentManager, nil)
 	runID := correlation.RunIDFromContext(f.ctx)

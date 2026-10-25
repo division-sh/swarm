@@ -3020,8 +3020,8 @@ type_system:
       explicitly tracked surviving follow-up.
     validation_row_boundary: |
       Machine-evaluated validation rows are governed by
-      policy_validation_contracts. They consume the stable-ID criteria artifact
-      family with a machine evaluator, bind computed.validation.* results only,
+      policy_validation_contracts. They consume stable-ID machine rule sets,
+      bind computed.validation.* results only,
       and leave branch routing to policy-sheet selection rows.
   field_forms:
     terse: 'field_name: TypeName'
@@ -3039,9 +3039,6 @@ type_system:
           min: 0
           max: 100
         equal_to: sibling_field
-        citation:                 # event payload fields only
-          criteria: feasibility_exclusions
-          allowed_classes: [hard, soft]
         _unused_reason: Reason    # entities only; verify suppression for E1
         _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
     optional_record_edge: |
@@ -3087,15 +3084,14 @@ type_system:
       An admitted open/unknown top-level domain, including json,
       requires default: fail rather than being rejected for lacking a closed
       scalar kind; actual scalar matching and unsupported-value misses retain
-      their canonical runtime/default behavior. Citation scalar/list elements
-      and original loop revision carriage consume the flow-scoped plain-text
+      their canonical runtime/default behavior. Original loop revision carriage consumes the flow-scoped plain-text
       domain, not raw type spelling; enum/UUID/timestamp are not plain text.
       Loop revision checks consume the effective semantic Source's admitted
       event schema, including imported overlays and ExactSchema fields without
       an authored type reference; underlying bundle residency is not required.
       Required string fields retain their enum/format domain evidence rather
       than deriving plain text from structural string lowering alone.
-      Requiredness, citation criteria/classes and exact loop.revision_id mapping
+      Requiredness and exact loop.revision_id mapping
       remain separately required. An expression context may omit its optional
       join result-schema evidence and retain dynamic results; this is absence
       at that boundary, not an authored empty reference. A supplied invalid
@@ -3280,110 +3276,22 @@ rule_set_contracts:
   implementation_slice: '#2303'
   location: flow rules.yaml
   owner: admitted RulesDocument single scoped namespace
-  resolution: Walk ancestors and replace each complete same-name declaration with the nearest one, then check agent or machine variant. A nearer wrong-kind declaration rejects the reference; it never falls back to an ancestor of the requested kind.
+  resolution: Walk ancestors and replace each complete same-name declaration with the nearest one, then check the machine rule-set contract. A nearer malformed declaration rejects the reference; it never falls back to an ancestor.
   variants:
-    agent: classes and ordered rules containing id, class, text and optional params
     machine: classes, nonempty typed inputs and ordered rules additionally requiring explicit boolean pin_candidate and equal-only check
   admission:
   - Rule-set, class and input names retain the existing exact declaration-name grammar; unrestricted policy keys do not change that grammar.
   - Every nested mapping is closed. Required text is nonempty text, not coercible numeric data. classes and rules are nonempty.
-  - Presence of inputs, check or pin_candidate selects the machine obligations. Partial or null machine fields are invalid, never downgraded to the agent variant.
+  - Every set has the machine obligations. Partial or null inputs, check or pin_candidate fields are invalid.
   - Parameters are omitted or a mapping of inert text, boolean, integer or finite numeric scalars. Empty text is valid; null and containers are invalid. Existing policy scalar reference semantics are unchanged.
   - Alias and merge expansion consumes the same admission and document-wide bounds. Duplicate local declarations, duplicate rule IDs and undeclared classes fail closed.
-criteria_contracts:
-  status: merge_bearing_runtime_behavior
-  implementation_slice: '#1717'
-  description: |
-    Flow-local agent-judged criteria are stable-ID rule sets declared as a
-    agent variant in the owning flow's flat `rules.yaml`. Criteria
-    are contract artifacts, not prompt prose, generic policy scalar values,
-    flow `data/` files, or `read_flow_data` conventions.
-  rule_declaration:
-    location: flow rules.yaml
-    owner: nearest scoped RuleSet agent variant
-    shape: |
-      <set_name>:
-        classes:
-          <class_name>:
-            disposition: <event_name-or-none>
-        rules:
-          - id: <stable-never-reused-id>
-            class: <declared-class>
-            text: <human-readable rule>
-            params:
-              <name>: <typed-scalar-or-policy-scalar-ref>
-    rules:
-    - Agent rule sets are closed declarations in rules.yaml, never extracted from policy values or agent intent.
-    - Criteria sets are flow-local, including the selected root FlowNode `.`. Project-shared packs, team packs, and
-      marketplace distribution are not implemented; there is no separate project criteria scope.
-    - Rule IDs are stable and never reused within a set. Historical events cite the bundle/contract version active when
-      emitted; this slice does not add a separate criteria-versioning subsystem.
-    - Each set MUST declare at least one class, every class MUST have a disposition, every rule MUST have id/class/text,
-      every rule class MUST be declared, and duplicate rule IDs fail static validation.
-    - Parameters are inert typed scalar literals or references to sibling scalar policy values using `policy.<key>`.
-      Criteria parameters are not CEL, predicates, machine-evaluated checks, or a general expression language.
-  agent_references:
-    field: criteria
-    location: flow-scoped agents.yaml entries
-    syntax: 'criteria: [feasibility_exclusions]'
-    rules:
-    - Agent criteria refs are short set names resolved against the agent's owning scoped rules.yaml namespace. Dotted paths,
-      path separators, duplicates, empty refs, and unresolved refs fail static validation.
-    - Selected-root agents resolve criteria against the root FlowNode's rules.yaml, under the same resolution rules as child agents.
-  delivery:
-    generated_context: |
-      Agents that declare criteria receive a deterministic generated "Contract Criteria" prompt/context section rendered from
-      the resolved contract. The generated section is the only PR1 delivery path and is tested as stable so later prompt-frame
-      generation (#1718) can absorb it without changing behavior.
-    forbidden_bypasses:
-    - generic policy or agent-intent interpolation
-    - extraction of rule authority from literal policy values
-    - flow `data/` files
-    - '`read_flow_data`'
-    - intent-local hardcoded criteria IDs as authority
-    fail_closed: Runtime inability to deliver an otherwise valid referenced set fails closed before agent judgment proceeds.
-  event_citations:
-    field_metadata: |
-      Event payload fields may declare citation metadata:
-
-      cites:
-        type: text       # or an explicit scalar type reference '[text]'
-        citation:
-          criteria: feasibility_exclusions
-          allowed_classes: [hard]
-    type_rule: Citation fields must be text/string or list-of-text/list-of-string.
-    compatibility_rule: |
-      PR1 uses explicit `allowed_classes` on each citation field. The end-state may derive allowed classes from the
-      class-to-disposition mapping, but until that is promoted, missing `allowed_classes` is invalid.
-    emit_boundary: |
-      Generated emit tools validate criteria citations after ordinary payload schema validation and before publish. Unknown IDs,
-      agent-undeclared criteria sets, unresolved sets, wrong citation value shape, and class-incompatible IDs fail in-turn with
-      a non-retryable typed corrective runtime error (`criteria_citation_validation_failed`) and publish zero events.
-    multi_citation: Both single `text` citation fields and list citation fields are supported in this slice.
-  static_verification:
-    checks:
-    - typed agent rule-set shape
-    - flow-local placement
-    - unique stable IDs within a set
-    - class declaration and disposition completeness
-    - inert parameter scalar/ref validation
-    - agent criteria references
-    - event citation field type and allowed class metadata
-    - emitted-event citation fields consumed only by agents that declare the referenced criteria set
-  split_boundaries:
-  - '#1714 machine-evaluated validation rows consume this stable-ID rule grammar as the machine variant with a different
-    evaluator.'
-  - '#1718 prompt-frame generation may absorb the deterministic criteria section later; #1717 does not ship the full frame
-    generator.'
-  - Structured predicates, criteria packs, team packs, CLI/editor UX, and criteria evaluation harnesses are separate state.
 policy_validation_contracts:
   status: merge_bearing_runtime_behavior
   implementation_slice: '#1714'
   description: |
     Flow-local machine-evaluated validation sets are stable-ID rule sets
     declared as the machine variant in the owning flow's flat
-    `rules.yaml`. They share the criteria artifact family but use the
-    platform machine evaluator, not agent judgment. Validation rows bind
+    `rules.yaml`. They use the platform machine evaluator, not agent judgment. Validation rows bind
     turn-scoped computed facts only; they do not route, emit, advance state,
     persist data, call tools, read files, run CEL, or execute code.
   rule_declaration:
@@ -3415,8 +3323,9 @@ policy_validation_contracts:
       validation rows themselves do not emit or route.
     - 'Every rule MUST declare id/class/text, every rule class MUST be declared, every rule MUST explicitly declare
       `pin_candidate: true|false`, and duplicate rule IDs fail static validation.'
-    - Rule parameters, when present, follow `criteria_contracts` inert scalar/ref rules. They are not expressions and are
-      not consumed by the Slice B equal-only evaluator.
+    - Rule parameters, when present, are inert text, boolean, integer or finite numeric scalar literals or references to
+      sibling scalar policy values using `policy.<key>`. Empty text is valid; null and containers are invalid. They are not
+      expressions and are not consumed by the Slice B equal-only evaluator.
   evaluator:
     supported_checks:
     - equal
@@ -3473,7 +3382,7 @@ policy_validation_contracts:
   - Schema refinements own pattern, length, range, presence, enum, and same-object equal_to checks.
   - 'Receiver input pins and static interface negotiation may later absorb `pin_candidate: true` rules; this slice records the
     marker but does not promote pin declarations.'
-  - Non-equality predicates, richer expression/derive rows, criteria packs, prompt-frame validation, compute/WASM validation,
+  - Non-equality predicates, richer expression/derive rows, prompt-frame validation, compute/WASM validation,
     and file-backed validation sets are separate state.
 compute_module_contracts:
   status: merge_bearing_runtime_behavior
@@ -7827,7 +7736,7 @@ engine:
     - 1. Event arrives in agent inbox.
     - '2. Platform creates the agent session from the already reconstructed runtime prompt carrier and appends the generated
       environment postamble. Session construction never performs source lookup; startup/recovery must first reconstruct the
-      carrier from the selected contract''s immutable resolved intent and exact authored criteria references.'
+      carrier from the selected contract''s immutable resolved intent.'
     - 3. Platform provides tools (from tools.yaml) to the agent session.
     - '4. Agent processes event: reasons, may call tools, may emit events.'
     - 5. Each tool call is validated (schema check, permission check) before execution.
@@ -8630,7 +8539,7 @@ engine:
           accepted by Layer 1. These fields/blocks MUST fail closed or be separately gated before implementation.
       exclusions:
       - No defaults for logical identity, runtime/display id templates, subscriptions, emit_events,
-        pins, events, entities, public interfaces, policy, intent, criteria, credentials, permissions, permissions_bundle, tools,
+        pins, events, entities, public interfaces, policy, intent, credentials, permissions, permissions_bundle, tools,
         native_tools, or flow_data_access.
     subscription_types:
       subscriptions: Static subscription list. Always active from boot (or from instance creation for dynamic flows). Cannot
@@ -8646,8 +8555,7 @@ engine:
         → tool: emit_score_dimension_complete'
       behavior: |
         Each emit tool accepts a payload object matching the event's schema in events.yaml. The platform validates
-        the payload, validates any criteria_contracts.event_citations metadata against the actor's declared criteria sets,
-        attaches sender context, and publishes the event.
+        the payload, attaches sender context, and publishes the event.
         For pin-declared output events, generated agent emit tools MUST consume the same publish-time RoutePlan
         authority as node/system emits. If EventBus preflight reports a canonical lowered parent-connect route
         decision, the tool MUST admit the event to Publish so that EventBus persists and dispatches the typed
@@ -8772,21 +8680,6 @@ engine:
         shared_owner: Verify, boot, runtime tool generation, runtime execution, MCP/tool visibility, and diagnostics must
           consume the same flow-data path/scoping resolver.
         boot_check: flow_data_access_validation
-    criteria:
-      description: Optional flow-scoped agent contract field. Declares the scoped rules.yaml agent sets that are
-        delivered to the agent as deterministic generated context and that the agent may cite in generated emit tools.
-      contract_field:
-        field: criteria
-        type: array of short set names
-        location: Flow-local agent declaration in agents.yaml, including the selected root FlowNode `.`.
-        default: omitted or empty means no generated criteria context and no criteria citation authority.
-        example: "criteria:\n  - feasibility_exclusions"
-      validation:
-        boot_check: criteria_contract_validation
-        refs: Each item must be a short non-empty set name resolving to an agent variant in the declaring flow's scoped rules.yaml namespace.
-          Dotted paths and filesystem-like paths are invalid.
-        generated_delivery: Referenced sets are rendered through criteria_contracts.delivery; criteria are not granted by
-          tools, flow_data_access, agent-intent interpolation, or generic policy reads.
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
@@ -10220,14 +10113,6 @@ engine:
       scope: per-agent
       trigger: An agent's flow_data_access declaration references an invalid, missing, non-regular, escaping, or
         outside-flow data file. The same owning-flow checks apply at the selected root `.` and child flows.
-      when: boot-only
-    - id: criteria_contract_validation
-      severity: error
-      scope: per-flow/per-agent/per-event
-      trigger: A rules.yaml agent set has invalid shape, duplicate stable IDs, undeclared classes, missing dispositions, bad
-        inert params, or non-flow-local placement; an agent criteria ref is malformed or unresolved; an event citation field
-        has an unsupported type or missing/invalid allowed_classes; or an agent emits a citation-bearing event without
-        declaring the referenced criteria set.
       when: boot-only
     - id: policy_sheet_validation_value_rows
       severity: hard_invalidity
@@ -13936,37 +13821,30 @@ agent_intent_model:
     materialization: >
       Static, template, recovery, shard, and selected-contract fork paths carry the exact resolved artifact into AgentConfig.
       AgentRuntimeSet may select backend/model/execution mode from that already materialized descriptor but is not an intent
-      source owner. Selected stores persist only the resolved intent artifact and authored criteria references, never rendered
+      source owner. Selected stores persist only the resolved intent artifact, never rendered
       prompt text. Recovery resolves the unique declaration bound by the persisted intent provenance/identity and
-      deterministically reconstructs criteria from the selected semantic source before any provider adapter is reached;
-      missing, ambiguous, or criteria-mismatched declarations fail closed. A persisted agent whose declaration was removed by
+      validates it against the selected semantic source before any provider adapter is reached;
+      missing, ambiguous, or mismatched declarations fail closed. A persisted agent whose declaration was removed by
       an accepted source revision, or whose declaration is being replaced by a different canonical revision, may be adopted
       only as a non-executable lifecycle identity for immediate fenced teardown or replacement; that path constructs no
       provider agent and installs no subscriptions.
     derived_system_prompt: >
-      The derived system prompt is an internal, non-serializable runtime carrier constructed from the exact resolved intent
-      plus separately owned contract criteria. It is never a selected-store field or authored string. Runtime rejects a
-      missing carrier, an intent-identity mismatch, or criteria references that differ from the selected declaration. The
+      The derived system prompt is an internal, non-serializable runtime carrier constructed from the exact resolved intent.
+      It is never a selected-store field or authored string. Runtime rejects a missing carrier or an intent-identity mismatch. The
       canonical provider-prompt assembly appends the separately owned generated environment context exactly once when
       constructing the provider-visible system prompt; normal execution and startup preflight consume that same assembly.
-      This step does not mutate or replace the resolved intent artifact or durable criteria references. Persisted
+      This step does not mutate or replace the resolved intent artifact. Persisted
       `derived_system_prompt` is unsupported and fails closed rather than being migrated or accepted.
     event_invariance: Event payload shape, payload mode, date, entity state, workspace class, shard parent, runtime backend,
       and execution mode never select or mutate authored intent content or identity.
     provider_boundary: API, CLI, OpenAI-compatible, Responses, mock, and startup-probe adapters receive the exact text emitted
       by the canonical ProviderPrompt assembly; provider adapters never resolve agent intent or append generated context.
-  contract_criteria_assembly:
-    owner: criteria_contracts.delivery
-    rule: >
-      Authored criteria references remain outside intent identity. Materialization may append the exact contract-owned
-      criteria section only when runtime references, if supplied, equal the authored set; runtime-only or mismatched refs fail
-      closed.
   environment_postamble:
     rule: >
-      The canonical ProviderPrompt assembly appends workspace facts after the immutable runtime intent-and-criteria carrier
+      The canonical ProviderPrompt assembly appends workspace facts after the immutable runtime intent carrier
       when constructing the provider-visible system prompt. Normal execution and startup preflight use that same assembly.
       The postamble is generated platform context, is not authorable, does not list tools, and does not alter durable
-      intent/criteria facts, the resolved intent artifact, or hashes.
+      intent facts, the resolved intent artifact, or hashes.
     required_content:
       - 'Workspace: /workspace (read-write logical path)'
       - 'Reference data: /data (read-only logical path)'
@@ -14038,16 +13916,12 @@ agent_execution_frame:
     - complete concrete agent identity
     - role and authored flow identity
     - resolved business-intent artifact and identity
-    - canonical criteria references plus criteria identity bound to the bundle
-    - canonical provider-visible prompt assembled from intent, criteria, and generated environment context
+    - canonical provider-visible prompt assembled from intent and generated environment context
     - resolved runtime mode, provider, transport, and the paired authored model alias plus concrete model when selected
     provider_model_selection: >
       `model_alias` is the exact canonical authored alias and `model` is its resolved concrete provider model. They are
       either both absent or both present; managed execution supplies both. Surrounding-whitespace aliases/models and
       one-sided selections fail closed before frame completion.
-    criteria_identity: >
-      `agent-criteria:v1:sha256:<64 lowercase hex>` over deterministic compact JSON containing the admitted bundle hash and
-      canonical criteria references. Runtime-only, reordered, duplicated, or mismatched criteria fail closed.
   turn_context:
     closed_kinds: [initial, tool_continuation, board_directive, remediation]
     admitted_event: >
@@ -14140,7 +14014,7 @@ agent_execution_frame:
       `conversation.get_turn` is the sole historical projection owner and derives only version, frame_id, content_hash,
       turn_kind, and the conditionally required parent_frame_id from the persisted private frame. Compact list, latest,
       session, dashboard, activity, trace, forkchat, and static/effective `agent.frame` surfaces do not select or hydrate
-      private frame bytes. Raw event/tool payloads, prompt/intent/criteria, capabilities, directives, remediation reasons,
+      private frame bytes. Raw event/tool payloads, prompt/intent, capabilities, directives, remediation reasons,
       lifecycle, pack, and provider evidence remain private.
     occurrence_rule: >
       Same-authority retry and crash recovery reuse the operation-owned frame exactly. Public event/agent replay and
@@ -31780,7 +31654,7 @@ cli_specification:
         AgentExecutionFrameInspection returned by the API and never reads bundles, runtime state, provider evidence, turn
         history, files, databases, or event payloads to reconstruct frame facts locally.
       output:
-        human: Labeled execution-frame detail with agent, scope, version, bundle, flow, intent identity, criteria identity, provider resolution, and turn resolution.
+        human: Labeled execution-frame detail with agent, scope, version, bundle, flow, intent identity, provider resolution, and turn resolution.
         json: --json emits AgentExecutionFrameInspection exactly, with no CLI wrapper.
         quiet: --quiet emits canonical agent_id.
         no_color: --no-color consumes the shared color owner without changing machine output.
@@ -35741,7 +35615,7 @@ api_specification:
           session_contract:
             type: object
             additionalProperties: false
-            required: [bundle_hash, agent_id, authored_flow, agent_identity, intent, criteria, provider, provider_prompt]
+            required: [bundle_hash, agent_id, authored_flow, agent_identity, intent, provider, provider_prompt]
             properties:
               bundle_hash:
                 type: string
@@ -35762,13 +35636,6 @@ api_specification:
                   content: {type: string, minLength: 1}
                   content_hash: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
                   identity: {type: string, pattern: '^agent-intent:v1:sha256:[a-f0-9]{64}$'}
-              criteria:
-                type: object
-                additionalProperties: false
-                required: [references, identity]
-                properties:
-                  references: {type: array, items: {type: string}}
-                  identity: {type: string, pattern: '^agent-criteria:v1:sha256:[a-f0-9]{64}$'}
               provider: {$ref: '#/components/schemas/AgentFrameProviderPresence'}
               provider_prompt: {type: string, minLength: 1}
           turn_context:

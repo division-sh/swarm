@@ -43,7 +43,7 @@ func CopyLifecycleEmitterCompetingExit(t testing.TB, timer bool) string {
 	if timer {
 		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {after: 2s, advances_to: cancelled}\n", 1)
 	} else {
-		schema += "    - work.cancelled\n"
+		schema += "  - work.cancelled\n"
 		writeClosedVariantFile(t, root, "events.yaml", lifecycleStaticRead(t, root, "events.yaml")+"work.cancelled:\n  seed: boolean\n")
 		nodes += "canceller:\n  work.cancelled:\n    guard: instance.stage == 'review'\n    advances_to: cancelled\n"
 	}

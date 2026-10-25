@@ -86,7 +86,7 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 			state := runtimeengine.StateSnapshot{
 				EntityID: entityID, CurrentState: "active", WorkflowName: "child", WorkflowVersion: source.WorkflowVersion(),
 				StateCarrier: runtimeengine.NewStateCarrierWithOwners(map[string]any{}, nil,
-					runtimeengine.StateControl{FlowPath: "child/executor", StorageRef: "child/executor", InstanceID: "executor", EntityType: "review_item"}, nil, nil),
+					runtimeengine.StateControl{FlowPath: "child/executor", StorageRef: "child/executor", InstanceID: "executor", EntityType: "state"}, nil, nil),
 			}
 			executor, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 				Source:            source,
@@ -110,7 +110,7 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 					ExecutionFlowID: runtimeidentity.NormalizeFlowID("child"), Node: node,
 					HandlerEventKey: "test.node_emitted",
 					Event:           eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted", "", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC()),
-					Handler:         runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Entities: "review_item", Count: true}},
+					Handler:         runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Entities: "state", Count: true}},
 					State:           state,
 				})
 				if err != nil {
@@ -126,7 +126,7 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 			if got := execute("before state-only row"); got != 0 {
 				t.Fatalf("baseline count = %d, want zero", got)
 			}
-			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/state-only", "review_item", map[string]any{"account_id": "state-only"})
+			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/state-only", "state", map[string]any{"account_id": "state-only"})
 			if got := execute("after state-only row"); got != 1 {
 				t.Fatalf("state-only count = %d, want one", got)
 			}

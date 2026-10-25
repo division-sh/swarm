@@ -694,7 +694,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				opened := backend.open(t)
 				files := map[string]string{"schema.yaml": "name: proposed-effect-remint\nstages:\n  operating: {}\n"}
 				if fields {
-					files["state.yaml"] = "item:\n  label: text?\n"
+					files["state.yaml"] = "label: text?\n"
 				}
 				f := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 				target, err := runtimecontracts.BootBundleIdentity(f.bundle)

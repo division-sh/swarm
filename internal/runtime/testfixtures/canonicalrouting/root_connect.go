@@ -177,8 +177,7 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`name: singleton-output-root-connect
-pins:
-  inputs: [scout.completed]
+inputs: [scout.completed]
 connect:
   - event: scout.completed
     from: %s

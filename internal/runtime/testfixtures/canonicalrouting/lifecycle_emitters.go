@@ -323,7 +323,7 @@ func CopyLifecycleForkSource(t testing.TB, gate bool) string {
 		text := string(raw)
 		switch path {
 		case "schema.yaml":
-			text = strings.Replace(text, "    - work.requested", "    - work.requested\n    - work.observed", 1)
+			text = strings.Replace(text, "  - work.requested", "  - work.requested\n  - work.observed", 1)
 		case "events.yaml":
 			text += "work.observed:\n  seed: boolean\n"
 		case "nodes.yaml":
@@ -445,7 +445,7 @@ inputs:
 	case LifecycleLoopRepeatEmits, LifecycleLoopRepeatEmitsUntilObserverFinish:
 		writeLifecycleLoopConnected(t, root)
 		for _, edit := range []struct{ path, old, replacement string }{
-			{"schema.yaml", "    - loop.escaped\n", "    - loop.escaped\n    - ordinary.repeated\n"},
+			{"schema.yaml", "  - loop.escaped\n", "  - loop.escaped\n  - ordinary.repeated\n"},
 			{"schema.yaml", "    to: sink\n", "    to: sink\n  - event: ordinary.repeated\n    from: .\n    to: ordinary\n"},
 			{"events.yaml", "work.requested:\n", "ordinary.repeated:\n  token: text\n  revision_id: text\nwork.requested:\n"},
 			{"nodes.yaml", "loop: {repeat: revision, from: review}\n      advances_to: drafting", "loop: {repeat: revision, from: review}\n      advances_to: drafting\n      emit:\n        event: ordinary.repeated\n        fields: {token: \"ordinary\", revision_id: loop.revision_id}"},
@@ -475,11 +475,11 @@ inputs:
 			// The observer has its own finite work. Its explicit finish keeps
 			// receiver-final refusal distinct from whole-run terminal refusal.
 			for _, edit := range []struct{ path, old, replacement string }{
-				{"schema.yaml", "    - loop.close\n", "    - loop.close\n    - ordinary.finish\n"},
-				{"schema.yaml", "    - ordinary.repeated\n", "    - ordinary.repeated\n    - ordinary.finish\n"},
+				{"schema.yaml", "  - loop.close\n", "  - loop.close\n  - ordinary.finish\n"},
+				{"schema.yaml", "  - ordinary.repeated\n", "  - ordinary.repeated\n  - ordinary.finish\n"},
 				{"schema.yaml", "    to: ordinary\n", "    to: ordinary\n  - event: ordinary.finish\n    from: .\n    to: ordinary\n"},
 				{"ordinary/schema.yaml", "  observed: {final: true}\n", "  observed: {}\n  done: {final: true}\n"},
-				{"ordinary/schema.yaml", "    - ordinary.repeated\n", "    - ordinary.repeated\n    - ordinary.finish\n"},
+				{"ordinary/schema.yaml", "  - ordinary.repeated\n", "  - ordinary.repeated\n  - ordinary.finish\n"},
 			} {
 				raw := lifecycleStaticRead(t, root, edit.path)
 				if strings.Count(raw, edit.old) != 1 {

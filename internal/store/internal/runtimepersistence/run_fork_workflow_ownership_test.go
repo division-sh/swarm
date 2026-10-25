@@ -326,7 +326,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 		t.Fatal(err)
 	}
 	commitPreparedWorkflowAggregateFixture(t, ctx, fixture.store.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "root", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+		InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "state", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
 		Mode: "static", StageDefined: true, CurrentState: "waiting", Fields: map[string]any{"marker": "source-owned"}, CreatedAt: at, EnteredStageAt: at,
 	}, at)
 	// Native snapshot correspondence retains a deliberately non-initial revision.
@@ -341,7 +341,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Entities) != 1 || plan.Entities[0].MaterializationMetadata == nil || plan.Entities[0].MaterializationMetadata.FlowInstance != runID || plan.Entities[0].MaterializationMetadata.EntityType != "root" {
+	if len(plan.Entities) != 1 || plan.Entities[0].MaterializationMetadata == nil || plan.Entities[0].MaterializationMetadata.FlowInstance != runID || plan.Entities[0].MaterializationMetadata.EntityType != "state" {
 		t.Fatalf("fixture failed to publish exact fixed-revision metadata: %+v", plan.Entities)
 	}
 	fixture.advance()
@@ -362,7 +362,7 @@ func requireForkWorkflowOwnershipPreserved(t *testing.T, db *sql.DB, sourceRun, 
 		if runID == forkRun {
 			wantRevision = 1
 		}
-		if entity != runID || route != runID || entityType != "root" || state != "waiting" || revision != wantRevision || !strings.Contains(fields, "source-owned") {
+		if entity != runID || route != runID || entityType != "state" || state != "waiting" || revision != wantRevision || !strings.Contains(fields, "source-owned") {
 			t.Fatalf("source/child ownership or state changed: %s/%s/%s/%s/%s/%d", entity, route, entityType, state, fields, revision)
 		}
 	}

@@ -37,7 +37,7 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 				ctx := correlation.WithRunID(f.ctx, runID)
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				seed := pipeline.ScenarioSetupEntityRequest{
-					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "record",
+					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "state",
 					CurrentState: mutationlog.PresentLifecycleState("pending"), Fields: map[string]any{"marker": "imported"}, Gates: map[string]bool{},
 				}
 				source := semanticview.Wrap(f.bundle)
