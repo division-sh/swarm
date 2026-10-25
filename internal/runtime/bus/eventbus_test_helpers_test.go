@@ -290,20 +290,37 @@ func newNativeScopedTestEventBus(t testing.TB, selected runtimebus.EventStore, o
 	if len(options) != 0 {
 		opts = options[0]
 	}
-	if opts.WorkOwner == nil {
-		fact := opts.SourceArtifactFact
-		if fact.Validate() != nil {
-			fact = testSourceArtifactFact(opts.ContractBundle)
+	fact := opts.SourceArtifactFact
+	if fact.Validate() != nil {
+		fact = testSourceArtifactFact(opts.ContractBundle)
+	}
+	runtimeID := opts.RuntimeInstanceID
+	if runtimeID == "" {
+		runtimeID = authorActivityTestRuntimeInstanceID
+	}
+	ctx := testAuthorActivityContextForSource(context.Background(), opts.ContractBundle)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, fact.BundleHash()))
+	if opts.WorkOwner != nil {
+		setup, err := opts.WorkOwner.Begin(ctx)
+		if err != nil {
+			return nil, err
 		}
-		ctx := testAuthorActivityContextForSource(context.Background(), opts.ContractBundle)
-		ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
-		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+		defer func() {
+			if err := setup.Done(); err != nil {
+				t.Error(err)
+			}
+		}()
+		ctx = setup.Context()
+	}
+	process, present := worklifetime.ProcessFromContext(ctx)
+	if !present {
 		ctx = nativeBusProcessContext(t, ctx, selected)
-		runtimeID := opts.RuntimeInstanceID
-		if runtimeID == "" {
-			runtimeID = authorActivityTestRuntimeInstanceID
-		}
-		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, fact.BundleHash()))
+	} else if _, bound := process.OriginalProcess(); !bound {
+		ctx = nativeBusProcessContext(t, ctx, selected)
+	}
+	if opts.WorkOwner == nil {
 		opts.WorkOwner = nativeBusWorkOwner(t, ctx)
 	}
 	return newScopedTestEventBus(selected, opts)

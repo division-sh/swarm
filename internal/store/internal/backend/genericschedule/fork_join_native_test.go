@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -30,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
@@ -254,29 +252,6 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 		t.Fatal(err)
 	}
 	return f
-}
-
-// The statement fixture retains its actual acquisition, not a full runtime grant.
-func statementOriginalContext(t testing.TB, sqlite bool, acquire func(context.Context, func(context.Context, *sql.Tx) error) (bool, error)) context.Context {
-	t.Helper()
-	identity := processbinding.LeaseIdentity{LeaseID: uuid.NewString(), OwnerID: "native-statement-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend}
-	if sqlite {
-		identity.Backend = processbinding.SQLiteLeaseBackend
-	}
-	var original processbinding.LeaseStamp
-	committed, err := acquire(t.Context(), func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, identity, sqlite)
-		return err
-	})
-	if err != nil || !committed {
-		t.Fatalf("acquire original statement process: committed=%v err=%v", committed, err)
-	}
-	ctx, err := generationauthority.MutationContext(t.Context(), original, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ctx
 }
 
 func forkJoinNativeRunContext(t *testing.T, f *forkJoinNativeFixture, runID string) context.Context {

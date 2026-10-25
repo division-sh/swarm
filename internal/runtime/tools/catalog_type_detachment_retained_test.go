@@ -44,7 +44,7 @@ func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := selected.EnsureSourceArtifact(ctx, initial.SourceArtifact); err != nil {
+			if _, err := selected.EnsureSourceArtifact(toolFixtureProcessContext(t, ctx, selected), initial.SourceArtifact); err != nil {
 				t.Fatal(err)
 			}
 			if err := selected.Close(); err != nil {

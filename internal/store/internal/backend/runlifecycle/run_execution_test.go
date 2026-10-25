@@ -19,23 +19,13 @@ import (
 
 const admissionTestRevisedBundle = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
-func admissionTestSQLMock(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
-	t.Helper()
-	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db, mock
-}
-
 func admissionTestRunSQL(postgres, readOnly bool) string {
 	if !postgres {
 		return "SELECT status, bundle_hash FROM runs WHERE run_id = ?"
 	}
 	query := "SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid"
 	if !readOnly {
-		query += " FOR UPDATE"
+		query += " FOR SHARE"
 	}
 	return query
 }

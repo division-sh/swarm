@@ -3,8 +3,6 @@ package apiv1
 import (
 	"context"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
@@ -28,25 +26,6 @@ func acquireAdministrativeResetCapability(t *testing.T, selected startupownershi
 		}
 	})
 	return cap
-}
-
-func administrativeResetContext(t *testing.T, ctx context.Context, capability startupownership.ProcessCapability) context.Context {
-	t.Helper()
-	original, err := capability.Evidence()
-	if err != nil {
-		t.Fatal(err)
-	}
-	process := worklifetime.NewProcess()
-	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		process.Retire()
-		if _, err := process.Join(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
-	return worklifetime.WithProcess(ctx, process)
 }
 
 type administrativeResetCleanup struct {

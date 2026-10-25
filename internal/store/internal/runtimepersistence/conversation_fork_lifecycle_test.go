@@ -588,7 +588,6 @@ func conversationForkToolCallMap(t *testing.T, raw json.RawMessage) map[string]a
 }
 
 type conversationForkSourceFixture struct {
-	ctx        context.Context
 	runID      string
 	bundleHash string
 	agentID    string
@@ -605,7 +604,10 @@ const conversationForkSourceFlowInstance = "review"
 
 func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, prepared *PostgresStore, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
-	store := admitTestPostgresStore(t, db)
+	store := prepared
+	if store == nil {
+		store = admitTestPostgresStore(t, db)
+	}
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	return seedConversationForkSourceWithContext(t, ctx, store, db, base, historical...)
 }

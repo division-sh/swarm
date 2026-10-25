@@ -434,7 +434,7 @@ func (o *Owner) LoadRunCreationOperation(ctx context.Context, runID string) (run
 		return runtimedata.RunCreationOperationRecord{}, err
 	}
 	var record runtimedata.RunCreationOperationRecord
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		stored, found, err := o.readStoredRunCreationReceipt(txctx, tx, runID)
 		if err != nil {
 			return err
