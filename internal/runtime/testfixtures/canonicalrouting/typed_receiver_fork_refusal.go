@@ -72,7 +72,7 @@ attributes: json
 status: false
 flow_path: "business/path"
 instance_id: "business-instance"
-workflow_version: 7
+workflow_version: 7.0
 `)
 	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  subscribes_to:\n    - work.ready\n", "  subscribes_to:\n    - work.ready\n    - account.initialized\n")
 	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  event_handlers:\n", `  event_handlers:

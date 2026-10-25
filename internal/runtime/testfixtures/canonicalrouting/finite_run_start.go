@@ -89,7 +89,7 @@ func CopyPublicCompletionInitiation(t testing.TB) string {
 	t.Helper()
 	root := CopyPublicCompletionFeedOnly(t)
 	writeClosedVariantFile(t, root, "schema.yaml", "name: deployment\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      data_accumulation:\n        writes: [topic]\n      advances_to: done\n")
 	return root
 }
 

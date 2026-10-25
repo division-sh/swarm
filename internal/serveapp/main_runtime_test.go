@@ -4620,7 +4620,7 @@ func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
 			SELECT entity_id::text
 			FROM entity_state
 			WHERE run_id = $1::uuid
-			  AND entity_type = 'order'
+			  AND entity_type = 'state' AND flow_instance = $1::text
 			ORDER BY created_at, entity_id
 			LIMIT 1
 		`, runID).Scan(&entityID)

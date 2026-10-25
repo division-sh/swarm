@@ -308,6 +308,59 @@ func TestListSpellingRetirementNestedReferences(t *testing.T) {
 }
 
 func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
+	for _, surface := range []string{"state", "indexed_state", "types", "events"} {
+		for _, tc := range []struct {
+			name, source, want string
+			refuse             bool
+		}{
+			{"nested", "[[integer]]", "[[integer]]", false},
+			{"deep", "[[[integer]]]", "[[[integer]]]", false},
+			{"unknown", "[[Missing]]", "", true},
+			{"empty", "[[]]", "", true},
+			{"mixed", "[[1, true]]", "", true},
+			{"multiple", "[[text, integer]]", "", true},
+			{"quoted", "[['integer']]", "", true},
+		} {
+			t.Run("recursive/"+surface+"/"+tc.name, func(t *testing.T) {
+				root := t.TempDir()
+				writeFixtureFile(t, root+"/schema.yaml", "name: nested-proof\nstages: {done: {final: true}}\n")
+				file, body := "state.yaml", "items: "+tc.source+"\n"
+				switch surface {
+				case "indexed_state":
+					body = "items: {type: " + tc.source + ", indexed: true}\n"
+				case "types":
+					file, body = "types.yaml", "types:\n  Container:\n    items: "+tc.source+"\n"
+				case "events":
+					file, body = "events.yaml", "proof.received:\n  items: "+tc.source+"\n"
+				}
+				writeFixtureFile(t, root+"/"+file, body)
+				repo := repoRootForContractsTest(t)
+				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+				if tc.refuse {
+					if err == nil || !strings.Contains(err.Error(), file) {
+						t.Fatalf("nested declaration admitted or lost source: %v", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got string
+				switch surface {
+				case "state", "indexed_state":
+					_, contract, _ := bundle.FlowPrimaryEntityContract(".")
+					got = contract.Fields["items"].Type
+				case "types":
+					got = bundle.RootTypes.Types["Container"].Fields["items"].Type
+				case "events":
+					got = bundle.Events["proof.received"].Payload.Properties["items"].Type
+				}
+				if got != tc.want {
+					t.Fatalf("recursive type = %q, want %q", got, tc.want)
+				}
+			})
+		}
+	}
 	for _, surface := range []string{"types", "entities", "events"} {
 		for _, scope := range []string{"", "child/"} {
 			for _, test := range []struct{ retired, canonical string }{

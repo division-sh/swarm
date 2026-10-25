@@ -1357,7 +1357,7 @@ units:
       TestOrdinaryForkCreatingPredecessorBothStores: [sqlite/historical, sqlite/later_native, sqlite/corrupt_header, sqlite/missing_cut, sqlite/dual_evidence, postgres/historical, postgres/later_native, postgres/corrupt_header, postgres/missing_cut, postgres/dual_evidence]
       TestOrdinaryForkPredecessorFaultScopeBothStores: [sqlite, postgres]
       TestOrdinaryForkAbsentCutFaultScopeBothStores: [sqlite, postgres]
-      TestOrdinaryReplayInitializedReceiversBothStores: [sqlite/wrong_path, sqlite/wrong_run, sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, sqlite/missing_declared_fields, postgres/wrong_path, postgres/wrong_run, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver, postgres/missing_declared_fields]
+      TestOrdinaryReplayInitializedReceiversBothStores: [sqlite/wrong_path, sqlite/wrong_run, sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, postgres/wrong_path, postgres/wrong_run, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver]
       TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores: [sqlite, postgres]
       TestManagerNativeLostAdmissionCleanupBothStores: [sqlite/commit, sqlite/rollback, sqlite/unresolved, sqlite/panic, postgres/commit, postgres/rollback, postgres/unresolved, postgres/panic]
       TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority: [sqlite/fields_false, sqlite/fields_true, postgres/fields_false, postgres/fields_true]

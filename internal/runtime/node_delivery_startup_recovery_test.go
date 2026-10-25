@@ -902,7 +902,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				DeliveryRuntime:     bus,
 			})
 
-			instance := artifactActionResultWorkflowInstance()
+			instance := artifactActionResultWorkflowInstance(source)
 			instance.Mode, instance.InstanceKey, instance.WorkflowVersion = runtimecontracts.FlowModeTemplate, "inst-1", source.WorkflowVersion()
 			seedRuntimeTestKeylessSource(t, ctx, selected, pc, semanticview.RootExecutionFlowID(source))
 			seedRuntimeTestPreparedInstance(t, ctx, selected, pc, instance)
@@ -997,14 +997,14 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				DeliveryRuntime:     bus,
 			})
 
-			healthyInstance := artifactActionResultWorkflowInstance()
+			healthyInstance := artifactActionResultWorkflowInstance(source)
 			healthyInstance.Mode, healthyInstance.InstanceKey, healthyInstance.WorkflowVersion = runtimecontracts.FlowModeTemplate, "inst-1", source.WorkflowVersion()
 			seedRuntimeTestKeylessSource(t, ctx, selected, pc, semanticview.RootExecutionFlowID(source))
 			seedRuntimeTestPreparedInstance(t, ctx, selected, pc, healthyInstance)
 
 			poisonEntityID := eventtest.UUID("node-recovery-poison-entity")
 			poisonTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/poison", EntityID: poisonEntityID}
-			poisonInstance := artifactActionResultWorkflowInstance()
+			poisonInstance := artifactActionResultWorkflowInstance(source)
 			poisonInstance.InstanceID = "poison"
 			poisonInstance.Mode, poisonInstance.InstanceKey, poisonInstance.WorkflowVersion = runtimecontracts.FlowModeTemplate, "poison", source.WorkflowVersion()
 			poisonInstance.StorageRef = poisonTarget.FlowInstance
@@ -1156,7 +1156,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				},
 			})
 
-			instance := artifactActionResultWorkflowInstance()
+			instance := artifactActionResultWorkflowInstance(source)
 			instance.Mode, instance.InstanceKey, instance.WorkflowVersion = runtimecontracts.FlowModeTemplate, "inst-1", source.WorkflowVersion()
 			seedRuntimeTestKeylessSource(t, ctx, selected, pc, semanticview.RootExecutionFlowID(source))
 			seedRuntimeTestPreparedInstance(t, ctx, selected, pc, instance)

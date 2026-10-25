@@ -18,7 +18,7 @@ const (
 
 	TemplateFlowID       = "account"
 	TemplateNodeID       = "account-node"
-	TemplateEntityType   = "account_state"
+	TemplateEntityType   = "state"
 	TemplateInputPin     = "account.ready"
 	TemplateInstanceBy   = "account_id"
 	TemplatePayloadKey   = "account_id"

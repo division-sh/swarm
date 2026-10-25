@@ -558,7 +558,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	producerEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
 	producer, producerExists := sourceRows[prefix+"producer"]
-	if producerExists == entitylessProducer || (producerExists && (producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
+	if producerExists == entitylessProducer || (producerExists && (producer.Type != "state" || producer.Fields["marker"] != "producer-owned")) {
 		t.Fatalf("source producer prerequisite: %+v", sourceRows)
 	}
 	producerRoute := producerEvidence.Source.Route()
@@ -580,13 +580,13 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			if receiver.Policy == canonicalrouting.ForkReceiverConstructorOwned {
 				marker = receiver.Path + "-created"
 			}
-			if !exists || row.ID == producer.ID || row.Type != "receipt" || row.State != "active" || row.Fields["marker"] != marker {
+			if !exists || row.ID == producer.ID || row.Type != "state" || row.State != "active" || row.Fields["marker"] != marker {
 				t.Fatalf("independent source receiver prerequisite: %s %+v", receiver.Path, sourceRows)
 			}
 			id = row.ID
 		} else {
 			row, exists := sourceRows[path]
-			if !exists || row.Type != "receipt" || len(row.Fields) != 0 {
+			if !exists || row.Type != "state" || len(row.Fields) != 0 {
 				t.Fatalf("optional empty contract lacks its exact initialized field companion: %+v", sourceRows)
 			}
 			id = row.ID
@@ -781,7 +781,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		}
 	}
 	rootRow := childRows[fork.ForkRunID]
-	if rootRow.ID != fork.ForkRunID || rootRow.Type != "root" || rootRow.Fields["marker"] != "root-owned" || rootRow.State != "active" {
+	if rootRow.ID != fork.ForkRunID || rootRow.Type != "state" || rootRow.Fields["marker"] != "root-owned" || rootRow.State != "active" {
 		t.Fatalf("root remap/restoration: %+v", childRows)
 	}
 	childBefore := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)
@@ -817,7 +817,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/validation.requested'`, seed.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)
 			}
-			if err := rt.DB.QueryRow(`SELECT entity_id,flow_instance FROM entity_state WHERE run_id=$1 AND entity_type='validation_case'`, seed.RunID).Scan(&entityID, &instancePath); err != nil {
+			if err := rt.DB.QueryRow(`SELECT entity_id,instance_path FROM flow_instances WHERE run_id=$1 AND flow_template='validator'`, seed.RunID).Scan(&entityID, &instancePath); err != nil {
 				t.Fatal(err)
 			}
 			if entityID == "" || !strings.HasPrefix(instancePath, "validator/") {
@@ -1137,7 +1137,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				seedRows := readForkReceiverRows(t, rt, seed.RunID)
-				if got := seedRows["consumer"]; got.Type != "receipt" || got.State != "active" || got.Fields["marker"] != "consumer-owned" || got.Fields["processed_token"] != "seeded" {
+				if got := seedRows["consumer"]; got.Type != "state" || got.State != "active" || got.Fields["marker"] != "consumer-owned" || got.Fields["processed_token"] != "seeded" {
 					t.Fatalf("receiver seed ownership: %+v", seedRows)
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-request"})
@@ -1156,7 +1156,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 					t.Fatalf("source receiver effect ownership: %+v", sourceRows)
 				}
 				producer, exists := sourceRows["producer"]
-				if exists == entityless || (exists && (producer.ID == consumer.ID || producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
+				if exists == entityless || (exists && (producer.ID == consumer.ID || producer.Type != "state" || producer.Fields["marker"] != "producer-owned")) {
 					t.Fatalf("source producer ownership: %+v", sourceRows)
 				}
 				sourceEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
@@ -1197,7 +1197,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 					t.Fatalf("business fork rehomed producer/receiver: source=%+v child=%+v", sourceRows, childRows)
 				}
 				root := childRows[fork.ForkRunID]
-				if root.ID != fork.ForkRunID || root.Type != "root" || root.Fields["marker"] != "root-owned" {
+				if root.ID != fork.ForkRunID || root.Type != "state" || root.Fields["marker"] != "root-owned" {
 					t.Fatalf("business fork root remapping: %+v", childRows)
 				}
 				childBefore := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)

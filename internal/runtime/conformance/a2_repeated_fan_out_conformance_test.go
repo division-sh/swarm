@@ -21,7 +21,8 @@ import (
 func TestA2RepeatedFanOutTriggerIsolationOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true})
+			accounts := []string{"acct-c", "acct-a", "acct-b"}
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true, InitialMembership: &accounts})
 			probe := newNestedServingProbe(t)
 			rt, db := newNestedServingRuntime(t, backend, source, nil, probe)
 			runID := uuid.NewString()
@@ -38,7 +39,6 @@ func TestA2RepeatedFanOutTriggerIsolationOnBothStores(t *testing.T) {
 			}
 
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
-			accounts := []string{"acct-c", "acct-a", "acct-b"}
 			publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{
 				"portfolio_id": "portfolio-main", "account_ids": accounts,
 			})

@@ -58,8 +58,8 @@ func issue642SustainedTimerSource(t *testing.T) string {
     timer.finished:
       advances_to: checked
 `,
-		"entities.yaml": "test_entity:\n  tick_count: {type: integer, initial: 0}\n",
-		"events.yaml":   "timer.scheduled:\ntimer.check:\ntimer.armed:\ntimer.finished:\n",
+		"state.yaml":  "tick_count: 0\n",
+		"events.yaml": "timer.scheduled:\ntimer.check:\ntimer.armed:\ntimer.finished:\n",
 		"schema.yaml": `stages:
   waiting: {}
   checked: {final: true}

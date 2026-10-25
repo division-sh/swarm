@@ -10,7 +10,7 @@ validation-node:
       advances_to: validated
       data_accumulation:
         writes:
-          - {target_field: validation_passed, value: 'true'}
+          - {target_field: validation_passed, value: true}
       emit: order.validated
 
 completion-node:
