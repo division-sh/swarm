@@ -241,7 +241,7 @@ func TestIssue2566ReporterFiniteFixtureCanCloseBothStores(t *testing.T) {
 			requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{
 				"run_id": opened.RunID, "event_name": "portfolio.close.requested", "payload": map[string]any{}, "idempotency_key": uuid.NewString(),
 			}, &publication)
-			requireServedFinalInstancesSettled(t, endpoint, opened.RunID, map[string]string{".": "done", "portfolio": "done"})
+			requireServedFinalInstancesSettled(t, endpoint, opened.RunID, map[string]string{opened.RunID: "done", "portfolio": "done"})
 		})
 	}
 }

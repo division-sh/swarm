@@ -47,7 +47,7 @@ WHERE es.run_id=$1 AND es.flow_instance='producer' AND fi.current_state='active'
 					t.Fatalf("independent run %d failed static materialization before any transition history read\n%s", attempt, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				requireServedFinalInstancesSettled(t, rt.Endpoint, seed.RunID, map[string]string{".": "active", "producer": "active"})
+				requireServedFinalInstancesSettled(t, rt.Endpoint, seed.RunID, map[string]string{seed.RunID: "active", "producer": "active"})
 				for _, check := range []struct {
 					query string
 					want  int
