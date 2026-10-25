@@ -15,6 +15,7 @@ const debtSelectedFixtureComposedCurrentSource = "d3fd1308470056da34276aaf08e212
 const debtSelectedFixtureComposedOldSHA256 = "2abd9424b866dbda517bcd44726bf04179a5a53ca75443588c86742370285681"
 const debtSelectedFixtureComposedCurrentSHA256 = "cdb196a9aeb5f87d51e656249b6bb533003d0af1ed7322cc858a2d9bd9d81fae"
 const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
+const debtCompletedSelectedFixturePinCollectorTo = "7bfb43aa7b24cf1be4190e38d1a3f234bff1281e3606ad943963538c939fdef9"
 
 func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]authorityDebtSite) {
 	old, current := debtControlSet(), debtControlSet()
