@@ -356,8 +356,14 @@ func upgradeLocation(source semanticview.Source, flow, family, member string) st
 	if flow == "" {
 		flow = "."
 	}
-	declaration := bundle.FlowSources[flow]
+	declaration, found := bundle.FlowSources[flow]
+	if !found {
+		declaration, member = bundle.FlowSources["."], ""
+	}
 	file := map[string]string{"schema": declaration.Schema, "entities": declaration.Entities, "events": declaration.Events, "nodes": declaration.Nodes}[family]
+	if file == "" {
+		file, member = declaration.Schema, ""
+	}
 	if family == "events" && member != "" {
 		proof := semanticview.ResolveFlowEventProof(source, flow, member)
 		if proof.CatalogKey != "" {
