@@ -11,8 +11,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -204,7 +206,10 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 	if !bounded {
 		t.Fatal("pin replay proof lost its original fixture deadline")
 	}
-	quiescence, cancelQuiescence := context.WithDeadline(use.WorkContext(), deadline)
+	ordinaryCtx := correlation.WithRuntimeInstanceID(use.WorkContext(), use.Runtime().Options.RuntimeInstanceID)
+	ordinaryCtx = correlation.WithSourceArtifactFact(ordinaryCtx, use.Runtime().Options.SourceArtifactFact)
+	ordinaryCtx = authoractivity.WithScope(ordinaryCtx, authoractivity.BundleScope(use.Runtime().Options.RuntimeInstanceID, use.Runtime().Options.SourceArtifactFact.BundleHash()))
+	quiescence, cancelQuiescence := context.WithDeadline(ordinaryCtx, deadline)
 	defer cancelQuiescence()
 	if err := use.Runtime().Manager.WaitForQuiescence(quiescence); err != nil {
 		t.Fatalf("join the ordinary receiver before the replay baseline: %v", err)
@@ -219,7 +224,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 	replayed, err := ExecuteSelectedContractRunFork(ctx, request)
 	activatedPins := slices.Clone(materialized.DataPins)
 	for i := range activatedPins {
-		activatedPins[i].RunState = runfork.RunForkActivatedStatus
+		activatedPins[i].RunState = runfork.RunForkLiveStatus
 	}
 	if err != nil || !replayed.Activation.Activated || replayed.Materialization.ForkRunID != materialized.ForkRunID ||
 		!slices.Equal(replayed.Materialization.DataPins, activatedPins) {

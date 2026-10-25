@@ -24,6 +24,7 @@ import (
 	generationauthority "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	"github.com/google/uuid"
 )
 
@@ -348,6 +349,9 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 	if err != nil || complete && !pending && len(req.Cancellations) == 0 {
 		return settled, err
 	}
+	if complete && settled.Disposition == runfork.SelectedForkRecoveryControlOnly {
+		return result, errors.New("closed live handoff retains selected cancellation work")
+	}
 	current, err := generationauthority.PreparedProcessCurrent(ctx, tx, preparation.Coordinates, preparation.ProcessGeneration, sqlite, false)
 	if err != nil {
 		return result, err
@@ -460,11 +464,23 @@ func retireSelectedRecoveryPredecessorTx(ctx context.Context, tx *sql.Tx, result
 
 func settledSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord, sqlite, lock bool) (runfork.SelectedForkRecoveryResult, bool, error) {
 	result := record.SelectedForkRecoveryResult
-	if !snapshot.State.Terminal() || record.state != "closed" || record.failure != nil {
+	if record.state != "closed" || record.failure != nil {
 		return result, false, nil
 	}
 	if result.Operation == nil || result.Operation.Status != runfork.ForkOperationActivated {
 		return result, false, nil
+	}
+	if !snapshot.State.Terminal() {
+		if result.Operation.Result == nil || result.Operation.Result.ForkRunStatus != runfork.RunForkLiveStatus {
+			return result, false, nil
+		}
+		handedOff, err := sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, result.RunID, snapshot.BundleHash)
+		if err != nil {
+			return result, false, err
+		}
+		if !handedOff {
+			return result, false, errors.New("closed live recovery lacks its exact immutable handoff")
+		}
 	}
 	active, err := selectedForkActiveEffectsTx(ctx, tx, result.ExecutionID)
 	if err != nil {
@@ -474,6 +490,9 @@ func settledSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlife
 		return result, false, fmt.Errorf("closed selected execution retains unsettled effects")
 	}
 	result.Disposition = runfork.SelectedForkRecoveryTerminal
+	if !snapshot.State.Terminal() {
+		result.Disposition = runfork.SelectedForkRecoveryControlOnly
+	}
 	return result, true, nil
 }
 
@@ -481,6 +500,11 @@ func settledSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlife
 // settlement and terminal mutations remain exclusively in boot recovery.
 func planSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord, sqlite, lock bool) (selectedRecoveryRecord, error) {
 	result := record
+	settled, complete, err := settledSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, lock)
+	if err != nil || complete {
+		result.SelectedForkRecoveryResult = settled
+		return result, err
+	}
 	disposition, eligible, err := selectedRecoveryContinuationDisposition(snapshot.State, record)
 	if err != nil {
 		return result, err

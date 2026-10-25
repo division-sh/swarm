@@ -874,7 +874,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("load fork entity state: %v", err)
 	}
 	forkEntityState = instance.CurrentState
-	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != string(storerunlifecycle.StateCompleted) || forkEntityState == "" {
+	if sourceStatus != "running" || forkStatus != "paused" || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
 	}
 }

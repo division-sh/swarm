@@ -69,6 +69,13 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 
 func (am *AgentManager) filterDynamicFlowRuntimeReadiness(ctx context.Context, projection runtimepipeline.DynamicFlowRuntimeReadinessProjection) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	return FilterDynamicFlowRuntimeReadiness(ctx, projection, am.roles.StandingRestarts, func(ctx context.Context, runID string) (bool, error) {
+		if am.lifecycle != nil {
+			if reader, ok := am.lifecycle.persistence().(interface {
+				ObserveStartupRunSource(context.Context, string) (bool, error)
+			}); ok {
+				return reader.ObserveStartupRunSource(ctx, runID)
+			}
+		}
 		ownership, err := am.inspectRunExecutionOwnership(ctx, runID)
 		return ownership == RunExecutionOwned, err
 	})
