@@ -265,7 +265,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash())
 	}
-	setup, setupErr := opts.WorkOwner.Begin(testAuthorActivityContextForRuntime(context.Background(), opts.RuntimeInstanceID, opts.SourceArtifactFact))
+	setup, setupErr := opts.WorkOwner.Begin(registrationContext)
 	if setupErr != nil {
 		return nil, setupErr
 	}

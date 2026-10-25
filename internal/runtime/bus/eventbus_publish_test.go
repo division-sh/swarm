@@ -204,8 +204,8 @@ func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) cont
 func eventBusTestRunContextForSource(t *testing.T, selected eventBusRunFixtureStore, source semanticview.Source) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), eventBusTestRunID)
-	ctx = originalEventBusFixtureContext(t, ctx, selected)
-	if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
+	ctx = nativeBusProcessContext(t, ctx, selected)
+	if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source), ctx); err != nil {
 		t.Fatalf("persist exact event bus test source artifact: %v", err)
 	}
 	if err := storetest.EnsureEphemeralRun(
@@ -2194,7 +2194,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 			ctx = originalEventBusFixtureContext(t, ctx, selected)
-			if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
+			if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source), ctx); err != nil {
 				t.Fatal(err)
 			}
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: testSourceArtifactFact(source).BundleHash()})

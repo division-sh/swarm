@@ -921,16 +921,11 @@ func runAuthorityTransactionWithProof(
 	}()
 	if runErr := session.runWithCallerCancellation(orderingCtx, func(operationCtx context.Context) error {
 		operationCtx = transactiontest.WithAttempt(operationCtx, probe)
-		operationCtx, retireAdmission, err := admitOptionalMutationTx(operationCtx, tx, opts, true)
+		operationCtx, retireAdmission, err := admitOptionalMutationTx(operationCtx, tx, opts, true, construction)
 		if err != nil {
 			return err
 		}
 		defer retireAdmission()
-		if !construction && (opts == nil || !opts.ReadOnly) {
-			if err := generationauthority.AdmitTransaction(operationCtx, tx, false); err != nil {
-				return err
-			}
-		}
 		return fn(operationCtx, tx)
 	}); runErr != nil {
 		serializationConflict = (opts == nil || !opts.ReadOnly) && exactSerializationConflict(runErr)

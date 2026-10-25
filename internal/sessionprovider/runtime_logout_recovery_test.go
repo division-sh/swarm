@@ -26,6 +26,10 @@ func acquireLogoutProcessFixture(t *testing.T, f *activeInputFixture, runtimeID 
 			if evidence.RuntimeInstanceID != runtimeID || (len(exact) == 1 && (evidence.OwnerID != exact[0].OwnerID || evidence.BootID != exact[0].BootID)) {
 				t.Fatal("session fixture cannot replace a live native process")
 			}
+			f.ctx, err = startupownership.WithProcessMutationAuthority(f.ctx, f.nativeProcess)
+			if err != nil {
+				t.Fatal(err)
+			}
 			return f.nativeProcess
 		}
 	}
