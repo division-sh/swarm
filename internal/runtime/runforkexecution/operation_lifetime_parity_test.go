@@ -223,13 +223,6 @@ func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend stri
 	at := time.Unix(1700002200, 0).UTC()
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)})
-	seedSelectedOperationInput(t, ctx, backend, db, selected, loaded, runID, eventID, input...)
-}
-
-func seedSelectedOperationInput(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, loaded LoadedSelectedContractSource, runID, eventID string, input ...events.Event) {
-	t.Helper()
-	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
-	at := time.Unix(1700002200, 0).UTC()
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
 		events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	if len(input) == 1 {

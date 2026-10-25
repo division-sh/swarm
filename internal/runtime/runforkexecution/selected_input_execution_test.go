@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -91,7 +92,9 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 					RunID: run, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()),
 					StartedAt: input.CreatedAt().Add(-time.Minute), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
 				})
-				seedSelectedOperationInput(t, ctx, backend, db, selected, loaded, run, eventID, input)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, selected, input, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
+				commitSelectedOperationRootFixture(t, ctx, selected, loaded, input)
+				storetest.CaptureRunForkSnapshot(t, ctx, selected, run)
 				liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, run, executionposture.Live)
 				selection := runforkadmission.SelectedContractSelection(loaded.Source)
 				operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "selected-input-evidence", IdempotencyKey: fault,
