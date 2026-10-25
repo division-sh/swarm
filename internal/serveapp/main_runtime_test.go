@@ -5470,16 +5470,22 @@ func requireServedTraceReadback(t *testing.T, endpoint, runID, eventID, eventNam
 
 func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantState string) {
 	t.Helper()
-	var result struct {
-		Entity struct {
-			EntityID     string  `json:"entity_id"`
-			RunID        string  `json:"run_id"`
-			CurrentState *string `json:"current_state"`
-		} `json:"entity"`
+	if entityID != runID {
+		t.Fatalf("root stage readback requires canonical run identity: %s/%s", runID, entityID)
 	}
-	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"entity_id": entityID, "run_id": runID}, &result)
-	if result.Entity.EntityID != entityID || result.Entity.RunID != runID || result.Entity.CurrentState == nil || *result.Entity.CurrentState != wantState {
-		t.Fatalf("entity.get result = %#v, want %s/%s state %s", result.Entity, runID, entityID, wantState)
+	var result cliapp.DiagnosticRunDiagnosisResult
+	requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
+	matched := 0
+	for _, instance := range result.Instances {
+		if instance.FlowInstance == runID {
+			matched++
+			if instance.Stage != wantState {
+				t.Fatalf("run.diagnose root = %#v, want stage %s", instance, wantState)
+			}
+		}
+	}
+	if result.Run.RunID != runID || matched != 1 {
+		t.Fatalf("run.diagnose root readback = %#v, want one exact %s header", result, runID)
 	}
 }
 

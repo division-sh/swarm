@@ -452,7 +452,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 	t.Helper()
 	commentHandler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check:  `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
+			Check:  `instance.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
 			OnFail: "discard",
 		},
 		Activity: runtimecontracts.ActivitySpec{
@@ -468,7 +468,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 		},
 	}
 	createIssueHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`, OnFail: "discard"},
+		Guard: &runtimecontracts.GuardSpec{Check: `instance.id != ""`, OnFail: "discard"},
 		Activity: runtimecontracts.ActivitySpec{
 			ID:   "github_create_issue",
 			Tool: "github.create_issue",
@@ -482,7 +482,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 		},
 	}
 	addLabelsHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`, OnFail: "discard"},
+		Guard: &runtimecontracts.GuardSpec{Check: `instance.id != ""`, OnFail: "discard"},
 		Activity: runtimecontracts.ActivitySpec{
 			ID:   "github_add_labels_to_issue",
 			Tool: "github.add_labels_to_issue",

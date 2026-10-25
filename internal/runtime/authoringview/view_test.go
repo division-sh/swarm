@@ -458,8 +458,8 @@ func TestBuildShowsRootPrimaryEntity(t *testing.T) {
 	if view.Root.PrimaryEntity.Fields["org_id"] != "text" {
 		t.Fatalf("root primary entity fields = %#v, want org_id text", view.Root.PrimaryEntity.Fields)
 	}
-	if view.Root.PrimaryEntity.SourceFile == "" || !strings.HasSuffix(view.Root.PrimaryEntity.SourceFile, "entities.yaml") {
-		t.Fatalf("root primary entity source file = %q, want entities.yaml", view.Root.PrimaryEntity.SourceFile)
+	if view.Root.PrimaryEntity.SourceFile == "" || !strings.HasSuffix(view.Root.PrimaryEntity.SourceFile, "state.yaml") {
+		t.Fatalf("root primary entity source file = %q, want state.yaml", view.Root.PrimaryEntity.SourceFile)
 	}
 }
 
@@ -944,11 +944,11 @@ func TestBuildShowsSingletonContainedOperations(t *testing.T) {
 	if len(flow.ContainedOperations) < 5 {
 		t.Fatalf("contained operation count = %d, want at least 5: %#v", len(flow.ContainedOperations), flow.ContainedOperations)
 	}
-	mapSet := containedOperationByTargetAndOp(t, flow, "entity.lead_index", "set")
+	mapSet := containedOperationByTargetAndOp(t, flow, "state.lead_index", "set")
 	if mapSet.MapKeyType != "text" || mapSet.MapValueType != "LeadScore" || mapSet.SourceFile == "" {
 		t.Fatalf("lead_index set view = %#v, want typed map target and source file", mapSet)
 	}
-	listAppend := containedOperationByTargetAndOp(t, flow, "entity.audit_log", "append")
+	listAppend := containedOperationByTargetAndOp(t, flow, "state.audit_log", "append")
 	if listAppend.ListItemType != "AuditEntry" || listAppend.SourceFile == "" {
 		t.Fatalf("audit_log append view = %#v, want typed list target and source file", listAppend)
 	}
@@ -1032,8 +1032,8 @@ func TestBuildShowsStatelessCountJoinWithoutCoordinatorDemandWithExactProvenance
 func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	entitiesPath := filepath.Join(root, "telegram-ingress", "entities.yaml")
-	entities := []byte("telegram_service:\n  unused_index:\n    type: map[text]json\n    initial: {}\n")
+	entitiesPath := filepath.Join(root, "telegram-ingress", "state.yaml")
+	entities := []byte("unused_index: map[text]json\n")
 	if err := os.WriteFile(entitiesPath, entities, 0o644); err != nil {
 		t.Fatalf("write standing singleton entities: %v", err)
 	}
@@ -1109,7 +1109,7 @@ func TestBuildScansFlowLocalDuplicateNodeIDsForContainedOperations(t *testing.T)
 
 	for _, flowID := range []string{"alpha", "beta"} {
 		flow := flowByID(t, view, flowID)
-		op := containedOperationByTargetAndOp(t, flow, "entity.items", "set")
+		op := containedOperationByTargetAndOp(t, flow, "state.items", "set")
 		if op.NodeID != identitytest.FlowNode(t, flowID, "indexer").Key() {
 			t.Fatalf("%s contained operation node = %q, want indexer", flowID, op.NodeID)
 		}
@@ -1339,7 +1339,7 @@ indexer:
           - source_field: id
             target_field: id
           - op: set
-            target: entity.items
+            target: state.items
             key: payload.item_id
             value:
               name: payload.item.name

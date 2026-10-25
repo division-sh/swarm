@@ -581,7 +581,7 @@ loops:
 		t.Fatal("activity fixture requires its admitted source bundle")
 	}
 	entityType, _, ok := bundle.FlowPrimaryEntityContract("flow_a")
-	if !ok || entityType != "test_entity" {
+	if !ok || entityType != "state" {
 		t.Fatalf("activity fixture must declare its producer entity in flow_a: %q, present=%v", entityType, ok)
 	}
 	return loaded
