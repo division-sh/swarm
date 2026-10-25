@@ -26,7 +26,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	source := runControlPublicationSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	ctx = originalEventBusFixtureContext(t, ctx, pg)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	source := runControlPublicationSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	ctx = originalEventBusFixtureContext(t, ctx, pg)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

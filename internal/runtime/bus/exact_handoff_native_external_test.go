@@ -40,9 +40,7 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	ctx := effects.WithDifferentOwner(context.Background(), effects.OwnerBuildTestInfrastructure)
 	ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
-	if !selectedExecution {
-		ctx = originalEventBusFixtureContext(t, ctx, owner)
-	}
+	ctx = nativeBusProcessContext(t, ctx, owner)
 	if err := sourceartifactfixture.Ensure(ctx, owner); err != nil {
 		t.Fatal(err)
 	}

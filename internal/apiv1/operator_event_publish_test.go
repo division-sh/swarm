@@ -1092,6 +1092,7 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx = originalAPIFixtureContext(t, ctx, pg)
 	source := semanticview.Wrap(eventPublishTargetRouteTestBundle(t))
 	bundleHash := runStartTestBundleHashForSource(source)
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))

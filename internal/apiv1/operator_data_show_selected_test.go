@@ -102,6 +102,7 @@ func assertDataShowEvidence(t *testing.T, handler *Handler, params map[string]an
 
 func dataShowSource(t *testing.T, ctx context.Context, selected DurableDataStore, bundle string, ref durabledata.DeclarationRef, expected durabledata.ExpectedHead, operation, input string) durabledata.SourceOperationResult {
 	t.Helper()
+	ctx = originalAPIFixtureContext(t, ctx, selected)
 	result, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{Operation: operation, SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: bundle, Declaration: ref, ExpectedHead: expected, InputFormat: "jsonl", Input: []byte(input)})
 	if err != nil {
 		t.Fatal(err)
