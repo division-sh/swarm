@@ -28,13 +28,13 @@ func eachExactFactStore(t *testing.T, prove func(*testing.T, exactFactStore)) {
 		t.Run(backend, func(t *testing.T) {
 			if backend == "sqlite" {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), store)
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 				prove(t, exactFactStore{ctx: ctx, db: store.backend.ConstructionHandle(), selected: store})
 				return
 			}
 			_, db, _ := testutil.StartPostgres(t)
 			store := admitTestPostgresStore(t, db)
-			ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), store)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			prove(t, exactFactStore{ctx: ctx, db: db, postgres: true, selected: store})
 		})
 	}

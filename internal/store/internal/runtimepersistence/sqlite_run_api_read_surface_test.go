@@ -265,12 +265,12 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	runtimeLogEventID := uuid.NewString()
 	readyEventID := uuid.NewString()
 
-	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{
 		RunID: blockedRunID, Origin: semanticEventRunOriginForTest(t, activeEventID, "quiescence.active_delivery"),
 		StartedAt: now.Add(-time.Minute),
 	})
-	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{
 		RunID: readyRunID, Origin: semanticEventRunOriginForTest(t, readyEventID, "quiescence.ready"),
 		StartedAt: now.Add(-time.Minute),

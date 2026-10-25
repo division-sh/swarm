@@ -13,7 +13,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -99,6 +98,7 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
+	originalContext := ctx
 	return &manager.ManagerDeliveryNativeFixture{
 		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority,
 		MutationContext: func(operation context.Context) (context.Context, error) {
@@ -115,15 +115,15 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		},
 		Publish: func(t *testing.T, ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 			t.Helper()
-			ctx = worklifetime.WithProcess(ctx, process)
+			ctx = startupownership.CarryMutationAuthority(ctx, originalContext)
 			publishManagerNativeDelivery(t, ctx, selected, event, routes, authority)
 		},
 		ClaimHeartbeat: func(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
-			ctx = worklifetime.WithProcess(ctx, process)
+			ctx = startupownership.CarryMutationAuthority(ctx, originalContext)
 			return storetest.ClaimManagerHeartbeatProof(ctx, selected, authority, event, route)
 		},
 		RenewHeartbeat: func(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.ClaimCommit, error) {
-			ctx = worklifetime.WithProcess(ctx, process)
+			ctx = startupownership.CarryMutationAuthority(ctx, originalContext)
 			return storetest.RenewManagerHeartbeatProof(ctx, selected, claim)
 		},
 		RetryReady: func(t *testing.T, event events.Event, route events.DeliveryRoute) {

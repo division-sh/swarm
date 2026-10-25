@@ -16,7 +16,7 @@ func TestPostgresStore_APIIdempotencyReplaysAndConflicts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
-	ctx = storeTestOriginalProcessContext(t, ctx, s)
+	ctx = originalStoreFixtureContext(t, ctx, s)
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	req := apiidempotency.Request{
 		Method: "event.publish", Actor: apiidempotency.BearerActor("actor-1"), IdempotencyKey: "idem-1",

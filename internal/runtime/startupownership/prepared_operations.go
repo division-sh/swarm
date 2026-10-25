@@ -57,7 +57,6 @@ type preparedOperationScope struct {
 	kind   PreparedOperationKind
 	target any
 	life   context.Context
-	stamp  processbinding.LeaseStamp
 }
 
 // PreparedOperationEntered permits only the exact synchronous semantic owner
@@ -70,15 +69,6 @@ func PreparedOperationEntered(ctx context.Context, kind PreparedOperationKind, t
 	}
 	scope, ok := ctx.Value(preparedOperationContextKey{}).(preparedOperationScope)
 	return ok && scope.kind == kind && scope.target == target && scope.life.Err() == nil
-}
-
-// PreparedOperationOriginalProcess carries the retained owner's attribution only
-// within the exact synchronous invocation, never from request or grant evidence.
-func PreparedOperationOriginalProcess(ctx context.Context, kind PreparedOperationKind, target any) (processbinding.LeaseStamp, error) {
-	if !PreparedOperationEntered(ctx, kind, target) {
-		return processbinding.LeaseStamp{}, ErrProcessNotCurrent
-	}
-	return ctx.Value(preparedOperationContextKey{}).(preparedOperationScope).stamp, nil
 }
 
 func (p *processCapability) RunPreparedOperation(ctx context.Context, operation PreparedProcessOperation) error {
@@ -117,7 +107,7 @@ func (p *processCapability) RunPreparedOperation(ctx context.Context, operation 
 	}
 	life, end := context.WithCancel(context.WithoutCancel(ctx))
 	defer end()
-	operationCtx := context.WithValue(ctx, preparedOperationContextKey{}, preparedOperationScope{operation.kind, operation.target, life, stamp})
+	operationCtx := context.WithValue(ctx, preparedOperationContextKey{}, preparedOperationScope{operation.kind, operation.target, life})
 	operationCtx = p.processMutationContext(operationCtx)
 	err = operation.run(operationCtx)
 	if err != nil {

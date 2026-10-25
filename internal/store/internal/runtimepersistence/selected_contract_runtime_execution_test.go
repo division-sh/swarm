@@ -1405,7 +1405,7 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	forkRunID := uuid.NewString()
 	dependentRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
-	ctx = storeTestOriginalProcessContext(t, ctx, store)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, sourceRunID, now)
 	requirePausedRunForTest(t, ctx, store, forkRunID, now)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)

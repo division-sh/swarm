@@ -112,7 +112,7 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 						t.Fatal(err)
 					}
 					runID := uuid.NewString()
-					ctx = storeTestOriginalProcessContext(t, ctx, selected)
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: artifact.BundleHash()})
 					setBlob := func(blob []byte) {
 						t.Helper()

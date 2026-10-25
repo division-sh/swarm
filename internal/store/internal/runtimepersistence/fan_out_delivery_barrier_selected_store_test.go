@@ -226,10 +226,10 @@ func TestFanOutDeliveryBarrierRestartAndExactIntentIsolationOnBothStores(t *test
 func TestFanOutDeliveryBarrierCandidateReturnsExactPostCommitScheduleActivationOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
-			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
-			ctx = originalStoreFixtureContext(t, ctx, owner)
-			selected := owner.(storeTestDurableEventBusStore)
+			f := newFanOutConstructorFixture(t, backend)
+			ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
+			defer cancel()
+			owner, db, postgres := f.store.(selectedFanOutOwner), f.db, backend == "postgres"
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, owner, postgres, 0, base, f.bundle.SourceArtifact)
 			seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
@@ -298,7 +298,7 @@ func TestFanOutDeliveryBarrierCorruptFactsFailBeforeCloseOnBothStores(t *testing
 			t.Run(backend+"/"+corruption, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
-				ctx = storeTestOriginalProcessContext(t, ctx, owner)
+				ctx = originalStoreFixtureContext(t, ctx, owner)
 				selected := restarted.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)

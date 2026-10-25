@@ -682,10 +682,6 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 	if err != nil {
 		t.Fatal(err)
 	}
-	capability, err := selected.StartupOwnership().AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "fork-engine-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
 	if err != nil {
 		t.Fatal(err)

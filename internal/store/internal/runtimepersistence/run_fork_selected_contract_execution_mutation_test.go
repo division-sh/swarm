@@ -1789,7 +1789,7 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 	ctx = startupownership.CarryMutationAuthority(runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(run.BundleHash), run.RunID), runtimeeffects.ExecutionModeLive), ctx)
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	selected.acceptCurrentSchemaForTest()
-	ctx = storeTestOriginalProcessContext(t, ctx, selected)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, run)
 	bundle := loadCanonicalSelectedContractStoreSource(t)
 	source := semanticview.Wrap(bundle)

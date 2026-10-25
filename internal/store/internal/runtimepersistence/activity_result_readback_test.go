@@ -24,7 +24,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			primaryRunID := runtimecorrelation.RunIDFromContext(ctx)
 			ctx = startupownership.CarryMutationAuthority(testAuthorActivityContext(), ctx)
 			sibling := uuid.NewString()
-			ctx = storeTestOriginalProcessContext(t, ctx, selected)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, sibling, time.Now().UTC())
 			journal := captureActivityFixtureJournal(t, ctx, selected)
 			fault := errors.New("post-acknowledgment cleanup")

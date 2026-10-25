@@ -71,7 +71,7 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 		t.Fatal(err)
 	}
 	work := worklifetime.NewProcess()
-	if err := work.BindOriginalProcess(original.LeaseStamp()); err != nil {
+	if err := work.BindOriginalProcess(authority.LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

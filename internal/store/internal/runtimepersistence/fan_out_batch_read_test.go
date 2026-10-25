@@ -251,9 +251,9 @@ func TestFanOutBatchDeliveryMembershipHostileBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-			ctx = storeTestOriginalProcessContext(t, ctx, owner)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
-			ctx = storeTestOriginalProcessContext(t, ctx, owner)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			other := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
 			event := fanOutBarrierChildEvent(t, fixture, 0, base)
 			if err := commitSemanticEventFixtureWithRoutes(ctx, owner, event, []events.DeliveryRoute{fanOutBarrierRoute("first"), fanOutBarrierRoute("second")}); err != nil {

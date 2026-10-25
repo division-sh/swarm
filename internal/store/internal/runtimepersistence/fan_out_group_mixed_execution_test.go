@@ -504,7 +504,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	}
 	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(artifact.BundleHash()), 20*time.Second)
 	t.Cleanup(cancel)
-	ctx = storeTestOriginalProcessContext(t, ctx, f.raw)
+	ctx = originalStoreFixtureContext(t, ctx, f.raw)
 	f.seed = seedFanOutOwnerFixtureWithArtifact(t, ctx, f.db, f.raw, f.postgres, 4, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	runtimeID := authorActivityTestRuntimeInstanceID
 	fact := mustStoreTestSourceArtifactFact(f.seed.bundleHash)

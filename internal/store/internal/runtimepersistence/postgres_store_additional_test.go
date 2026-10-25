@@ -241,7 +241,7 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityA := uuid.NewString()
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
-	ctx = storeTestOriginalProcessContext(t, ctx, pg)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	seedPostgresStoreEvent(t, ctx, pg, uuid.NewString(), runID, "scan.requested", events.EventProducerAgent, "test", eventEntityA, "", time.Now().UTC())
 	seedPostgresStoreEvent(t, ctx, pg, uuid.NewString(), runID, "scan.replayed", events.EventProducerAgent, "test", eventEntityB, "", time.Now().UTC())
@@ -276,7 +276,7 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	ctx = storeTestOriginalProcessContext(t, ctx, pg)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID,
 		State: storerunlifecycle.StateCompleted,
@@ -346,7 +346,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	createdAt := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Microsecond)
-	ctx = storeTestOriginalProcessContext(t, ctx, pg)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID, StartedAt: createdAt.Add(-time.Minute),
 	})

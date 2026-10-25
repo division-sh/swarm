@@ -60,7 +60,7 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				runID := uuid.NewString()
-				ctx = storeTestOriginalProcessContext(t, ctx, selected)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: runID, BundleHash: artifact.BundleHash(), Origin: semanticScenarioSetupRunOriginForTest()})
 				op, err := cap.AdmitResetOperation(ctx, destructivereset.Request{
 					OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "source-atomicity",

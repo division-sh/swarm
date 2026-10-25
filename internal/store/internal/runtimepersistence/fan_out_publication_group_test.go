@@ -180,7 +180,7 @@ func TestFanOutPublicationGroupSettlementBothStores(t *testing.T) {
 			raw, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, raw)
 			artifact, bundle := fanOutMixedRouteSource(t)
-			ctx = storeTestOriginalProcessContext(t, ctx, raw)
+			ctx = originalStoreFixtureContext(t, ctx, raw)
 			fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, postgres, 3, time.Now().UTC().Truncate(time.Microsecond), artifact)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fixture.bundleHash))
 			ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, fixture.runID), mustStoreTestSourceArtifactFact(fixture.bundleHash))

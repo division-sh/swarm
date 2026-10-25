@@ -285,7 +285,7 @@ func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurfac
 	t.Helper()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		ctx = storeTestOriginalProcessContext(t, ctx, store)
+		ctx = originalStoreFixtureContext(t, ctx, store)
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: authorActivityTestBundleHash})
 		for i, eventID := range eventIDs {
 			eventName := "provider.replied"
@@ -427,7 +427,7 @@ func freezeReplyContextTestRun(t *testing.T, ctx context.Context, store replyCon
 	forkEventID := uuid.NewString()
 	switch backend := store.(type) {
 	case *PostgresStore:
-		ctx = storeTestOriginalProcessContext(t, ctx, backend)
+		ctx = originalStoreFixtureContext(t, ctx, backend)
 		requireRunFixtureForTest(t, ctx, backend, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: forkRunID, State: storerunlifecycle.StatePaused,
 			BundleHash: authorActivityTestBundleHash, StartedAt: now,

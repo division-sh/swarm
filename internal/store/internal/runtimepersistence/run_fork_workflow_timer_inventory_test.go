@@ -46,10 +46,10 @@ func TestRunForkWorkflowTimerInventoryRefusesIncompleteReadbackBothDialects(t *t
 						t.Fatal(err)
 					}
 				}
-				ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), selected)
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 				sourceRun, childRun := uuid.NewString(), uuid.NewString()
 				for _, id := range []string{sourceRun, childRun} {
-					ctx = storeTestOriginalProcessContext(t, ctx, selected)
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireRunningRunForTest(t, ctx, selected, id, time.Now().UTC())
 				}
 				for i := 0; i < 2; i++ {

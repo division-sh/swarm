@@ -22,7 +22,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -505,16 +504,6 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 		}
 	}
 	var err error
-	if processEffectAuthority(authority) {
-		stamp, stampErr := runtimeownership.PreparedOperationOriginalProcess(ctx, runtimeownership.PreparedEffectAuthorize, s)
-		if stampErr != nil {
-			return runtimeeffects.Attempt{}, invalidExternalAuthority(authority, "original_process_scope_missing")
-		}
-		ctx, err = generationauthority.MutationContext(ctx, stamp, false)
-		if err != nil {
-			return runtimeeffects.Attempt{}, err
-		}
-	}
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -684,16 +673,6 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 		}
 	}
 	var err error
-	if processEffectAuthority(authority) {
-		stamp, stampErr := runtimeownership.PreparedOperationOriginalProcess(ctx, runtimeownership.PreparedEffectAuthorize, s)
-		if stampErr != nil {
-			return runtimeeffects.Attempt{}, invalidExternalAuthority(authority, "original_process_scope_missing")
-		}
-		ctx, err = generationauthority.MutationContext(ctx, stamp, false)
-		if err != nil {
-			return runtimeeffects.Attempt{}, err
-		}
-	}
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err

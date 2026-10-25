@@ -66,7 +66,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				envelope,
 				createdAt,
 			)
-			ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 				RunID: runID, StartedAt: createdAt.Add(-time.Second),
 			})
@@ -319,7 +319,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		sourceEventID, events.EventType("test.node_emitted"), producer, "event-owned-task",
 		[]byte(`{"task_id":"payload-owned-task"}`), 2, sourceRunID, parentID, sourceEnvelope, createdAt,
 	), executionmode.Mock)
-	ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: sourceRunID, StartedAt: createdAt.Add(-time.Second),
 	})

@@ -44,7 +44,7 @@ func TestReceiverPublicationExplicitTargetsBothStores(t *testing.T) {
 			targets["."] = events.RouteIdentity{FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID}
 			foreignRun := uuid.NewString()
 			foreignContext := correlation.WithRunID(f.ctx, foreignRun)
-			foreignContext = storeTestOriginalProcessContext(t, foreignContext, f.store)
+			foreignContext = originalStoreFixtureContext(t, foreignContext, f.store)
 			requireRunFixtureForTest(t, foreignContext, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: foreignRun, Artifact: f.bundle.SourceArtifact, BundleHash: f.bundle.SourceArtifact.BundleHash()})
 			foreignCreating := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "work.requested", "foreign-selector-proof", "", []byte(`{}`), 0, foreignRun, events.EventEnvelope{}, eventtest.RootRoutingSource(foreignRun), time.Now().UTC())
 			foreignRequest := sqliteFlowActivationRequest(f.bundle, ".", foreignRun, "", foreignRun)

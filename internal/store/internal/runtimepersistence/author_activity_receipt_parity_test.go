@@ -38,7 +38,7 @@ type authorActivityReceiptFixture struct {
 func (f authorActivityReceiptFixture) originalContext(ctx context.Context) context.Context {
 	owner := f.activityOwner
 	owner.Helper()
-	return storeTestOriginalProcessContext(owner, storeTestWorkContext(owner, ctx), f.store)
+	return originalStoreFixtureContext(owner, storeTestWorkContext(owner, ctx), f.store)
 }
 
 func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
@@ -165,7 +165,7 @@ func seedAuthorActivityReceiptRun(t *testing.T, fixture authorActivityReceiptFix
 	if fixture.activityOwner != nil {
 		ctx = fixture.originalContext(ctx)
 	} else {
-		ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
+		ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	}
 	requireRunningRunForTest(t, ctx, fixture.store, runID, startedAt)
 	return ctx

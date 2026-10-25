@@ -30,7 +30,7 @@ func Test2376ChannelExactSelectionAndStoredPresentationBothStores(t *testing.T) 
 					EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 				})
 				ctx := fixture.ctx
-				ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				now := time.Now().UTC()
 				principal, err := fixture.store.EnsureOperatorPrincipal(ctx, now)
 				if err != nil {

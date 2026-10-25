@@ -26,9 +26,9 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	entityB := uuid.NewString()
 	sharedEntity := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
-	ctx = storeTestOriginalProcessContext(t, ctx, pg)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, StartedAt: base})
-	ctx = storeTestOriginalProcessContext(t, ctx, pg)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, StartedAt: base})
 	seedEntity := func(runID, entityID, flow, entityType, fields string, createdAt time.Time) {
 		t.Helper()
@@ -185,9 +185,9 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	entityB := uuid.NewString()
 	sharedEntity := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
-	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, StartedAt: base})
-	ctx = storeTestOriginalProcessContext(t, ctx, sqliteStore)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, StartedAt: base})
 	seedEntity := func(runID, entityID, flow, entityType, fields string, createdAt time.Time) {
 		t.Helper()

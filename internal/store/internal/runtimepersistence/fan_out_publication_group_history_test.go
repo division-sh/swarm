@@ -428,7 +428,7 @@ func seedFanOutGroupHistoryFixture(t *testing.T, backend string, count int) (*fa
 	raw, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 	ctx = originalStoreFixtureContext(t, ctx, raw)
 	artifact, bundle := fanOutMixedRouteSource(t)
-	ctx = storeTestOriginalProcessContext(t, ctx, raw)
+	ctx = originalStoreFixtureContext(t, ctx, raw)
 	seed := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, postgres, count, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, seed.bundleHash))
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, seed.runID), mustStoreTestSourceArtifactFact(seed.bundleHash))

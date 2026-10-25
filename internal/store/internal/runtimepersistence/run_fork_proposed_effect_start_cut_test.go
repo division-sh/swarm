@@ -39,7 +39,7 @@ func TestRunForkProposedEffectStartCutExcludesLaterCardsBothStores(t *testing.T)
 				if err != nil {
 					t.Fatal(err)
 				}
-				ctx = storeTestOriginalProcessContext(t, ctx, f.store)
+				ctx = originalStoreFixtureContext(t, ctx, f.store)
 				requireRunFixtureForTest(t, ctx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: child,
 					Artifact: f.bundle.SourceArtifact, BundleHash: f.bundle.SourceArtifact.BundleHash()})
 				for _, run := range []string{source, child} {

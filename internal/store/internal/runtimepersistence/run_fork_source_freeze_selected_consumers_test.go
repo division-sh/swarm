@@ -81,7 +81,7 @@ func markSelectedTestRunForked(t *testing.T, ctx context.Context, fixture select
 	} else {
 		selected = newPostgresStoreWithBackend(mustPostgresBackend(fixture.db))
 	}
-	ctx = storeTestOriginalProcessContext(t, ctx, selected)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: continuedRunID, StartedAt: now, BundleHash: authorActivityTestBundleHash,
 	})

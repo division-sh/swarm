@@ -28,7 +28,7 @@ import (
 
 // Native component construction keeps its genuine original process owner;
 // source metadata or a delivery tag alone is not mutation admission.
-func originalEventBusFixtureContext(t *testing.T, ctx context.Context, selected any) context.Context {
+func originalEventBusFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
 	if startupownership.HasMutationAuthority(ctx) {
 		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
@@ -220,6 +220,7 @@ func ensureTestEventBusSourceArtifact(store runtimebus.EventStore, source semant
 
 func nativeBusProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	ctx = originalEventBusFixtureContext(t, ctx, selected)
 	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	}

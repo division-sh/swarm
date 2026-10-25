@@ -101,14 +101,14 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 
 			runID := uuid.NewString()
 			runtimeInstanceID := uuid.NewString()
-			process := worklifetime.NewProcess()
-			ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID), process), selected.backend)
+			workProcess := worklifetime.NewProcess()
+			ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID), workProcess), selected.backend)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				process.Retire()
-				if _, err := process.Join(context.Background()); err != nil {
+				workProcess.Retire()
+				if _, err := workProcess.Join(context.Background()); err != nil {
 					t.Error(err)
 				}
 			})
@@ -143,7 +143,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("derive story-writer prompt: %v", err)
 			}
-			originalCtx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
+			originalCtx := ctx
 			process, err := agentfixture.ProcessCapability(t, originalCtx, selected.backend)
 			if err != nil {
 				t.Fatal(err)

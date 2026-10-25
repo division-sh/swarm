@@ -8,7 +8,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -17,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"testing"
@@ -54,7 +52,7 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	}
 	fixture := runtimebus.ExactHandoffNativeFixtureForTest{Store: owner, Context: ctx, Authority: authority}
 	if selectedExecution {
-		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner, capability)
+		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner)
 		ctx, authority = execution.Context, execution.Authority
 		fixture.Context, fixture.Authority = ctx, authority
 		fixture.SelectedEvent, fixture.SelectedRoute = execution.SelectedEvent, execution.SelectedRoute

@@ -13,9 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -608,7 +606,7 @@ const conversationForkSourceFlowInstance = "review"
 func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, prepared *PostgresStore, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
 	store := admitTestPostgresStore(t, db)
-	ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), store)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	return seedConversationForkSourceWithContext(t, ctx, store, db, base, historical...)
 }
 
@@ -632,11 +630,10 @@ func seedConversationForkSourceWithContext(t *testing.T, ctx context.Context, st
 		source.bundleHash = run.Artifact.BundleHash()
 		run.BundleHash = source.bundleHash
 	}
-	store := prepared
 	if store == nil {
 		store = admitTestPostgresStore(t, db)
 	}
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.bundleHash), store)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireRunFixtureForTest(t, ctx, store, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
