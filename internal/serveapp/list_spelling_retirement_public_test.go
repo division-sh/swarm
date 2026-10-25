@@ -104,6 +104,10 @@ func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 			{"angle", "list<T>", false},
 			{"long", "{type: list, of: T}", false},
 		} {
+			if field.file == "state.yaml" && (form.name == "quoted_bracket" || form.name == "quoted_singleton") {
+				// Quoted state values are literals, covered by state declaration admission.
+				continue
+			}
 			t.Run(field.file+"/"+form.name, func(t *testing.T) {
 				root := t.TempDir()
 				declaration := form.declaration
