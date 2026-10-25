@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -22,9 +24,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -91,16 +96,36 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
-				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
+				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 				root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 				input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "task.assigned", "source-runtime", "", []byte(`{"entity_id":"`+runID+`"}`), 0, runID, events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), eventtest.RootRoutingSource(runID), at, executionmode.Live)
 				route := selectedExecutionTestAgentRoute(t, runID, "test-agent", runID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID})
 				storetest.CommitSemanticEventWithRoutes(t, ctx, selected, input, []events.DeliveryRoute{route}, "subscribed")
-				sourceCtx := correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact)
-				command := selectedExecutionSourceFlowCommand(t, sourceCtx, loaded, input, root)
-				if committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(sourceCtx, command); err != nil || !committed.Acknowledged {
-					t.Fatalf("source flow construction: %+v err=%v", committed, err)
+				ordinary, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, runID, executionposture.Live, SelectedContractAgentRuntimeOptions{
+					Config: selectedForkAPIProviderConfig(selection.BackendOpenAICompatible, "request-A", provider.URL), ProviderCredentials: credentialStore,
+				})
+				use, _, err := liveContexts.AcquireBundleHash(ctx, loaded.SourceArtifactFact.BundleHash())
+				if err != nil || use == nil {
+					t.Fatalf("acquire original source constructor: %v", err)
+				}
+				t.Cleanup(func() {
+					if err := use.Done(); err != nil {
+						t.Error(err)
+					}
+				})
+				grant, err := ordinary.CurrentStartupGrantEvidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				sourceCtx := correlation.WithSourceArtifactFact(correlation.WithRunID(use.WorkContext(), runID), loaded.SourceArtifactFact)
+				sourceCtx = authoractivity.WithScope(sourceCtx, authoractivity.BundleScope(grant.RuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+				created, err := ordinary.Manager.EnsureFlowInstance(sourceCtx, pipeline.FlowInstanceActivationRequest{
+					ContractBundle: loaded.Source, Instance: root, OccurredAt: at,
+				})
+				err = errors.Join(err, use.Done())
+				if err != nil || !created {
+					t.Fatalf("source flow construction: created=%t err=%v", created, err)
 				}
 				storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 				firstCut := eventID
@@ -140,6 +165,7 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					}
 					request := SelectedContractExecutionRequest{
 						SourceRunID: sourceID, At: point, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+						LiveRuntime: ordinary, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 						ForkOperation:     &operation,
 						ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 						AgentRuntime: SelectedContractAgentRuntimeOptions{Config: selectedForkAPIProviderConfig(selection.BackendOpenAICompatible, "request-A", provider.URL), ProviderCredentials: credentialStore,
@@ -184,8 +210,8 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				first := execute(runID, firstCut, eventID)
 				firstID, firstPoint := first.ACK.Materialization.ForkRunID, first.InputID
 				frozenSource, err := headers.LoadRunHeader(ctx, runID)
-				if err != nil || frozenSource.Status != "forked" || frozenSource.ContinuedAsRunID != firstID || frozenSource.EndedAt == nil {
-					t.Fatalf("first child did not establish exact source freeze: %+v %v", frozenSource, err)
+				if err != nil || frozenSource.Status != "paused" || frozenSource.ContinuedAsRunID != "" || frozenSource.EndedAt != nil {
+					t.Fatalf("live fork did not preserve its exact paused source: %+v %v", frozenSource, err)
 				}
 				sourceDomain, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, runID)
 				if err != nil {
@@ -222,8 +248,8 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				if variant != "refork_without_sibling" {
 					sibling := execute(runID, eventID, eventID)
 					siblingID = sibling.ACK.Materialization.ForkRunID
-					if !sibling.ACK.Activation.SourceFrozen || sibling.ACK.Activation.SourceRunStatus != "forked" || sibling.ACK.Activation.BranchDivergence != nil {
-						t.Fatalf("historical source was misreported as a new freeze/divergence: %+v", sibling.ACK.Activation)
+					if sibling.ACK.Activation.SourceFrozen || sibling.ACK.Activation.SourceRunStatus != "paused" || sibling.ACK.Activation.BranchDivergence != nil {
+						t.Fatalf("historical source was misreported as frozen/terminal: %+v", sibling.ACK.Activation)
 					}
 					if sibling.ACK.Activation.SourceAdvancedAfterFork != (variant == "frozen_source_advanced_cut") {
 						t.Fatalf("historical admission invented or omitted real source advancement: %+v", sibling.ACK.Activation)
@@ -248,10 +274,60 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					domain map[string]storetest.SelectedForkStorageTableSnapshot
 				}{{runID, frozenSource, sourceDomain}, {firstID, firstHeader, firstDomain}} {
 					header, err := headers.LoadRunHeader(ctx, conservation.id)
-					if err != nil || !reflect.DeepEqual(header, conservation.header) {
+					expected := conservation.header
+					if conservation.id == firstID {
+						expected.Status, expected.ControlReason = "paused", "fork_live_switch"
+						expected.EventCount++
+					}
+					if err != nil || !reflect.DeepEqual(header, expected) {
 						t.Fatalf("sibling/refork rewrote source lifecycle: before=%+v after=%+v err=%v", conservation.header, header, err)
 					}
 					domain, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, conservation.id)
+					if err == nil && conservation.id == firstID {
+						table := domain["events"]
+						comparison := table
+						comparison.Rows = nil
+						parked := 0
+						grant, grantErr := ordinary.CurrentStartupGrantEvidence()
+						if grantErr != nil {
+							t.Fatal(grantErr)
+						}
+						for _, raw := range table.Rows {
+							if slices.Contains(conservation.domain["events"].Rows, raw) {
+								comparison.Rows = append(comparison.Rows, raw)
+								continue
+							}
+							row, decodeErr := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: table.Columns, Rows: []string{raw}})
+							if decodeErr != nil || len(row) != 1 {
+								t.Fatalf("decode predecessor parking event: %v", decodeErr)
+							}
+							kind, _ := row[0]["event_class"].Text()
+							name, _ := row[0]["event_name"].Text()
+							id, _ := row[0]["run_id"].Text()
+							payload, _ := row[0]["payload"].Text()
+							var log struct {
+								Details struct {
+									Action        string `json:"action"`
+									AgentID       string `json:"agent_id"`
+									RunID         string `json:"run_id"`
+									RunMode       string `json:"run_mode"`
+									Phase         string `json:"phase"`
+									PreviousPhase string `json:"previous_phase"`
+									Binding       struct {
+										GrantID string `json:"generation_grant_id"`
+									} `json:"process_binding"`
+								} `json:"details"`
+							}
+							if json.Unmarshal([]byte(payload), &log) != nil || kind != "diagnostic_direct" || name != "platform.runtime_log" || id != firstID || log.Details.Action != "platform.agent_lifecycle_transition" || log.Details.AgentID != "test-agent" || log.Details.RunID != firstID || log.Details.RunMode != "stopped" || log.Details.Phase != "registered" || log.Details.PreviousPhase != "running" || log.Details.Binding.GrantID != grant.GrantID {
+								t.Fatalf("source gained a row other than its exact native parking diagnostic: %s", raw)
+							}
+							parked++
+						}
+						if parked != 1 {
+							t.Fatalf("predecessor parking diagnostic count=%d, want 1", parked)
+						}
+						domain["events"] = comparison
+					}
 					if err != nil || !reflect.DeepEqual(domain, conservation.domain) {
 						t.Fatalf("sibling/refork changed source state/delivery domain: run=%s err=%v", conservation.id, err)
 					}
@@ -340,7 +416,8 @@ func waitSelectedQ1CompletedInput(t *testing.T, ctx context.Context, selected st
 		if err != nil || delivery.AgentDeliveries > 1 || len(delivery.Failures) != 0 {
 			t.Fatalf("selected input delivery: %+v err=%v", delivery, err)
 		}
-		if header.Status == "completed" && storage.State == "closed" && len(inputs.Events) == 1 && delivery.AgentDeliveries == 1 && delivery.Delivered == 1 {
+		stage := storetest.ObserveWriterStage(t, wait, selected, child, child, "done")
+		if header.Status == "live" && header.EndedAt == nil && stage.State == "done" && storage.State == "closed" && len(inputs.Events) == 1 && delivery.AgentDeliveries == 1 && delivery.Delivered == 1 {
 			input := inputs.Events[0]
 			prepared, found, err := selected.(bus.PreparedPublishEventReader).LoadPreparedPublishEvent(wait, input.EventID)
 			if err != nil || !found || input.RunID != child {

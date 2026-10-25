@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -22,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -59,7 +64,10 @@ func (p selectedHandlerFanOutIntentCrash) CommitWorkflowEngineMutation(ctx conte
 func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, capability startupownership.ProcessCapability) {
 	t.Helper()
 	repo := runForkExecutionRepoRoot(t)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: canonicalrouting.CopyForkFanOutConsumer(t, false, false)}
+	root := canonicalrouting.CopyForkFanOutConsumer(t, false, false)
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: fork-fan-out-carrier\nstages:\n  pending: {}\npins:\n  inputs: [items.ready]\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "items.ready:\n  items: [text]\nitems.child:\n  value: text\n")
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +81,7 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 	}
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-		RunID: sourceRun, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+		RunID: sourceRun, Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, Artifact: bundle.SourceArtifact,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: event.CreatedAt().Add(-time.Minute),
 	})
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustRunForkRootNode("fan-out-source")),
@@ -92,7 +100,11 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 			checkpoint := selectedForkCrashCheckpoint{SourceRun: sourceRun, ForkRun: key.RunID,
 				FanOut: &selectedHandlerFanOutCrashCheckpoint{Key: key, Selection: authority.SelectedFork}}
 			if os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_handler_fan_out_claim_acquired" {
-				grant := selectedHandlerFanOutGrant(t, owner, key.RunID)
+				mutation, err := startupownership.CaptureMutationAuthority(ctx)
+				grant := mutation.GrantEvidence()
+				if err != nil || !mutation.HasRuntimeGrant() || grant.SelectedFork == nil || grant.SelectedFork.ForkRunID != key.RunID {
+					t.Fatal("intent checkpoint lacks its original installed selected grant")
+				}
 				serving, err := selected.(selectedHandlerFanOutBinder).BindSelectedFanOutGrant(grant)
 				if err != nil {
 					t.Fatal(err)
@@ -115,15 +127,15 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 		},
 	})
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-handler-fan-out", IdempotencyKey: "intent-cut",
 			TransportHash: "retained-handler-fan-out-transport", SourceRunID: sourceRun, ForkEventID: eventID,
 			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
 	})
-	if err != nil || !result.Activation.Activated {
-		t.Fatalf("activate handler fan-out: %+v error=%v", result.Activation, err)
+	if err != nil || result.Materialization.ForkRunID == "" || result.Activation.Activated {
+		t.Fatalf("materialized selected handler fan-out: %+v error=%v", result, err)
 	}
 	select {
 	case <-ctx.Done():
@@ -221,17 +233,22 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			sourceDelivery := pendingSourceDeliveryForReboot(t, context.Background(), selected, sourceBefore, checkpoint.SourceRun)
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 			})
 			original, found, err := operations.LoadForkOperation(context.Background(), "retained-handler-fan-out", "intent-cut", "retained-handler-fan-out-transport")
-			if err != nil || !found || original.Status != runfork.ForkOperationActivated || original.ForkRunID != checkpoint.ForkRun || original.Result == nil {
-				t.Fatalf("intent crash lost activation acknowledgment: %+v found=%t error=%v", original, found, err)
+			if err != nil || !found || original.Status != runfork.ForkOperationMaterialized || original.ForkRunID != checkpoint.ForkRun || original.Result != nil {
+				t.Fatalf("intent crash fabricated an early handoff acknowledgment: %+v found=%t error=%v", original, found, err)
 			}
 			ctx := runForkTestContext(t)
 			capability := selectedContractTestProcessCapability(t, ctx, selected)
 			ctx = originalSelectedFixtureContext(t, ctx, selected)
 			owner := construct()
+			ackRelease := make(chan struct{})
+			var releaseACK sync.Once
+			resumeACK := func() { releaseACK.Do(func() { close(ackRelease) }) }
+			owner.ports.pipelineObligations = selectedActivityInputSettlementHold{Store: owner.ports.pipelineObligations, sourceRequest: original.Request.ForkEventID, release: ackRelease}
 			successor := make(chan effects.Authority, 1)
 			owner.ports.runtimeExecution = selectedActivitySuccessorClaim{owner.ports.runtimeExecution, successor}
 			process, _ := worklifetime.ProcessFromContext(ctx)
@@ -245,6 +262,19 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 				}
 			})
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.SourceRun, Selection: original.Request.ContractSelection})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, checkpoint.SourceRun, executionposture.MockOnly)
+			rebootGrant, err := ordinary.CurrentStartupGrantEvidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			rebootAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, rebootGrant.GrantID, rebootGrant.RuntimeGeneration)
+			if err != nil {
+				t.Fatal(err)
+			}
 			recoveryCtx := ctx
 			var held *selectedHandlerFanOutClaimHold
 			if live {
@@ -252,12 +282,38 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 				defer held.resume()
 				recoveryCtx = startupownership.WithFanOutChunkObserverForTest(ctx, held.observe)
 			}
-			recovered, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
-				SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
-			})
-			if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
-				t.Fatalf("handler successor recovery: %+v error=%v", recovered, err)
+			recoveryCtx, cancelRecovery := context.WithCancel(recoveryCtx)
+			type recoveredOutcome struct {
+				entries []runfork.SelectedForkRecoveryResult
+				err     error
 			}
+			done := make(chan recoveredOutcome, 1)
+			go func() {
+				recovered, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
+					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+						use, _, err := contexts.AcquireBundleHash(ctx, hash)
+						return use, err
+					},
+				})
+				done <- recoveredOutcome{recovered, err}
+			}()
+			joined := false
+			t.Cleanup(func() {
+				resumeACK()
+				if held != nil {
+					held.resume()
+				}
+				if !joined {
+					cancelRecovery()
+					result := <-done
+					if result.err != nil {
+						t.Error(result.err)
+					}
+				}
+				cancelRecovery()
+			})
 			select {
 			case authority := <-successor:
 				previous := checkpoint.FanOut.Selection
@@ -267,7 +323,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 				if !authority.Valid() || authority.Kind != effects.AuthoritySelectedContractFork || next != expected || next.ExecutionID == previous.ExecutionID || next.Generation != previous.Generation+1 {
 					t.Fatalf("successor borrowed the predecessor's executor authority: %+v previous=%+v", authority, previous)
 				}
-			default:
+			case <-time.After(15 * time.Second):
 				t.Fatal("recovery did not claim a fresh selected executor")
 			}
 			if live {
@@ -289,12 +345,21 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 				case acquired := <-held.acquired:
 					requireSelectedHandlerFanOutLiveClaimFenced(t, wait, selected, owner, checkpoint, acquired)
 					held.resume()
+				case result := <-done:
+					joined = true
+					t.Fatalf("native recovery returned before the live selected claim: %+v error=%v", result.entries, result.err)
 				case <-wait.Done():
 					t.Fatalf("successor never acquired its actual live claim: %v", wait.Err())
 				}
 			}
-			inputID := activityidentity.ForkLineageEventID(checkpoint.ForkRun, original.Result.ForkEventID)
+			inputID := activityidentity.ForkLineageEventID(checkpoint.ForkRun, original.Request.ForkEventID)
 			for {
+				select {
+				case result := <-done:
+					joined = true
+					t.Fatalf("native recovery returned before the held pipeline settlement: %+v error=%v", result.entries, result.err)
+				default:
+				}
 				progress, err := storetest.ReadFanOutIntentCompletionStorage(wait, selected, key)
 				if err != nil {
 					t.Fatal(err)
@@ -315,7 +380,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if progress.Status == string(fanoutobligation.StatusClosed) && progress.Cursor == 2 && progress.Cardinality == 2 && len(progress.Outcomes) == 2 && outputs == 2 && settlement.Total == 3 && settlement.Delivered == 3 && receipt.Found && receipt.Outcome == "success" && pending == 0 {
+				if progress.Status == string(fanoutobligation.StatusClosed) && progress.Cursor == 2 && progress.Cardinality == 2 && len(progress.Outcomes) == 2 && outputs == 2 && settlement.Total == 3 && settlement.Delivered == 3 {
 					for ordinal, outcome := range progress.Outcomes {
 						if outcome.Ordinal != ordinal || outcome.Kind != string(fanoutobligation.OutcomeCommitted) || outcome.EventID == "" {
 							t.Fatalf("successor lost exact ordinal outcomes: %+v", progress.Outcomes)
@@ -339,17 +404,26 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 			if claimed {
 				requireSelectedHandlerFanOutPredecessorFenced(t, cleanup, selected, owner, checkpoint)
 			}
-			if err := owner.RetireSelectedContexts(cleanup); err != nil || process.ActiveCount() != baseline {
+			resumeACK()
+			result := <-done
+			joined = true
+			if result.err != nil || len(result.entries) != 1 || result.entries[0].RunID != checkpoint.ForkRun || result.entries[0].Disposition != runfork.SelectedForkRecoveryResume {
+				t.Fatalf("handler successor recovery: %+v error=%v", result.entries, result.err)
+			}
+			if receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(cleanup, selected, inputID); err != nil || !receipt.Found || receipt.Outcome != "success" {
+				t.Fatalf("native handoff did not acknowledge its actual pipeline receipt: %+v err=%v", receipt, err)
+			}
+			if pending, err := storetest.ReadServedIncompletePipelineHandoffCount(cleanup, selected, checkpoint.ForkRun); err != nil || pending != 0 {
+				t.Fatalf("native handoff left an unacknowledged pipeline: pending=%d err=%v", pending, err)
+			}
+			if err := errors.Join(owner.RetireSelectedContexts(cleanup), ordinary.Shutdown()); err != nil || process.ActiveCount() != baseline {
 				t.Fatalf("successor retirement leaked resources: leases=%d baseline=%d error=%v", process.ActiveCount(), baseline, err)
 			}
 			retry, found, err := operations.LoadForkOperation(cleanup, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)
-			if err != nil || !found || !reflect.DeepEqual(original, retry) {
-				t.Fatalf("successor rewrote the acknowledged fork operation: %+v error=%v", retry, err)
+			if err != nil || !found || retry.Status != runfork.ForkOperationActivated || retry.Result == nil || retry.ForkRunID != original.ForkRunID || !reflect.DeepEqual(original.Request, retry.Request) {
+				t.Fatalf("successor did not acknowledge the exact original operation: %+v error=%v", retry, err)
 			}
-			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(cleanup, selected, checkpoint.SourceRun)
-			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
-				t.Fatalf("successor changed source business history: %v", err)
-			}
+			requirePendingSourceRebootConservation(t, cleanup, selected, sourceBefore, sourceDelivery, rebootAuthority)
 		})
 	}
 }

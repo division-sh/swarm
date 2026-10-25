@@ -175,6 +175,26 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	}
 	retireContinuations := sync.OnceValue(func() error { return continuations.Retire(context.WithoutCancel(c.attachment.ctx)) })
 	defer func() { finalErr = errors.Join(finalErr, retireContinuations()) }()
+	if err := c.attachment.pipeline.RestoreWorkflowTimers(c.attachment.ctx); err != nil {
+		return out, err
+	}
+	if err := runtime.genericSchedules.ReconcileRunWakeups(c.attachment.ctx, c.req.ForkRunID); err != nil {
+		return out, err
+	}
+	if err := c.admitSelectedDeploymentFeeds(c.attachment.ctx); err != nil {
+		return out, err
+	}
+	// Recovered handlers may await already-owed fan-out or an original deadline.
+	// Their existing selected owners must be running before recovery is joined.
+	recovered := p.recoveryFromExecutionID != ""
+	if recovered {
+		if err := c.startSelectedServing(c.attachment.ctx); err != nil {
+			return out, err
+		}
+	}
+	if err := c.reconcileRecoveredDeliveries(c.attachment.ctx, continuations); err != nil {
+		return out, err
+	}
 	inputs, err := c.commitSelectedInputs()
 	defer func() {
 		for _, input := range inputs {
@@ -183,6 +203,11 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	}()
 	if err != nil {
 		return out, err
+	}
+	if !recovered {
+		if err := c.startSelectedServing(c.attachment.ctx); err != nil {
+			return out, err
+		}
 	}
 	for _, input := range inputs {
 		if err := c.dispatchCommittedInput(input); err != nil {
@@ -194,6 +219,16 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 		})
 	}
 	if err := continuations.Synchronize(c.attachment.ctx); err != nil {
+		return out, err
+	}
+	timeout := c.req.AgentRuntime.Options.QuiescenceTimeout
+	if timeout <= 0 {
+		timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
+	}
+	wait, cancel := context.WithTimeout(c.attachment.ctx, timeout)
+	err = runtime.WaitForQuiescence(wait, runtime.bus)
+	cancel()
+	if err != nil {
 		return out, err
 	}
 	if err := retireContinuations(); err != nil {

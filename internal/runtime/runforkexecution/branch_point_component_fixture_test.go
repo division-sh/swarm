@@ -81,6 +81,17 @@ func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request 
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
+	if prepared.forkOperation == nil {
+		prepared.forkOperation, err = bindPreparedSelectedForkOperation(&runfork.ForkOperationRequest{
+			OperationID: uuid.NewString(), Actor: "selected-phase-component", IdempotencyKey: uuid.NewString(),
+			TransportHash: "selected-phase-component", SourceRunID: request.SourceRunID, ForkEventID: request.At, AtStart: request.AtStart,
+			TargetBundleHash: prepared.loadedSource.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
+			AllowSourceFreeze: request.AllowSourceFreeze, DataPinOverrides: request.DataPinOverrides,
+		}, prepared.plan)
+		if err != nil {
+			return SelectedContractExecutionResult{}, errors.Join(err, prepared.Close())
+		}
+	}
 	if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
 		return SelectedContractExecutionResult{}, errors.Join(err, prepared.Close())
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -314,7 +315,7 @@ const fanOutExecutionReasonSQL = `CASE
 	WHEN b.binding_id IS NOT NULL AND g.grant_id IS NULL THEN 'selected_fork_reserved'
 	WHEN g.grant_id IS NULL THEN 'runtime_unregistered'
 	WHEN r.bundle_hash<>i.bundle_hash THEN 'run_not_owned'
-	WHEN r.status NOT IN ('running','live') THEN 'run_' || r.status
+	WHEN r.status NOT IN ('running','live') AND NOT (r.status='paused' AND g.selected_binding_id IS NOT NULL) THEN 'run_' || r.status
 	WHEN c.control_status IN ('paused','stopped') THEN 'run_' || c.control_status
 	ELSE 'eligible' END`
 
@@ -449,6 +450,9 @@ func fanOutRunAcceptsTurnTx(ctx context.Context, tx *sql.Tx, grant startupowners
 	var status, control string
 	if err := tx.QueryRowContext(ctx, `SELECT r.status,COALESCE(c.control_status,'') FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&status, &control); err != nil {
 		return false, err
+	}
+	if newTurn && status == "paused" && control == "" && grant.SelectedFork != nil && grant.SelectedFork.ForkRunID == runID {
+		return runlifecycle.ObserveMaterializedSelectedExecution(ctx, tx, runID, grant.BundleHash)
 	}
 	return (status == "running" || status == "live" || (!newTurn && status == "paused")) && control != "stopped" && (!newTurn || control != "paused"), nil
 }

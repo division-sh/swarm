@@ -658,11 +658,11 @@ func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture
 	state := pipeline.WorkflowEngineStateRecord{
 		Identity: owner, EntityID: entityID, ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: instance.Mode, Status: instance.Status,
-		CurrentState: instance.CurrentState, StageDefined: instance.StageDefined, EntityType: instance.EntityType, Slug: instance.Slug, Name: instance.Name,
+		CurrentState: activation.CurrentStage, StageDefined: true, EntityType: instance.EntityType, Slug: instance.Slug, Name: instance.Name,
 		Fields: before.State.Fields, Bookkeeping: before.Lifecycle.State.Bookkeeping, Gates: before.Lifecycle.State.Gates,
 		Accumulator: json.RawMessage(selectedContractActivityJSON(t, buckets)), Config: before.Lifecycle.Config,
 		InitialFields:  json.RawMessage(selectedContractActivityJSON(t, instance.InitialFieldValues)),
-		EnteredStageAt: instance.EnteredStageAt, CreatedAt: instance.CreatedAt, UpdatedAt: at,
+		EnteredStageAt: at, CreatedAt: instance.CreatedAt, UpdatedAt: at,
 		ExpectedState: instance.CurrentState, ExpectedRevision: instance.Revision, Transition: pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion,
 	}
 	committed, err := selected.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state})
@@ -670,7 +670,7 @@ func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture
 		t.Fatalf("commit atomic source loop projection/history: committed=%v err=%v", committed.Committed, err)
 	}
 	after, found, err := selected.LoadWorkflowInstance(ctx, owner)
-	if err != nil || !found || after.Revision != instance.Revision+1 || selectedContractActivityJSON(t, after.StateBuckets) != selectedContractActivityJSON(t, buckets) {
+	if err != nil || !found || after.Revision != instance.Revision+1 || !after.StageDefined || after.CurrentState != activation.CurrentStage || selectedContractActivityJSON(t, after.StateBuckets) != selectedContractActivityJSON(t, buckets) {
 		t.Fatalf("source loop exact header/readback: found=%v instance=%+v err=%v", found, after, err)
 	}
 }

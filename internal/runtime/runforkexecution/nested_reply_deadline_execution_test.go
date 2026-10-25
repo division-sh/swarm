@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -37,11 +38,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -100,6 +103,11 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 
 func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool, observeGrant ...func(startupownership.GrantEvidence)) (*rootruntime.Runtime, func(), error) {
 	t.Helper()
+	return nodeReplyRuntimeWithAgentOptions(t, ctx, selected, owner, loaded, posture, live, SelectedContractAgentRuntimeOptions{}, observeGrant...)
+}
+
+func nodeReplyRuntimeWithAgentOptions(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool, agents SelectedContractAgentRuntimeOptions, observeGrant ...func(startupownership.GrantEvidence)) (*rootruntime.Runtime, func(), error) {
+	t.Helper()
 	nodes, err := pipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
 		t.Fatal(err)
@@ -108,9 +116,26 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	p := owner.ports
 	options := rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 		SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
-		WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}}
+		ProviderCredentials: agents.ProviderCredentials,
+		WorkflowModule:      selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}}
 	var gateway *httptest.Server
 	if semanticview.SourceDeclaresAgents(loaded.Source) {
+		if loaded.RuntimeProjection == nil {
+			bundle, found := semanticview.Bundle(loaded.Source)
+			if !found || bundle.SourceArtifact == nil {
+				t.Fatal("ordinary agent fixture requires its retained admitted artifact")
+			}
+			projection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded.RuntimeProjection = projection
+			t.Cleanup(func() {
+				if err := projection.Release(); err != nil {
+					t.Error(err)
+				}
+			})
+		}
 		gateway = httptest.NewUnstartedServer(nil)
 		t.Cleanup(gateway.Close)
 		endpoint := "http://" + gateway.Listener.Addr().String()
@@ -142,13 +167,23 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 		})
 		options.WorkspaceLifecycle = host
 	}
+	cfg := config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4}, LLM: config.LLMConfig{Backend: "anthropic"}}
+	if agents.Config != nil {
+		cfg = *agents.Config
+		if cfg.Runtime.MaxConcurrentAgents == 0 {
+			cfg.Runtime.MaxConcurrentAgents = 4
+		}
+	}
+	cfg.Runtime.RecoveryOnStartup = live
 	rt, err := rootruntime.NewRuntime(ctx, rootruntime.RuntimeDeps{
-		Config:              &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4, RecoveryOnStartup: live}, LLM: config.LLMConfig{Backend: "anthropic"}},
+		Config:              &cfg,
 		Options:             options,
 		WorkflowPersistence: p.workflow, EventStore: p.events, EventBusDurable: p.busDurable,
 		EventPayloadAdmissionBinder: selected.(rootruntime.EventPayloadAdmissionBinder), AuthorActivityRegistrars: []rootruntime.AuthorActivityCatalogRegistrar{p.fork},
 		RunBundleAvailability: p.fork, RunControlStore: selected.(runcontrol.Store), RunLifecycleCandidates: p.candidates,
 		RuntimeLogStore: p.logs, ManagerStore: p.manager, ManagerPersistenceRoles: p.managerRoles,
+		SessionRegistry: selected.(sessions.Registry), LiveSessionAcquirer: selected.(runtimellm.LiveSessionAcquirer),
+		SessionResetter: selected.(sessions.Resetter), ConversationStore: selected.(runtimellm.ConversationPersistence),
 		EffectsStore: p.effects, CompletionStore: p.completion, CompletionHeartbeatStore: p.completionHeartbeat,
 		ManagedCapabilitiesStore: p.managedCapabilities, DeliveryStore: p.busDurable.DeliveryLifecycle, PipelineObligations: p.pipelineObligations,
 		GenericScheduleStore: p.genericSchedules, TimerObligationReader: selected.(timerobligation.Reader),
@@ -247,7 +282,7 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	return rt, serving.Close, nil
 }
 
-func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string, posture executionposture.Posture) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
+func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string, posture executionposture.Posture, agents ...SelectedContractAgentRuntimeOptions) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
 	t.Helper()
 	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 	availability, err := owner.ports.fork.LoadRunBundleAvailability(ctx, sourceRunID)
@@ -264,7 +299,7 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 			t.Fatalf("park source before ordinary runtime recovery: outcome=%+v err=%v", outcome, err)
 		}
 	}
-	rt, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, posture)
+	rt, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, posture, agents...)
 	availability, err = owner.ports.fork.LoadRunBundleAvailability(ctx, sourceRunID)
 	if err != nil || !availability.Available() || availability.BundleHash != sourceHash || availability.Status != "paused" {
 		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
@@ -272,7 +307,7 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 	return rt, contexts
 }
 
-func ordinaryForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
+func ordinaryForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, agents ...SelectedContractAgentRuntimeOptions) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
 	t.Helper()
 	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 	bundle, found := semanticview.Bundle(loaded.Source)
@@ -280,7 +315,14 @@ func ordinaryForkRuntimeFixture(t *testing.T, ctx context.Context, selected any,
 		t.Fatal("ordinary fork fixture requires its retained source artifact")
 	}
 	storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), selected.(storetest.DurableDataCatalogStore), bundle)
-	rt, _, err := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, true)
+	var options SelectedContractAgentRuntimeOptions
+	if len(agents) > 1 {
+		t.Fatal("ordinary runtime fixture accepts one exact agent configuration")
+	}
+	if len(agents) == 1 {
+		options = agents[0]
+	}
+	rt, _, err := nodeReplyRuntimeWithAgentOptions(t, ctx, selected, owner, loaded, posture, true, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +456,7 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 			at := runlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-2 * time.Hour))
 			bundle, _ := semanticview.Bundle(loaded.Source)
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
-			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
+			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, RunID: runID,
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 			rt, stopSourceServing := nestedDeadlineSourceRuntime(t, ctx, selected, owner, loaded)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
@@ -569,15 +611,17 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 					t.Fatal(err)
 				}
 				stopSourceServing()
-				selected, owner, ctx = restartSelectedDeadlineChild(t, ctx, rt, selected, owner, reopen, loaded, staged, childRows, operation, childHold, servingContexts, runID)
+				selected, owner, ctx = restartSelectedDeadlineChild(t, ctx, rt, selected, owner, reopen, loaded, staged, childRows, operation, childHold, servingContexts, runID, resumeChild)
 			}
 			wait, cancelWait := context.WithTimeout(ctx, 20*time.Second)
 			defer cancelWait()
-			var servingCtx context.Context
-			select {
-			case servingCtx = <-servingContexts:
-			case <-wait.Done():
-				t.Fatal("selected serving admission was not observed")
+			servingCtx := ctx
+			if restartVariant == "" {
+				select {
+				case servingCtx = <-servingContexts:
+				case <-wait.Done():
+					t.Fatal("selected serving admission was not observed")
+				}
 			}
 			// A context-only start cut owes the retained deadline arms, not a
 			// fabricated inner delivery. The other cut must claim its real input.
@@ -604,6 +648,9 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 					case <-time.After(10 * time.Millisecond):
 					}
 				}
+			}
+			if restartVariant != "" {
+				resumeChild()
 			}
 			for {
 				closed := 0
