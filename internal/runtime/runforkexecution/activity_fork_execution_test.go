@@ -34,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 
@@ -311,6 +312,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 // materialization, runtime execution, connector calls and final publication are real.
 type activityForkFixture struct {
 	owner SelectedContractExecutionOwner
+	live  bool
 }
 
 type activityForkSourceEvidence = storetest.ActivityForkSourceStorage
@@ -346,9 +348,13 @@ func (f activityForkFixture) seedSource(t *testing.T, ctx context.Context, loade
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
 	ctx = originalSelectedFixtureContext(t, ctx, any(f.owner.ports.fork).(startupownership.Store))
-	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), storetest.RunFixture{
+	run := storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: artifact,
-	})
+	}
+	if f.live {
+		run.Origin, run.LiveScope = runlifecycle.DeploymentRunOrigin(), runlifecycle.LiveRunScope{FlowPath: "."}
+	}
+	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), run)
 	payload, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
@@ -506,9 +512,21 @@ func selectedContractActivityDeclaredSourceWithResultConsumer(t *testing.T, serv
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
+		"schema.yaml": `name: activity-fork-proof
+stages: {pending: {}}
+pins:
+  inputs: [review.start, review.requested, review.retry, review.close]
+connect:
+  - {event: review.start, from: ., to: flow_a}
+  - {event: review.requested, from: ., to: flow_a}
+  - {event: review.retry, from: ., to: flow_a}
+  - {event: review.close, from: ., to: flow_a}
+`,
 		"entities.yaml": "root: {}\n",
+		"events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/schema.yaml": `name: flow_a
+pins:
+  inputs: [review.start, review.requested, review.retry, review.close]
 stages:
   pending: {}
   review: {}
@@ -520,8 +538,7 @@ loops:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `,
-		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
-		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
+		"flow_a/entities.yaml": "test_entity:\n  name: {type: text, _unused_reason: retained source identity witness}\n",
 		"flow_a/nodes.yaml": `test-node:
   execution_type: system_node
   subscribes_to: [review.start, review.requested, review.retry, review.close]
@@ -546,7 +563,6 @@ loops:
 `, method, serverURL),
 	}
 	if consumeResult {
-		files["flow_a/schema.yaml"] = strings.Replace(files["flow_a/schema.yaml"], "  pending: {}\n  review: {}", "  review: {}\n  pending: {}", 1)
 		files["flow_a/nodes.yaml"] = strings.Replace(files["flow_a/nodes.yaml"], "review.retry, review.close]", "review.retry, review.close, connector.succeeded]", 1) + `
     connector.succeeded:
       loop: {repeat: revision, from: review}

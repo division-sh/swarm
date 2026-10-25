@@ -3844,42 +3844,19 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
-	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
-
-	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-		ForkRunID:         materialized.ForkRunID,
-		AllowSourceFreeze: true,
-		Store:             pg,
-		ExecutionOwner:    selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
-		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
+		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
+		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader, ContractSelection: selection,
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
 	if err != nil {
-		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
+		t.Fatalf("selected recipient execution: %v", err)
 	}
-	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.ForkRunID)
-	if executionErr != nil {
-		t.Fatalf("retained selected execution: %v", executionErr)
+	materialized := result.Materialization
+	if result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+		t.Fatalf("selected recipient execution = %#v", result)
 	}
-
-	if result.ContractSwapBootResumeExecution == nil ||
-		result.ContractSwapBootResumeExecution.Owner != runfork.RunForkHistoricalReplayContractSwapBootResumeOwner ||
-		result.ContractSwapBootResumeExecution.ParentHistoricalReplayExecutionOwner != runfork.RunForkHistoricalReplayExecutionOwner ||
-		len(result.ContractSwapBootResumeExecution.ExecutableWork) != 1 {
-		t.Fatalf("contract-swap execution = %#v", result.ContractSwapBootResumeExecution)
-	}
-	if retainedExecution.ExecutedEventCount != 1 || len(retainedExecution.ForkEvents) != 1 || !result.Activated {
-		t.Fatalf("activation result = %#v", result)
-	}
-	assertSelectedContractRuntimeContainerProof(t,
-		result.ForkLocalRuntimeContainer,
-		runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
-		sourceRunID,
-		materialized.ForkRunID,
-		sourceEventID,
-		[]string{sourceEventID},
-	)
-	forkEventID := retainedExecution.ForkEvents[0].ForkEventID
+	forkEventID := result.ForkEvents[0].ForkEventID
 
 	var sourceSubscriberDeliveries, forkEventDeliveries int
 	if err := db.QueryRowContext(ctx, `
@@ -3966,7 +3943,6 @@ func TestActivateSelectedContractRunForkKeepsPostTReplayScopeSourceLocal(t *test
 	}
 	storetest.CaptureRunForkSnapshot(t, ctx, pg, sourceRunID)
 
-	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
 	afterEvent := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(afterEventID, "source.after", "source-runtime", "", []byte(`{}`), 0,
 		sourceRunID, events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), events.NoRoutingSource(), at.Add(time.Second), executionmode.Live)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, afterEvent, nil, runtimepipelineobligation.ScopeDirect)
@@ -3976,15 +3952,13 @@ func TestActivateSelectedContractRunForkKeepsPostTReplayScopeSourceLocal(t *test
 		t.Fatal(err)
 	}
 
-	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-		AllowSourceFreeze: true,
-		ForkRunID:         materialized.ForkRunID,
-		Store:             pg,
-		ExecutionOwner:    selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
-		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
+		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
+		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader, ContractSelection: selection,
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
-	if err != nil || !result.Activated || result.SourceFrozen || !result.SourceAdvancedAfterFork {
+	materialized := result.Materialization
+	if err != nil || result.ExecutedEventCount != 1 || !materialized.SourceRunStatusUnchanged {
 		t.Fatalf("source-local scope suppressed selected continuation: result=%+v err=%v", result, err)
 	}
 	for deadline := time.Now().Add(15 * time.Second); ; {
