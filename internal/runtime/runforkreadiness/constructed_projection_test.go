@@ -140,7 +140,6 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 						row := runfork.RunForkEntityState{EntityID: child.EntityID, CurrentState: mutationlog.PresentLifecycleState("active"), EnteredStateAt: &entered,
 							MaterializationMetadata: selectedAgentConstructionMetadata(t, source, runID, child, "", entered)}
 						if fields {
-							row.MaterializationMetadata.EntityType = "child_state"
 							row.Fields = map[string]any{"value": key}
 						}
 						row.MaterializationMetadata.InitialMaterialization = selectedConstructionReceipt(t, source, runID, child, row.Fields, entered)

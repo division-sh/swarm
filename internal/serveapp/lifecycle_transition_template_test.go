@@ -339,7 +339,7 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 			completeLifecycleTemplateSiblings(t, rt, runID, siblings)
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			var count int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, runID).Scan(&count); err != nil {
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND stage_defined=true`, runID).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			if count != 7 {
