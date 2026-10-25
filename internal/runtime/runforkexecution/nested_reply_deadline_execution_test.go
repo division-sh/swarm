@@ -191,9 +191,9 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	return rt, serving.Close
 }
 
-func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
+func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string, posture executionposture.Posture) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
 	t.Helper()
-	rt, _ := nodeReplyRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, true)
+	rt, _ := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, true)
 	definition := rootruntime.BundleContext{
 		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source,
 		Runtime: rt, WorkOwner: rt.WorkOccurrence(),
