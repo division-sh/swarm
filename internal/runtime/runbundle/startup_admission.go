@@ -184,7 +184,7 @@ type upgradeCheck struct {
 func (c *upgradeCheck) add(instance, entity, flow, kind, detail, family, member string) {
 	c.blockers = append(c.blockers, UpgradeBlocker{
 		RunID: c.runID, FlowInstance: instance, EntityID: entity, Kind: kind,
-		Detail: detail, Location: upgradeLocation(c.current, flow, family, member),
+		Detail: detail, Location: upgradeLocation(c.candidate, flow, family, member),
 	})
 }
 

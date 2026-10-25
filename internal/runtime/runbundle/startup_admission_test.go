@@ -9,8 +9,12 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -95,10 +99,14 @@ func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
 }
 
 func testUpgradeRetainedInstances(t *testing.T) {
-	source := func(stage, fieldType string) semanticview.Source {
+	source := func(stage, fieldType string, edits ...func(*contracts.WorkflowContractBundle)) semanticview.Source {
 		bundle := &contracts.WorkflowContractBundle{
 			RootSchema: &contracts.FlowSchemaDocument{Name: "upgrade", StageDeclarations: contracts.FlowStageDeclarations{
-				Declared: true, Entries: []contracts.FlowStageDeclaration{{ID: stage}},
+				Declared: true, Entries: []contracts.FlowStageDeclaration{{ID: stage, Gate: &contracts.FlowStageGateDeclaration{
+					Decision: "review", Title: "Review", Outcomes: map[string]contracts.FlowStageGateOutcomeDeclaration{
+						"approve": {Label: "Approve", AdvancesTo: stage},
+					},
+				}}},
 			}},
 			FlowSources: map[string]contracts.FlowSource{".": {Schema: "schema.yaml", Entities: "entities.yaml"}},
 			RootEntities: contracts.EntityContractsDocument{"record": {Fields: map[string]contracts.EntityFieldDecl{
@@ -111,6 +119,9 @@ func testUpgradeRetainedInstances(t *testing.T) {
 		root := &contracts.FlowContractView{Paths: contracts.FlowContractPaths{FlowPath: "."},
 			Schema: *bundle.RootSchema, Events: bundle.Events}
 		bundle.FlowTree = contracts.FlowTree{Root: root, ByID: map[string]*contracts.FlowContractView{".": root}}
+		for _, edit := range edits {
+			edit(bundle)
+		}
 		if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
 			t.Fatal(err)
 		}
@@ -170,6 +181,67 @@ func testUpgradeRetainedInstances(t *testing.T) {
 				t.Fatalf("changed queued schema admitted: %+v", blockers)
 			}
 		}
+		t.Run("all retained blockers are reported together", func(t *testing.T) {
+			routingSource, err := events.NewRootRoutingSource(identity.EntityID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+				Route: state.Instances[0].Route, FlowID: ".", EntityID: identity.EntityID,
+				Stage: "ready", StageActivationID: "stage-entry-1", Source: routingSource,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			queued.Instances = state.Instances
+			queued.Deliveries = []deliverylifecycle.Snapshot{{
+				RunID: state.RunID, EventID: event.ID(), SubscriberID: "removed-agent", Status: deliverylifecycle.StatusPending,
+				Route: events.DeliveryRoute{
+					Recipient: events.MustAgentDeliveryRecipient("removed-agent"),
+					Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: identity.InstancePath, EntityID: identity.EntityID}),
+				},
+			}}
+			queued.Cards = []decisioncard.ListItem{{RunID: state.RunID, Status: "pending", Anchor: anchor}}
+			queued.Barriers = []fanoutbarrier.Barrier{{Status: fanoutbarrier.StatusArmed, Registration: fanoutbarrier.Registration{
+				IntentKey: fanoutobligation.IntentKey{RunID: state.RunID, TriggeringDeliveryID: "delivery-1", ElementRef: contracts.FanOutElementRef{
+					FlowPath: ".", Family: "fan_out", SemanticPath: `nodes["producer"].handlers["work.queued"].fan_out`,
+				}},
+				Route: state.Instances[0].Route, EntityID: identity.EntityID,
+			}}}
+			candidate := source("later", "string", func(bundle *contracts.WorkflowContractBundle) {
+				bundle.FlowSources["."] = contracts.FlowSource{Schema: "candidate/schema.yaml", Entities: "candidate/entities.yaml", Nodes: "candidate/nodes.yaml", Events: "candidate/events.yaml"}
+			})
+			blockers, err := CheckUpgrade(context.Background(), current, candidate, queued)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kinds := map[string]bool{}
+			for _, blocker := range blockers {
+				if blocker.RunID != state.RunID || !strings.HasPrefix(blocker.Location, "candidate/") {
+					t.Fatalf("blocker lost its instance or candidate location: %+v", blocker)
+				}
+				if blocker.Kind != "queued_event_schema_changed" && (blocker.FlowInstance != identity.InstancePath || blocker.EntityID != identity.EntityID) {
+					t.Fatalf("instance-owned blocker lost its exact target: %+v", blocker)
+				}
+				kinds[blocker.Kind] = true
+			}
+			for _, kind := range []string{"stage_removed", "field_value_incompatible", "queued_event_schema_changed", "delivery_target_removed", "gate_removed", "join_in_flight"} {
+				if !kinds[kind] {
+					t.Fatalf("missing %s in aggregate blockers: %+v", kind, blockers)
+				}
+			}
+			queued.Deliveries[0].RunID = "another-run"
+			if partial, err := CheckUpgrade(context.Background(), current, candidate, queued); err == nil || partial != nil {
+				t.Fatalf("foreign delivery returned a partial admission: %+v, %v", partial, err)
+			}
+			queued.Deliveries[0].RunID = state.RunID
+			queued.Deliveries[0].Status = deliverylifecycle.StatusDelivered
+			queued.Cards[0].Status = "resolved"
+			queued.Barriers[0].Status = fanoutbarrier.StatusFired
+			if blockers, err := CheckUpgrade(context.Background(), current, source("ready", "integer"), queued); err != nil || len(blockers) != 0 {
+				t.Fatalf("settled obligations blocked a compatible upgrade: %+v, %v", blockers, err)
+			}
+		})
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
