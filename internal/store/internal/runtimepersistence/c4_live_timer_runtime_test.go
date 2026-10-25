@@ -9,6 +9,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -85,6 +86,13 @@ func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, sourceR
 	if err != nil || !paused.Acknowledged || paused.State.Status != "paused" {
 		t.Fatalf("park exact C4 source before runtime recovery: %+v err=%v", paused, err)
 	}
+	// The construction fixture owns a different generation. Start the real
+	// runtime from the same process, not by replacing that fixture's custody.
+	ctx, err = startupownership.WithProcessMutationAuthority(worklifetime.WithProcess(context.Background(), work.process), capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(coordinates.RuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	deps.Config = &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}}
 	deps.Options = runtimepkg.RuntimeOptions{ExecutionPosture: executionposture.Live, RuntimeInstanceID: coordinates.RuntimeInstanceID,
 		SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: work.process, WorkflowModule: loaded.Module}
