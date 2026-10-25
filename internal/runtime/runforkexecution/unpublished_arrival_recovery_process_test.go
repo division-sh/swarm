@@ -9,12 +9,15 @@ import (
 	"testing"
 	"time"
 
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -32,33 +35,29 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	ancestor := uuid.NewString()
 	marker, original := seedPublishedJoinSource(t, ctx, selected, owner, loaded, ancestor)
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
-	activated, parentDone := make(chan string, 1), make(chan error, 1)
-	parent := owner
-	parentPorts := *owner.ports
-	parent.ports = &parentPorts
-	parent.ports.busDurable.RunLifecycle = &selectedActivatedServingCut{OperationOwner: owner.ports.busDurable.RunLifecycle, checkpoint: func(runID string) {
-		activated <- runID
-		<-ctx.Done()
-	}}
-	go func() {
-		_, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: ancestor, At: marker,
-			AllowSourceFreeze: true, Owner: parent, SourceLoader: loader, ContractSelection: selection,
-			ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-parent", IdempotencyKey: "original-cut",
-				TransportHash: "pending-join-parent-transport", SourceRunID: ancestor, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
-			AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
-		if err != nil {
-			parentDone <- err
-		}
-	}()
-	var parentRun string
-	select {
-	case parentRun = <-activated:
-	case err := <-parentDone:
-		t.Fatalf("pending parent missed its actual activation acknowledgment: %v", err)
-	case <-time.After(15 * time.Second):
-		t.Fatal("pending parent activation exceeded the existing bound")
+	// This source is the real unpublished materialized cut, not an ACK before
+	// business dispatch. Its component closes without gaining live authority.
+	parent := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: ancestor, At: marker,
+		AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection,
+		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-parent", IdempotencyKey: "original-cut",
+			TransportHash: "pending-join-parent-transport", SourceRunID: ancestor, ForkEventID: marker,
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
+	parentRun := parent.materialized.ForkRunID
+	if err := parent.container.Quiesce(parent.prepared.operation.Context()); err != nil {
+		t.Fatal(err)
 	}
+	if err := parent.container.Close(parent.prepared.operation.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := parent.prepared.settleConstructionFailure(parent.prepared.operation.PreparationContext(), owner.ports.fork, parentRun,
+		runfork.ForkOperationFailure{Code: "fixture_unpublished_source", Reason: "retire the materialized source before business dispatch"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := parent.prepared.Close(); err != nil {
+		t.Fatal(err)
+	}
+	parent.closed = true
 	plan, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: parentRun, AtStart: true})
 	if err != nil || len(plan.TransferredJoins) != 1 || len(plan.JoinSchedules) != 0 {
 		t.Fatalf("pending parent cut: %+v error=%v", plan, err)
@@ -103,8 +102,10 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-crash", IdempotencyKey: "parent-start",
 		TransportHash: "pending-join-crash-transport", SourceRunID: parentRun, AtStart: true,
 		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, ancestor, executionposture.MockOnly)
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: parentRun, AtStart: true,
 		AllowSourceFreeze: true, Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+		LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 	if err != nil || !result.Activation.Activated {
 		t.Fatalf("activate pending arrival before SIGKILL: %+v error=%v", result, err)
@@ -160,10 +161,6 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				operations := selected.(interface {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
-				parentACK, found, err := operations.LoadForkOperation(ctx, "pending-join-parent", "original-cut", "pending-join-parent-transport")
-				if err != nil || !found || parentACK.ForkRunID != crashed.SourceRun || parentACK.Status != runfork.ForkOperationActivated {
-					t.Fatalf("frozen parent lost its durable operation: %+v error=%v", parentACK, err)
-				}
 				inspected, err := InspectSelectedForkRecoveries(ctx, selected.(SelectedForkRecoveryInspectionReader), loader)
 				if err != nil || len(inspected) != 2 {
 					t.Fatalf("read-only two-boundary recovery inventory: %+v error=%v", inspected, err)
@@ -171,15 +168,19 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				for _, entry := range inspected {
 					switch entry.Entry.Binding.ForkRunID {
 					case crashed.SourceRun:
-						if entry.Evidence.RunState != "forked" || entry.Evidence.ExecutionState != "running" ||
-							entry.Evidence.Plan.Disposition != runfork.SelectedForkRecoveryFailed || entry.Evidence.Plan.Continuation != nil || entry.Evidence.Plan.Operation == nil ||
-							!reflect.DeepEqual(parentACK, *entry.Evidence.Plan.Operation) {
-							t.Fatalf("frozen interrupted parent gained continuation authority: %+v", entry)
+						if entry.Evidence.RunState != "cancelled" || entry.Evidence.ExecutionState != "closed" ||
+							entry.Evidence.Plan.Disposition != runfork.SelectedForkRecoveryTerminal || entry.Evidence.Plan.Continuation != nil || entry.Evidence.Plan.Operation == nil || entry.Evidence.Plan.Operation.Status != runfork.ForkOperationFailed || entry.Evidence.Plan.Operation.Result != nil {
+							t.Fatalf("closed unpublished component gained continuation authority: %+v", entry)
 						}
 					case crashed.ForkRun:
-						if entry.Evidence.RunState != "running" || entry.Evidence.ExecutionState != "running" ||
-							entry.Evidence.Plan.Disposition != runfork.SelectedForkRecoveryResume || entry.Evidence.Plan.Continuation == nil {
-							t.Fatalf("acknowledged child lost its exact continuation: %+v", entry)
+						preACK := cut == "retained_pending_join_event_committed"
+						wantRun, wantExecution, wantDisposition := runlifecycle.StateLive, "closed", runfork.SelectedForkRecoveryControlOnly
+						if preACK {
+							wantRun, wantExecution, wantDisposition = runlifecycle.StatePaused, "running", runfork.SelectedForkRecoveryResume
+						}
+						if entry.Evidence.RunState != wantRun || entry.Evidence.ExecutionState != wantExecution ||
+							entry.Evidence.Plan.Disposition != wantDisposition || (entry.Evidence.Plan.Continuation != nil) != preACK {
+							t.Fatalf("child lost its exact crash-phase continuation: %+v", entry)
 						}
 					default:
 						t.Fatalf("recovery inventory contains an unrelated boundary: %+v", entry)
@@ -198,7 +199,12 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				}
 				baseline := process.ActiveCount()
 				ack, found, err := operations.LoadForkOperation(ctx, "pending-join-crash", "parent-start", "pending-join-crash-transport")
-				if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.ForkRunID != crashed.ForkRun || ack.Result == nil ||
+				preACK := cut == "retained_pending_join_event_committed"
+				wantStatus := runfork.ForkOperationActivated
+				if preACK {
+					wantStatus = runfork.ForkOperationMaterialized
+				}
+				if err != nil || !found || ack.Status != wantStatus || ack.ForkRunID != crashed.ForkRun || (ack.Result == nil) != preACK ||
 					ack.Request.ResolvedPoint == nil || *ack.Request.ResolvedPoint != binding.ForkPoint {
 					t.Fatalf("pending crash lost permanent cut/activation acknowledgment: %+v error=%v", ack, err)
 				}
@@ -210,22 +216,43 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				ancestorDelivery := pendingSourceDeliveryForReboot(t, ctx, selected, ancestorBefore, pending.Publication.CommittedCause.RunID)
 				physical, found, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, id)
-				if err != nil || found != (cut == "retained_pending_join_event_committed") {
+				if err != nil || !found {
 					t.Fatalf("wrong physical crash boundary: found=%t error=%v", found, err)
 				}
 				if found && (!physical.Event.Event().CreatedAt().Equal(pending.Command.Due.Absolute) || physical.Event.Event().RunID() != crashed.ForkRun) {
 					t.Fatal("physical crash checkpoint changed child identity or original due")
 				}
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: crashed.ForkRun, Selection: ack.Request.ContractSelection})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ordinary, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+				rebootGrant, err := ordinary.CurrentStartupGrantEvidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rebootAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, rebootGrant.GrantID, rebootGrant.RuntimeGeneration)
+				if err != nil {
+					t.Fatal(err)
+				}
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
-					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
+					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+						use, _, err := contexts.AcquireBundleHash(ctx, hash)
+						return use, err
+					}})
 				if err != nil || len(recovered) != 2 {
 					t.Fatalf("pending arrival successor recovery: %+v error=%v", recovered, err)
 				}
 				for _, entry := range recovered {
-					want := runfork.SelectedForkRecoveryFailed
-					if entry.RunID == crashed.ForkRun {
+					want := runfork.SelectedForkRecoveryTerminal
+					if entry.RunID == crashed.ForkRun && preACK {
 						want = runfork.SelectedForkRecoveryResume
+					} else if entry.RunID == crashed.ForkRun {
+						want = runfork.SelectedForkRecoveryControlOnly
 					}
 					if entry.Disposition != want {
 						t.Fatalf("successor confused frozen parent and owed child: %+v want=%s", entry, want)
@@ -233,12 +260,20 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				}
 				waitPublishedChildCompletion(t, selected, process, baseline, crashed.ForkRun)
 				state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, crashed.ForkRun)
-				if err != nil || state.State != "closed" || state.RunStatus != "completed" || state.Occurrences != 2 {
+				wantOccurrences := 1
+				if preACK {
+					wantOccurrences = 2
+				}
+				if err != nil || state.State != "closed" || state.RunStatus != "live" || state.Occurrences != wantOccurrences {
 					t.Fatalf("successor did not complete through one fresh execution: %+v error=%v", state, err)
 				}
 				parentState, err := storetest.ReadSelectedExecutionStorage(ctx, selected, crashed.SourceRun)
-				if err != nil || parentState.State != "closed" || parentState.RunStatus != "forked" || parentState.Occurrences != 1 {
-					t.Fatalf("successor reexecuted or changed the frozen parent: %+v error=%v", parentState, err)
+				if err != nil || parentState.State != "closed" || parentState.RunStatus != "cancelled" || parentState.Occurrences != 1 {
+					t.Fatalf("successor reexecuted or changed the unpublished parent: %+v error=%v", parentState, err)
+				}
+				parentAvailability, err := lifecycle.LoadRunBundleAvailability(ctx, crashed.SourceRun)
+				if err != nil || !parentAvailability.Available() || parentAvailability.Status != "cancelled" || parentAvailability.BundleHash != loaded.SourceArtifactFact.BundleHash() {
+					t.Fatalf("successor changed its retained materialized source: %+v err=%v", parentAvailability, err)
 				}
 				event := storetest.LoadCanonicalEventRecord(t, ctx, selected, id)
 				lineage, found := event.SelectedForkLineage()
@@ -273,16 +308,32 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 					runID  string
 					before map[string]storetest.SelectedForkStorageTableSnapshot
 				}{{crashed.SourceRun, parentBefore}, {pending.Publication.CommittedCause.RunID, ancestorBefore}} {
+					if source.runID == pending.Publication.CommittedCause.RunID {
+						requirePendingSourceRebootConservation(t, ctx, selected, source.before, ancestorDelivery, rebootAuthority)
+						continue
+					}
 					after, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, source.runID)
 					if err != nil || !reflect.DeepEqual(source.before, after) {
+						for table, old := range source.before {
+							if !reflect.DeepEqual(old, after[table]) {
+								t.Logf("source=%s table=%s before=%+v after=%+v", source.runID, table, old, after[table])
+							}
+						}
 						t.Fatalf("successor changed source/cause business facts: run=%s error=%v", source.runID, err)
 					}
 				}
 				stable, found, err := operations.LoadForkOperation(ctx, ack.Request.Actor, ack.Request.IdempotencyKey, ack.Request.TransportHash)
-				if err != nil || !found || !reflect.DeepEqual(ack, stable) {
+				if preACK {
+					if err != nil || !found || stable.Status != runfork.ForkOperationActivated || stable.Result == nil || stable.ForkRunID != ack.ForkRunID || stable.BindingID != ack.BindingID || stable.SemanticHash != ack.SemanticHash || !reflect.DeepEqual(stable.Request, ack.Request) {
+						t.Fatalf("successor did not acknowledge its exact original operation: %+v err=%v", stable, err)
+					}
+				} else if err != nil || !found || !reflect.DeepEqual(ack, stable) {
 					t.Fatalf("successor changed the permanent acknowledgment: %+v error=%v", stable, err)
 				}
 				requireUnpublishedJoinAncestorPurgeRefused(t, ctx, selected, owner, capability, pending.Publication.CommittedCause.RunID, crashed.SourceRun)
+				if err := ordinary.Shutdown(); err != nil || process.ActiveCount() != baseline {
+					t.Fatalf("unpublished recovery did not join its real ordinary resources: work=%d baseline=%d err=%v", process.ActiveCount(), baseline, err)
+				}
 				if err := owner.RetireSelectedContexts(ctx); err != nil || process.ActiveCount() != baseline {
 					t.Fatalf("pending successor retained process work: count=%d baseline=%d error=%v", process.ActiveCount(), baseline, err)
 				}

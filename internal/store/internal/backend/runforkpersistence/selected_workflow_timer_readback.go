@@ -21,10 +21,10 @@ type runForkWorkflowTimerReadbackPort struct {
 	replies          runForkReplyContextOwner
 }
 
-// Successor issuance consumes the permanent activation fact, never "paused"
-// as proof that the predecessor did not execute. Readback creates no work.
+// The caller has issued and transferred from the exact closed predecessor in
+// this attempt. A materialized operation alone proves no execution progress.
 func requireSelectedSuccessorWorkflowTimers(ctx context.Context, attempt *mutationprotocol.Attempt, req runfork.SelectedContractRuntimeExecutionIssueRequest, port runForkWorkflowTimerReadbackPort) error {
-	if port.snapshot == nil || port.plan == nil || port.timers == nil || port.arrivalSchedules == nil || port.replies == nil {
+	if req.RecoveryFromExecutionID == "" || port.snapshot == nil || port.plan == nil || port.timers == nil || port.arrivalSchedules == nil || port.replies == nil {
 		return fmt.Errorf("selected timer continuation requires its canonical readback owners")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -61,10 +61,10 @@ func requireSelectedSuccessorWorkflowTimers(ctx context.Context, attempt *mutati
 		bornAt := runlifecycle.CanonicalTimestamp(snapshot.StartedAt)
 		switch {
 		case operation.Status == runfork.ForkOperationMaterialized && snapshot.State == runlifecycle.StatePaused:
-			admission, err = requireMaterializedRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
+			admission, err = requireContinuingRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
 				req.InheritedSchedules, port.timers, port.arrivalSchedules, bornAt, admission)
 			if err == nil {
-				_, err = requireMaterializedRunForkReplyContexts(ctx, tx, port.replies, plan, snapshot.RunID, port.postgres, admission)
+				_, err = requireContinuingRunForkReplyContexts(ctx, tx, port.replies, plan, snapshot.RunID, bornAt, admission)
 			}
 		case operation.Status == runfork.ForkOperationActivated && snapshot.State == runlifecycle.StateRunning:
 			admission, err = requireContinuingRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
