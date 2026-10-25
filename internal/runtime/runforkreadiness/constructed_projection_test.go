@@ -38,7 +38,7 @@ func TestSelectedRecordedRootAttachmentWithoutDispatch(t *testing.T) {
 	entity := runfork.RunForkEntityState{EntityID: runID, CurrentState: mutationlog.PresentLifecycleState("waiting"), EnteredStateAt: &entered,
 		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
-			Mode: "static", EntityType: "state", FlowTemplate: root.TemplateID, FlowInstance: runID,
+			Mode: "static", FlowTemplate: root.TemplateID, FlowInstance: runID,
 			FlowConfig: selectedAgentHeaderConfig(t, root),
 		}}
 	entity.MaterializationMetadata.InitialMaterialization = selectedConstructionReceipt(t, source, runID, root, nil, entered)

@@ -2778,8 +2778,6 @@ contract_formats:
           Optimistic executor validation is not commit authority. Equality-participant paths remain available when explicitly
           granted, but each single-field tool call must leave the full candidate valid. No bulk, clear or CEL agent tool is added.'
         response_semantics: 'Generated save/update tools inherit save_entity_field committed revision and post-commit failure response semantics; they expose only the safe post_commit_error_code and MUST NOT expose raw SQL or connection error text or invite a duplicate write.'
-        materialized_field_exclusion: 'Fields declaring materialize_from, and every nested subpath below them, MUST NOT
-          appear in generated write tools or writable-path summaries. They are runtime-owned projection fields.'
         create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
           expose a generic agent-facing create_entity replacement for current-entity tools.'
       generated_schema_closure: 'Generated entity-tool input and output schemas are closed recursively: additionalProperties
@@ -3222,26 +3220,18 @@ entity_contracts:
             min: <number>
             max: <number>
           equal_to: <sibling_field>
-          materialize_from: <node_id>.<accumulator_name>
-          project:
-            <target_item_field>: source.<source_item_field>
-            <target_policy_field>: policy.<policy_path>
-            <target_literal_field>: <literal>
           _unused_reason: <reason>
           _unused_reader_reason: <reason>
     notes:
     - Entity-level metadata is underscore-prefixed.
     - State does not live in entity contracts.
     - Envelope names are reserved and must not be author-declared.
-    - '`materialize_from` is valid only for a list of a declared named type.'
-    - '`materialize_from` and `_unused_reason` are mutually exclusive.'
     - '`_unused_reader_reason` documents that a field is intentionally read only outside platform-visible internal handlers.
       It suppresses only the informational `entity_reader_coverage` slice; it does not count as writer coverage, authorize
       runtime/API reads, or change persistence semantics.'
     - '`indexed: true` declares a top-level entity field for supported query/index consumers.
       It does not make that field receiver-routing authority. Template receiver selection consumes only the
       flow''s declared scalar instance identity; arbitrary business-field descriptor routing is retired.'
-    - 'A `materialize_from` field is runtime-owned and not agent-writable.'
     - 'A trailing ? marks an optional field edge, not a nullable value. Bare entity roots may remain progressively
       unassigned until a proven write; supplied named records still require every bare member.'
     - 'Explicit initial values apply once through the canonical keyed/keyless constructor and never during reads,
@@ -3272,53 +3262,6 @@ entity_contracts:
       Input address, connect map, arbitrary entity-field targets, and the old
       business-field materializer are invalid and cannot be repaired by an
       indexed field.
-  accumulator_entity_projection:
-    description: |
-      `materialize_from` declares a downstream typed entity-field copy of a
-      same-flow node accumulator. The accumulator remains canonical for
-      stream receipt acceptance, deduplication, and computation. The
-      entity field is a persisted visibility/audit projection written by the
-      runtime after each admitted stream arrival.
-    source_reference: |
-      The value has shape `<node_id>.<accumulator_name>`. The referenced node
-      must belong to the same flow as the declaring entity. The referenced
-      handler accumulator must be declared with `accumulate.into:
-      <accumulator_name>`.
-    target_type: |
-      The target field must be `[NamedType]`. The source
-      accumulator state_schema field named by `accumulate.into` must also be a
-      named-type list. `jsonb`, `[text]`, and untyped structural targets are
-      invalid for projection.
-    project: |
-      If source and target item named types are identical, `project` is
-      forbidden and identity projection is used. If they differ, `project` is
-      required and must name every field of the target item type. Project
-      expressions support exactly `source.*`, `policy.*`, and literal YAML
-      scalar/sequence/mapping values. `source.*` references resolve only
-      against declared fields of the source item type. Runtime accumulator
-      metadata (`event_id`, `event_type`, `source`, `received_at`) and
-      event-payload extras outside the source named type are not addressable
-      through `source.*`. `policy.*` references resolve against the declaring
-      flow's resolved policy document and must be declared; unknown policy
-      paths are hard invalidity. Literal values are copied as authored and
-      validated through the target entity field's named-type normalizer at
-      runtime. Bindings to `entity.*`, `payload.*`, `event.*`, `fan_out.*`, or
-      `accumulated.*` are unsupported in `project`.
-    writer_ownership: |
-      `materialize_from` is the sole runtime writer for the field after
-      create-time `initial:` materialization. Other authored writes
-      (`data_accumulation`, compute/filter/reduce/count/group_by store_as,
-      query store_as, clear, or agent entity_writes/save tools) are hard
-      invalidity.
-    runtime_binding_identity: |
-      Runtime projection binding uses the same node event identity semantics as
-      handler dispatch. A flow-local authored handler key and the
-      namespace-qualified runtime event that dispatched that handler are the
-      same projection source when the node event resolver canonicalizes them to
-      the same event identity.
-    e1_coverage: |
-      `materialize_from` counts as entity writer coverage for E1. It replaces
-      `_unused_reason`; the two may not coexist.
   one_entity_type_per_flow: |
     For normal flow-instance-centered authoring (stateful schemas with no
     static/template mode), a stateful normal flow declares exactly one entity
@@ -4063,7 +4006,6 @@ handler_specification:
       \           └→ emit-site selection (handler emit OR active emit set: selected rule emit/template then on_success.emit, selected on_complete emit, or fan_out emit)\n                    \
       \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
-      \                         └→ projection (materialize_from, when declared for an admitted stream arrival)\n                  \
       \                                └→ emit.fields\n                                                       └→ emit.event\n  \
       \                                                          └→ action OR activity intent\n                                            \
       \                     └→ clear (optional — reset accumulator/state buckets)\n    "
@@ -4189,9 +4131,8 @@ handler_specification:
       type: object
       purpose: Admit arrivals into an instance-scoped stream without finite membership or closure.
       sub_fields:
-        into: 'string — optional explicit accumulator buffer name. Required when any entity field declares
-          materialize_from: <this_node>.<into>. Must resolve to a state_schema field on this node typed as
-          [NamedType]. Within one node, a given into value may be declared by at most one handler.'
+        into: 'string — optional explicit accumulator buffer name. Within one node, a given into value may be declared
+          by at most one handler.'
         from: string — optional sender path filter
         description: string — human-readable note
         key: >-
@@ -4212,13 +4153,6 @@ handler_specification:
         and fail strict decoding. Finite declared-membership waiting, completion, timeout, persistence, and replay belong only
         to the compiled WorkflowJoinPlan and joinruntime activation. Handler-level `on_complete` is also prohibited on a
         handler that declares `accumulate`.
-      projection_hook: |
-        After each admitted stream arrival, any same-flow
-        entity field declaring `materialize_from` for this handler's
-        `accumulate.into` buffer is written as a full replacement list after
-        data_accumulation and before emit.fields. Rules remain ordinary
-        per-arrival branch-selection/data-write/emit/action semantics and do
-        not turn the stream into a finite barrier.
     compute:
       field: compute
       type: object
@@ -5480,7 +5414,7 @@ handler_specification:
       entity:
         resolves_to: 'Declared business fields for the current entity. entity.X reads entity_state.fields->>X
           only when X is declared by the active entity contract.'
-        populated_by: 'Committed typed mutation operations, declared accumulator projections and explicit creation
+        populated_by: 'Committed typed mutation operations and explicit creation
           initialization. sets_gate and advances_to do not assign entity fields by themselves.'
         read_model:
           declared_fields: A bare field read requires prior assignment at its exact program point. T? permits intentional omission, without reader-time initialization.
@@ -5491,9 +5425,7 @@ handler_specification:
           reference_owner: Field-reference and lifecycle checks consume the stock CEL AST, including optional selectors and lexical macro bindings, after the existing condition-dialect normalization. String/regex extraction must not invent paths or count a shadowed entity identifier as the current entity.
         does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
           collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
-          only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.
-          To persist a strict typed downstream copy, declare an entity field materialize_from; the runtime projection
-          step owns that write.'
+          only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.'
       _entity:
         resolves_to: 'Read-only platform metadata/control for the current entity. Supported fields are _entity.id,
           _entity.current_state, _entity.flow_instance, _entity.gates, and _entity.gates.<name>.'
@@ -5513,11 +5445,6 @@ handler_specification:
           (e.g., d.dimension, d.score, d.tier for score.dimension_complete).'
         not_available_in: 'guard.check — guards run before accumulation. handler-level on_complete is prohibited on
           accumulate handlers and cannot recreate finite completion.'
-        projection_boundary: |
-          `materialize_from` consumes accumulated items through the source
-          named type's typed view. Runtime accumulator metadata and event
-          payload extras outside the source named type are stripped before
-          writing the entity field and are not addressable as `source.*`.
       fan_out:
         resolves_to: 'Handler context produced while creating the durable fan_out obligation. fan_out.count is the
           immutable source cardinality owed by that obligation, not publications committed, deliveries settled,
@@ -5643,7 +5570,6 @@ handler_specification:
   - 'emit-site selection → sets_gate: sets_gate is handler-level only; selected rule/on_complete entries do not declare or override sets_gate'
   - 'emit-site selection → data_accumulation: selected rule/on_complete data_accumulation supplements handler-level data_accumulation in the same transaction; selected entry writes run before handler-level writes'
   - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
-  - 'data_accumulation → projection: accumulator-to-entity materialize_from writes run after selected rule writes on valid stream handlers'
   - 'projection → emit.fields: emit payload expressions observe projected entity fields'
   - 'emit.fields → emit.event: output payload constructed before event persisted'
   - 'emit.event → clear: state cleanup is staged last in the handler transaction'
@@ -6842,8 +6768,7 @@ engine:
         event key after runtime handler resolution/localization, not by the
         concrete event-bus event type that delivered the event. The concrete
         event type remains event provenance and must be retained on accumulated
-        item metadata and diagnostics. Compute reads and `materialize_from`
-        projection reads must consume the same selected
+        item metadata and diagnostics. Compute reads must consume the same selected
         handler event key and captured generation. The selected instance owns
         the partition; no authored business-window suffix remains.
       arrival: >-
@@ -25685,45 +25610,11 @@ static_analyzer:
         rule: Explicit `initial:` on the field counts as authored creation-time coverage.
       unused_reason:
         rule: Explicit `_unused_reason:` documents intentional no-writer intent and suppresses this slice only.
-      materialize_from:
-        rule: Explicit `materialize_from:` counts as runtime-owned writer coverage when accumulator_entity_projection verify passes.
       handler_write_sites:
         rule: Handler write targets that name the field explicitly count as coverage. This includes data_accumulation, compute,
           filter/group_by/reduce/count store_as, query store_as, and clear targets.
     rule: Emit hard invalidity when a declared entity field has no authored writer coverage, no explicit `initial:`, and no
       `_unused_reason:`.
-  slice_6b_accumulator_entity_projection:
-    id: accumulator_entity_projection
-    domain: semantic_validity
-    authority: hard_invalidity
-    severity: error
-    canonical_owner: internal/runtime/accprojection resolver consumed by bootverify and runtime executor
-    supported_surface: cmd/swarm verify and runtime handler execution
-    spec_basis:
-    - entity_contracts.accumulator_entity_projection
-    - handler_specification.handler_fields.accumulate
-    - design_principles.no_structural_primitive_elides_type_discipline
-    rule: |
-      Verify every `materialize_from` field through the shared projection
-      resolver. Hard invalidity if the reference is malformed, the source node
-      is missing or cross-flow, the source handler lacks matching
-      `accumulate.into`, multiple handlers on one node declare the same
-      projectable buffer, the source/target types are not named-type lists, the
-      source event payload lacks the complete typed view, project coverage is
-      partial, reaches undeclared source fields/metadata/extras, references an
-      undeclared policy path, uses an unsupported binding namespace, the field
-      also declares `_unused_reason`, or any other authored writer targets the
-      same field.
-    runtime_rule: |
-      After each open-stream accumulator arrival is admitted, runtime writes the
-      current projection as a full replacement before emit.fields. Handler
-      `rules` do not guard projection eligibility. The projected result is
-      validated through entity named-type normalization. Failure rolls back the
-      whole handler transaction. If a verify-clean declaration exists for the
-      active stream accumulator but runtime resolves zero projection bindings,
-      execution fails closed as a runtime invariant violation rather than
-      silently skipping the projection. Projection is per admitted arrival and
-      is never gated by finite completion, timeout, or handler `on_complete`.
   slice_6c_accumulator_static_safety:
     ids:
     - accumulator_input_producer_path

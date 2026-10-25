@@ -235,8 +235,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				construction224Instance, construction224Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction224Ctx, owner, runtimepipeline.WorkflowInstance{
 					InstanceID: flowInstanceID, StorageRef: flowInstance, EntityID: entityID,
 					ParentFlowID: parent.TemplateID, ParentFlowInstance: parent.InstancePath, ParentEntityID: parent.EntityID,
-					EntityType: "state", WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),
-					Mode: runtimecontracts.FlowModeStatic, CurrentState: "active", Fields: map[string]any{},
+					WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),
+					Mode: runtimecontracts.FlowModeStatic, CurrentState: "active",
 				}, construction224At)
 				if err != nil {
 					t.Fatalf("prepare fixture initial lifecycle: %v", err)

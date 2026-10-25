@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -210,32 +209,6 @@ func TestA2M15AccumulatorBucketIsolationAndCapturedGeneration(t *testing.T) {
 	frame = &executionFrame{req: ExecutionRequest{Node: firstNode, HandlerEventKey: "item.received"}, loopActivation: &loopruntime.Activation{}}
 	_, _, err = executor.resolveAccumulatorBucketRef(frame, nil)
 	requireAccumulatorFailure(t, err, failures.ClassLifecycleConflict)
-}
-
-func TestA2M15AccumulatorProjectionPreservesMetadataNamesAndNestedFields(t *testing.T) {
-	executor := &Executor{}
-	text := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}
-	record := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "id", Type: text}}}
-	binding := accprojection.Binding{SourceItemType: "Business", TargetItemType: "Projected", Project: map[string]any{}}
-	item := map[string]any{"event_id": "authored-id", "event_type": "authored-type", "source": "authored-source", "received_at": "authored-time", "payload": map[string]any{"id": "nested"}}
-	for _, name := range []string{"event_id", "event_type", "source", "received_at", "payload"} {
-		fieldType := text
-		if name == "payload" {
-			fieldType = record
-		}
-		field := runtimecontracts.ResolvedCatalogField{Name: name, Type: fieldType}
-		binding.SourceType.Fields = append(binding.SourceType.Fields, field)
-		binding.TargetType.Fields = append(binding.TargetType.Fields, field)
-		binding.Project[name] = "source." + name
-	}
-	projected, err := executor.projectAccumulatorItems(&executionFrame{}, binding, []map[string]any{item})
-	if err != nil || len(projected) != 1 || !reflect.DeepEqual(projected[0], item) {
-		t.Fatalf("business projection = %#v, %v", projected, err)
-	}
-	projected[0].(map[string]any)["payload"].(map[string]any)["id"] = "changed"
-	if item["payload"].(map[string]any)["id"] != "nested" {
-		t.Fatal("projection aliases nested business fields")
-	}
 }
 
 func TestA2M15AccumulatorFilterReduceCountAndComputeUseBusinessItems(t *testing.T) {
