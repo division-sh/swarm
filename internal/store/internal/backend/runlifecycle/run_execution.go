@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -156,10 +157,8 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 			if err != nil || !original.HasRuntimeGrant() {
 				return errors.Join(err, fmt.Errorf("%w: live handoff requires its ordinary generation grant", runtimerunlifecycle.ErrRunExecutionAuthority))
 			}
-			if evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx); present {
-				if err := generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, evidence, fact.BundleHash(), !postgres); err != nil {
-					return err
-				}
+			if evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx); present && !reflect.DeepEqual(evidence, original.GrantEvidence()) {
+				return fmt.Errorf("%w: live handoff grant evidence differs from its original owner", runtimerunlifecycle.ErrRunExecutionAuthority)
 			}
 			return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, original.GrantEvidence(), fact.BundleHash(), !postgres)
 		}

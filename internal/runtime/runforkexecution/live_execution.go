@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -162,6 +163,18 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	if err := runtime.startExecution(c.attachment.ctx, c.attachment.pipeline, c.diagnostics, p.recoveryFromExecutionID != ""); err != nil {
 		return out, err
 	}
+	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, p.operation.selected, runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) })
+	if err != nil {
+		return out, err
+	}
+	if err := runtime.bus.SetDeliveryContinuationOwner(continuations); err != nil {
+		return out, err
+	}
+	if err := continuations.Start(c.attachment.ctx); err != nil {
+		return out, err
+	}
+	retireContinuations := sync.OnceValue(func() error { return continuations.Retire(context.WithoutCancel(c.attachment.ctx)) })
+	defer func() { finalErr = errors.Join(finalErr, retireContinuations()) }()
 	inputs, err := c.commitSelectedInputs()
 	defer func() {
 		for _, input := range inputs {
@@ -176,6 +189,12 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 			return out, err
 		}
 		out.ExecutedEventCount++
+	}
+	if err := continuations.Synchronize(c.attachment.ctx); err != nil {
+		return out, err
+	}
+	if err := retireContinuations(); err != nil {
+		return out, err
 	}
 	// Stop actors and join accepted work while their selected grant still exists.
 	// Shutdown retires that grant and therefore belongs after the native handoff.
