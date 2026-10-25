@@ -165,6 +165,19 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 				TransportHash: "prepared-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, sourceCtx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+			preservedSource := joinLiveForkFixtureClock(t, sourceCtx, liveRuntime, selected, sourceRun, source.ID)
+			sourceCount, err := storetest.ReadLifecycleEventCardinality(sourceCtx, selected, sourceRun, "platform.join_timeout")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(sourceCtx, selected, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceDeliveries, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(sourceCtx, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
 			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(sourceCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
@@ -301,12 +314,10 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			if err != nil || !found {
 				t.Fatalf("prepared source deadline disappeared: found=%v err=%v", found, err)
 			}
-			afterDigest, err := original.EvidenceDigest()
-			if err != nil || afterDigest != sourceDigest || original.Status != genericschedule.StatusActive || original.CurrentEventID != candidate.EventID ||
-				!original.CurrentEventAdmittedAt.Equal(candidate.AdmittedAt) {
+			if !reflect.DeepEqual(original, preservedSource) {
 				t.Fatalf("child changed or committed its prepared source candidate: %+v err=%v", original, err)
 			}
-			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_timeout"); err != nil || count != 0 {
+			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_timeout"); err != nil || count != sourceCount {
 				t.Fatalf("prepared source timeout was published: count=%d err=%v", count, err)
 			}
 			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceRun)
@@ -314,7 +325,7 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 				t.Fatalf("child timeout changed prepared source business facts: %v", err)
 			}
 			sourceSettlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, sourceRun)
-			if err != nil || sourceSettlement.Total != 0 {
+			if err != nil || !reflect.DeepEqual(sourceSettlement, sourceDeliveries) {
 				t.Fatalf("child created a prepared-source delivery obligation: %+v err=%v", sourceSettlement, err)
 			}
 			retry, found, err := operations.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)

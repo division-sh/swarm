@@ -247,6 +247,32 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 	return rt, contexts
 }
 
+func joinLiveForkFixtureClock(t *testing.T, ctx context.Context, rt *rootruntime.Runtime, selected any, sourceRunID, activationID string) genericschedule.Activation {
+	t.Helper()
+	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	availability, err := selected.(SelectedContractForkLifecycle).LoadRunBundleAvailability(wait, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		clock, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(wait, activationID)
+		if err != nil || !found || clock.Command.RunID != sourceRunID {
+			t.Fatalf("read original fixture clock: found=%t clock=%+v err=%v", found, clock, err)
+		}
+		if availability.BundleHash != rt.Options.SourceArtifactFact.BundleHash() || clock.Status == genericschedule.StatusFired {
+			// This is the setup publication boundary, not a drain: its paused
+			// source keeps the real deferred delivery for a later continue.
+			return clock
+		}
+		select {
+		case <-wait.Done():
+			t.Fatalf("ordinary fixture source publication did not settle: %+v err=%v", clock, wait.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func nestedDeadlineArm(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, row replycontext.Record) joinruntime.Activation {
 	t.Helper()
 	instance, found, err := owner.ports.workflow.LoadWorkflowInstance(ctx, flowidentity.RunScopedFlowInstance{RunID: row.RunID,
