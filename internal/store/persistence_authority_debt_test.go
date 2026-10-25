@@ -836,11 +836,6 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if collector == debtSelectedFixtureComposedCollectorTo || collector == debtSelectedFixtureLandedCollectorTo {
-			if err := debtSelectedFixtureSourcePins(root, baseRoot); err != nil {
-				t.Fatal(err)
-			}
-		}
 		if err := debtValidateCollectorIdentity(baseCollector, collector, trusted, head, collector); err != nil {
 			t.Fatal(err)
 		}
@@ -943,6 +938,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // #2727/6388897450: exact landed-inert repair; both source endpoints remain authenticated.
+	}
+	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
+		current == debtCompletedSelectedFixturePinCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2728/6392837709: delete the completed migration pin; no permission change.
 	}
 	if base == debtDeploymentRegistrationCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureComposedCollectorTo && reviewedTransition == current && head.Collector == current &&
