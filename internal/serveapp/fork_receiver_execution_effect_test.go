@@ -72,7 +72,7 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 		if _, err := graph.ResolveStoredStage(wantState); err != nil {
 			t.Fatalf("receiver authored stage is invalid: %s: %v", wantState, err)
 		}
-		if policy == canonicalrouting.ForkReceiverOptionalAbsent || policy == canonicalrouting.ForkReceiverOptionalExisting {
+		if policy == canonicalrouting.ForkReceiverOptionalAbsent {
 			header := requireReceiverConstructionStorage(t, rt.ReceiverStateReader, runID, path, entityID, "")
 			if header.EntityID != entityID || header.Template != path || header.State != wantState || header.EntityTypePresent || header.FieldRows != 0 {
 				t.Fatalf("fieldless receiver differs from its exact authored owner/stage: %+v want=%s", header, wantState)
