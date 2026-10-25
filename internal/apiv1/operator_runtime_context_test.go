@@ -722,14 +722,15 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 
 func seedRuntimeContextSourceArtifact(t *testing.T, pg *store.PostgresStore, artifact *sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
-	if _, err := pg.EnsureSourceArtifact(context.Background(), artifact); err != nil {
+	ctx := apiTestOriginalProcessContext(t, context.Background(), pg)
+	if _, err := pg.EnsureSourceArtifact(ctx, artifact); err != nil {
 		t.Fatalf("ensure source artifact %s: %v", artifact.BundleHash(), err)
 	}
 }
 
 func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 	t.Helper()
-	return testHandler(t, Options{
+	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
@@ -750,6 +751,8 @@ func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 			},
 		}),
 	})
+	bindAPITestHandlerOriginalProcess(t, handler, apiTestOriginalProcessContext(t, context.Background(), f.pg))
+	return handler
 }
 
 func seedRuntimeContextRunBundle(t *testing.T, pg *store.PostgresStore, runID, bundleHash string) {

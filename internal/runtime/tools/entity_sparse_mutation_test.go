@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
@@ -393,6 +394,7 @@ func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.Workf
 		t.Fatal(err)
 	}
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	ctx = correlation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = effects.WithDifferentOwner(ctx, effects.OwnerBuildTestInfrastructure)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, entityToolTestRunID), fact)
 	ctx = toolFixtureProcessContext(t, ctx, selected)

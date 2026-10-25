@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -131,9 +132,6 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	if opts.SourceArtifactFact.Validate() != nil {
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
-	if err := ensureTestEventBusSourceArtifact(store, opts.ContractBundle, opts.SourceArtifactFact); err != nil {
-		return nil, err
-	}
 	if receiver, ok := store.(interface {
 		setTestConstructionSource(semanticview.Source)
 	}); ok {
@@ -149,6 +147,14 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 			return nil, err
 		}
 		opts.WorkOwner = owner
+	}
+	setup, err := opts.WorkOwner.Begin(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	setupErr := ensureTestEventBusSourceArtifact(store, opts.ContractBundle, opts.SourceArtifactFact, setup.Context())
+	if err := errors.Join(setupErr, setup.Done()); err != nil {
+		return nil, err
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
@@ -172,7 +178,6 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 		_ = lease // The store and its catalog are scoped to the test that owns them.
 	}
 	var bus *runtimebus.EventBus
-	var err error
 	if opts.PipelineObligations == nil {
 		bus, err = runtimebus.NewEphemeralEventBusWithOptions(store, opts)
 	} else {
@@ -192,7 +197,7 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	return bus, nil
 }
 
-func ensureTestEventBusSourceArtifact(store runtimebus.EventStore, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) error {
+func ensureTestEventBusSourceArtifact(store runtimebus.EventStore, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, contexts ...context.Context) error {
 	writer, ok := store.(sourceartifactfixture.Writer)
 	if !ok {
 		return nil
@@ -206,7 +211,101 @@ func ensureTestEventBusSourceArtifact(store runtimebus.EventStore, source semant
 	if artifact.BundleHash() != fact.BundleHash() {
 		return fmt.Errorf("event bus test source artifact %s contradicts selected source %s", artifact.BundleHash(), fact.BundleHash())
 	}
-	return sourceartifactfixture.EnsureArtifact(context.Background(), writer, artifact)
+	ctx := context.Background()
+	if len(contexts) != 0 {
+		ctx = contexts[0]
+	}
+	return sourceartifactfixture.EnsureArtifact(ctx, writer, artifact)
+}
+
+func nativeBusProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	}
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	}
+	store, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("native bus fixture requires its original process acquisition owner, got %T", selected)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, found := worklifetime.ProcessFromContext(ctx)
+	if !found {
+		process = worklifetime.NewProcess()
+		ctx = worklifetime.WithProcess(ctx, process)
+	}
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		process.Retire()
+		if _, err := process.Join(join); err != nil {
+			t.Error(err)
+		}
+	})
+	return ctx
+}
+
+func nativeBusWorkOwner(t testing.TB, ctx context.Context) *worklifetime.RuntimeOccurrence {
+	t.Helper()
+	process, found := worklifetime.ProcessFromContext(ctx)
+	scope, scoped := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !found || !scoped {
+		t.Fatal("native bus work requires its original scoped process")
+	}
+	if _, bound := process.OriginalProcess(); !bound {
+		t.Fatal("native bus work cannot create original process attribution")
+	}
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: scope.RuntimeInstanceID, BundleHash: scope.BundleHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := owner.RetireAndWait(join); err != nil {
+			t.Error(err)
+		}
+	})
+	return owner
+}
+
+func newNativeScopedTestEventBus(t testing.TB, selected runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+	t.Helper()
+	opts := runtimebus.EventBusOptions{}
+	if len(options) != 0 {
+		opts = options[0]
+	}
+	if opts.WorkOwner == nil {
+		fact := opts.SourceArtifactFact
+		if fact.Validate() != nil {
+			fact = testSourceArtifactFact(opts.ContractBundle)
+		}
+		ctx := testAuthorActivityContextForSource(context.Background(), opts.ContractBundle)
+		ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+		ctx = nativeBusProcessContext(t, ctx, selected)
+		runtimeID := opts.RuntimeInstanceID
+		if runtimeID == "" {
+			runtimeID = authorActivityTestRuntimeInstanceID
+		}
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, fact.BundleHash()))
+		opts.WorkOwner = nativeBusWorkOwner(t, ctx)
+	}
+	return newScopedTestEventBus(selected, opts)
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
@@ -225,6 +324,9 @@ func testSourceArtifactFact(source semanticview.Source) runtimecorrelation.Sourc
 func testAuthorActivityContextForSource(ctx context.Context, source semanticview.Source) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if _, found := worklifetime.ProcessFromContext(ctx); !found {
+		ctx = worklifetime.WithProcess(ctx, worklifetime.NewProcess())
 	}
 	fact := testSourceArtifactFact(source)
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)

@@ -645,6 +645,19 @@ func requirePublishedJoinSourceScope(t *testing.T, source genericschedule.Activa
 	}
 }
 
+func publishedJoinChildInstance(t *testing.T, source genericschedule.Activation, child string) flowidentity.RunScopedFlowInstance {
+	t.Helper()
+	_, ref, valid := timeridentity.ParseJoinHandle(source.Command.Payload.Interface().(map[string]any))
+	if !valid {
+		t.Fatal("source publication lost its exact join handle")
+	}
+	path := ref.StageEntry().InstancePath
+	if ref.FlowPath() == "." {
+		path = child
+	}
+	return flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(ref.FlowPath(), flowidentity.LogicalInstanceID(path), path)}
+}
+
 func requirePublishedJoinChildReceiver(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, source genericschedule.Activation, child string) {
 	t.Helper()
 	_, original, valid := timeridentity.ParseJoinHandle(source.Command.Payload.Interface().(map[string]any))

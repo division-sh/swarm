@@ -61,6 +61,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 				}),
 			}, ctx)
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"ack-loss"}}`, card.CardID, card.CardContentHash)
+			bindAPITestHandlerOriginalProcess(t, handler, ctx)
 			first := rpcCall(t, handler, body)
 			if first.Error == nil {
 				t.Fatal("planted post-commit acknowledgment loss was not surfaced")

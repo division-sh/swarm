@@ -166,7 +166,7 @@ func testRetirementDispatchOutcome(t *testing.T, selected bool, scenario string,
 	})
 	var err error
 	if selected {
-		c, err = NewSelected(store, authority, occurrence, dispatcher, func(_ context.Context, err error) { reported <- err })
+		c, err = NewSelected(store, authority, occurrence, dispatcher, func(_ context.Context, err error) { reported <- err }, func(context.Context) error { return nil })
 	} else {
 		c, err = New(store, coordinatorTestRestarts{}, authority, occurrence, dispatcher, func(_ context.Context, err error) { reported <- err })
 	}
@@ -213,7 +213,11 @@ func testRetirementDispatchOutcome(t *testing.T, selected bool, scenario string,
 	if got := occurrence.worker.Context().Err() != nil; got != canceled {
 		t.Fatalf("dispatch cancellation visible=%t, want %t", got, canceled)
 	}
-	if owner.ActiveCount() != 2 {
+	wantActive := uint64(2)
+	if selected {
+		wantActive++ // The selected scan retains its finite reconciliation lease.
+	}
+	if owner.ActiveCount() != wantActive {
 		t.Fatalf("admitted scan/worker lost exact lifetime: %d", owner.ActiveCount())
 	}
 	releaseDispatch()

@@ -504,6 +504,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	}
 	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(artifact.BundleHash()), 20*time.Second)
 	t.Cleanup(cancel)
+	ctx = storeTestOriginalProcessContext(t, ctx, f.raw)
 	f.seed = seedFanOutOwnerFixtureWithArtifact(t, ctx, f.db, f.raw, f.postgres, 4, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	runtimeID := authorActivityTestRuntimeInstanceID
 	fact := mustStoreTestSourceArtifactFact(f.seed.bundleHash)
@@ -514,7 +515,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	construction.Instance = flowidentity.Stored(source, ".", f.seed.runID, f.seed.runID, f.seed.runID, "")
 	construction.OccurredAt = f.seed.createdAt
 	constructHistoricalSourceFixture(t, ctx, f.raw.(agentFixtureFlowStore), construction)
-	process := worklifetime.NewProcess()
+	process, _ := worklifetime.ProcessFromContext(ctx)
 	var am *manager.AgentManager
 	f.occurrence, err = process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: f.seed.bundleHash})
 	if err != nil {
@@ -530,15 +531,6 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 		}
 		if _, err := f.occurrence.RetireAndWait(deadline); err != nil {
 			t.Error(err)
-		}
-		process.Retire()
-		if _, err := process.Join(deadline); err != nil {
-			t.Error(err)
-		}
-		if f.process != nil {
-			if err := f.process.Release(deadline); err != nil {
-				t.Error(err)
-			}
 		}
 	})
 	ctx = worklifetime.WithRuntimeOccurrence(ctx, f.occurrence)

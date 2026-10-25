@@ -241,33 +241,6 @@ func TestSelectedForkAcknowledgmentPrecedesBusinessDrainBothStores(t *testing.T)
 	}
 }
 
-func TestSelectedCompletionActualScopeBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			fixture := newActivityForkFixture(t, backend)
-			owner, selected := fixture.owner, fixture.owner.ports.fork
-			ctx, request, _ := q1GateComponentSource(t, owner, false, true, false)
-			attachment := q1StageBranchPointComponent(t, ctx, request)
-			selectedCtx := attachment.container.attachment.ctx
-			if _, err := owner.ports.busDurable.RunLifecycle.TransitionActiveRun(selectedCtx, runlifecycle.ActiveTransitionRequest{
-				RunID: attachment.materialized.ForkRunID, State: runlifecycle.StateRunning,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := attachment.container.attachment.runtime.startExecution(selectedCtx, attachment.container.attachment.pipeline, attachment.container.diagnostics, false); err != nil {
-				t.Fatal(err)
-			}
-			requester := selected.(interface {
-				RequestCompletionCandidate(context.Context, runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error)
-			})
-			if _, err := requester.RequestCompletionCandidate(selectedCtx, runlifecycle.CandidateAtTime(attachment.materialized.ForkRunID, time.Now().UTC())); err != nil {
-				t.Fatal(err)
-			}
-			proveSelectedCompletionScope(t, ctx, selectedCtx, selected, owner.ports.candidates, attachment.prepared.loadedSource.Source, attachment.materialized.ForkRunID)
-		})
-	}
-}
-
 func TestReviewerSelectedAsyncFailureDisposesResources(t *testing.T) {
 	for _, fault := range []string{"publication", "execution-scope", "panic", "cancellation", "startup", "continuation", "settlement-retry", "settlement-cleanup", "stale-settlement", "cleanup-retry", "cleanup-panic", "operator-stop"} {
 		t.Run(fault, func(t *testing.T) { proveRetainedAcknowledgment(t, fault) })

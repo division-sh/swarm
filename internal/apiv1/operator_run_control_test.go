@@ -108,6 +108,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 		}),
 	}, ctx)
 	runID := uuid.NewString()
+	ctx = apiTestOriginalProcessContext(t, ctx, pg)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 		StartedAt: time.Date(2026, 5, 11, 11, 0, 0, 0, time.UTC),

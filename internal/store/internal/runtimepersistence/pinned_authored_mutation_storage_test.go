@@ -19,7 +19,7 @@ func TestPinnedAuthoredMutationStoragePreservesExactSourceAndPhysicalBytesBothSt
 			ctx, runID, otherRun := testAuthorActivityContext(), uuid.NewString(), uuid.NewString()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, run := range []string{runID, otherRun} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			}
 			source := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEntityField, RunID: runID, EntityID: uuid.NewString(), MutationID: uuid.NewString(), Field: "items"}
 			otherMutation, nullMutation, privateMutation := uuid.NewString(), uuid.NewString(), uuid.NewString()

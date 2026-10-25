@@ -299,7 +299,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	for _, reader := range originReaders {
 		opts.Durable.RunOrigins = reader(selected)
 	}
-	bus, err := newScopedTestEventBus(selected, opts)
+	bus, err := newNativeScopedTestEventBus(t, selected, opts)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -500,6 +500,7 @@ func seedCompleteEventDispatchRunWithOrigin(
 	origin runtimerunlifecycle.RunOrigin,
 ) {
 	t.Helper()
+	ctx = nativeBusProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: origin, RunID: runID, StartedAt: startedAt})
 }
 
@@ -612,7 +613,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	}
 	workflow := newEventBusWorkflowCoordinator(f.bus, f.store, newFixtureWorkflowModule(t, bundle))
 	process := worklifetime.NewProcess()
-	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+	managerCtx := nativeBusProcessContext(t, worklifetime.WithProcess(f.ctx, process), f.store)
+	owner, err := process.NewRuntime(managerCtx, worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleHash:        fact.BundleHash(),
 	})
@@ -622,6 +624,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	manager := runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &completeEventRecordingAgent{id: cfg.ID, agentType: cfg.Type, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
 	}, runtimemanager.AgentManagerOptions{
+		BaseContext:        managerCtx,
 		SourceArtifactFact: fact,
 		SemanticSource:     f.source,
 		WorkflowInstances:  workflow,

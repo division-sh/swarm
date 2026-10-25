@@ -163,9 +163,6 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 			if nextWake == nil {
 				return errors.New("acquired live session has no exact lease expiry")
 			}
-			if _, err := attempt.RequestCompletion(sqlCtx, s.lifecycle, identity.RunID, nextWake); err != nil {
-				return err
-			}
 			value.lease = &runtimesessions.Lease{
 				SessionID: current.sessionID, ProviderSessionID: strings.TrimSpace(current.providerSessionID.String), Identity: identity,
 				RetryReason: strings.TrimSpace(current.retryReason.String), RetriesFromSessionID: strings.TrimSpace(current.retriesFrom.String),
@@ -222,8 +219,7 @@ func (s *LLMPostgresOwner) Renew(ctx context.Context, lease *runtimesessions.Lea
 			if err := addAgentSessionFacts(attempt, identity.RunID, lease.SessionID); err != nil {
 				return err
 			}
-			_, err = attempt.RequestCompletion(sqlCtx, s.lifecycle, identity.RunID, &expiry)
-			return err
+			return nil
 		})
 		return renewed, err
 	})
@@ -268,9 +264,6 @@ func (s *LLMPostgresOwner) ReleaseOutcome(ctx context.Context, lease *runtimeses
 			}
 			if err != nil {
 				return fmt.Errorf("release live session lease: %w", err)
-			}
-			if _, err := attempt.RequestCompletion(sqlCtx, s.lifecycle, identity.RunID, nil); err != nil {
-				return err
 			}
 			return addAgentSessionFacts(attempt, storedRunID, storedSessionID)
 		})
@@ -425,9 +418,6 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, leaseInput *runtimesessio
 			if nextWake == nil {
 				return errors.New("rotated live session has no exact lease expiry")
 			}
-			if _, err := attempt.RequestCompletion(sqlCtx, s.lifecycle, identity.RunID, nextWake); err != nil {
-				return err
-			}
 			if err := addAgentSessionFacts(attempt, currentRunID, currentID); err != nil {
 				return err
 			}
@@ -490,11 +480,7 @@ func (s *LLMPostgresOwner) IncrementTurnOutcome(ctx context.Context, lease *runt
 			if err := tx.QueryRowContext(sqlCtx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
 				return fmt.Errorf("read selected-store session time: %w", err)
 			}
-			nextWake, err := storerunlifecycle.PostgresRunSessionNextWakeTx(sqlCtx, tx, identity.RunID, now.UTC())
-			if err != nil {
-				return err
-			}
-			_, err = attempt.RequestCompletion(sqlCtx, s.lifecycle, identity.RunID, nextWake)
+			_, err = storerunlifecycle.PostgresRunSessionNextWakeTx(sqlCtx, tx, identity.RunID, now.UTC())
 			return err
 		})
 		return struct{}{}, err

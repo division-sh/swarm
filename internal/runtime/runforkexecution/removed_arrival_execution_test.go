@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -34,15 +33,12 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			t.Setenv(publishedJoinFlowEnv, "orders")
 			var selected startupownership.Store
 			var owner SelectedContractExecutionOwner
-			var construct func() SelectedContractExecutionOwner
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStore(t)
 				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
-				construct = func() SelectedContractExecutionOwner { return newSelectedContractSQLiteExecutionOwnerForTest(t, s) }
 			} else {
 				s := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
-				construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 			}
 			ctx := runForkTestContext(t)
 			process, _ := worklifetime.ProcessFromContext(ctx)
@@ -141,6 +137,10 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.ForkRunID != child || ack.Result == nil {
 				t.Fatalf("removed-rule fork lacks permanent acknowledgment: %+v found=%v err=%v", ack, found, err)
 			}
+			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
+			if err != nil {
+				t.Fatal(err)
+			}
 			wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			reader := selected.(interface {
@@ -167,10 +167,6 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 					t.Fatalf("removed rule left dependent work alive: %+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
 				case <-time.After(10 * time.Millisecond):
 				}
-			}
-			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
-			if err != nil {
-				t.Fatal(err)
 			}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()})
 			if err != nil || !found || header.CurrentState != "awaiting" || header.EntityID != projected.EntityID ||

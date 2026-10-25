@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
@@ -349,7 +350,15 @@ func (m postgresRunLifecycleMutation) RequirePresent(ctx context.Context, runID 
 		WHERE run_id = $1::uuid
 	`
 	if !m.readOnly {
-		query += ` FOR UPDATE`
+		exclusive, err := mutationprotocol.RunRowLock(ctx, m.tx, runID, false)
+		if err != nil {
+			return err
+		}
+		if exclusive {
+			query += ` FOR UPDATE`
+		} else {
+			query += ` FOR SHARE`
+		}
 	}
 	err := m.tx.QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(&state)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -472,6 +481,12 @@ func (m postgresRunLifecycleMutation) Create(
 	if !inserted {
 		return runtimerunlifecycle.MutationExactNoop, nil
 	}
+	if _, err := mutationprotocol.RunRowLock(ctx, m.tx, request.RunID, true); err != nil {
+		return "", err
+	}
+	if err := counterprojection.Initialize(ctx, m.tx, privateactivity.DialectPostgres, request.RunID); err != nil {
+		return "", err
+	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
@@ -528,6 +543,12 @@ func (m sqliteRunLifecycleMutation) Create(
 	if rows == 0 {
 		return m.classifyCreateExisting(ctx, request)
 	}
+	if _, err := mutationprotocol.RunRowLock(ctx, m.tx, request.RunID, true); err != nil {
+		return "", err
+	}
+	if err := counterprojection.Initialize(ctx, m.tx, privateactivity.DialectSQLite, request.RunID); err != nil {
+		return "", err
+	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
@@ -572,9 +593,9 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		result, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash, flow_path
+			started_at, bundle_hash, flow_path
 		)
-		SELECT $1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9, flow_path
+		SELECT $1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, $8, $9, flow_path
 		FROM runs WHERE run_id=$4::uuid
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 			startedAt.UTC(), bundleHash)
@@ -583,6 +604,12 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		}
 		if rows, err := result.RowsAffected(); err != nil || rows != 1 {
 			return errors.Join(fmt.Errorf("fork run creation requires exactly one source row; inserted %d", rows), err)
+		}
+		if _, err := mutationprotocol.RunRowLock(ctx, tx, forkRunID, true); err != nil {
+			return err
+		}
+		if err := counterprojection.Initialize(ctx, tx, privateactivity.DialectPostgres, forkRunID); err != nil {
+			return err
 		}
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
 			return err
@@ -630,9 +657,9 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		result, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash, flow_path
+			started_at, bundle_hash, flow_path
 		)
-		SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, flow_path
+		SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, flow_path
 		FROM runs WHERE run_id=?
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 			startedAt.UTC(), bundleHash, sourceRunID)
@@ -641,6 +668,12 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		}
 		if rows, err := result.RowsAffected(); err != nil || rows != 1 {
 			return errors.Join(fmt.Errorf("fork run creation requires exactly one source row; inserted %d", rows), err)
+		}
+		if _, err := mutationprotocol.RunRowLock(ctx, tx, forkRunID, true); err != nil {
+			return err
+		}
+		if err := counterprojection.Initialize(ctx, tx, privateactivity.DialectSQLite, forkRunID); err != nil {
+			return err
 		}
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
 			return err
@@ -705,14 +738,6 @@ func (m postgresRunLifecycleMutation) TransitionActive(
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
-	if request.State == runtimerunlifecycle.StateRunning {
-		if m.store == nil {
-			return "", errors.New("PostgreSQL run lifecycle resume requires selected-store candidate owner")
-		}
-		if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
-			return "", err
-		}
-	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
 
@@ -724,6 +749,9 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 		return "", errors.New("SQLite active run lifecycle transition requires transaction")
 	}
 	if err := request.Validate(); err != nil {
+		return "", err
+	}
+	if _, err := mutationprotocol.RunRowLock(ctx, m.tx, request.RunID, true); err != nil {
 		return "", err
 	}
 	current, err := loadSQLiteRunLifecycleSnapshot(ctx, m.tx, request.RunID)
@@ -757,14 +785,6 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
-	}
-	if request.State == runtimerunlifecycle.StateRunning {
-		if m.store == nil {
-			return "", errors.New("SQLite run lifecycle resume requires selected-store candidate owner")
-		}
-		if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
-			return "", err
-		}
 	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
@@ -813,7 +833,7 @@ func (m postgresRunLifecycleMutation) classifyCreateExisting(
 	ctx context.Context,
 	request runtimerunlifecycle.CreateRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
-	current, err := loadPostgresRunLifecycleSnapshot(ctx, m.tx, request.RunID, true)
+	current, err := loadPostgresRunLifecycleSnapshot(ctx, m.tx, request.RunID, false)
 	if err != nil {
 		return "", err
 	}
@@ -905,6 +925,9 @@ func (m postgresRunLifecycleMutation) ReviseSource(
 	ctx context.Context,
 	request runtimerunlifecycle.SourceRevisionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
+	if _, err := mutationprotocol.RunRowLock(ctx, m.tx, request.RunID, true); err != nil {
+		return "", err
+	}
 	current, err := m.RequireActiveSource(ctx, request.RunID)
 	if err != nil {
 		return "", err
@@ -931,9 +954,6 @@ func (m postgresRunLifecycleMutation) ReviseSource(
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
-	if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
-		return "", err
-	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
 
@@ -941,6 +961,9 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 	ctx context.Context,
 	request runtimerunlifecycle.SourceRevisionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
+	if _, err := mutationprotocol.RunRowLock(ctx, m.tx, request.RunID, true); err != nil {
+		return "", err
+	}
 	current, err := m.RequireActiveSource(ctx, request.RunID)
 	if err != nil {
 		return "", err
@@ -967,15 +990,15 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
-	if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
-		return "", err
-	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
 
 func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string, postgres bool) error {
 	if tx == nil || strings.TrimSpace(runID) == "" {
 		return errors.New("materialized fork lifecycle deletion requires transaction and run_id")
+	}
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, runID, true); err != nil {
+		return err
 	}
 	query := `DELETE FROM runs WHERE run_id = ? AND status = ?`
 	if postgres {

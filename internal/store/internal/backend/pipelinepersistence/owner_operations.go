@@ -1263,7 +1263,6 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 	defer state.operationMu.Unlock()
 	lease := state.postgresLease
 	outcome := mutationprotocol.RunRetainedPostgres(ctx, lease.Session(), mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		var runID string
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			transactiontest.Mark(txctx, transactiontest.PipelineDecisionProcessed)
 			if err := validateGroupedSingletonSettlementTx(txctx, tx, state); err != nil {
@@ -1275,17 +1274,11 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 			if err := markDecisionRouteProcessedTx(txctx, tx, attempt, claim.EventID(), true, time.Now().UTC()); err != nil {
 				return err
 			}
-			var err error
-			runID, err = eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), true)
+			_, err := eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), true)
 			return err
 		})
 		if err != nil {
 			return struct{}{}, err
-		}
-		if runID != "" {
-			if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil); err != nil {
-				return struct{}{}, err
-			}
 		}
 		return struct{}{}, postgresDeliveryAdapter.CommitPipelineHandoff(txctx, attempt, claim.EventID())
 	})
@@ -1308,7 +1301,6 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "mark sqlite decision route processed", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		var runID string
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			transactiontest.Mark(txctx, transactiontest.PipelineDecisionProcessed)
 			if err := validateGroupedSingletonSettlementTx(txctx, tx, state); err != nil {
@@ -1326,17 +1318,11 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 			if err := markDecisionRouteProcessedTx(txctx, tx, attempt, claim.EventID(), false, s.now()); err != nil {
 				return err
 			}
-			var err error
-			runID, err = eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), false)
+			_, err := eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), false)
 			return err
 		})
 		if err != nil {
 			return struct{}{}, err
-		}
-		if runID != "" {
-			if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil); err != nil {
-				return struct{}{}, err
-			}
 		}
 		return struct{}{}, sqliteDeliveryAdapter.CommitPipelineHandoff(txctx, attempt, claim.EventID())
 	})

@@ -20,7 +20,9 @@ func TestSQLiteAPIIdempotencyHeldPostCommitElectsOnlySameRequest(t *testing.T) {
 	defer cancel()
 	path := filepath.Join(t.TempDir(), "keyed.sqlite")
 	first := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	ctx = storeTestOriginalProcessContext(t, ctx, first)
 	other := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	ctx = storeTestOriginalProcessContext(t, ctx, other)
 	req := apiidempotency.Request{Method: "event.publish", Actor: apiidempotency.BearerActor("actor"), IdempotencyKey: "same", RequestHash: "original", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
 	lease, err := privateidempotency.AcquireSQLiteRequest(ctx, first.sQLiteOwner, req)
 	if err != nil {
@@ -115,6 +117,7 @@ func TestSQLiteAPIIdempotencyHeldPostCommitElectsOnlySameRequest(t *testing.T) {
 	}
 	// No response was delivered by the original lease; a fresh pool must replay it.
 	reopened := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	ctx = storeTestOriginalProcessContext(t, ctx, reopened)
 	completion, replay, err := reopened.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
 		t.Error("lost-ACK/reopen reexecuted callback")
 		return apiidempotency.Completion{}, nil
@@ -127,6 +130,7 @@ func TestSQLiteAPIIdempotencyHeldPostCommitElectsOnlySameRequest(t *testing.T) {
 func TestSQLiteAPIIdempotencyErrorsCancellationAndUnkeyedRemainExact(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	req := apiidempotency.Request{Method: "event.publish", Actor: apiidempotency.BearerActor("actor"), IdempotencyKey: "error", RequestHash: "body", Now: time.Now().UTC()}
 	want := apiidempotency.Completion{ResourceID: "resource", Response: json.RawMessage(`{"ok":true}`)}
 	stop := errors.New("callback stopped")

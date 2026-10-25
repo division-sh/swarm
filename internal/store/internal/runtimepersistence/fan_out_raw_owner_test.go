@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
@@ -50,13 +51,33 @@ func rawFanOutTestOwner(factory rawFanOutTestFactory, bundle string) (pipeline.F
 }
 
 func rawFanOutTestClaimOwner(ctx context.Context, db *sql.DB, factory rawFanOutTestFactory, claim fanoutobligation.Claim) (pipeline.FanOutObligationOwner, error) {
+	return rawFanOutTestIntentOwner(ctx, db, factory, claim.Key)
+}
+
+func rawFanOutTestIntentOwner(ctx context.Context, db *sql.DB, factory rawFanOutTestFactory, key fanoutobligation.IntentKey) (pipeline.FanOutObligationOwner, error) {
 	var bundle string
 	err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`,
-		claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.FlowPath, claim.Key.ElementRef.Family, claim.Key.ElementRef.SemanticPath).Scan(&bundle)
+		key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&bundle)
 	if err != nil {
 		return nil, err
 	}
 	return rawFanOutTestOwner(factory, bundle)
+}
+
+func (s *PostgresStore) AdvanceFanOutBarriers(ctx context.Context, key fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	owner, err := rawFanOutTestIntentOwner(ctx, s.backend.ConstructionHandle(), s.pipelinePostgresOwner, key)
+	if err != nil {
+		return nil, err
+	}
+	return owner.AdvanceFanOutBarriers(ctx, key)
+}
+
+func (s *SQLiteRuntimeStore) AdvanceFanOutBarriers(ctx context.Context, key fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	owner, err := rawFanOutTestIntentOwner(ctx, s.backend.ConstructionHandle(), s.pipelineSQLiteOwner, key)
+	if err != nil {
+		return nil, err
+	}
+	return owner.AdvanceFanOutBarriers(ctx, key)
 }
 
 func rawFanOutTestClaim(ctx context.Context, db *sql.DB, factory rawFanOutTestFactory, request pipeline.FanOutClaimRequest, now func() time.Time) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {

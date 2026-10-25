@@ -7,12 +7,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -29,33 +28,6 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		candidateOwner, ok := fixture.primary.(runtimerunlifecycle.CandidateOwner)
-		if !ok {
-			t.Fatal("selected store lacks completion candidate authority")
-		}
-		scope := runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}
-		executor, err := runtimerunlifecycle.NewExecutor(
-			candidateOwner, scope, runCompletionTerminalCatalog(source),
-			newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bundleHash),
-			runtimerunlifecycle.ExecutorOptions{},
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		registration, err := candidateOwner.RegisterCompletionCandidateSink(ctx, scope, executor)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := executor.Start(ctx); err != nil {
-			registration.Release()
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := executor.Retire(ctx); err != nil {
-				t.Errorf("retire completion executor: %v", err)
-			}
-			registration.Release()
-		})
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
 		versions := make(map[string]durabledata.VersionID)
 
@@ -139,11 +111,10 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 					t.Fatalf("replay created %d intents", got)
 				}
 				if tc.rowCount == 0 {
-					deadline := time.Now().Add(3 * time.Second)
-					for {
-						header, err := fixture.reconstructed.LoadRunHeader(ctx, runID)
-						if err != nil {
-							t.Fatalf("empty feed run readback: %v", err)
+					requireAPIV1Convergence(t, "empty feed quiescence", func() (bool, error) {
+						response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"empty-feed","method":"run.diagnose","params":{"run_id":%q}}`, runID))
+						if response.Error != nil {
+							t.Fatalf("empty feed diagnosis: %#v", response.Error)
 						}
 						settled, err := fixture.reconstructed.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
 						if err != nil {
@@ -152,18 +123,8 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 						if header.Status == "live" && settled.TestQuiescence.Ready {
 							break
 						}
-						if time.Now().After(deadline) {
-							query := "SELECT completion_revision, completion_due_at FROM runs WHERE run_id = ?"
-							if _, postgres := fixture.primary.(*store.PostgresStore); postgres {
-								query = "SELECT completion_revision, completion_due_at FROM runs WHERE run_id = $1::uuid"
-							}
-							var revision int64
-							var due any
-							_ = fixture.db.QueryRowContext(ctx, query, runID).Scan(&revision, &due)
-							t.Fatalf("empty feed run remained %s (candidate revision=%d due=%v active=%d)", header.Status, revision, due, executor.ActiveCandidates())
-						}
-						time.Sleep(10 * time.Millisecond)
-					}
+						return asMap(t, report["test_quiescence"])["ready"] == true, nil
+					})
 				}
 				if tc.rowCount > 0 {
 					before, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)

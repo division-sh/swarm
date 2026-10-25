@@ -127,6 +127,51 @@ func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(authorActivityTestRuntimeInstanceID))
 }
 
+func apiTestOriginalProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	} else {
+		process := worklifetime.NewProcess()
+		ctx = worklifetime.WithProcess(ctx, process)
+		t.Cleanup(func() {
+			process.Retire()
+			if _, err := process.Join(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	owner, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("API native fixture requires its process owner, got %T", selected)
+	}
+	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	}
+	ctx, err := agentfixture.ProcessContext(t, ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
+func bindAPITestHandlerOriginalProcess(t testing.TB, handler *Handler, ctx context.Context) {
+	t.Helper()
+	process, found := worklifetime.ProcessFromContext(ctx)
+	if !found {
+		t.Fatal("native API handler fixture requires its original process")
+	}
+	stamp, bound := process.OriginalProcess()
+	if !bound {
+		t.Fatal("native API handler fixture process has no original acquisition")
+	}
+	if err := handler.workOwner.BindOriginalProcess(stamp); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testAuthorActivityContext(ctx context.Context) context.Context {
 	return testAuthorActivityContextForSource(ctx, authorActivityTestSourceArtifactFact)
 }
@@ -208,6 +253,25 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	if binder, ok := eventStore.(runtimepkg.EventPayloadAdmissionBinder); ok {
 		binder.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	}
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash())
+	}
+	setup, setupErr := opts.WorkOwner.Begin(testAuthorActivityContextForRuntime(context.Background(), opts.RuntimeInstanceID, opts.SourceArtifactFact))
+	if setupErr != nil {
+		return nil, setupErr
+	}
+	defer func() {
+		if err := setup.Done(); err != nil {
+			t.Error(err)
+		}
+	}()
+	setupCtx := setup.Context()
+	if selected, native := eventStore.(agentfixture.Store); native {
+		setupCtx, setupErr = agentfixture.ProcessContext(t, setupCtx, selected)
+		if setupErr != nil {
+			return nil, setupErr
+		}
+	}
 	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok {
 		catalog := durabledata.Catalog{BundleHash: opts.SourceArtifactFact.BundleHash()}
 		if exactCatalog != nil {
@@ -236,7 +300,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		if reader, ok := eventStore.(interface {
 			ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 		}); ok {
-			existing, err := reader.ListDataDeclarationSummaries(context.Background(), catalog.BundleHash)
+			existing, err := reader.ListDataDeclarationSummaries(setupCtx, catalog.BundleHash)
 			if err != nil {
 				return nil, fmt.Errorf("read API test source artifact/data catalog: %w", err)
 			}
@@ -247,9 +311,6 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 				return nil, fmt.Errorf("ensure API test source artifact/data catalog: %w", err)
 			}
 		}
-	}
-	if opts.WorkOwner == nil {
-		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash())
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()

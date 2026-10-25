@@ -13,6 +13,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/google/uuid"
 )
 
 const runForkTestRuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
@@ -99,4 +100,68 @@ func runForkTestContext(t testing.TB) context.Context {
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, runForkTestBundleHash),
 	)
+}
+
+func runForkOriginalContextForTest(t testing.TB, ctx context.Context, capability startupownership.ProcessCapability) context.Context {
+	t.Helper()
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, found := worklifetime.ProcessFromContext(ctx)
+	if !found {
+		ownerCtx := runForkTestContext(t)
+		process, _ = worklifetime.ProcessFromContext(ownerCtx)
+		ctx = worklifetime.WithProcess(ctx, process)
+	}
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
+func nativeRunForkTestContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	}
+	owner, ok := selected.(startupownership.Store)
+	if !ok {
+		t.Fatalf("source fixture requires its original process owner, got %T", selected)
+	}
+	return runForkOriginalContextForTest(t, ctx, selectedContractTestProcessCapability(t, ctx, owner))
+}
+
+func successorRunForkProcessForTest(t testing.TB, ctx context.Context, selected startupownership.Store) (context.Context, *worklifetime.Process, startupownership.ProcessCapability) {
+	t.Helper()
+	capability, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "selected-contract-successor-test", BootID: uuid.NewString(), RuntimeInstanceID: runForkTestRuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := worklifetime.NewProcess()
+	ctx = runForkOriginalContextForTest(t, worklifetime.WithProcess(ctx, process), capability)
+	runtime, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runForkTestRuntimeInstanceID, BundleHash: runForkTestBundleHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = worklifetime.WithOccurrence(ctx, runtime)
+	t.Cleanup(func() {
+		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := runtime.RetireAndWait(join); err != nil {
+			t.Error(err)
+		}
+		process.Retire()
+		if _, err := process.Join(join); err != nil {
+			t.Error(err)
+		}
+		if err := capability.Release(join); err != nil {
+			t.Error(err)
+		}
+	})
+	return ctx, process, capability
 }

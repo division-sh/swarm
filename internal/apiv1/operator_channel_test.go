@@ -87,6 +87,7 @@ func (s *recordingOperatorChannelIdempotency) WithAPIIdempotency(ctx context.Con
 
 func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 	selected := storetest.StartSQLiteRuntimeStore(t)
+	ctx := apiTestOriginalProcessContext(t, context.Background(), selected)
 	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +102,7 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-	principal, _, err := service.Bootstrap(context.Background(), now)
+	principal, _, err := service.Bootstrap(ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +120,7 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken, rotatedToken}, OperatorPrincipalID: principal.ID, Handlers: handlers,
 	})
+	bindAPITestHandlerOriginalProcess(t, handler, ctx)
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"auth","method":"channel.list","params":{}}`)))
@@ -151,6 +153,7 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 
 func TestOperatorChannelConfirmationCredentialRotationReturnsParentResumeContract(t *testing.T) {
 	selected := storetest.StartSQLiteRuntimeStore(t)
+	ctx := apiTestOriginalProcessContext(t, context.Background(), selected)
 	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +163,7 @@ func TestOperatorChannelConfirmationCredentialRotationReturnsParentResumeContrac
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 31, 18, 0, 0, 0, time.UTC)
-	principal, _, err := service.Bootstrap(context.Background(), now)
+	principal, _, err := service.Bootstrap(ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,6 +173,7 @@ func TestOperatorChannelConfirmationCredentialRotationReturnsParentResumeContrac
 		Idempotency: selected, Now: func() time.Time { return now },
 	})
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: handlers})
+	bindAPITestHandlerOriginalProcess(t, handler, ctx)
 	response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"stale","method":"channel.confirm","params":{"operation_id":%q,"expected_revision":2,"approve":true}}`, uuid.NewString()))
 	requireOperatorChannelAPIErrorCode(t, response, ChannelCredentialRequiredCode)
 	details := asMap(t, response.Error.Data)["details"].(map[string]any)

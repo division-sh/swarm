@@ -10,23 +10,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestTransactionProbeIncludesConnectionPoolWait(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	db.SetMaxOpenConns(1)
-	backend, err := New(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend, exits := newExitProbe(t)
+	db := backend.db
 	collector, restore, err := backend.InstallTransactionProbeForTest(transactiontest.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer restore()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(exits.original, 5*time.Second)
 	defer cancel()
 	held, err := db.Conn(ctx)
 	if err != nil {
@@ -65,7 +59,7 @@ func TestOrderingRetainedRollbackMeasuresPhysicalCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restore()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(exits.original, 5*time.Second)
 	defer cancel()
 	conn, err := backend.db.Conn(ctx)
 	if err != nil {

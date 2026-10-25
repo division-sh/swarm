@@ -32,7 +32,9 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					ctx := original
 					now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 					sourceRun, childRun := uuid.NewString(), uuid.NewString()
+					ctx = storeTestOriginalProcessContext(t, ctx, store)
 					requireRunningRunForTest(t, ctx, store, sourceRun, now)
+					ctx = storeTestOriginalProcessContext(t, ctx, store)
 					requireRunningRunForTest(t, ctx, store, childRun, now)
 					card, effect := newProposedEffectTestCard(t, sourceRun, now, attemptgeneration.Generation{})
 					// Generation correspondence has no reply row to project.

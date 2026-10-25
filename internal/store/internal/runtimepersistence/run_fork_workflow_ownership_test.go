@@ -306,6 +306,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 	source = effective.Source()
 	ctx = correlation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, hash))
+	ctx = storeTestOriginalProcessContext(t, ctx, fixture.store)
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: hash, Artifact: bundle.SourceArtifact, StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)})
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
 	event := eventtest.ExistingRunRootIngress(eventID, "start.requested", "test", "", []byte(`{"token":"ownership"}`), 0, runID, events.EventEnvelope{}, at)

@@ -13,7 +13,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -588,6 +590,7 @@ func conversationForkToolCallMap(t *testing.T, raw json.RawMessage) map[string]a
 }
 
 type conversationForkSourceFixture struct {
+	ctx        context.Context
 	runID      string
 	bundleHash string
 	agentID    string
@@ -603,6 +606,13 @@ type conversationForkSourceFixture struct {
 const conversationForkSourceFlowInstance = "review"
 
 func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, prepared *PostgresStore, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
+	t.Helper()
+	store := admitTestPostgresStore(t, db)
+	ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), store)
+	return seedConversationForkSourceWithContext(t, ctx, store, db, base, historical...)
+}
+
+func seedConversationForkSourceWithContext(t *testing.T, ctx context.Context, store *PostgresStore, db *sql.DB, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),

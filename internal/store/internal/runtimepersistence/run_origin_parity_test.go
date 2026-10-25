@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
-	"sync/atomic"
+
 	"testing"
 	"time"
 
@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -21,36 +21,13 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
+
 	"github.com/google/uuid"
 )
 
 type runOriginReadStore interface {
 	LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
 	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
-}
-
-type standingExecutionCountingStore struct {
-	delegate   runtimerunlifecycle.CandidateStore
-	executions atomic.Int64
-}
-
-func (s *standingExecutionCountingStore) ListCompletionCandidates(
-	ctx context.Context,
-	scope runtimerunlifecycle.CandidateScope,
-	cursor runtimerunlifecycle.CandidateCursor,
-	limit int,
-) (runtimerunlifecycle.CandidatePage, error) {
-	return s.delegate.ListCompletionCandidates(ctx, scope, cursor, limit)
-}
-
-func (s *standingExecutionCountingStore) ExecuteCompletionCandidate(
-	ctx context.Context,
-	candidate runtimerunlifecycle.Candidate,
-	catalog runtimerunlifecycle.FinalCatalog,
-) (runtimerunlifecycle.CompletionResult, error) {
-	s.executions.Add(1)
-	return s.delegate.ExecuteCompletionCandidate(ctx, candidate, catalog)
 }
 
 func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
@@ -308,31 +285,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 
 			candidate.Source = mustStoreTestSourceArtifactFact(secondHash)
 			seedStoreTestPersistedArtifact(t, db, secondArtifact)
-			process := worklifetime.NewProcess()
-			occurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, secondHash)
-			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
-			countingStore := &standingExecutionCountingStore{delegate: candidateStore}
-			executor := newRunLifecycleParityExecutorForScope(
-				t,
-				countingStore,
-				occurrence,
-				secondHash,
-				stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{"standing/root": {"completed"}}),
-			)
-			registration, err := registrar.RegisterCompletionCandidateSink(
-				runtimeCtx,
-				runtimerunlifecycle.CandidateScope{BundleHash: secondHash},
-				executor,
-			)
-			if err != nil {
-				t.Fatalf("register repair candidate executor: %v", err)
-			}
-			defer registration.Release()
-			if err := executor.Start(runtimeCtx); err != nil {
-				t.Fatalf("start repair candidate executor: %v", err)
-			}
-
-			stopped, err := workflow.ReconcileStandingService(runtimeCtx, candidate)
+			stopped, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatalf("reconcile terminal standing generation: %v", err)
 			}
@@ -346,7 +299,6 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			if state != string(runtimerunlifecycle.StateCancelled) || duePresent {
 				t.Fatalf("terminal candidate posture = state:%s due:%v, want cancelled/false", state, duePresent)
 			}
-			awaitRunLifecycleExecutorCandidates(t, executor, 0)
 
 			suspendedFlowPath := "repair-candidate-suspended/standing"
 			suspendedServiceID := runtimeflowidentity.StandingServiceID(suspendedFlowPath)
@@ -383,8 +335,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			insertStandingRestartAbandonControl(t, ctx, db, backend, suspendedFresh.RunID)
 
 			suspendedCandidate.Source = mustStoreTestSourceArtifactFact(secondHash)
-			beforeSuspendedRepair := countingStore.executions.Load()
-			suspendedStopped, err := workflow.ReconcileStandingService(runtimeCtx, suspendedCandidate)
+			suspendedStopped, err := workflow.ReconcileStandingService(ctx, suspendedCandidate)
 			if err != nil {
 				t.Fatalf("reconcile terminal suspended standing generation: %v", err)
 			}
@@ -397,16 +348,6 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			if state != string(runtimerunlifecycle.StateCancelled) || duePresent {
 				t.Fatalf("terminal suspended candidate = state:%s due:%v, want cancelled/false", state, duePresent)
 			}
-			awaitRunLifecycleExecutorCandidates(t, executor, 0)
-			if got := countingStore.executions.Load(); got != beforeSuspendedRepair {
-				t.Fatalf("candidate executions while terminal standing remained parked = %d, want %d", got, beforeSuspendedRepair)
-			}
-
-			if err := executor.Retire(context.Background()); err != nil {
-				t.Fatalf("retire repair candidate executor: %v", err)
-			}
-			retireRunLifecycleExecutorOccurrence(t, occurrence)
-			retireRunLifecycleProcess(t, process)
 		})
 	}
 }

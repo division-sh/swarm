@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -114,12 +115,15 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		},
 		Publish: func(t *testing.T, ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 			t.Helper()
+			ctx = worklifetime.WithProcess(ctx, process)
 			publishManagerNativeDelivery(t, ctx, selected, event, routes, authority)
 		},
 		ClaimHeartbeat: func(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
+			ctx = worklifetime.WithProcess(ctx, process)
 			return storetest.ClaimManagerHeartbeatProof(ctx, selected, authority, event, route)
 		},
 		RenewHeartbeat: func(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.ClaimCommit, error) {
+			ctx = worklifetime.WithProcess(ctx, process)
 			return storetest.RenewManagerHeartbeatProof(ctx, selected, claim)
 		},
 		RetryReady: func(t *testing.T, event events.Event, route events.DeliveryRoute) {
@@ -218,7 +222,7 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 			}
 			repo := canonicalrouting.RepoRoot(t)
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected}
-			ctx := manager.TerminalPanicFixtureContext()
+			ctx := fixture.Context
 			admitted, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 				BundleHash: sourceartifactfixture.BundleHash,
 				Selection:  runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: sourceartifactfixture.BundleHash},

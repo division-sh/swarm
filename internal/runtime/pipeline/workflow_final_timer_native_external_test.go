@@ -146,6 +146,7 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 						if err := closeStore(); err != nil {
 							t.Fatal(err)
 						}
+						replacePipelineExternalWorkOccurrenceForSource(t, authorActivityTestSourceArtifactFact, pipelineExternalTestWorkOwner(t))
 						selected = reopen()
 						ctx = originalPipelineFixtureContext(t, withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)), selected)
 					}

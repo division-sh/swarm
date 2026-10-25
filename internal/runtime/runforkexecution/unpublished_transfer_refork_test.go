@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -123,7 +124,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 					if err != nil || !parentResult.Activation.Activated || parentResult.Materialization.ForkRunID != parentRun {
 						t.Fatalf("late parent publication lost its original materialized child: %+v err=%v", parentResult, err)
 					}
-					waitUnpublishedReforkRunCompletion(t, ctx, selected, parentRun)
+					waitUnpublishedReforkRunCompletion(t, ctx, selected, owner, parentRun)
 					original := storetest.LoadCanonicalEventRecord(t, ctx, selected, pending.Publication.EventID)
 					if original.RunID() != parentRun || !original.CreatedAt().Equal(cause.CurrentDueAt) {
 						t.Fatal("late immediate-source publication changed its owner or original due")
@@ -147,7 +148,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				t.Fatalf("unpublished continuation flattened the parent boundary: %+v error=%v", binding, err)
 			}
 			id := activityidentity.ForkLineageEventID(child, pending.Publication.EventID)
-			waitUnpublishedReforkRunCompletion(t, ctx, selected, child)
+			waitUnpublishedReforkRunCompletion(t, ctx, selected, owner, child)
 			event := storetest.LoadCanonicalEventRecord(t, ctx, selected, id)
 			lineage, exists := event.SelectedForkLineage()
 			if !exists || lineage.SourceRunID() != parentRun || lineage.SourceEventID() != pending.Publication.EventID ||
@@ -204,7 +205,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 	}
 }
 
-func waitUnpublishedReforkRunCompletion(t *testing.T, ctx context.Context, selected startupownership.Store, runID string) {
+func waitUnpublishedReforkRunCompletion(t *testing.T, ctx context.Context, selected startupownership.Store, owner SelectedContractExecutionOwner, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	var last storetest.SelectedExecutionStorage

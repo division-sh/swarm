@@ -114,6 +114,7 @@ func TestResourceCodecCompiledMapImportReceiptAndPinnedPublicAgentReadbackBothSt
 		}
 		sourceRun, targetRun := uuid.NewString(), uuid.NewString()
 		for _, runID := range []string{sourceRun, targetRun} {
+			ctx = apiTestOriginalProcessContext(t, ctx, fixture.primary)
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{RunID: runID, State: runlifecycle.StateRunning,
 				Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC()})
 		}

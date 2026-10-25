@@ -100,9 +100,9 @@ func assertDataShowEvidence(t *testing.T, handler *Handler, params map[string]an
 	}
 }
 
-func dataShowSource(t *testing.T, selected DurableDataStore, bundle string, ref durabledata.DeclarationRef, expected durabledata.ExpectedHead, operation, input string) durabledata.SourceOperationResult {
+func dataShowSource(t *testing.T, ctx context.Context, selected DurableDataStore, bundle string, ref durabledata.DeclarationRef, expected durabledata.ExpectedHead, operation, input string) durabledata.SourceOperationResult {
 	t.Helper()
-	result, err := selected.ExecuteDataSourceOperation(context.Background(), durabledata.SourceCommand{Operation: operation, SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: bundle, Declaration: ref, ExpectedHead: expected, InputFormat: "jsonl", Input: []byte(input)})
+	result, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{Operation: operation, SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: bundle, Declaration: ref, ExpectedHead: expected, InputFormat: "jsonl", Input: []byte(input)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func dataShowReadOnlyHandlers(t *testing.T, fixture dataRunLifecycleFixture) map
 
 func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, ref := dataHTTPProbeCatalog(t)
 		for _, keyType := range []string{"boolean", "number"} {
 			keyRef, err := durabledata.ParseDeclarationRef(".", keyType+".observed")
@@ -191,8 +191,8 @@ func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: dataShowReadOnlyHandlers(t, fixture)})
-		first := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"alpha\"}\n{\"slug\":\"beta\"}\n")
-		second := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, first.Head.After, "import", "{\"slug\":\"gamma\"}\n")
+		first := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"alpha\"}\n{\"slug\":\"beta\"}\n")
+		second := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, first.Head.After, "import", "{\"slug\":\"gamma\"}\n")
 		before, err := fixture.primary.ListDataDeclarationSummaries(ctx, dataProbeBundleHash)
 		if err != nil {
 			t.Fatal(err)
@@ -310,7 +310,7 @@ func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 				key         any
 			}{{"boolean", "{\"key\":false}\n{\"key\":true}\n", true}, {"number", "{\"key\":1}\n{\"key\":2}\n", 2}} {
 				ref, _ := durabledata.ParseDeclarationRef(".", test.kind+".observed")
-				result := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", test.input)
+				result := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", test.input)
 				wire := dataShowWire(t, handler, map[string]any{"view": "row", "declaration": dataRunDeclaration(ref), "selector": map[string]any{"kind": "version", "version_id": result.Candidate.VersionID}, "row_selector": map[string]any{"key": test.key}})
 				if !reflect.DeepEqual(asMap(t, wire["value"])["key"], map[string]any{"boolean": true, "number": float64(2)}[test.kind]) {
 					t.Fatalf("typed key=%#v", wire)
@@ -319,7 +319,7 @@ func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 		})
 		t.Run("keyless_and_empty", func(t *testing.T) {
 			keylessRef, _ := durabledata.ParseDeclarationRef(".", "score.observed")
-			result := dataShowSource(t, fixture.primary, dataProbeBundleHash, keylessRef, durabledata.AbsentHead(), "import", "{\"label\":\"same\"}\n{\"label\":\"other\"}\n{\"label\":\"same\"}\n")
+			result := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, keylessRef, durabledata.AbsentHead(), "import", "{\"label\":\"same\"}\n{\"label\":\"other\"}\n{\"label\":\"same\"}\n")
 			sourceRecord, err := fixture.primary.LoadDataSourceOperation(ctx, result.SourceInvocationID)
 			if err != nil || sourceRecord.Result.Delta.RowIdentity != durabledata.DeltaRowIdentityPosition || sourceRecord.Result.Delta.Summary == nil || sourceRecord.Result.Delta.Summary.Added != 3 || len(sourceRecord.Evidence.DeltaAdded) != 0 {
 				t.Fatalf("positional delta=%#v/%v", sourceRecord, err)
@@ -343,7 +343,7 @@ func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 				{Declaration: keylessRef, VersionID: result.Candidate.VersionID, Ordinal: 2, Value: map[string]any{"label": "other"}},
 				{Declaration: keylessRef, VersionID: result.Candidate.VersionID, Ordinal: 3, Value: map[string]any{"label": "same"}},
 			})
-			empty := dataShowSource(t, fixture.primary, dataProbeBundleHash, keylessRef, result.Head.After, "import", "")
+			empty := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, keylessRef, result.Head.After, "import", "")
 			for _, view := range []string{"rows", "export_chunk"} {
 				params["view"] = view
 				params["page"] = map[string]any{}
@@ -409,7 +409,7 @@ func TestDataShowReadFamilyAcrossSelectedStores(t *testing.T) {
 
 func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, ref := dataHTTPProbeCatalog(t)
 		compiled, defects := durabledata.CompileJSONL(ref, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"slug"}, "properties": map[string]any{"slug": map[string]any{"type": "string"}, "payload": map[string]any{"type": "string"}}}, "slug", nil)
 		if len(defects) != 0 {
@@ -430,12 +430,12 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: dataShowReadOnlyHandlers(t, fixture)})
-		first := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"alpha\",\"payload\":\"before\"}\n{\"slug\":\"beta\",\"payload\":\"before\"}\n{\"slug\":\"epsilon\"}\n{\"slug\":\"zeta\"}\n")
-		second := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, first.Head.After, "import", "{\"slug\":\"alpha\",\"payload\":\"after\"}\n{\"slug\":\"beta\",\"payload\":\"after\"}\n{\"slug\":\"gamma\"}\n{\"slug\":\"theta\"}\n")
-		check := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "check", "{\"slug\":\"delta\"}\n")
-		rejected := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "check", "{\"unknown\":true}\n")
-		rejectedImport := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "import", "{\"unknown\":true}\n{\"unknown\":false}\n")
-		conflict := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"stale\"}\n")
+		first := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"alpha\",\"payload\":\"before\"}\n{\"slug\":\"beta\",\"payload\":\"before\"}\n{\"slug\":\"epsilon\"}\n{\"slug\":\"zeta\"}\n")
+		second := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, first.Head.After, "import", "{\"slug\":\"alpha\",\"payload\":\"after\"}\n{\"slug\":\"beta\",\"payload\":\"after\"}\n{\"slug\":\"gamma\"}\n{\"slug\":\"theta\"}\n")
+		check := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "check", "{\"slug\":\"delta\"}\n")
+		rejected := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "check", "{\"unknown\":true}\n")
+		rejectedImport := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, second.Head.After, "import", "{\"unknown\":true}\n{\"unknown\":false}\n")
+		conflict := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"stale\"}\n")
 		for _, result := range []durabledata.SourceOperationResult{first, second, check, rejected, rejectedImport, conflict} {
 			record, err := fixture.primary.LoadDataSourceOperation(ctx, result.SourceInvocationID)
 			if err != nil {
@@ -571,7 +571,7 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 					t.Fatalf("second real pin=%#v", response)
 				}
 				// Move the current head so the separate pinned refusal is reachable.
-				newHead := dataShowSource(t, fixture.primary, runStartTestBundleHash, scanRef, durabledata.VersionHead(pin.VersionID), "import", "{\"topic\":\"next\"}\n")
+				newHead := dataShowSource(t, ctx, fixture.primary, runStartTestBundleHash, scanRef, durabledata.VersionHead(pin.VersionID), "import", "{\"topic\":\"next\"}\n")
 				prune, err := fixture.primary.PruneDataResource(ctx, durabledata.PruneCommand{PruneInvocationID: uuid.NewString(), Actor: "operator", Declaration: scanRef, VersionID: pin.VersionID, ExpectedHead: newHead.Head.After})
 				if err != nil || prune.Outcome != "refused_pinned" {
 					t.Fatalf("pinned prune=%#v/%v", prune, err)

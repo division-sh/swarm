@@ -1129,7 +1129,10 @@ func (s *RunForkPostgresOwner) RequireRunForkSelectedContractExecutionSettlement
 		return err
 	}
 	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		snapshot, err := s.LoadSnapshotTx(ctx, tx, authority.SelectedFork.ForkRunID, true)
+		if _, err := s.RequirePresentSourceTx(ctx, tx, authority.SelectedFork.ForkRunID); err != nil {
+			return err
+		}
+		snapshot, err := s.LoadSnapshotTx(ctx, tx, authority.SelectedFork.ForkRunID, false)
 		if err != nil {
 			return err
 		}

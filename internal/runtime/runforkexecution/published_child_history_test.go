@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -119,7 +120,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != wantRecovery {
 					t.Fatalf("recover exact transferred work: %+v err=%v", recovered, err)
 				}
-				waitPublishedChildCompletion(t, selected, process, baseline, checkpoint.ForkRun)
+				waitPublishedChildCompletion(t, selected, owner, process, baseline, checkpoint.ForkRun)
 				again, err := lifecycle.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: checkpoint.ForkRun, AtStart: true})
 				if err != nil || !reflect.DeepEqual(start.Entities, again.Entities) || !reflect.DeepEqual(start.TransferredJoins, again.TransferredJoins) {
 					t.Fatalf("restart/settlement changed the old prepublication cut: %v", err)
@@ -151,7 +152,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					t.Fatalf("child-as-source exact owed delivery: %+v err=%v", result, err)
 				}
 				grandchild := result.Materialization.ForkRunID
-				waitPublishedChildCompletion(t, selected, process, baseline, grandchild)
+				waitPublishedChildCompletion(t, selected, owner, process, baseline, grandchild)
 				grandEvent := storetest.LoadCanonicalEventRecord(t, ctx, selected, activityidentity.ForkLineageEventID(grandchild, id))
 				lineage, found := grandEvent.SelectedForkLineage()
 				if !found || lineage.SourceRunID() != checkpoint.ForkRun || lineage.SourceEventID() != id ||
@@ -177,7 +178,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 	}
 }
 
-func waitPublishedChildCompletion(t *testing.T, selected any, process *worklifetime.Process, baseline uint64, runID string) {
+func waitPublishedChildCompletion(t *testing.T, selected any, owner SelectedContractExecutionOwner, process *worklifetime.Process, baseline uint64, runID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()

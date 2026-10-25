@@ -36,7 +36,9 @@ func TestRuntimeLogFilterParityBothStores(t *testing.T) {
 			artifactA := storeTestSourceArtifact("runtime-log-filter-a")
 			artifactB := storeTestSourceArtifact("runtime-log-filter-b")
 			runA, runB := uuid.NewString(), uuid.NewString()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, Artifact: artifactA, StartedAt: base.Add(-time.Minute)})
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, Artifact: artifactB, StartedAt: base.Add(-time.Minute)})
 			insert := func(run, code string, at time.Time) string {
 				t.Helper()

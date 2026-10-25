@@ -148,6 +148,7 @@ func TestTerminalStandingMembersDoNotAbortCompleteSetParity(t *testing.T) {
 			ctx := testAuthorActivityRuntimeContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			terminalCandidate := fixture.candidate("terminal-member")
+			ctx = storeTestOriginalProcessContext(t, ctx, fixture.selected)
 			healthyCandidate := fixture.candidate("healthy-member")
 			terminal, err := fixture.workflow.ReconcileStandingService(ctx, terminalCandidate)
 			if err != nil {

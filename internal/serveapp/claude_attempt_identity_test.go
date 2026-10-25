@@ -51,6 +51,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -58,13 +59,6 @@ const (
 	claudeAttemptProofEventType events.EventType = "claude.attempt.proof.requested"
 	claudeAttemptProofRuntimeID                  = "77777777-7777-4777-8777-777777777777"
 )
-
-func claudeAttemptProofContext(source runtimecorrelation.SourceArtifactFact) context.Context {
-	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
-		claudeAttemptProofRuntimeID,
-		source.BundleHash(),
-	))
-}
 
 type claudeAttemptProofSurface struct {
 	name           string

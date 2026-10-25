@@ -62,12 +62,13 @@ type dispatchJob struct {
 // delivery continuations. It is a bounded selected-store projection, not a
 // durable queue or a second eligibility clock.
 type Coordinator struct {
-	store      runtimedelivery.Store
-	restarts   runtimestanding.StandingRestartDispositionReader
-	authority  runtimedelivery.ExecutionAuthority
-	workOwner  worklifetime.Occurrence
-	dispatcher Dispatcher
-	report     ErrorReporter
+	store             runtimedelivery.Store
+	restarts          runtimestanding.StandingRestartDispositionReader
+	authority         runtimedelivery.ExecutionAuthority
+	workOwner         worklifetime.Occurrence
+	dispatcher        Dispatcher
+	report            ErrorReporter
+	selectedReconcile func(context.Context) error
 
 	mu            sync.Mutex
 	entries       map[string]entry
@@ -113,11 +114,19 @@ func NewSelected(
 	workOwner worklifetime.Occurrence,
 	dispatcher Dispatcher,
 	report ErrorReporter,
+	reconcile func(context.Context) error,
 ) (*Coordinator, error) {
 	if authority.Kind() != runtimedelivery.ExecutionAuthoritySelectedContractFork {
 		return nil, errors.New("selected delivery continuation coordinator requires selected execution authority")
 	}
-	return newCoordinator(store, nil, authority, workOwner, dispatcher, report)
+	if reconcile == nil {
+		return nil, errors.New("selected delivery continuation requires barrier reconciliation")
+	}
+	c, err := newCoordinator(store, nil, authority, workOwner, dispatcher, report)
+	if err == nil {
+		c.selectedReconcile = reconcile
+	}
+	return c, err
 }
 
 func newCoordinator(
@@ -798,7 +807,20 @@ func (c *Coordinator) beginDispatchWork(ctx context.Context) (*worklifetime.Leas
 	return c.workOwner.Begin(ctx)
 }
 
-func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration, bool, error) {
+func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Duration, shouldWake bool, resultErr error) {
+	dispatchCtx := ctx
+	if c.selectedReconcile != nil {
+		lease, err := c.beginDispatchWork(ctx)
+		if err != nil {
+			return 0, false, err
+		}
+		// Keep the recovered work and its delivery handoff in one finite reach.
+		defer func() { resultErr = errors.Join(resultErr, lease.Done()) }()
+		ctx = lease.Context()
+		if err := c.selectedReconcile(ctx); err != nil {
+			return 0, false, err
+		}
+	}
 	var cursor runtimedelivery.ContinuationCursor
 	var next time.Duration
 	var wake bool
@@ -847,7 +869,8 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration,
 					return 0, false, err
 				}
 				c.reclaimAttempt(item.DeliveryID, beforeScan[item.DeliveryID])
-				if err := c.schedule(ctx, item); err != nil {
+				// Dispatch outlives this finite scan, but not its coordinator.
+				if err := c.schedule(dispatchCtx, item); err != nil {
 					return 0, false, err
 				}
 			case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimParked:

@@ -36,6 +36,7 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 			ctx = originalAPIFixtureContext(t, ctx, selected)
 			runID := uuid.NewString()
 			fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifact, StartedAt: time.Now().UTC()}
+			ctx = apiTestOriginalProcessContext(t, ctx, selected)
 			storetest.RequireRun(t, ctx, selected, fixture)
 			source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID})
 			if err != nil {

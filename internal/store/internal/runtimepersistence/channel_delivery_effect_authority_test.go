@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/packs"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/packs"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -74,6 +75,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}
 				} else {
 					sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
+					ctx := storeTestOriginalProcessContext(t, ctx, sqlite)
 					selected, db = sqlite, sqlite.backend
 					runTx = func(fn func(context.Context, *sql.Tx) error) error {
 						return sqlite.backend.RunTransaction(ctx, "channel delivery authority test", fn)

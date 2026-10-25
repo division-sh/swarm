@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/google/uuid"
 )
 
@@ -77,6 +78,11 @@ func CarryAcceptedLease(dst, admitted context.Context) context.Context {
 	lease, _ := admitted.Value(acceptedLeaseContextKey{}).(*Lease)
 	if lease == nil {
 		return dst
+	}
+	// Receiver contexts intentionally discard caller values. Original process
+	// attribution belongs to the admitted lease, not to that caller value tree.
+	if process, found := ProcessFromContext(lease.Context()); found {
+		dst = WithProcess(dst, process)
 	}
 	return context.WithValue(dst, acceptedLeaseContextKey{}, lease)
 }
@@ -437,6 +443,35 @@ func (o *ownedOccurrence) finish(ctx context.Context) error {
 
 type Process struct {
 	occurrence *ownedOccurrence
+	stampMu    sync.RWMutex
+	stamp      processbinding.LeaseStamp
+}
+
+// BindOriginalProcess retains attribution from the acquired native process.
+// It is immutable; SQL admission must still prove this stamp under its fence.
+func (p *Process) BindOriginalProcess(stamp processbinding.LeaseStamp) error {
+	if p == nil {
+		return errors.New("process work owner is required")
+	}
+	if err := stamp.Validate(); err != nil {
+		return err
+	}
+	p.stampMu.Lock()
+	defer p.stampMu.Unlock()
+	if p.stamp.Generation != 0 && p.stamp != stamp {
+		return errors.New("process work owner already belongs to another original process")
+	}
+	p.stamp = stamp
+	return nil
+}
+
+func (p *Process) OriginalProcess() (processbinding.LeaseStamp, bool) {
+	if p == nil {
+		return processbinding.LeaseStamp{}, false
+	}
+	p.stampMu.RLock()
+	defer p.stampMu.RUnlock()
+	return p.stamp, p.stamp.Generation != 0
 }
 
 type processContextKey struct{}

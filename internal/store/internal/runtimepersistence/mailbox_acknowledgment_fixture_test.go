@@ -17,6 +17,7 @@ type noticeAcknowledgmentFixtureOwner interface {
 func noticeAcknowledgmentFixture(t testing.TB, selected noticeAcknowledgmentFixtureOwner, id string) func(context.Context) error {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	requireDefaultSourceArtifactForTest(t, ctx, selected)
 	principal, err := selected.EnsureOperatorPrincipal(ctx, time.Now())
 	if err != nil {

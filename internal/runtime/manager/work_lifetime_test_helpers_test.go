@@ -247,6 +247,31 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 			opts.DeliveryStore = deliveryStore
 		}
 	}
+	if native := managerTestOriginalProcessFromStore(opts.DeliveryStore); native != nil {
+		original, found := native.OriginalProcess()
+		if !found {
+			t.Fatal("native manager fixture requires its original process")
+		}
+		lease, err := opts.WorkOwner.Begin(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		process, found := worklifetime.ProcessFromContext(lease.Context())
+		if err := lease.Done(); err != nil {
+			t.Fatal(err)
+		}
+		if !found {
+			t.Fatal("native manager fixture requires its process work owner")
+		}
+		if err := process.BindOriginalProcess(original); err != nil {
+			t.Fatal(err)
+		}
+		base := opts.BaseContext
+		if base == nil {
+			base = context.Background()
+		}
+		opts.BaseContext = worklifetime.WithProcess(base, process)
+	}
 	if opts.SessionResetter == nil && opts.Sessions != nil {
 		opts.SessionResetter, _ = opts.Sessions.(sessions.Resetter)
 	}

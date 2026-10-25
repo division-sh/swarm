@@ -27,6 +27,7 @@ func TestFanOutGrantedBatchObservationReadOnlyBothStores(t *testing.T) {
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 64, time.Now().UTC())
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			unregistered := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), storeTestSourceArtifact("unregistered-observed-source"))
 			process, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
 			executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 8), done: make(chan struct{})}
@@ -163,6 +164,7 @@ func TestFanOutGrantedSelectorObservationBypassesMutationFenceBothStores(t *test
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 0, time.Now().UTC())
 			_, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
 			executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 4), done: make(chan struct{})}
@@ -295,6 +297,7 @@ func TestFanOutGrantedSourceRefreshRegistrationWindowBothStores(t *testing.T) {
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 1, time.Now().UTC())
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			extra := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 0, time.Now().UTC(), storeTestSourceArtifact("refresh-extra-source"))
 			process, grants, occurrences, originalPlan := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
 			executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 8), done: make(chan struct{})}

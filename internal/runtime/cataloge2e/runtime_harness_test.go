@@ -41,6 +41,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
@@ -435,6 +436,7 @@ func installCatalogRuntimeStartupGrant(
 	capability runtimestartupownership.ProcessCapability,
 	rt *runtime.Runtime,
 	componentExecution bool,
+	retained ...runtimestartupownership.ProcessCapability,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
 	if capability == nil || rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {

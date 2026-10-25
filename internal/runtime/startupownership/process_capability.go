@@ -14,6 +14,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
@@ -174,6 +175,30 @@ type generationGrant struct {
 
 type liveGenerationGrant struct {
 	*generationGrant
+}
+
+// BindProcessWorkOwner carries the acquired process, not the grant's potentially
+// different source/runtime identity, into existing descendant work contexts.
+func BindProcessWorkOwner(process *worklifetime.Process, grant GenerationGrant) error {
+	var owned *generationGrant
+	switch g := grant.(type) {
+	case *generationGrant:
+		owned = g
+	case *liveGenerationGrant:
+		if g != nil {
+			owned = g.generationGrant
+		}
+	default:
+		return errors.New("process attribution requires the original owned generation grant")
+	}
+	if owned == nil || owned.owner == nil {
+		return errors.New("generation grant has no original process owner")
+	}
+	original, err := owned.owner.Evidence()
+	if err != nil {
+		return err
+	}
+	return process.BindOriginalProcess(original.LeaseStamp())
 }
 
 func NewProcessCapability(session RetainedSession) (ProcessCapability, error) {

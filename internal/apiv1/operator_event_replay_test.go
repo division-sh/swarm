@@ -1090,6 +1090,7 @@ func TestEventReplayAuditPayloadOmitsAbsentTargetlessEntity(t *testing.T) {
 
 func seedCompleteReplayRun(t testing.TB, ctx context.Context, selected storetest.RunFixtureStore, runID string, startedAt time.Time) {
 	t.Helper()
+	ctx = apiTestOriginalProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, StartedAt: startedAt, BundleHash: runStartTestBundleHash,
 	})
@@ -1625,6 +1626,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	ctx = originalAPIFixtureContext(t, ctx, pg)
 	eventID := uuid.NewString()
 	runID := operatorReplayRunID
+	ctx = apiTestOriginalProcessContext(t, ctx, pg)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	semanticEvent := eventtest.PersistedProjection(
 		eventID,

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -213,6 +214,9 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 			if err != nil || len(summary.Results) != 2 || calls.Load() != 2 {
 				t.Fatalf("runtime-scoped sibling recovery lost once-only results: count=%d calls=%d err=%v", len(summary.Results), calls.Load(), err)
 			}
+			replacePipelineExternalWorkOccurrenceForSource(t, first.fact, pipelineExternalTestWorkOwnerForSource(t, first.fact))
+			publicationCtx := testAuthorActivityContextForSource(t, context.Background(), first.fact)
+			publicationCtx = nativeOriginalProcessContextFixture(t, publicationCtx, successor)
 			for _, recovered := range summary.Results {
 				proveRecoveredActivitySibling(t, selected, cells, successorRequest.RuntimeInstanceID, recovered, successor)
 			}

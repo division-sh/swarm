@@ -59,5 +59,6 @@ func insertDirectiveRun(t *testing.T, ctx context.Context, pg *PostgresStore, ru
 	if err != nil {
 		t.Fatalf("parse run state %q: %v", status, err)
 	}
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, State: state})
 }

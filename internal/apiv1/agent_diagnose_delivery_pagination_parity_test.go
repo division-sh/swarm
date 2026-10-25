@@ -57,6 +57,7 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 
 			now := time.Now().UTC().Add(-time.Minute)
 			runID := uuid.NewString()
+			ctx = apiTestOriginalProcessContext(t, ctx, selected)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 				RunID: runID, StartedAt: now.Add(-time.Minute),
 			})

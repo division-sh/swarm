@@ -141,7 +141,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 					name = "linked/"
 				}
 				t.Run(backend+"/"+name+operation, func(t *testing.T) {
-					ctx := testAuthorActivityContext()
+					ctx := storeTestWorkContext(t, testAuthorActivityContext())
 					cards, runID := decisionCardTestStore(t, backend)
 					ctx = originalStoreFixtureContext(t, ctx, cards)
 					card, continuation := newRootProposedEffectTestCard(t, runID, time.Now().UTC())
@@ -242,7 +242,7 @@ func TestChannelPostCommitCardCreationAndTerminalHintsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, kind := range []string{"gate", "human_task", "proposed_effect"} {
 			t.Run(backend+"/"+kind, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				ctx = originalStoreFixtureContext(t, ctx, cards)
 				proof := observeChannelHints(t, cards.(interface {

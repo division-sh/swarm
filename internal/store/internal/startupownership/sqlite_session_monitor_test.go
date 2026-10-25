@@ -224,7 +224,7 @@ func newSQLiteProofSession(t *testing.T, maximum int) (*sqliteSession, *sql.DB) 
 		t.Fatal(err)
 	}
 	var authority runtimestartupownership.Authority
-	if err := backend.RunTransaction(context.Background(), "seed runtime process authority", func(ctx context.Context, tx *sql.Tx) error {
+	if _, err := backend.RunProcessAcquisitionOutcome(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		authority, err = acquireProcessGenerationTx(ctx, tx, runtimestartupownership.AcquireRequest{
 			OwnerID: "sqlite-monitor-release", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),

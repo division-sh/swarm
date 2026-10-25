@@ -20,6 +20,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
@@ -995,6 +996,109 @@ func (s *PipelineSQLiteOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Contex
 		return err
 	})
 	return activations, err
+}
+
+func (s *fanOutPostgresOwner) AdvanceFanOutBarriers(ctx context.Context, key fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	return s.advanceFanOutBarriers(ctx, &key)
+}
+
+func (s *fanOutPostgresOwner) ReconcileFanOutBarriers(ctx context.Context) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	return s.advanceFanOutBarriers(ctx, nil)
+}
+
+func (s *fanOutPostgresOwner) advanceFanOutBarriers(ctx context.Context, key *fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+		return advanceAdmittedFanOutBarriers(ctx, attempt, true, s.admission, s.grant, s.genericSchedules, key, time.Now)
+	})
+	activations, _ := outcome.Value()
+	return activations, outcome.Err()
+}
+
+func (s *fanOutSQLiteOwner) AdvanceFanOutBarriers(ctx context.Context, key fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	return s.advanceFanOutBarriers(ctx, &key)
+}
+
+func (s *fanOutSQLiteOwner) ReconcileFanOutBarriers(ctx context.Context) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	return s.advanceFanOutBarriers(ctx, nil)
+}
+
+func (s *fanOutSQLiteOwner) advanceFanOutBarriers(ctx context.Context, key *fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "advance fan-out barriers", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+		return advanceAdmittedFanOutBarriers(ctx, attempt, false, s.admission, s.grant, s.genericSchedules, key, s.now)
+	})
+	activations, _ := outcome.Value()
+	return activations, outcome.Err()
+}
+
+func advanceAdmittedFanOutBarriers(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, admission FanOutAdmission, grant startupownership.GrantEvidence, schedules GenericScheduleTxOwner, key *fanoutobligation.IntentKey, now func() time.Time) (activations []runtimerunlifecycle.CommittedGenericScheduleActivation, err error) {
+	var runID string
+	if key == nil {
+		if grant.SelectedFork == nil {
+			return nil, errors.New("barrier recovery requires an exact selected-fork grant")
+		}
+		runID = grant.SelectedFork.ForkRunID
+	} else {
+		if err := key.Validate(); err != nil {
+			return nil, err
+		}
+		runID = key.RunID
+	}
+	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		ready, err := admitFanOutRun(ctx, tx, admission, grant, runID, true)
+		if err != nil || !ready {
+			return err
+		}
+		if key != nil {
+			predicate, args := fanOutKeyPredicate("", *key, 2)
+			var present int
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM fan_out_intents WHERE bundle_hash=$1 AND `+predicate, append([]any{grant.BundleHash}, args...)...).Scan(&present); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil
+				}
+				return err
+			}
+		}
+		at, err := fanOutAdmissionTime(ctx, tx, postgres, now)
+		if err != nil {
+			return err
+		}
+		if _, err := advanceFanOutDeliveryBarriersTx(ctx, tx, attempt, postgres, schedules, runID, at); err != nil {
+			return err
+		}
+		activations, err = retainedFanOutBarrierActivations(ctx, tx, attempt, postgres, schedules, runID)
+		return err
+	})
+	return activations, err
+}
+
+func retainedFanOutBarrierActivations(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, schedules GenericScheduleTxOwner, runID string) (activations []runtimerunlifecycle.CommittedGenericScheduleActivation, err error) {
+	pending, err := loadFanOutBarriers(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending, nil, true)
+	if err != nil {
+		return activations, err
+	}
+	for _, barrier := range pending {
+		if barrier.TransferredOccurrence != nil {
+			continue
+		}
+		activation, found, err := schedules.LoadActivationTx(ctx, attempt, barrier.ScheduleActivationID)
+		if err != nil {
+			return activations, err
+		}
+		if !found {
+			return activations, fmt.Errorf("pending fan-out barrier activation %s is missing", barrier.ScheduleActivationID)
+		}
+		if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(barrier, activation); err != nil {
+			return activations, err
+		}
+		committed, err := runtimerunlifecycle.NewCommittedGenericScheduleActivation(activation.ID)
+		if err != nil {
+			return activations, err
+		}
+		activations = append(activations, committed)
+	}
+	return activations, nil
 }
 
 func (s *PipelinePostgresOwner) SummarizeFanOutDeliveryBarriersRunTx(ctx context.Context, tx *sql.Tx, runID string) (fanoutbarrier.RunSummary, error) {

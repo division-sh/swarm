@@ -258,7 +258,7 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 						t.Fatalf("successor confused frozen parent and owed child: %+v want=%s", entry, want)
 					}
 				}
-				waitPublishedChildCompletion(t, selected, process, baseline, crashed.ForkRun)
+				waitPublishedChildCompletion(t, selected, owner, process, baseline, crashed.ForkRun)
 				state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, crashed.ForkRun)
 				wantOccurrences := 1
 				if preACK {
