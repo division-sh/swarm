@@ -128,6 +128,12 @@ func (tx *completionOutcomeTx) Commit() error {
 
 func openCompletionOutcomeFixture(t *testing.T, backend string, wrappers ...func(driver.Connector) driver.Connector) (completionSettlementFixture, *completionOutcomeConnector) {
 	t.Helper()
+	fixture, control := openCompletionOutcomeNativeStore(t, backend, wrappers...)
+	return newCompletionSettlementFixture(t, fixture.store, fixture.db, fixture.sqlite), control
+}
+
+func openCompletionOutcomeNativeStore(t *testing.T, backend string, wrappers ...func(driver.Connector) driver.Connector) (completionSettlementFixture, *completionOutcomeConnector) {
+	t.Helper()
 	var native driver.Connector
 	if backend == "postgres" {
 		dsn, _, _ := testutil.StartPostgres(t)
@@ -150,7 +156,7 @@ func openCompletionOutcomeFixture(t *testing.T, backend string, wrappers ...func
 		}
 	})
 	if backend == "postgres" {
-		return newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false), control
+		return completionSettlementFixture{store: admitTestPostgresStore(t, db), db: db, context: testAuthorActivityContext()}, control
 	}
 	store := NewSQLiteRuntimeStoreForTest(db)
 	if err := store.BootstrapSchema(testAuthorActivityContext(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
@@ -158,7 +164,7 @@ func openCompletionOutcomeFixture(t *testing.T, backend string, wrappers ...func
 	}
 	store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 	registerTestAuthorActivityCatalog(t, store)
-	return newCompletionSettlementFixture(t, store, db, true), control
+	return completionSettlementFixture{store: store, db: db, sqlite: true, context: testAuthorActivityContext()}, control
 }
 
 func TestCompletionTransactionAcknowledgementBoundaryBothStores(t *testing.T) {

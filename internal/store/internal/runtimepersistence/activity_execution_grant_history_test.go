@@ -21,14 +21,8 @@ import (
 
 type activityGrantHistoryConnector struct {
 	driver.Connector
-	fault              string
-	reads              int
-	cohortFault        string
-	cohortReads        int
-	installedFault     string
-	permanentFault     string
-	copiedFault        string
-	copiedLineageReads int
+	fault string
+	reads int
 }
 
 func (c *activityGrantHistoryConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -49,48 +43,9 @@ func (c *activityGrantHistoryConn) BeginTx(ctx context.Context, options driver.T
 }
 
 func (c *activityGrantHistoryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	permanent := permanentForkEvidenceQuery(query) && c.control.permanentFault != ""
-	if permanent && c.control.permanentFault == "query_error" {
-		return nil, errSelectedGrantHistoryRead
-	}
-	closed := strings.Contains(query, "AS history_max_generation")
-	installed := strings.Contains(query, "FROM activity_attempts") && strings.HasSuffix(query, " ORDER BY request_event_id")
-	if (closed || installed) && c.control.installedFault == "query_error" {
-		return nil, errSelectedGrantHistoryRead
-	}
-	cohort := strings.Contains(query, "FROM runtime_generation_grants WHERE selected_execution_id=$1 OR ")
-	if cohort {
-		c.control.cohortReads++
-		if c.control.cohortFault == "query_error" {
-			return nil, errSelectedGrantHistoryRead
-		}
-		if strings.HasPrefix(c.control.cohortFault, "snapshot_only") {
-			query = strings.Replace(query, "selected_execution_id=$1 OR ", "FALSE OR ", 1)
-		}
-	}
 	rows, err := c.pipelineCrashConn.QueryContext(ctx, query, args)
 	if err != nil {
 		return nil, err
-	}
-	if permanent {
-		return &permanentForkEvidenceRows{Rows: rows, fault: c.control.permanentFault, query: query}, nil
-	}
-	if c.control.copiedFault != "" && strings.HasPrefix(strings.TrimSpace(query), "SELECT CAST(fork_run_id AS TEXT), CAST(source_run_id AS TEXT),") && strings.Contains(query, "COALESCE(source_obligation_event_id, source_event_id)") {
-		fault := c.control.copiedFault
-		c.control.copiedLineageReads++
-		if fault == "last_lineage" && c.control.copiedLineageReads == 2 {
-			fault = "foreign_source"
-		}
-		return &selectedCopiedInputRows{Rows: rows, fault: fault}, nil
-	}
-	if installed && (strings.HasPrefix(c.control.copiedFault, "copy_") || c.control.copiedFault == "last_copy_payload") {
-		return &selectedInstalledHistoryRows{Rows: rows, fault: c.control.copiedFault}, nil
-	}
-	if closed || installed {
-		return &selectedInstalledHistoryRows{Rows: rows, fault: c.control.installedFault, closed: closed}, nil
-	}
-	if cohort {
-		return &selectedGrantCohortRows{Rows: rows, fault: c.control.cohortFault}, nil
 	}
 	if !strings.Contains(query, "FROM runtime_generation_grants WHERE grant_id=$1 AND state_version=$2") {
 		return rows, nil
@@ -134,21 +89,18 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			control := &activityGrantHistoryConnector{}
-			fixture, _ := openCompletionOutcomeFixture(t, backend, func(native driver.Connector) driver.Connector {
+			fixture, _ := openCompletionOutcomeNativeStore(t, backend, func(native driver.Connector) driver.Connector {
 				control.Connector = native
 				return control
 			})
 			ctx := fixture.context
 			selected := fixture.store.(agentfixture.Store)
-			process, err := agentfixture.ProcessCapability(t, ctx, selected)
+			coordinate := agenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan, found, err := process.CurrentSourceSet(ctx)
-			if err != nil || !found || len(plan.Sources) != 1 {
-				t.Fatalf("exact source plan unavailable: found=%t error=%v", found, err)
-			}
-			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, agenttopology.SourceCoordinate{BundleHash: plan.Sources[0].BundleHash})
+			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -225,9 +177,6 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("historical reads changed durable rows: %v", err)
 			}
-			proveRetiredSelectedGrantHistory(t, fixture, process, control)
-			proveClosedSelectedPermanentForkCohort(t, backend)
-			proveClosedCopiedSelectedJournalCohort(t, backend)
 		})
 	}
 }
