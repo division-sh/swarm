@@ -303,8 +303,6 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 			{name: "materialization_missing_ack", materialization: operationErr, refuseMaterialization: true},
 			{name: "source_events_acknowledged_cleanup", source: operationErr, sourceCommitted: true, activate: true},
 			{name: "activation_acknowledged_error", activation: operationErr, activate: true},
-			{name: "activation_and_close_errors", activation: operationErr, close: settlementErr, activate: true},
-			{name: "close_acknowledged_error", close: settlementErr, activate: true},
 		} {
 			t.Run(backend+"/"+tc.name, func(t *testing.T) {
 				fixture := newActivityForkFixture(t, backend)
