@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -60,15 +60,17 @@ func createCompletion2270WaitingRun(t *testing.T, rt completion2270ServedProof) 
 	}
 	deadline = time.Now().Add(15 * time.Second)
 	for {
-		entities, err := rt.Selected.Entities().ListOperatorEntities(context.Background(), operatorread.OperatorEntityListOptions{RunID: result.RunID, CurrentState: "waiting"})
-		if err != nil {
-			t.Fatal(err)
+		var diagnosis cliapp.DiagnosticRunDiagnosisResult
+		requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": result.RunID}, &diagnosis)
+		waiting := false
+		for _, instance := range diagnosis.Instances {
+			waiting = waiting || instance.FlowInstance == result.RunID && instance.Stage == "waiting"
 		}
-		if len(entities.Entities) > 0 && entities.Entities[0].EntityID != "" && entities.Entities[0].RunID == result.RunID {
+		if waiting {
 			break
 		}
 		if !time.Now().Before(deadline) {
-			t.Fatalf("exact waiting entity is missing: %+v", entities)
+			t.Fatalf("exact waiting flow header is missing: %+v", diagnosis.Instances)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

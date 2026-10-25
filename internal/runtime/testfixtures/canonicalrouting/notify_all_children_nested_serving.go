@@ -8,9 +8,9 @@ import (
 // CopyNotifyAllChildrenNestedServing keeps the production example's root
 // ingress and direct barrier, then makes each account a genuine child producer.
 // Task identities repeat across account siblings but own distinct nested state.
-func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
+func CopyNotifyAllChildrenNestedServing(t testing.TB, membership ...string) string {
 	t.Helper()
-	root := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{FanOutDeliveryBarrier: true})
+	root := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{FanOutDeliveryBarrier: true, InitialMembership: &membership})
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - portfolio.notify.requested\n  outputs:\n", "    - portfolio.notify.requested\n    - account.tasks.completed\n    - account.task.completed\n  outputs:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.tasks.completed\n    - account.task.completed\nconnect:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n", "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n  - event: account.tasks.completed\n    from: account\n    to: .\n  - event: account.task.completed\n    from: account/task\n    to: .\n")

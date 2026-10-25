@@ -241,7 +241,7 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	}
 	state := record.State
 	state.Transition, state.ExpectedState, state.ExpectedRevision = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion, "pending", 1
-	state.CurrentState, state.EntityType, state.Name, state.Fields = "pending", "default", "At R", json.RawMessage(`{"name":"At R"}`)
+	state.CurrentState, state.Name, state.Fields = "pending", "At R", json.RawMessage(`{"name":"At R"}`)
 	if _, err := selected.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state}); err != nil {
 		t.Fatal(err)
 	}

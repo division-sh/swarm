@@ -50,6 +50,7 @@ func assertIssue2655ChildCutContents(t *testing.T, ctx context.Context, f *deplo
 		t.Fatal("post-cut marker disappeared from the advanced source")
 	}
 	counts := map[string]int{}
+	fieldCompanions := 0
 	for table, records := range rows {
 		for _, row := range records {
 			childOwned := false
@@ -67,6 +68,9 @@ func assertIssue2655ChildCutContents(t *testing.T, ctx context.Context, f *deplo
 				continue
 			}
 			counts[table]++
+			if table == "flow_instances" && text(row, "entity_type") != "" {
+				fieldCompanions++
+			}
 			for column, cell := range row {
 				if cell.Type != "string" && cell.Type != "[]uint8" {
 					continue
@@ -78,10 +82,13 @@ func assertIssue2655ChildCutContents(t *testing.T, ctx context.Context, f *deplo
 			}
 		}
 	}
-	for _, table := range []string{"flow_instances", "entity_state", "run_fork_fact_revisions"} {
+	for _, table := range []string{"flow_instances", "run_fork_fact_revisions"} {
 		if counts[table] == 0 {
 			t.Fatalf("child has no retained at-cut %s evidence", table)
 		}
+	}
+	if counts["entity_state"] != fieldCompanions {
+		t.Fatalf("child field companions=%d, want %d declared state headers", counts["entity_state"], fieldCompanions)
 	}
 	lineage := false
 	for _, row := range rows["runs"] {

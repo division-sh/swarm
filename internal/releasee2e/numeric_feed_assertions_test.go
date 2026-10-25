@@ -58,7 +58,7 @@ func decodeNumericFeedExpectations(body []byte) (numericFeedExpectations, error)
 		return expected, fmt.Errorf("numeric source requires its exact structural claim")
 	}
 	if f.Dataset != "data/items.jsonl" || len(f.SHA256) != 64 || f.Rows != 100 || f.Event != "item.registered" ||
-		f.ReceiverFlow != "registry" || f.ReceiverNode != "registry-intake" || f.ReceiverType != "item" || f.ReceiverStage != "registered" ||
+		f.ReceiverFlow != "registry" || f.ReceiverNode != "registry-intake" || f.ReceiverType != "state" || f.ReceiverStage != "registered" ||
 		f.TimerAfter != "2160h" || f.DeadLetters == nil || *f.DeadLetters != 0 ||
 		!reflect.DeepEqual(f.StateFields, []string{"batch_id", "item_id", "label", "region", "source_ref", "openings", "tags", "origin", "score", "qualified"}) ||
 		!reflect.DeepEqual(f.OptionalEventFields, []string{"note"}) {

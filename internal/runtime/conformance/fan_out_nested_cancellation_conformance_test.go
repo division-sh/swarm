@@ -66,7 +66,8 @@ func (p *nestedCancellationHandlers) assertOnlyHeld(t *testing.T, ids ...string)
 func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t))
+			accounts := []string{"sibling-c", "sibling-a", "sibling-b"}
+			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t, accounts...))
 			probe := newNestedServingProbe(t)
 			probe.pauseAccountTurn = 2
 			probe.accountTurnPaused = make(chan struct{}, 1)
@@ -88,7 +89,6 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			}
 
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
-			accounts := []string{"sibling-c", "sibling-a", "sibling-b"}
 			publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})
 			waitNotifyAllChildrenRuntime(t, rt, runID)
 			notifyID := publishNotifyAllChildrenEventAsync(t, ctx, rt, source, runID, "portfolio.notify.requested", map[string]any{"portfolio_id": "portfolio-main", "command": "cancel-nested-proof"})

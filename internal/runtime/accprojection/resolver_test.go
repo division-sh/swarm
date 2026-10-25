@@ -228,12 +228,7 @@ types:
     dimension: text
     score: integer
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
-vertical:
-  scores:
-    type: "[DimensionScore]"
-    initial: []
-    materialize_from: scoring-node.dimensions_received
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "state.yaml"), `scores: [DimensionScore]
 `)
 	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 score.dimension_complete:

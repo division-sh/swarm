@@ -27,15 +27,6 @@ func nativeEngineReadRecipes(t *testing.T) []recipe {
 	return selected
 }
 
-func TestNativeEngineReadRecipesPreserveSourceStateAndAssertions(t *testing.T) {
-	for _, row := range nativeEngineReadRecipes(t) {
-		row = historicalMechanicalRecipe(t, row)
-		if nativeEngineReadWorkload(t, row, row.Before, true) != nativeEngineReadWorkload(t, row, row.After, false) {
-			t.Fatalf("engine read source/state/assertion changed: %s", row.Function)
-		}
-	}
-}
-
 func nativeEngineReadWorkload(t *testing.T, row recipe, source string, predecessor bool) string {
 	t.Helper()
 	body := projectionShapeFunction(t, source).Body

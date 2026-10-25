@@ -572,7 +572,7 @@ func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, 
 	for _, key := range []string{
 		"runs",
 		"events",
-		"entity_state",
+		"flow_instances",
 		"event_deliveries",
 		"selected_contract_bindings",
 		"selected_contract_executions",
@@ -581,6 +581,13 @@ func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, 
 		if counts[key] == 0 {
 			t.Fatalf("%s rows for fork run %s = 0, counts=%#v", key, forkRunID, counts)
 		}
+	}
+	var fieldCompanions int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1::uuid AND entity_type<>''`, forkRunID).Scan(&fieldCompanions); err != nil {
+		t.Fatal(err)
+	}
+	if counts["entity_state"] != fieldCompanions {
+		t.Fatalf("fork field companions=%d, want %d declared state headers", counts["entity_state"], fieldCompanions)
 	}
 
 	var agentDeliveries, agentReceipts int
@@ -854,6 +861,7 @@ func selectedContractRunCounts(t testing.TB, db *sql.DB, runID string, ignoreRun
 	}
 	queries := map[string]string{
 		"runs":                                 `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`,
+		"flow_instances":                       `SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid`,
 		"events":                               `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid` + eventFilter,
 		"event_deliveries":                     `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`,
 		"event_receipts":                       `SELECT COUNT(*) FROM event_receipts WHERE event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid` + eventFilter + `)`,

@@ -54,7 +54,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 		if entity.RunID != runID {
 			t.Fatalf("selected list borrowed another run: %+v", entity)
 		}
-		counts[entity.EntityType]++
+		counts[entity.FlowInstance]++
 		var full operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
 		if !reflect.DeepEqual(full.Entity, entity) {
@@ -65,7 +65,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 		}
 	}
 	var aggregate operatorread.OperatorEntityAggregateResult
-	requireServedJSONRPCResult(t, endpoint, "entity.aggregate", map[string]any{"run_id": runID, "group_by": "entity_type"}, &aggregate)
+	requireServedJSONRPCResult(t, endpoint, "entity.aggregate", map[string]any{"run_id": runID, "group_by": "flow_instance"}, &aggregate)
 	if !reflect.DeepEqual(aggregate.Counts, counts) {
 		t.Fatalf("selected aggregate disagrees with exact entities: %+v / %v", aggregate, counts)
 	}

@@ -12,23 +12,12 @@ import (
 
 func reviewedSource(t *testing.T) []byte {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join("..", "..", "..", Source))
+	body, err := os.ReadFile(filepath.Join("testdata", "original.go.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if Digest(body) != Origin {
-		raw, err := os.ReadFile(filepath.Join("..", "..", "..", Successors))
-		if err != nil {
-			t.Fatal(err)
-		}
-		history, err := Read(raw)
-		if err != nil || len(history.Records) == 0 {
-			t.Fatalf("reviewed origin unavailable: %v", err)
-		}
-		body = []byte(history.Records[0].Before)
-		if Digest(body) != Origin {
-			t.Fatal("positive witness lost the immutable approved origin")
-		}
+		t.Fatal("positive witness lost the immutable approved origin")
 	}
 	return body
 }

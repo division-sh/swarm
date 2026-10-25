@@ -19,7 +19,7 @@ func TestScenarioSetupSemanticNumericParity(t *testing.T) {
 			run, key := uuid.NewString(), uuid.NewString()
 			var first json.RawMessage
 			for _, number := range []string{"5", "5.0", "5e0"} {
-				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"setup","method":"test.setup_entities","params":{"bundle_hash":%q,"run_id":%q,"idempotency_key":%q,"entities":[{"alias":"subject","entity_id":%q,"entity_type":"widget","current_state":"waiting","fields":{"score":%s}}]}}`, rt.BundleHash, run, key, run, number)
+				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"setup","method":"test.setup_entities","params":{"bundle_hash":%q,"run_id":%q,"idempotency_key":%q,"entities":[{"alias":"subject","entity_id":%q,"entity_type":"state","current_state":"waiting","fields":{"score":%s}}]}}`, rt.BundleHash, run, key, run, number)
 				result := semanticNumericRPC(t, rt.Endpoint, "http", body)
 				if result.Error != nil {
 					t.Fatalf("setup %s: %#v", number, result.Error)

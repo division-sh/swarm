@@ -92,7 +92,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 				},
 			})
 
-			instance := artifactActionResultWorkflowInstance()
+			instance := artifactActionResultWorkflowInstance(source)
 			instance.InstanceKey = "inst-1"
 			instance.WorkflowVersion = source.WorkflowVersion()
 			seedRuntimeTestKeylessSource(t, ctx, pg, pc, semanticview.RootExecutionFlowID(source))
@@ -359,8 +359,13 @@ func artifactActionResultNodeID(t testing.TB) string {
 	return identitytest.FlowNode(t, "repo-scaffold", "repo-scaffold-node").Key()
 }
 
-func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
+func artifactActionResultWorkflowInstance(source semanticview.Source) runtimepipeline.WorkflowInstance {
 	enteredAt := time.Now().UTC()
+	contract, hasState := entityruntime.ResolveForFlow(source, "repo-scaffold")
+	var fields map[string]any
+	if hasState {
+		fields = map[string]any{}
+	}
 	return runtimepipeline.WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      "repo-scaffold/inst-1",
@@ -370,8 +375,8 @@ func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 		CurrentState:    "ready",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
+		Fields:          fields,
+		EntityType:      contract.EntityType,
 	}
 }
 

@@ -80,7 +80,7 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 			(!staged && (entity.Entity.CurrentState != nil || entity.Entity.EnteredStateAt != nil)) {
 			t.Fatalf("public receiver stage posture differs from authored source: %+v", entity.Entity)
 		}
-		if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "receipt" || !reflect.DeepEqual(entity.Fields, row.Fields) {
+		if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "state" || !reflect.DeepEqual(entity.Fields, row.Fields) {
 			t.Fatalf("public receiver state: %+v rows=%+v", entity, row)
 		}
 	}

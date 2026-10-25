@@ -238,11 +238,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				return decodeLifecycleTransitionHistory(t, storetest.ObserveWriterFlow(t, context.Background(), rt.selected, started.RunID, entityID).Config)
 			}
 			readLoop := func() loopruntime.PublicActivation {
-				entity := issue2564Entity(t, rt, started.RunID, entityID)
-				if len(entity.Loops) != 1 {
-					t.Fatalf("expected one public loop: %#v", entity)
-				}
-				return entity.Loops[0]
+				return readLifecycleLoop(t, servedControlProofRuntime{ReceiverStateReader: requireReceiverProofStateReader(t, rt.selected)}, started.RunID, entityID)
 			}
 			snapshot := func() string {
 				stored, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), rt.selected)

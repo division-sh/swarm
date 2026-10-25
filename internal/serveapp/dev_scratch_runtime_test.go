@@ -248,9 +248,7 @@ ingress:
 	if err := os.WriteFile(schemaPath, []byte(updatedSchema), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sourceRoot, "fulfillment", "entities.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
 }
 
 func requireSingleServedStandingRun(t *testing.T, endpoint, bundleHash string) operatorread.RunHeader {

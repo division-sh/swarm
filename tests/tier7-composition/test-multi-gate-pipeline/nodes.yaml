@@ -6,7 +6,7 @@ gate-setter-1:
     gate.g1_set:
       data_accumulation:
         writes:
-          - {target_field: g1, value: 'true'}
+          - {target_field: g1, value: true}
       emit:
         event: gate.set
 
@@ -18,7 +18,7 @@ gate-setter-2:
     gate.g2_set:
       data_accumulation:
         writes:
-          - {target_field: g2, value: 'true'}
+          - {target_field: g2, value: true}
       emit:
         event: gate.set
 
@@ -30,7 +30,7 @@ gate-setter-3:
     gate.g3_set:
       data_accumulation:
         writes:
-          - {target_field: g3, value: 'true'}
+          - {target_field: g3, value: true}
       emit:
         event: gate.set
 

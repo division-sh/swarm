@@ -1761,18 +1761,21 @@ func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 			t.Errorf("entity.list returned empty or duplicate entity identity %#v", entity)
 		}
 		seenEntityIDs[entity.EntityID] = true
-		switch entity.EntityType {
-		case "search_batch":
+		if entity.EntityType != "state" {
+			t.Errorf("entity.list returned noncanonical state identity %#v", entity)
+		}
+		switch {
+		case entity.FlowInstance == runID:
 			if result.root.EntityID != "" || entity.CurrentState != "complete" || entity.FlowInstance != runID {
 				t.Errorf("root entity = %#v, want one complete run-owned root", entity)
 			}
 			result.root = entity
-		case "scout_task":
+		case entity.FlowInstance == "scout":
 			if result.scout.EntityID != "" || entity.CurrentState != "complete" || entity.FlowInstance != "scout" {
 				t.Errorf("scout entity = %#v, want one complete singleton scout", entity)
 			}
 			result.scout = entity
-		case "candidate_analysis":
+		case strings.HasPrefix(entity.FlowInstance, "candidate/"):
 			var detail struct {
 				Fields map[string]any `json:"fields"`
 			}
@@ -1792,7 +1795,7 @@ func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 			seenFlowInstances[entity.FlowInstance] = true
 			result.candidates[candidateID] = entity
 		default:
-			t.Errorf("entity.list returned unexpected entity type %#v", entity)
+			t.Errorf("entity.list returned unexpected flow instance %#v", entity)
 		}
 	}
 	if result.root.EntityID == "" || result.scout.EntityID == "" {

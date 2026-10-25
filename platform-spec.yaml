@@ -2940,8 +2940,11 @@ type_system:
       by member order; non-mapping declarations and omitted/non-member defaults are ordinary contract-load errors.
     lists: |
       Ordered collections of a declared element type. The sole authored list
-      declaration is a sequence with exactly one plain, unquoted type token:
-      `items: [T]`. A block sequence preserves a parameterized token containing
+      declaration is a sequence with exactly one plain, unquoted type token or
+      another list declaration: `items: [T]`, `matrix: [[T]]`. The same recursive
+      spelling applies to state fields, indexed state types, type members and
+      event payload fields. Initials remain scalars or nonempty sequences of
+      scalar literals, never nested sequences. A block sequence preserves a parameterized token containing
       a comma, such as `amounts:` followed by `- numeric(5,2)`; the flow sequence
       `[numeric(5,2)]` contains two YAML items and is invalid.
       Bare quoted bracket references and quoted singleton elements are not

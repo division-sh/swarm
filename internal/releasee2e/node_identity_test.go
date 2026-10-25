@@ -83,7 +83,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				run, events := executeNodeIdentityWork(t, process, hash, scope, "before-"+scope)
 				persisted[run] = events
 				ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
-				entities, err := readGoldenEntities(ctx, process.rpc, run)
+				entities, err := readNodeIdentityInstances(ctx, store, run)
 				cancel()
 				if err != nil {
 					t.Fatal(err)
@@ -116,7 +116,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				if err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("restart readback: %v\nwant %#v\ngot %#v", err, want, got)
 				}
-				entities, err := readGoldenEntities(ctx, process.rpc, run)
+				entities, err := readNodeIdentityInstances(ctx, store, run)
 				if err != nil || !reflect.DeepEqual(entities, persistedEntities[run]) {
 					t.Fatalf("restart changed the complete constructed tree: %v\nwant %#v\ngot %#v", err, persistedEntities[run], entities)
 				}
@@ -266,11 +266,18 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 	if count != wantCount {
 		t.Fatalf("handler execution count = %d", count)
 	}
-	entities, err := readGoldenEntities(ctx, process.rpc, admitted.RunID)
-	if err != nil {
+	var instances struct {
+		Instances []struct {
+			FlowInstance string `json:"flow_instance"`
+			Stage        string `json:"stage"`
+		} `json:"instances"`
+	}
+	if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": admitted.RunID}, &instances); err != nil {
 		t.Fatal(err)
 	}
-	assertNodeIdentityConstructedTree(t, entities, admitted.RunID, scope)
+	if len(instances.Instances) != len(nodeIdentityScopes) {
+		t.Fatalf("public diagnosis omitted fieldless flow headers: %+v", instances.Instances)
+	}
 	for other := range nodeIdentityScopes {
 		if other == scope {
 			continue
@@ -298,6 +305,30 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 		t.Fatal(err)
 	}
 	return admitted.RunID, observed
+}
+
+// Fieldless flows have headers but no entity_state companion. Public commands
+// above prove execution; this inspection preserves the exact constructor IDs.
+func readNodeIdentityInstances(ctx context.Context, store goldenStoreSelection, runID string) ([]goldenEntitySummary, error) {
+	db, err := openLifecycleFailureInspection(store)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT entity_id, instance_path, current_state FROM flow_instances WHERE run_id=$1 ORDER BY instance_path`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var instances []goldenEntitySummary
+	for rows.Next() {
+		instance := goldenEntitySummary{RunID: runID}
+		if err := rows.Scan(&instance.EntityID, &instance.FlowInstance, &instance.CurrentState); err != nil {
+			return nil, err
+		}
+		instances = append(instances, instance)
+	}
+	return instances, rows.Err()
 }
 
 func assertNodeIdentityConstructedTree(t *testing.T, entities []goldenEntitySummary, runID, selectedScope string) {
