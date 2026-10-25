@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -127,20 +126,6 @@ type selectedCrashExecution struct {
 type selectedCrashActivated struct {
 	SelectedContractForkLifecycle
 	checkpoint func(string)
-}
-
-type selectedActivatedServingCut struct {
-	runlifecycle.OperationOwner
-	checkpoint func(string)
-	once       sync.Once
-}
-
-func (p *selectedActivatedServingCut) RequireActiveRunSource(ctx context.Context, runID string) (correlation.SourceArtifactFact, error) {
-	fact, err := p.OperationOwner.RequireActiveRunSource(ctx, runID)
-	if err == nil {
-		p.once.Do(func() { p.checkpoint(runID) })
-	}
-	return fact, err
 }
 
 func (p selectedCrashActivated) ActivateRunForkForSelectedContractExecution(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
