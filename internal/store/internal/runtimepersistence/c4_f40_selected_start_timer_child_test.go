@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -284,7 +286,15 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				t.Fatalf("native retry lost the durable exact-start request: %+v found=%t err=%v", materializedOperation, found, err)
 			}
 
-			activated, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, executionRequest)
+			use, lookup, err := contexts.AcquireBundleHash(ctx, bundleHash)
+			if err != nil || !lookup.Loaded() || use == nil {
+				t.Fatalf("acquire the exact ordinary caller for timer handoff: loaded=%t err=%v", lookup.Loaded(), err)
+			}
+			t.Cleanup(func() { _ = use.Done() })
+			caller := correlation.WithSourceArtifactFact(use.WorkContext(), use.Context.SourceArtifactFact)
+			caller = authoractivity.WithScope(caller, authoractivity.BundleScope(ordinary.Options.RuntimeInstanceID, bundleHash))
+			activated, err := runforkexecution.ExecuteSelectedContractRunFork(caller, executionRequest)
+			err = errors.Join(err, use.Done())
 			if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != staged.ForkRunID ||
 				activated.Activation.ForkPoint != sourcePlan.ForkPoint || activated.ExecutedEventCount != 0 ||
 				activated.ForkLocalRuntimeContainer == nil || activated.ForkLocalRuntimeContainer.RuntimeExecutionID == "" ||
