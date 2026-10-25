@@ -51,7 +51,6 @@ func testManagedSessionSeed(t testing.TB, identity agentidentity.Identity, role 
 		AgentIdentity:  identity,
 		Role:           role,
 		Intent:         intent,
-		Criteria:       []string{},
 		ProviderPrompt: providerPrompt,
 		RuntimeMode:    contract.RuntimeMode,
 		Provider:       contract.Provider,
