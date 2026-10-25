@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -28,6 +30,7 @@ type selectedRecoveryRestoreFailure struct {
 	armed atomic.Bool
 	fired atomic.Bool
 	seen  chan struct{}
+	cause error
 }
 
 func (p *selectedRecoveryRestoreFailure) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
@@ -51,7 +54,7 @@ func (p *selectedRecoveryRestoreFailure) AdvanceFlowAttachment(ctx context.Conte
 func (p *selectedRecoveryRestoreFailure) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route flowidentity.Route) (pipeline.DynamicFlowRuntimeReadiness, bool, error) {
 	if p.armed.Swap(false) && p.fired.CompareAndSwap(false, true) {
 		close(p.seen)
-		return pipeline.DynamicFlowRuntimeReadiness{}, false, errors.New("recovery restoration read failed after activation adoption")
+		return pipeline.DynamicFlowRuntimeReadiness{}, false, p.cause
 	}
 	return p.WorkflowPersistenceOwner.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
@@ -83,7 +86,12 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
 				original, found, err := operations.LoadForkOperation(context.Background(), "retained-crash", "fixed-cut", "retained-crash-transport")
-				if err != nil || !found || original.Status != runfork.ForkOperationActivated || original.ForkRunID != checkpoint.ForkRun || original.Result == nil {
+				beforeACK := cut == "retained_event_committed"
+				expectedState := runfork.ForkOperationActivated
+				if beforeACK {
+					expectedState = runfork.ForkOperationMaterialized
+				}
+				if err != nil || !found || original.Status != expectedState || original.ForkRunID != checkpoint.ForkRun || (original.Result == nil) != beforeACK || original.Failure != nil {
 					t.Fatalf("crash lost permanent activation: %+v found=%v error=%v", original, found, err)
 				}
 				before, err := storetest.ReadSelectedForkSourceDomain(context.Background(), selected, checkpoint.SourceRun)
@@ -95,7 +103,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 				owner := construct()
 				var restoreFailure *selectedRecoveryRestoreFailure
 				if cut == "restore_failure_after_adoption" {
-					restoreFailure = &selectedRecoveryRestoreFailure{WorkflowPersistenceOwner: selected.(pipeline.WorkflowPersistenceOwner), seen: make(chan struct{})}
+					restoreFailure = &selectedRecoveryRestoreFailure{WorkflowPersistenceOwner: selected.(pipeline.WorkflowPersistenceOwner), seen: make(chan struct{}), cause: errors.New("recovery restoration read failed after activation adoption")}
 					owner.ports.workflow = pipeline.NewWorkflowPersistence(restoreFailure)
 				}
 				process, _ := worklifetime.ProcessFromContext(ctx)
@@ -109,15 +117,45 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					}
 				})
 				loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+				binding, err := owner.ports.fork.RequireRunForkSelectedContractBinding(ctx, checkpoint.ForkRun)
+				if err != nil {
+					t.Fatal(err)
+				}
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: binding.ContractSelection})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ordinary *rootruntime.Runtime
+				var contexts *rootruntime.RuntimeContextManager
+				if restoreFailure == nil {
+					ordinary, contexts = ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+				}
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+						if contexts == nil {
+							return nil, errors.New("control-only recovery has no executable live target")
+						}
+						use, _, err := contexts.AcquireBundleHash(ctx, hash)
+						return use, err
+					},
 				})
-				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+				expectedRecovery := runfork.SelectedForkRecoveryControlOnly
+				if beforeACK {
+					expectedRecovery = runfork.SelectedForkRecoveryResume
+				}
+				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != expectedRecovery {
 					t.Fatalf("retained recovery failed: %+v %v", recovered, err)
 				}
 				wait, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
 				if restoreFailure != nil {
+					var startErr error
+					ordinary, _, startErr = nodeReplyRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, true)
+					if startErr != nil && !errors.Is(startErr, restoreFailure.cause) {
+						t.Fatalf("ordinary recovery returned an independent startup error: %v", startErr)
+					}
 					select {
 					case <-restoreFailure.seen:
 					case <-wait.Done():
@@ -125,6 +163,9 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					}
 					if err := owner.RetireSelectedContexts(wait); err != nil {
 						t.Fatalf("join exact recovery cleanup after adoption: %v", err)
+					}
+					if err := ordinary.Shutdown(); err != nil {
+						t.Fatalf("join ordinary recovery after failed restoration: %v", err)
 					}
 					if process.ActiveCount() != baselineLeases {
 						t.Fatalf("post-adoption failure retained execution leases: got=%d want=%d", process.ActiveCount(), baselineLeases)
@@ -139,7 +180,11 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					}
 					return
 				}
-				inputID := activityidentity.ForkLineageEventID(checkpoint.ForkRun, original.Result.ForkEventID)
+				ack, found, err := operations.LoadForkOperation(wait, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)
+				if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != original.ForkRunID || ack.BindingID != original.BindingID || !reflect.DeepEqual(ack.Request, original.Request) || (!beforeACK && !reflect.DeepEqual(ack, original)) {
+					t.Fatalf("recovery did not preserve its exact operation and permanent ACK: %+v err=%v", ack, err)
+				}
+				inputID := activityidentity.ForkLineageEventID(checkpoint.ForkRun, ack.Result.ForkEventID)
 				childOwner, err := flowidentity.NewRunScopedFlowInstance(checkpoint.ForkRun, flowidentity.Route{ScopeKey: ".", InstanceID: checkpoint.ForkRun, InstancePath: checkpoint.ForkRun})
 				if err != nil {
 					t.Fatal(err)
@@ -176,7 +221,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					retained := len(owner.ports.contexts.entries)
 					owner.ports.contexts.mu.Unlock()
 					leases := process.ActiveCount()
-					if cardinality == 1 && outputs == 1 && pending == 0 && settlement.Total == 1 && settlement.Delivered == 1 && found && header.CurrentState == "done" && availability.Status == "completed" && retained == 0 && leases == baselineLeases {
+					if cardinality == 1 && outputs == 1 && pending == 0 && settlement.Total == 1 && settlement.Delivered == 1 && found && header.CurrentState == "done" && availability.Status == "live" && retained == 0 {
 						break
 					}
 					select {
@@ -185,13 +230,16 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					case <-time.After(10 * time.Millisecond):
 					}
 				}
+				if err := ordinary.Shutdown(); err != nil || process.ActiveCount() != baselineLeases {
+					t.Fatalf("ordinary recovery retained its resources: work=%d baseline=%d err=%v", process.ActiveCount(), baselineLeases, err)
+				}
 				input := storetest.LoadCanonicalEventRecord(t, wait, selected, inputID)
 				lineage, present := input.SelectedForkLineage()
-				if !present || input.RunID() != checkpoint.ForkRun || lineage.SourceRunID() != checkpoint.SourceRun || lineage.SourceEventID() != original.Result.ForkEventID {
+				if !present || input.RunID() != checkpoint.ForkRun || lineage.SourceRunID() != checkpoint.SourceRun || lineage.SourceEventID() != ack.Result.ForkEventID {
 					t.Fatal("recovered input lost exact fixed-cut lineage")
 				}
 				retry, found, err := operations.LoadForkOperation(wait, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)
-				if err != nil || !found || !reflect.DeepEqual(original, retry) {
+				if err != nil || !found || !reflect.DeepEqual(ack, retry) {
 					t.Fatalf("recovery changed the original acknowledgment: %+v %v", retry, err)
 				}
 				after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
