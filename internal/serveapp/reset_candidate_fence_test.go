@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
@@ -358,10 +357,6 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				if use, _, err := manager.AcquireIngress(ctx, target.Alias, target.Provider); use != nil {
 					_ = use.Done()
 					t.Fatalf("channel ingress escaped reset fence: %v", err)
-				}
-				controller := &serveStandingServiceController{manager: manager, supervisor: supervisor}
-				if _, err := controller.SuspendStandingService(ctx, pipeline.StandingServiceOperation{ServiceID: candidates[0].startupStandingTargets[0].ServiceID}); err == nil {
-					t.Fatal("standing control escaped reset")
 				}
 				if use, err := supervisor.acquireCurrentRuntime(ctx); err == nil || use != nil {
 					if use != nil {

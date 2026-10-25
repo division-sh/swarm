@@ -22,7 +22,6 @@ const (
 	cliIdentifierFamilyFlowInstance    cliIdentifierFamily          = "flow_instance"
 	cliIdentifierFamilyContext         cliIdentifierFamily          = "context"
 	cliIdentifierFamilySubscriber      cliIdentifierFamily          = "subscriber"
-	cliIdentifierFamilyStanding        cliIdentifierFamily          = "standing_service"
 	cliIdentifierFamilyPack            cliIdentifierFamily          = "pack"
 	cliIdentifierFamilyOperatorChannel cliIdentifierFamily          = "operator_channel"
 )
@@ -219,15 +218,6 @@ var cliIdentifierFamilyRegistry = map[cliIdentifierFamily]cliIdentifierFamilyPol
 		NormalizationRule: "trim only; case-sensitive",
 		DisplayProjection: cliIdentifierDisplayFull,
 	},
-	cliIdentifierFamilyStanding: {
-		Family:            cliIdentifierFamilyStanding,
-		CandidateSource:   cliIdentifierSourceUnpromoted,
-		ScopeMode:         cliIdentifierScopeUnpromoted,
-		ScopeRule:         "global boundedness not promoted; full service UUID",
-		NormalizationMode: cliIdentifierNormalizeCaseSensitive,
-		NormalizationRule: "trim only; case-sensitive",
-		DisplayProjection: cliIdentifierDisplayFull,
-	},
 	cliIdentifierFamilyPack: {
 		Family:            cliIdentifierFamilyPack,
 		CandidateSource:   cliIdentifierSourceLocalPacks,
@@ -359,9 +349,6 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm event follow", Selector: "flag:subscriber-id", Family: cliIdentifierFamilySubscriber, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm run trace", Selector: "flag:subscriber-id", Family: cliIdentifierFamilySubscriber, Mode: cliIdentifierModeFullOnly},
 
-	{Command: "swarm standing suspend", Selector: "arg:service-id", Family: cliIdentifierFamilyStanding, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
-	{Command: "swarm standing resume", Selector: "arg:service-id", Family: cliIdentifierFamilyStanding, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
-	{Command: "swarm standing reset", Selector: "arg:service-id", Family: cliIdentifierFamilyStanding, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
 	{Command: "swarm import", Selector: "arg:pack-id", Family: cliIdentifierFamilyPack, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
 	{Command: "swarm packs show", Selector: "arg:pack-id", Family: cliIdentifierFamilyPack, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm channel connect", Selector: "arg:provider", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "admitted provider shorthand resolved through the exact onboarding candidate catalog", Safety: cliIdentifierSafetyMutating},
@@ -432,8 +419,6 @@ func expectedCLIIdentifierFamilyPolicyModes(family cliIdentifierFamily) (cliIden
 		return cliIdentifierSourceLocalContext, cliIdentifierScopeLocalBounded, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilySubscriber:
 		return cliIdentifierSourcePolymorphic, cliIdentifierScopePolymorphicFull, cliIdentifierNormalizeCaseSensitive, true
-	case cliIdentifierFamilyStanding:
-		return cliIdentifierSourceUnpromoted, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilyPack:
 		return cliIdentifierSourceLocalPacks, cliIdentifierScopeLocalBounded, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilyOperatorChannel:

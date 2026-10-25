@@ -168,7 +168,6 @@ Use default 'swarm verify' to observe admission for an explicitly configured dep
 		newRunGroupCommand(root, opts),
 		newDataCommand(opts),
 		newControlCommand(opts),
-		newStandingCommand(opts),
 		newEventCommand(opts),
 		newMailboxCommand(opts),
 		newAgentCommand(opts),

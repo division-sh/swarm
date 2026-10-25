@@ -28567,14 +28567,6 @@ cli_specification:
             normalization: trim only; case-sensitive
             display_projection: full
             display_shortening_eligible: false
-          standing_service:
-            candidate_source: unpromoted
-            scope_mode: unpromoted_full_only
-            scope_rule: global boundedness not promoted; full service UUID
-            normalization_mode: trim_case_sensitive
-            normalization: trim only; case-sensitive
-            display_projection: full
-            display_shortening_eligible: false
           pack:
             candidate_source: local_effective_pack_inventory
             scope_mode: local_bounded
@@ -28685,9 +28677,6 @@ cli_specification:
           event_list_subscriber: {command: swarm event list, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
           event_follow_subscriber: {command: swarm event follow, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
           run_trace_subscriber: {command: swarm run trace, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
-          standing_suspend_service: {command: swarm standing suspend, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
-          standing_resume_service: {command: swarm standing resume, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
-          standing_reset_service: {command: swarm standing reset, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
           import_pack: {command: swarm import, selector: 'arg:pack-id', family: pack, mode: full_only, safety: mutating}
           packs_show_pack: {command: swarm packs show, selector: 'arg:pack-id', family: pack, mode: full_only}
           channel_connect_provider: {command: swarm channel connect, selector: 'arg:provider', family: none, mode: different_concept, scope_rule: admitted provider shorthand resolved through the exact onboarding candidate catalog, safety: mutating}
@@ -29335,25 +29324,6 @@ cli_specification:
               classification: split
               owner_issue: '#1712'
               reason: destructive control output is implemented but not routed through the shared output-mode owner.
-            standing:
-              command: swarm standing
-              classification: exception
-              exception_rule: group_help
-            standing_suspend:
-              command: swarm standing suspend
-              classification: split
-              owner_issue: '#1712'
-              reason: standing desired-state mutation output is implemented but not routed through the shared output-mode owner.
-            standing_resume:
-              command: swarm standing resume
-              classification: split
-              owner_issue: '#1712'
-              reason: standing desired-state mutation output is implemented but not routed through the shared output-mode owner.
-            standing_reset:
-              command: swarm standing reset
-              classification: split
-              owner_issue: '#1712'
-              reason: standing desired-state mutation output is implemented but not routed through the shared output-mode owner.
             agent:
               command: swarm agent
               classification: exception
@@ -31837,45 +31807,6 @@ cli_specification:
       implementation_status: implemented
       owner: /v1/rpc health.check
       behavior: Structured authenticated operator health; separate from lightweight /healthz and /readyz process probes.
-    standing_group:
-      command: swarm standing
-      group: run_operate
-      tier: must_have
-      implementation_status: implemented
-      behavior: Bare standing namespace prints group help and performs no runtime mutation.
-    standing_suspend:
-      command: swarm standing suspend <service-id> [--reason <reason>] [--idempotency-key <key>]
-      group: run_operate
-      tier: must_have
-      implementation_status: implemented
-      owner: /v1/rpc standing.suspend
-      behavior: Persistently overrides a declaration-owned standing service to suspended and quiesces its current generation through the canonical standing-service desired-state owner. A fresh repeat on valid suspended N is an exact no-op without a child; keyed replay is distinct.
-      proof_expectations:
-      - exact /v1/rpc standing.suspend call with service_id plus optional reason and idempotency_key
-      - full standing service UUID is required; invalid input and malformed success results fail closed
-      - no direct DB, store, runtime manager, scheduler, or EventBus mutation
-    standing_resume:
-      command: swarm standing resume <service-id> [--reason <reason>] [--idempotency-key <key>]
-      group: run_operate
-      tier: must_have
-      implementation_status: implemented
-      owner: /v1/rpc standing.resume
-      behavior: Clears the persistent suspended override and publishes one exact child for N before ingress reopens. A fresh repeat on already-active N preserves its existing child, schedules and publication without reconstruction; keyed replay is distinct.
-      proof_expectations:
-      - exact /v1/rpc standing.resume call with service_id plus optional reason and idempotency_key
-      - full standing service UUID is required; invalid input and malformed success results fail closed
-      - no direct DB, store, runtime manager, scheduler, or EventBus mutation
-    standing_reset:
-      command: swarm standing reset <service-id> [--reason <reason>] [--idempotency-key <key>]
-      group: run_operate
-      tier: must_have
-      implementation_status: implemented
-      owner: /v1/rpc standing.reset
-      behavior: Journaled replacement of N by N+1 under the latest declaration source and stable service identity. Suspended reset preserves the override and has no child; terminal-declared or validated-invalid N may also reset without a child. Only executable N+1 is materialized.
-      proof_expectations:
-      - exact /v1/rpc standing.reset call with service_id plus optional reason and idempotency_key
-      - full standing service UUID is required; invalid input and malformed success results fail closed
-      - no direct DB, store, runtime manager, scheduler, or EventBus mutation
     control_pause:
       command: swarm control pause <run-id> [--idempotency-key <key>] | --all [--idempotency-key <key>]
       group: run_operate
@@ -33555,9 +33486,6 @@ api_specification:
         - run.stop
         - run.pause
         - run.continue
-        - standing.suspend
-        - standing.resume
-        - standing.reset
         - mailbox.decide
         - mailbox.defer
         - mailbox.begin_input
@@ -38118,16 +38046,6 @@ api_specification:
             const: true
           recovery:
             $ref: '#/components/schemas/RunStopRecoveryResult'
-      StandingServiceMutationResult:
-        type: object
-        additionalProperties: false
-        required: [service_id, run_id, generation, effective_state, transition]
-        properties:
-          service_id: {$ref: '#/components/schemas/OpaqueId'}
-          run_id: {$ref: '#/components/schemas/OpaqueId'}
-          generation: {type: integer, minimum: 1}
-          effective_state: {type: string, enum: [active, suspended, orphaned, dormant, recovery_required, session_required]}
-          transition: {type: string, enum: [suspended, operator_resumed, reset]}
       RuntimeNukeResult:
         type: object
         additionalProperties: false
@@ -39473,14 +39391,6 @@ api_specification:
         properties:
           run_id:
             $ref: '#/components/schemas/OpaqueId'
-      STANDING_SERVICE_NOT_FOUND:
-        type: object
-        additionalProperties: false
-        required:
-        - service_id
-        properties:
-          service_id:
-            $ref: '#/components/schemas/OpaqueId'
       RUN_ALREADY_TERMINAL:
         type: object
         additionalProperties: false
@@ -40494,51 +40404,6 @@ api_specification:
       - DATA_PAYLOAD_PRUNED
       - DATA_VERSION_NOT_FOUND
       - DATA_INTEGRITY_ERROR
-    standing.suspend:
-      tier: must_have
-      description: Persistently suspend a declaration-owned standing service, quiesce active deliveries, sessions, and timers, pause its current run, and withdraw inbound publication. The override survives restart. Fresh repeated suspend of valid suspended N is an exact no-op without child drain; disposition-read errors refuse rather than acknowledging a no-op.
-      scope:
-        required: [write:runs]
-      idempotency: per the convention.
-      params:
-      - {name: service_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
-      - {name: reason, required: false, schema: {type: string}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result:
-        name: result
-        required: true
-        schema: {$ref: '#/components/schemas/StandingServiceMutationResult'}
-      errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
-    standing.resume:
-      tier: must_have
-      description: Clear a persistent standing-service suspension and publish its routes, agents, schedules, and exact child before reopening ingress. Fresh repeated resume of already-active N preserves the same child and publication as an exact no-op. Orphaned services refuse until declaration restore; terminal or invalid current generations require reset. Disposition-read errors refuse.
-      scope:
-        required: [write:runs]
-      idempotency: per the convention.
-      params:
-      - {name: service_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
-      - {name: reason, required: false, schema: {type: string}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result:
-        name: result
-        required: true
-        schema: {$ref: '#/components/schemas/StandingServiceMutationResult'}
-      errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
-    standing.reset:
-      tier: must_have
-      description: Destructively quiesce and retire N, preserve its evidence, and create deterministic N+1 under the latest declaration source. Preserve the standing suspended override without materialization; otherwise publish executable N+1. Valid suspended, terminal-declared or validated-invalid N may have no process child, but recovery exclusion and ingress fencing remain required. Broken relation or invalid process composition refuses without store surgery.
-      scope:
-        required: [write:runs]
-      idempotency: per the convention.
-      params:
-      - {name: service_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
-      - {name: reason, required: false, schema: {type: string}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result:
-        name: result
-        required: true
-        schema: {$ref: '#/components/schemas/StandingServiceMutationResult'}
-      errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     run.stop:
       tier: must_have
       description: >
