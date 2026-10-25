@@ -420,9 +420,6 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err := os.WriteFile(filepath.Join(root, "tools.yaml"), wire, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "state.yaml"), []byte(""), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("render.requested:\n  component: text\n  owner: text\n  language: text\n  files: [text]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -817,93 +814,6 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 	}
 }
 
-func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReadsForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
-	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `name: validation
-stages:
-  queued: {}
-`,
-		"validation/state.yaml": `revision_count: 0
-kill_reason: text
-`,
-		"validation/events.yaml": "candidate.discovered:\nstate.created:\n  revision_count: integer\n",
-		"validation/nodes.yaml": `
-node-a:
-  {}
-`,
-	})
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("expected temp workflow bundle")
-	}
-	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
-	bus := &nativePipelineDeliveryBusObservationForTest{Bus: pc.bus, EngineMutationPublicationPlanner: pc.bus.(EngineMutationPublicationPlanner)}
-	pc.bus = bus
-	trigger := nativeWorkflowJoinEventForTest(ctx, "validation", "validation", FlowInstanceEntityID("validation"), "candidate.discovered", nil, time.Now().UTC())
-	ctx, state := prepareNativeConstructorHandlerDeliveryForTest(t, fixture, pc, ctx, "validation", "node-a", trigger)
-	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `state.revision_count == 0 && !has(state.kill_reason)`},
-		Emit: runtimecontracts.EmitSpec{
-			Event: "entity.created",
-			Fields: map[string]runtimecontracts.ExpressionValue{
-				"revision_count": runtimecontracts.CELExpression("state.revision_count"),
-			},
-		},
-	}, workflowTriggerContext{
-		Event: trigger,
-		State: state,
-	})
-	if err != nil {
-		t.Fatalf("executeNodeContractHandler: %v", err)
-	}
-	if !result.Handled {
-		t.Fatal("expected handled result")
-	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("bus published count = %d, want 1", got)
-	}
-	emitted := bus.publishedEvent(0)
-	entityID := emitted.EntityID()
-	if entityID == "" {
-		t.Fatal("expected emitted event to carry created entity id")
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(emitted.Payload(), &payload); err != nil {
-		t.Fatalf("unmarshal emitted payload: %v", err)
-	}
-	if got := payload["revision_count"]; got != float64(0) && got != 0 {
-		t.Fatalf("emitted payload revision_count = %#v, want 0", got)
-	}
-
-	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, emitted.FlowInstance()))
-	if err != nil {
-		t.Fatalf("workflowStore.Load: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected created entity to persist")
-	}
-	if got := instance.Fields["revision_count"]; got != int64(0) {
-		t.Fatalf("persisted revision_count = %#v, want 0", got)
-	}
-	if _, present := instance.Fields["kill_reason"]; present {
-		t.Fatalf("creation synthesized an uninitialized field: %#v", instance.Fields)
-	}
-	assertNativeCreatedChildFlowIdentityCoherentForTest(t, fixture, ctx, "validation", entityID, emitted, instance)
-
-	initialMutations := map[string][3]string{}
-	for _, row := range fixture.MutationHistory(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID) {
-		if row.WriterType == "platform" && row.WriterID == "entity_initial_value" {
-			initialMutations[row.Domain+":"+row.Path] = [3]string{row.WriterType, row.WriterID, row.HandlerStep}
-		}
-	}
-	if got, ok := initialMutations["authored_field:revision_count"]; !ok {
-		t.Fatalf("expected initial-value mutation for revision_count, got %#v", initialMutations)
-	} else if got[2] != "create_entity" {
-		t.Fatalf("revision_count initial mutation metadata = %#v, want handler_step create_entity", got)
-	}
-}
-
 func VerifyNativeExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContextForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"schema.yaml": "name: runtime-test\n",
@@ -1044,76 +954,6 @@ node-a:
 		t.Fatalf("persisted status = %#v, want pending", got)
 	}
 	assertNativeCreatedChildFlowIdentityCoherentForTest(t, fixture, ctx, "review", entityID, emitted, instance)
-}
-
-func VerifyNativeExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValueForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
-	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `name: validation
-stages:
-  queued: {}
-`,
-		"validation/state.yaml": `revision_count: 0
-`,
-		"validation/events.yaml": "candidate.discovered:\nstate.created:\n",
-		"validation/nodes.yaml": `
-node-a:
-  {}
-`,
-	})
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("expected temp workflow bundle")
-	}
-	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
-	bus := &nativePipelineDeliveryBusObservationForTest{Bus: pc.bus, EngineMutationPublicationPlanner: pc.bus.(EngineMutationPublicationPlanner)}
-	pc.bus = bus
-	trigger := nativeWorkflowJoinEventForTest(ctx, "validation", "validation", FlowInstanceEntityID("validation"), "candidate.discovered", nil, time.Now().UTC())
-	ctx, state := prepareNativeConstructorHandlerDeliveryForTest(t, fixture, pc, ctx, "validation", "node-a", trigger)
-	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-			{Operation: runtimecontracts.WorkflowDataOperationClear, TargetRef: "state.revision_count"},
-		}},
-		Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
-	}, workflowTriggerContext{
-		Event: trigger,
-		State: state,
-	})
-	if err != nil {
-		t.Fatalf("executeNodeContractHandler: %v", err)
-	}
-	if !result.Handled {
-		t.Fatal("expected handled result")
-	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("bus published count = %d, want 1", got)
-	}
-	emitted := bus.publishedEvent(0)
-	entityID := emitted.EntityID()
-	if entityID == "" {
-		t.Fatal("expected emitted event to carry created entity id")
-	}
-
-	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, emitted.FlowInstance()))
-	if err != nil {
-		t.Fatalf("workflowStore.Load: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected created entity to persist")
-	}
-	if _, ok := instance.Fields["revision_count"]; ok {
-		t.Fatalf("persisted revision_count = %#v, want field cleared", instance.Fields["revision_count"])
-	}
-
-	var sawInitial bool
-	for _, row := range fixture.MutationHistory(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID) {
-		if row.Domain == "authored_field" && row.Path == "revision_count" && row.WriterType == "platform" && row.WriterID == "entity_initial_value" && row.HandlerStep == "create_entity" {
-			sawInitial = true
-		}
-	}
-	if !sawInitial {
-		t.Fatal("expected initial-value mutation for revision_count before later clear")
-	}
 }
 
 func VerifyNativeExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntityForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {

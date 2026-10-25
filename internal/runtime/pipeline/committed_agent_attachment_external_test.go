@@ -60,7 +60,7 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 					"events.yaml":        "work.requested:\n  order_id: text\n",
 					"orders/schema.yaml": "name: orders\ninstance: order_id\ninputs: [order.created, work.requested]\nstages:\n  active: {}\n",
 					"orders/events.yaml": "order.created:\n  order_id: text\nwork.requested:\n  order_id: text\n",
-					"orders/state.yaml":  "type: text\nindexed: true\n",
+					"orders/state.yaml":  "order_id: {type: text, indexed: true}\n",
 					"orders/agents.yaml": fmt.Sprintf("a-installed:\n  id: %s\n  model: regular\n  intent: {inline: Observe work.}\n  subscriptions: [work.requested]\nz-held:\n  id: %s\n  model: regular\n  intent: {inline: Observe work.}\n  subscriptions: [work.requested]\n", first, missing),
 				}))
 				bundle, found := semanticview.Bundle(source)

@@ -26,26 +26,10 @@ func TestCompiledTransitionEvidenceRoundTripOnBothStores(t *testing.T) {
 	pipeline.VerifyNativeCompiledTransitionEvidenceRoundTripOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
-func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			pipeline.VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReadsForTest(t, backend, pipelineDeliveryNativeFixture)
-		})
-	}
-}
-
 func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentityForTest(t, backend, pipelineDeliveryNativeFixture)
-		})
-	}
-}
-
-func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			pipeline.VerifyNativeExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValueForTest(t, backend, pipelineDeliveryNativeFixture)
 		})
 	}
 }

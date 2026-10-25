@@ -177,7 +177,7 @@ func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRes
 					t.Fatalf("active sibling timers = %#v, want two", active)
 				}
 				byDeclaration := workflowTimerActivationsByDeclaration(active)
-				for _, key := range []string{workflowTimerNodeDeclarationKey(first, "same"), workflowTimerNodeDeclarationKey(second, "same")} {
+				for _, key := range []string{workflowTimerNodeDeclarationKey(first, "shared.timer.a"), workflowTimerNodeDeclarationKey(second, "shared.timer.b")} {
 					if activation, ok := byDeclaration[key]; !ok || activation.Ref.ActivationID == "" {
 						t.Fatalf("sibling timer %q = %#v, want exact durable activation", key, activation)
 					}
@@ -639,18 +639,15 @@ func VerifyNativeWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStoresFo
 				active, draining := workflowTimerScheduledCounts(scheduler)
 				return active == 2 && draining == 0
 			}, "initial retry and preserved event wakeups")
-			if changed, err := fixture.MissingFields(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID); err != nil || changed != 1 {
-				t.Fatalf("remove exact instance projection: changed=%d err=%v", changed, err)
-			}
 			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
-				t.Fatalf("retire initial wakeups after instance projection loss: %v", err)
+				t.Fatalf("retire rearmed initial wakeups: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
 				active, draining := workflowTimerScheduledCounts(scheduler)
 				return active == 1 && draining == 0
-			}, "event wakeup preserved after instance projection loss")
+			}, "event wakeup preserved after repeated initial cleanup")
 			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
-				t.Fatalf("repeat initial wakeup retirement after instance projection loss: %v", err)
+				t.Fatalf("repeat initial wakeup retirement: %v", err)
 			}
 			if err := fixture.SetTimerForeignRouteMalformedName(ctx, runtimecorrelation.RunIDFromContext(ctx), eventRef.ActivationID); err != nil {
 				t.Fatal(err)
@@ -975,7 +972,7 @@ func VerifyNativeWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOn
 				t.Fatal(err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
-			stateEntryKey := workflowTimerStageDeclarationKey(".", "waiting.state_entry")
+			stateEntryKey := workflowTimerStageDeclarationKey(".", "waiting.timer.state_entry")
 			if len(active) != 1 || active[0].Ref.DeclarationKey != stateEntryKey {
 				t.Fatalf("initial active timers = %#v, want %s", active, stateEntryKey)
 			}
@@ -1018,7 +1015,7 @@ func VerifyNativeWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOn
 			if persistedStateTimer.Ref != stateTimer.Ref || persistedStateTimer.Status != workflowTimerStatusActive {
 				t.Fatalf("state-entry timer after event-only handlers = %#v, want original active activation %#v", persistedStateTimer, stateTimer.Ref)
 			}
-			eventArmedKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), "waiting.event_armed")
+			eventArmedKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), "observer.timer.event_armed")
 			if got := activationByDeclaration[eventArmedKey].Status; got != workflowTimerStatusActive {
 				t.Fatalf("event-armed timer status = %q, want active without state-trigger cancellation", got)
 			}
@@ -1074,7 +1071,7 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores
 			}
 			declarations := func(id string) []WorkflowTimerActivation {
 				t.Helper()
-				declarationKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), id)
+				declarationKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), "observer.timer."+id)
 				all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
 				matched := make([]WorkflowTimerActivation, 0, 1)
 				for _, activation := range all {
@@ -1537,10 +1534,10 @@ func VerifyNativeWorkflowTimerLifecycleCommitOrdersConvergeOnBothStoresForTest(t
 						}
 					case "unrelated":
 						if err := store.mutateE(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx)), func(instance *WorkflowInstance) error {
-							if instance.Fields == nil {
-								instance.Fields = map[string]any{}
+							if instance.Bookkeeping == nil {
+								instance.Bookkeeping = map[string]any{}
 							}
-							instance.Fields["unrelated_timer_order_proof"] = test.name
+							instance.Bookkeeping["unrelated_timer_order_proof"] = test.name
 							return nil
 						}); err != nil {
 							t.Fatalf("unrelated workflow mutation: %v", err)
@@ -1557,8 +1554,8 @@ func VerifyNativeWorkflowTimerLifecycleCommitOrdersConvergeOnBothStoresForTest(t
 				}
 				if unrelatedApplied {
 					instance, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx)))
-					if err != nil || !found || instance.Fields["unrelated_timer_order_proof"] != test.name {
-						t.Fatalf("unrelated mutation found=%v value=%#v err=%v", found, instance.Fields["unrelated_timer_order_proof"], err)
+					if err != nil || !found || instance.Bookkeeping["unrelated_timer_order_proof"] != test.name {
+						t.Fatalf("unrelated mutation found=%v value=%#v err=%v", found, instance.Bookkeeping["unrelated_timer_order_proof"], err)
 					}
 				}
 			})

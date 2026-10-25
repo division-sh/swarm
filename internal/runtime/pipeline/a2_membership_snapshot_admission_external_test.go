@@ -94,7 +94,7 @@ func TestA2MembershipSnapshotValidationOnBothStores(t *testing.T) {
 					f.assertUnchanged(t, before, footprint, commits)
 					failure := f.failure(t, event.ID(), node.Key())
 					if failure.Class != failures.ClassSchemaInvalid || failure.Detail.Code != "join_members_invalid" || !failure.Deterministic ||
-						failure.Detail.Attributes["source"] != "state.expected" || failure.Detail.Attributes["row_id"] != "awaiting" {
+						failure.Detail.Attributes["source"] != "state.expected" || failure.Detail.Attributes["handler_event"] != "item.completed" {
 						t.Fatalf("refusal did not come from membership snapshot validation: %#v", failure)
 					}
 					return
