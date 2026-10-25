@@ -15,13 +15,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -65,11 +63,6 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				t.Fatal("activity fixture has no admitted source fact")
 			}
 			intent.BundleHash, intent.WorkflowVersion = fact.BundleHash(), source.WorkflowVersion()
-			store := selected.events.(startupownership.Store)
-			original, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
-			if err != nil {
-				t.Fatal(err)
-			}
 			processEvidence, err := original.Evidence()
 			if err != nil {
 				t.Fatal(err)

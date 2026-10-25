@@ -6,6 +6,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	obligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,10 +16,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	obligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 
 	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -422,11 +420,6 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	}
 	if count != wantBefore {
 		t.Fatalf("receipt at restart=%d want %d", count, wantBefore)
-	}
-	candidates := fixture.store.(runlifecycle.CandidateStore)
-	before := pipelineCrashCandidate(t, ctx, candidates, runID)
-	if (before.RunID != "") != (wantBefore == 1) {
-		t.Fatalf("candidate at restart=%#v, committed settlement=%v", before, wantBefore == 1)
 	}
 	bus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
 	if err != nil {

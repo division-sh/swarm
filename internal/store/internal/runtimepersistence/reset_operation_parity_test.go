@@ -125,7 +125,7 @@ func TestResetQuiescenceReceiptCommitsWithRunCancellationBothStores(t *testing.T
 				}
 			})
 			runID := uuid.NewString()
-			ctx = storeTestOriginalProcessContext(t, ctx, selected)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: runID, Origin: semanticScenarioSetupRunOriginForTest()})
 			op, err := cap.AdmitResetOperation(ctx, destructivereset.Request{OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "quiescence", IncludeSourceArtifactsSet: true, RequestedAt: time.Now().UTC()})
 			if err != nil {
@@ -209,7 +209,7 @@ func proveResetCleanupCommitAndReplay(t *testing.T, ctx context.Context, selecte
 		t.Fatalf("cleanup receipt = %+v, %v", committed, err)
 	}
 	laterRun := uuid.NewString()
-	ctx = storeTestOriginalProcessContext(t, ctx, selected)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: laterRun, Origin: semanticScenarioSetupRunOriginForTest()})
 	replay, err := cap.ApplyDestructiveResetCleanup(ctx, req, nil)
 	if err != nil || !reflect.DeepEqual(replay, result) {

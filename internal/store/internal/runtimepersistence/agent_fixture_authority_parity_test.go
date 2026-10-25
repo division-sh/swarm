@@ -33,8 +33,14 @@ import (
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	runtimeexecutionmode "github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"reflect"
+	"sort"
 )
 
 type agentFixtureFlowStore interface {
@@ -64,7 +70,7 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(storeTestWorkContext(t, ctx), runID)
 			ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
-			ctx = storeTestOriginalProcessContext(t, ctx, selected)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
 			})
@@ -556,3 +562,65 @@ func captureAgentFixtureAuthority(t *testing.T, ctx context.Context, selected ag
 	}
 	return agentFixtureAuthoritySnapshot{Authority: authority, Plan: plan, Binding: binding, States: states}
 }
+
+type agentFixtureAcquireProbe struct {
+	agentfixture.Store
+	mu           sync.Mutex
+	acquireCalls int
+}
+
+func (s *agentFixtureAcquireProbe) AcquireProcessCapability(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.ProcessCapability, error) {
+	s.mu.Lock()
+	s.acquireCalls++
+	s.mu.Unlock()
+	return s.Store.AcquireProcessCapability(ctx, req)
+}
+
+func (s *agentFixtureAcquireProbe) calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.acquireCalls
+}
+
+type agentFixtureAuthoritySnapshot struct {
+	Authority runtimestartupownership.Authority
+	Plan      runtimeagenttopology.SourceSetPlan
+	Binding   runtimemanager.ProcessExecutionBinding
+	States    []runtimemanager.AgentLifecycleState
+}
+
+type agentFixtureAuthorityRows struct {
+	ProcessGeneration   processbinding.LeaseStamp
+	SourceSetHeads      int
+	SourceSetOperations int
+	GenerationGrants    int
+	Agents              int
+	LifecycleOperations int
+}
+
+func rejectedAgentFixtureAdmissions(t *testing.T) []runtimeagenttopology.Admission {
+	t.Helper()
+	validEphemeral, err := runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []runtimeagenttopology.Admission{
+		{},
+		{Lifetime: runtimeagenttopology.LifetimeDurableManaged, Authority: runtimeagenttopology.Authority{
+			Kind:   runtimeagenttopology.AuthorityKind("future_authority"),
+			Static: &runtimeagenttopology.StaticDeclarationPlan{SourceSetRevision: "revision", BundleHash: agentFixtureTestBundleHash},
+		}},
+		{Lifetime: runtimeagenttopology.LifetimeDurableManaged, Authority: runtimeagenttopology.Authority{
+			Kind: runtimeagenttopology.AuthorityStaticDeclarationPlan, Static: &runtimeagenttopology.StaticDeclarationPlan{},
+		}},
+		{Lifetime: runtimeagenttopology.LifetimeDurableManaged, Authority: runtimeagenttopology.Authority{
+			Kind: runtimeagenttopology.AuthorityFlowReadinessPlan, Readiness: &runtimeagenttopology.FlowReadinessPlan{RunID: uuid.NewString(), InstancePath: "review/invalid"},
+		}},
+		{Lifetime: runtimeagenttopology.LifetimeEphemeral, Authority: runtimeagenttopology.Authority{
+			Kind: runtimeagenttopology.AuthorityEphemeralExecution, Ephemeral: &runtimeagenttopology.EphemeralExecution{ExecutionID: uuid.NewString()},
+		}},
+		validEphemeral,
+	}
+}
+
+const agentFixtureTestBundleHash = sourceartifactfixture.BundleHash

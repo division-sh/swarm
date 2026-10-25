@@ -68,8 +68,6 @@ type runExecutionTestOwner interface {
 	ObserveRunExecution(context.Context, sourceadmission.ExecutionQuery, string) (bool, error)
 }
 
-const admissionTestRevisedBundle = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-
 func runExecutionOwner(postgres bool, authority runAuthorityOwner) runExecutionTestOwner {
 	if postgres {
 		return &RunLifecyclePostgresOwner{runAuthority: authority}

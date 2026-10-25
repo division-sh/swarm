@@ -24,7 +24,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -55,6 +54,8 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 			ctx := correlation.WithSourceArtifactFact(correlation.WithRuntimeInstanceID(context.Background(), instance), fact)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(instance, fact.BundleHash()))
 			ctx = cliFixtureProcessContext(t, ctx, selected)
+			work := worklifetime.NewProcess()
+			ctx = worklifetime.WithProcess(ctx, work)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# runtime-log-consumer-foreign\n"))

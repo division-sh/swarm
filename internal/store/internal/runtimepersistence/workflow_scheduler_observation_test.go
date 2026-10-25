@@ -23,7 +23,7 @@ func TestWorkflowSchedulerObservationKeepsPhysicalHistoryAndExactScopeBothStores
 			ctx := selectedScheduleTestContext(t, run)
 			ctx = originalStoreFixtureContext(t, ctx, f.store)
 			for _, id := range []string{run, otherRun} {
-				ctx = storeTestOriginalProcessContext(t, ctx, f.store)
+				ctx = originalStoreFixtureContext(t, ctx, f.store)
 				requireRunningRunForTest(t, ctx, f.store, id, time.Now().UTC())
 			}
 			selected := f.store.(runtimegenericschedule.Store)

@@ -129,6 +129,7 @@ func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
 
 func apiTestOriginalProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	ctx = originalAPIFixtureContext(t, ctx, selected)
 	if process, found := worklifetime.ProcessFromContext(ctx); found {
 		if _, bound := process.OriginalProcess(); bound {
 			return ctx
@@ -159,6 +160,14 @@ func apiTestOriginalProcessContext(t testing.TB, ctx context.Context, selected a
 
 func bindAPITestHandlerOriginalProcess(t testing.TB, handler *Handler, ctx context.Context) {
 	t.Helper()
+	for name, method := range handler.handlers {
+		handler.handlers[name] = func(requestCtx context.Context, request Request) (any, error) {
+			if !startupownership.HasMutationAuthority(requestCtx) {
+				requestCtx = startupownership.CarryMutationAuthority(requestCtx, ctx)
+			}
+			return method(requestCtx, request)
+		}
+	}
 	process, found := worklifetime.ProcessFromContext(ctx)
 	if !found {
 		t.Fatal("native API handler fixture requires its original process")

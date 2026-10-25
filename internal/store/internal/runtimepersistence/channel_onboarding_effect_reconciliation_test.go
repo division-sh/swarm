@@ -37,7 +37,6 @@ func TestChannelOnboardingEffectReconciliationSelectedStoreParity(t *testing.T) 
 				selected = admitTestPostgresStore(t, db)
 			}
 			ctx := testAuthorActivityContext()
-			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			capability, _, startup := admitRegistrationTestGeneration(t, ctx, selected, "channel-effect-reconciliation")
 			t.Cleanup(func() { _ = capability.Release(context.Background()) })
 			ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)

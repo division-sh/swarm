@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 
 	"github.com/division-sh/swarm/internal/store/sessionstate"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"

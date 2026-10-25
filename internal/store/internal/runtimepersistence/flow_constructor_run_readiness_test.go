@@ -45,7 +45,7 @@ func TestFlowConstructorReadinessKeepsExactRunOwnershipBothStores(t *testing.T) 
 			}
 			nextID := uuid.NewString()
 			nextCtx := correlation.WithRunID(f.ctx, nextID)
-			nextCtx = storeTestOriginalProcessContext(t, nextCtx, f.store)
+			nextCtx = originalStoreFixtureContext(t, nextCtx, f.store)
 			requireRunFixtureForTest(t, nextCtx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: nextID, Artifact: f.bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 			source := semanticview.Wrap(f.bundle)
 			rootRequest := sqliteFlowActivationRequest(f.bundle, ".", nextID, "", nextID)

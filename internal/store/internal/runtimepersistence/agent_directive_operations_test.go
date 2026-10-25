@@ -173,7 +173,7 @@ func TestSQLiteDirectiveOperationConcurrentSameKeyHasOneReservation(t *testing.T
 	ctx = originalStoreFixtureContext(t, ctx, first)
 	seedDirectiveOperationRun(t, ctx, first.backend.ConstructionHandle(), false)
 	second := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-	ctx = storeTestOriginalProcessContext(t, ctx, second)
+	ctx = originalStoreFixtureContext(t, ctx, second)
 	now := time.Date(2026, 7, 10, 14, 0, 0, 0, time.UTC)
 	requests := []runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001201", "00000000-0000-0000-0000-000000001202", "same-key", "same-hash", now),

@@ -210,6 +210,10 @@ func nativeProcessContextFixture(t *testing.T, ctx context.Context, selected any
 
 func nativeOriginalProcessContextFixture(t *testing.T, ctx context.Context, capability startupownership.ProcessCapability) context.Context {
 	t.Helper()
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	original, err := capability.Evidence()
 	if err != nil {
 		t.Fatal(err)

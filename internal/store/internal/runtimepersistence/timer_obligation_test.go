@@ -38,7 +38,7 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 			}
 
 			terminalRunID := uuid.NewString()
-			ctx = storeTestOriginalProcessContext(t, ctx, selected)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, terminalRunID, observedAt.Add(-time.Hour))
 			insertTimerObligationProofRow(t, ctx, selected, terminalRunID, "timer", observedAt)
 			transitionGenericScheduleRun(t, selected, terminalRunID, true)

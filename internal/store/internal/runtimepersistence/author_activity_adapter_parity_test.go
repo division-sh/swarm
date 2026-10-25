@@ -125,7 +125,7 @@ func runAuthorActivityFixture(t *testing.T, fixture authorActivityAdapterFixture
 		}
 		return write(ctx, story)
 	}
-	ctx := storeTestOriginalProcessContext(t, testAuthorActivityContext(), fixture.store)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 	if store, ok := fixture.store.(*PostgresStore); ok {
 		return store.backend.RunTransaction(ctx, operation)
 	}

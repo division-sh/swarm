@@ -6,22 +6,15 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
-	"sync/atomic"
-	"testing"
-
-	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
-	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"strings"
+	"sync/atomic"
+	"testing"
 )
 
 // This connector interleaves real transactions before the real fence statement;
@@ -66,7 +59,7 @@ func (c *fenceConflictConn) QueryContext(ctx context.Context, query string, args
 		_, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, `DO $$ BEGIN RAISE EXCEPTION 'revision conflict' USING ERRCODE='40001'; END $$`, nil)
 		return nil, err
 	}
-	if strings.Contains(query, "FROM runtime_process_generation WHERE singleton_id = 1") && strings.HasSuffix(query, " FOR SHARE") {
+	if strings.Contains(strings.ReplaceAll(query, " ", ""), "FROMruntime_process_generationWHEREsingleton_id=1") && strings.HasSuffix(query, " FOR SHARE") {
 		p := c.probe
 		p.fences++
 		rows, err := native.QueryContext(ctx, `SELECT txid_current(), generation FROM runtime_process_generation WHERE singleton_id=1`, nil)
@@ -142,6 +135,15 @@ func nativeFenceBackend(t *testing.T, prepare NativeFenceAuthorityFixtureForTest
 		t.Fatal(err)
 	}
 	p := &fenceConflictConnector{driver: original.Driver(), dsn: dsn, competitor: original, conflicts: 1}
+	setup, err := postgresbackend.New(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setup.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return privateactivity.FenceMutationOrder(ctx, tx, privateactivity.DialectPostgres)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := original.QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&p.baseSequence); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +185,7 @@ func VerifyNativeRetainedPostgresFenceConflictRetriesBeforeDomainForTest(t *test
 			}); err != nil {
 				return "", err
 			}
-			if sequence != p.baseSequence+1 {
+			if sequence != p.baseSequence {
 				return "", fmt.Errorf("stale authority sequence %d", sequence)
 			}
 			if err := faultMatrixInsert(ctx, attempt, "selected-fork-output"); err != nil {
@@ -211,7 +213,7 @@ func VerifyNativeRetainedPostgresFenceConflictRetriesBeforeDomainForTest(t *test
 		t.Fatal("output was not exactly once")
 	}
 	var occurrences, sequence int64
-	if err := p.competitor.QueryRow(`SELECT COUNT(*), MAX(sequence) FROM author_activity_occurrences WHERE dedup_key='selected-fork-history'`).Scan(&occurrences, &sequence); err != nil || occurrences != 1 || sequence != p.baseSequence+2 {
+	if err := p.competitor.QueryRow(`SELECT COUNT(*), MAX(sequence) FROM author_activity_occurrences WHERE dedup_key='selected-fork-history'`).Scan(&occurrences, &sequence); err != nil || occurrences != 1 || sequence != p.baseSequence+1 {
 		t.Fatalf("history did not use fresh ordering exactly once: occurrences=%d sequence=%d err=%v", occurrences, sequence, err)
 	}
 	if err := lease.ProveCurrent(context.Background()); err != nil {

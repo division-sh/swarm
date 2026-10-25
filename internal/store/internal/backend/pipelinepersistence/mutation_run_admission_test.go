@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/google/uuid"
 )
 
@@ -25,6 +23,10 @@ func VerifyMissingMutationRunForTest(t *testing.T, initial bool, prepare Stateme
 	t.Helper()
 	db, location := openFanOutReadbackTestDB(t, "sqlite")
 	_, original := materializeSQLiteStatementRuns(t, db, location, false, prepare)
+	backend, err := sqlitebackend.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, ddl := range []string{
 		`CREATE TABLE entity_mutations (mutation_id TEXT PRIMARY KEY)`,
 	} {

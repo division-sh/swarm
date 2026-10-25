@@ -14,6 +14,8 @@ import (
 	_ "modernc.org/sqlite"
 
 	runtimeactivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"

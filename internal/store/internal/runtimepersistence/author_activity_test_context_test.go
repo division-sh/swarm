@@ -72,7 +72,7 @@ type storeTestWorkFixture struct {
 
 var storeTestWorkFixtures sync.Map
 
-func storeTestWorkOwner(t *testing.T, contexts ...context.Context) *worklifetime.RuntimeOccurrence {
+func storeTestWorkOwner(t testing.TB, contexts ...context.Context) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	if existing, ok := storeTestWorkFixtures.Load(t); ok {
 		return existing.(*storeTestWorkFixture).runtime
@@ -171,7 +171,7 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
-	setupCtx := storeTestOriginalProcessContext(t, storeTestWorkContext(t, testAuthorActivityContext()), store)
+	setupCtx := originalStoreFixtureContext(t, storeTestWorkContext(t, testAuthorActivityContext()), store)
 	if opts.SourceArtifactFact.Validate() != nil {
 		opts.SourceArtifactFact = sourceartifactfixture.Require(t, setupCtx, store)
 	} else if opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {

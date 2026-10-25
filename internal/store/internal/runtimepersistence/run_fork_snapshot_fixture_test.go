@@ -14,7 +14,7 @@ import (
 func runForkSnapshotFixtureEvent(t *testing.T, ctx context.Context, selected any) events.Event {
 	t.Helper()
 	runID := uuid.NewString()
-	ctx = storeTestOriginalProcessContext(t, ctx, selected)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "snapshot.fixture", "fixture", "", []byte(`{"value":1}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	event, err := bindSemanticEventFixturePayload(event)

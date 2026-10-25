@@ -2425,7 +2425,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 						Store: seedStore.PipelineObligations(), eventID: eventIDs[i], claimed: claimed, release: release,
 					},
 				}
-				bus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{WorkOwner: nativeBusWorkOwner(t, originalCtx)})
+				bus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{WorkOwner: nativeBusWorkOwner(t, nativeBusProcessContext(t, seedCtx, seedStore))})
 				if err != nil {
 					t.Fatal(err)
 				}

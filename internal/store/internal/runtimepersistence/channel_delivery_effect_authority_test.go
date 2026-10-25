@@ -75,7 +75,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}
 				} else {
 					sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
-					ctx := storeTestOriginalProcessContext(t, ctx, sqlite)
+					ctx := originalStoreFixtureContext(t, ctx, sqlite)
 					selected, db = sqlite, sqlite.backend
 					runTx = func(fn func(context.Context, *sql.Tx) error) error {
 						return sqlite.backend.RunTransaction(ctx, "channel delivery authority test", fn)

@@ -51,7 +51,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -203,6 +202,13 @@ func (b claudeAttemptProofBackend) context() context.Context {
 		return b.original
 	}
 	return claudeAttemptProofContext(b.source)
+}
+
+func claudeAttemptProofContext(source runtimecorrelation.SourceArtifactFact) context.Context {
+	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
+		claudeAttemptProofRuntimeID,
+		source.BundleHash(),
+	))
 }
 
 type claudeAttemptProofSpendProjection struct{}

@@ -227,7 +227,7 @@ func TestClockScheduleTerminalRunCannotAdmitOrFireOnBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, _, ctx := tc.open(t)
-			ctx = storeTestOriginalProcessContext(t, ctx, store)
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID})
 			if err != nil {

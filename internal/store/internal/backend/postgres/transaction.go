@@ -86,7 +86,7 @@ func (b *Backend) RunAdmittedTransactionWithOptionsOutcome(ctx context.Context, 
 	if err != nil {
 		return false, cancellationBeforeMutationAdmission(ctx, err)
 	}
-	return b.runTransactionOutcome(original, opts, true, operation)
+	return b.runTransactionOutcome(original, opts, true, false, operation)
 }
 
 // RunReadTransaction owns one caller-scoped, transactionally consistent read.

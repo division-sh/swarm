@@ -54,7 +54,7 @@ func TestResetCoordinatorContinuesDurableReceiptsBothStores(t *testing.T) {
 				seedRun := func() string {
 					t.Helper()
 					id := uuid.NewString()
-					ctx = storeTestOriginalProcessContext(t, ctx, selected)
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: id, Origin: semanticScenarioSetupRunOriginForTest()})
 					return id
 				}

@@ -160,7 +160,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	selected := storetest.StartSQLiteRuntimeStore(t)
 	sourceartifactfixture.RequireArtifact(t, t.Context(), selected, bundle.SourceArtifact)
 	rt.Manager = runtimemanager.NewAgentManager(bus, nil)
-	grant := admitServeSessionProcessFixture(t, selected, rt.Options.RuntimeInstanceID, bundleHash)
+	grant := admitServeSessionProcessFixture(t, t.Context(), selected, rt.Options.RuntimeInstanceID, bundleHash)
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)
 	}

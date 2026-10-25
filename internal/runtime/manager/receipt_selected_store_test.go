@@ -10,30 +10,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var selected interface {
-				runtimedelivery.Store
-				runlifecycle.OperationOwner
-				runlifecycle.CandidateStore
-				runlifecycle.CandidateRegistrar
-			}
-			dialect := authoractivityfixture.DialectSQLite
-			if backend == "postgres" {
-				_, db, _ := testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
-				dialect = authoractivityfixture.DialectPostgres
-			} else {
-				selected = storetest.StartSQLiteRuntimeStore(t)
-			}
-			original := originalManagerFixtureContext(t, manager.TerminalPanicFixtureContext(), selected.(agentfixture.Store))
+			fixture := openManagerNativeDelivery(t, backend)
+			selected := fixture.Store
+			original := fixture.Context
 			for _, status := range []manager.ReceiptStatus{manager.ReceiptStatusProcessed, manager.ReceiptStatusError, manager.ReceiptStatusDeadLetter, manager.ReceiptStatusTerminal} {
 				for _, fail := range []bool{false, true} {
 					phase := "healthy"

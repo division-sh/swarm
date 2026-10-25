@@ -77,7 +77,7 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 		BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		StartedAt:  now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
 	})
-	ctx = storeTestOriginalProcessContext(t, ctx, pg)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: newerRunID, StartedAt: now.Add(-time.Hour),
 	})
@@ -124,7 +124,7 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 	olderRunID := uuid.NewString()
 	emptyRunID := uuid.NewString()
 	now := time.Unix(1700000000, 0).UTC()
-	ctx = storeTestOriginalProcessContext(t, ctx, pg)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: targetRunID, StartedAt: now,
 	})
@@ -133,7 +133,7 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 		BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		StartedAt:  now.Add(-time.Hour),
 	})
-	ctx = storeTestOriginalProcessContext(t, ctx, pg)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: emptyRunID, StartedAt: now.Add(time.Hour),
 	})
@@ -293,7 +293,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	now := time.Now().UTC()
 
 	for _, runID := range []string{blockedRunID, readyRunID} {
-		ctx = storeTestOriginalProcessContext(t, ctx, pg)
+		ctx = originalStoreFixtureContext(t, ctx, pg)
 		requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: runID, StartedAt: now.Add(-time.Minute),
 		})

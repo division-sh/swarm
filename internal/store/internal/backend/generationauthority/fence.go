@@ -71,6 +71,9 @@ func AdmitTransaction(ctx context.Context, tx *sql.Tx, sqlite bool) (err error) 
 	if ctx == nil {
 		return errors.New("original process mutation context is required")
 	}
+	if result, found := ctx.Value(externalEffectResultKey{}).(*externalEffectResult); found {
+		return admitExternalEffectResultTx(ctx, tx, sqlite, result)
+	}
 	original, present := ctx.Value(originalProcessKey{}).(originalProcess)
 	if process, found := worklifetime.ProcessFromContext(ctx); found {
 		if stamp, bound := process.OriginalProcess(); bound {
@@ -115,6 +118,7 @@ type transaction struct {
 	mode     lockMode
 	stamp    processbinding.LeaseStamp
 	loaded   bool
+	result   *externalEffectResult
 }
 
 // BindTransaction is called only by native settlement owners. The record is

@@ -54,11 +54,11 @@ func proveNativeAgentRestartAPICompletionLoss(t *testing.T, original context.Con
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := capability.Evidence()
+	originalEvidence, err := capability.Evidence()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+	if err := process.BindOriginalProcess(originalEvidence.LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
