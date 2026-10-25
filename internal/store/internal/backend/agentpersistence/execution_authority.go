@@ -532,7 +532,7 @@ type selectedForkGrantExecutionRow struct {
 }
 
 func loadSelectedForkGrantExecutionTx(ctx context.Context, tx *sql.Tx, binding startupownership.SelectedForkGrantBinding, sqlite bool) (selectedForkGrantExecutionRow, error) {
-	row, err := loadSelectedForkGrantExecutionModeTx(ctx, tx, binding, sqlite, true)
+	row, err := loadSelectedForkGrantExecutionModeTx(ctx, tx, binding, sqlite, true, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		return selectedForkGrantExecutionRow{}, errors.New("selected-fork grant execution is absent, expired, terminal or inconsistent with its binding")
 	}
@@ -549,14 +549,21 @@ func ObserveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evide
 	if tx == nil || evidence.SelectedFork == nil || evidence.State != startupownership.GrantAdmitted {
 		return false, errors.New("selected serving observation requires an admitted grant and read transaction")
 	}
-	row, err := loadSelectedForkGrantExecutionModeTx(ctx, tx, *evidence.SelectedFork, sqlite, false)
+	row, err := loadSelectedForkGrantExecutionModeTx(ctx, tx, *evidence.SelectedFork, sqlite, false, false)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		materialized, phaseErr := sourceadmission.ObserveMaterializedSelectedGrant(ctx, tx, evidence)
+		if phaseErr != nil || !materialized {
+			return false, phaseErr
+		}
+		row, err = loadSelectedForkGrantExecutionModeTx(ctx, tx, *evidence.SelectedFork, sqlite, false, true)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
 	}
 	return err == nil && row.Binding == *evidence.SelectedFork && row.BundleHash == evidence.BundleHash, err
 }
 
-func loadSelectedForkGrantExecutionModeTx(ctx context.Context, tx *sql.Tx, binding startupownership.SelectedForkGrantBinding, sqlite, lock bool) (selectedForkGrantExecutionRow, error) {
+func loadSelectedForkGrantExecutionModeTx(ctx context.Context, tx *sql.Tx, binding startupownership.SelectedForkGrantBinding, sqlite, lock, materialized bool) (selectedForkGrantExecutionRow, error) {
 	query := `SELECT execution.binding_id, execution.fork_run_id,
 		execution.generation, execution.fence_generation, execution.execution_owner,
 		execution.admission_fingerprint, execution.container_plan_fingerprint,
@@ -584,8 +591,10 @@ func loadSelectedForkGrantExecutionModeTx(ctx context.Context, tx *sql.Tx, bindi
 		AND execution.state = 'running'
 		AND (binding.mode = 'selected_contracts' OR (binding.mode = 'bundle_hash' AND binding.bundle_hash = run.bundle_hash))`
 	args := []any{binding.ExecutionID}
-	if !lock {
+	if !lock && !materialized {
 		query += ` AND run.status = 'running'`
+	} else if !lock {
+		query += ` AND run.status = 'paused'`
 	}
 	if sqlite {
 		query += ` AND execution.lease_expires_at > $2`

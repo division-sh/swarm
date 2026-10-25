@@ -51,13 +51,17 @@ type selectedActivityCrashCheckpoint struct {
 type selectedActivityInputSettlementHold struct {
 	pipelineobligation.Store
 	sourceRequest string
+	release       <-chan struct{}
 }
 
 func (p selectedActivityInputSettlementHold) Settle(ctx context.Context, claim pipelineobligation.Claim, disposition pipelineobligation.Disposition) (pipelineobligation.SettlementOutcome, error) {
 	authority, selected := effects.AuthorityFromContext(ctx)
 	if selected && authority.Kind == effects.AuthoritySelectedContractFork && claim.EventID() == activityidentity.ForkLineageEventID(authority.SelectedFork.ForkRunID, p.sourceRequest) {
-		<-ctx.Done()
-		return pipelineobligation.SettlementOutcome{}, ctx.Err()
+		select {
+		case <-ctx.Done():
+			return pipelineobligation.SettlementOutcome{}, ctx.Err()
+		case <-p.release:
+		}
 	}
 	return p.Store.Settle(ctx, claim, disposition)
 }
@@ -205,7 +209,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		t.Fatalf("acknowledged activity publication resumed without SIGKILL: %v", err)
 	}
 	if advanced {
-		owner.ports.pipelineObligations = selectedActivityInputSettlementHold{owner.ports.pipelineObligations, requestID}
+		owner.ports.pipelineObligations = selectedActivityInputSettlementHold{Store: owner.ports.pipelineObligations, sourceRequest: requestID}
 		owner.ports.workflow = pipeline.NewWorkflowPersistence(selectedActivityResultConsumerCrash{selected.(pipeline.WorkflowPersistenceOwner), t, after})
 	} else {
 		publication := func(ctx context.Context, event events.Event) { after(ctx, event, attemptgeneration.Generation{}) }
@@ -219,12 +223,17 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		}
 	}
 	liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.Live)
-	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: requestID, AllowSourceFreeze: true, Owner: owner,
+	execution := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: requestID, AllowSourceFreeze: true, Owner: owner,
 		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		SourceLoader: &fakeSelectedContractSourceLoader{loaded: loaded}, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut", TransportHash: "retained-crash-transport",
-			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}})
+			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}}
+	if advanced {
+		_, err := q1ExecuteSelectedPhaseComponent(t, ctx, execution)
+		t.Fatalf("selected result consumer returned before its physical commit checkpoint: %v", err)
+	}
+	result, err := executeLiveSelectedContractRunFork(ctx, execution)
 	if err != nil {
 		t.Fatal(err)
 	}

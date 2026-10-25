@@ -4164,7 +4164,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), forkAt)
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
-	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
 		At:                forkPointEventID,
 		AllowSourceFreeze: true,
@@ -4178,7 +4178,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.Materialization.ForkRunID == "" || !result.Activation.Activated {
+	if result.Materialization.ForkRunID == "" || result.Activation.Activated || result.ExecutedEventCount != 1 {
 		t.Fatalf("selected execution result = %#v", result)
 	}
 	for _, code := range []string{
@@ -4191,10 +4191,8 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 			t.Fatalf("selected execution retained %s: materialization=%#v activation=%#v", code, result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
 		}
 	}
-	if !result.Activation.SourceAdvancedAfterFork ||
-		result.Activation.BranchDivergence == nil ||
-		!containsString(result.Activation.BranchDivergence.SourceAdvancedFacts, runfork.RunForkSelectedContractActiveSourceDeliveryConversationCouplingClassification) {
-		t.Fatalf("activation branch divergence = %#v, want #678 same-source active delivery fact", result.Activation.BranchDivergence)
+	if !containsString(runfork.ActiveSourceDeliveryConversationCouplingFacts(result.Materialization.ReplayResumeAdmission), runfork.RunForkSelectedContractActiveSourceDeliveryConversationCouplingClassification) {
+		t.Fatalf("native component lost its same-source active delivery lineage: %#v", result.Materialization.ReplayResumeAdmission)
 	}
 
 	var copiedSessions, copiedAudits, copiedTurns, copiedSourceSubscriberDeliveries int
@@ -4289,7 +4287,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 		runforkrevision.FamilyEventDeliveries,
 	)
 
-	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
 		At:                sourceEventID,
 		AllowSourceFreeze: true,
@@ -4303,11 +4301,8 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.Materialization.ForkRunID == "" || !result.Activation.Activated {
+	if result.Materialization.ForkRunID == "" || result.Activation.Activated || result.ExecutedEventCount != 1 {
 		t.Fatalf("selected execution result = %#v", result)
-	}
-	if !result.Activation.SourceAdvancedAfterFork || result.Activation.BranchDivergence == nil {
-		t.Fatalf("activation = %#v, want source-advanced branch divergence", result.Activation)
 	}
 	for _, code := range []string{
 		"source_sessions_advanced_after_fork_point",
@@ -4316,9 +4311,6 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	} {
 		if selectedExecutionResultHasBlocker(result, code) {
 			t.Fatalf("selected execution retained %s: materialization=%#v activation=%#v", code, result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
-		}
-		if !containsString(result.Activation.BranchDivergence.SourceAdvancedFacts, code) {
-			t.Fatalf("branch facts = %#v, want %s", result.Activation.BranchDivergence.SourceAdvancedFacts, code)
 		}
 	}
 	for _, code := range []string{
@@ -4469,18 +4461,21 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	}
 	baselineLeases := process.ActiveCount()
 	probe := &selectedReplayScopeConflictProbe{
-		SelectedContractReplayPersistence:         owner.ports.replay,
-		SelectedContractRuntimeExecutionLifecycle: owner.ports.runtimeExecution,
-		selected: pg, publication: make(chan selectedReplayScopeConflictObservation, 1),
+		SelectedContractReplayPersistence: owner.ports.replay,
+		selected:                          pg, publication: make(chan selectedReplayScopeConflictObservation, 1),
 	}
-	owner.ports.replay, owner.ports.runtimeExecution = probe, probe
+	owner.ports.replay = probe
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 	operation := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "scope-conflict-proof", IdempotencyKey: uuid.NewString(), TransportHash: "scope-conflict-proof",
 		SourceRunID: sourceRunID, ForkEventID: sourceEventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
 		ContractSelection: selection, AllowSourceFreeze: true,
 	}
-	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	beforeSource, err := pg.LoadRunHeader(ctx, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, executeErr := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 		ForkOperation:     &operation,
 		SourceRunID:       sourceRunID,
 		At:                sourceEventID,
@@ -4490,18 +4485,12 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 		ContractSelection: selection,
 		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
-	// #642/6207897765: retained publication follows the permanent activation
-	// ACK. The old synchronous/whole-fork rollback oracle tested the wrong phase.
-	if err != nil || !result.Activation.Activated || !result.Activation.SourceFrozen {
-		t.Fatalf("scope-conflict control did not reach retained publication: %+v err=%v", result, err)
+	if executeErr == nil || !strings.Contains(executeErr.Error(), "committed pipeline scope conflicts") || result.Activation.Activated || result.Materialization.ForkRunID == "" {
+		t.Fatalf("scope-conflict control did not refuse its actual pre-ACK publication: %+v err=%v", result, executeErr)
 	}
 	ack, found, err := pg.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
-	if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != result.Materialization.ForkRunID {
-		t.Fatalf("retained publication lacks the immutable activation ACK: %+v found=%t err=%v", ack, found, err)
-	}
-	beforeSource, err := pg.LoadRunHeader(ctx, sourceRunID)
-	if err != nil || beforeSource.Status != "forked" || beforeSource.ContinuedAsRunID != result.Materialization.ForkRunID {
-		t.Fatalf("original source freeze missing: %+v err=%v", beforeSource, err)
+	if err != nil || !found || ack.Status != runfork.ForkOperationMaterialized || ack.Result != nil || ack.ForkRunID != result.Materialization.ForkRunID {
+		t.Fatalf("refused selected publication fabricated a handoff ACK: %+v found=%t err=%v", ack, found, err)
 	}
 	wait, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -4514,6 +4503,9 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	if publication.err == nil || !strings.Contains(publication.err.Error(), "committed pipeline scope conflicts") {
 		t.Fatalf("actual retained publication error=%v, want exact same-event scope conflict", publication.err)
 	}
+	if !errors.Is(executeErr, publication.err) {
+		t.Fatalf("publication failure was not returned to the caller: returned=%v actual=%v", executeErr, publication.err)
+	}
 	attempt := publication.request.Commit.Event.Event()
 	if publication.request.Lineage.SourceRunID != sourceRunID || publication.request.Lineage.SourceEventID != sourceEventID ||
 		publication.request.Lineage.ForkRunID != result.Materialization.ForkRunID || publication.request.Lineage.ForkEventID != attempt.ID() ||
@@ -4523,48 +4515,23 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	if publication.readErr != nil || !reflect.DeepEqual(publication.before, publication.after) {
 		t.Fatalf("rejected publication partially committed event/lineage/delivery/reply/scope/history: %v", publication.readErr)
 	}
-	for {
-		state, err := storetest.ReadSelectedExecutionStorage(wait, pg, result.Materialization.ForkRunID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		owner.ports.contexts.mu.Lock()
-		joined := len(owner.ports.contexts.entries) == 0
-		owner.ports.contexts.mu.Unlock()
-		if state.State == "closed" && state.RunStatus == "failed" && joined && process.ActiveCount() == baselineLeases {
-			break
-		}
-		select {
-		case <-wait.Done():
-			t.Fatalf("exact publication failure did not settle and join: %+v joined=%t err=%v", state, joined, wait.Err())
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-	probe.mu.Lock()
-	failure, acknowledged := append([]byte(nil), probe.failure...), probe.failureAcknowledged
-	probe.mu.Unlock()
-	expectedFailure, err := json.Marshal(runtimefailures.FromError(publication.err, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, "execute").Failure)
-	if err != nil || !acknowledged || !slices.Equal(failure, expectedFailure) {
-		t.Fatalf("native failure disposition differs from the canonical exact-error projection: acknowledged=%t failure=%s want=%s err=%v", acknowledged, failure, expectedFailure, err)
-	}
-	terminal, err := storetest.ReadRuntimeLogRunSnapshot(wait, pg, result.Materialization.ForkRunID)
-	if err != nil || terminal.Failure == nil {
-		t.Fatalf("retained scope conflict has no durable terminal failure: %+v err=%v", terminal, err)
-	}
-	durableFailure, err := json.Marshal(terminal.Failure)
-	if err != nil || !slices.Equal(durableFailure, expectedFailure) {
-		t.Fatalf("durable terminal failure differs from exact publication's canonical disposition: got=%s want=%s err=%v", durableFailure, expectedFailure, err)
+	state, err := storetest.ReadSelectedExecutionStorage(wait, pg, result.Materialization.ForkRunID)
+	owner.ports.contexts.mu.Lock()
+	joined := len(owner.ports.contexts.entries) == 0
+	owner.ports.contexts.mu.Unlock()
+	if err != nil || state.State != "closed" || state.RunStatus != "paused" || !joined || process.ActiveCount() != baselineLeases {
+		t.Fatalf("refused pre-ACK publication did not join its real private resources: %+v joined=%t leases=%d baseline=%d err=%v", state, joined, process.ActiveCount(), baselineLeases, err)
 	}
 	if count, err := storetest.ReadLifecycleEventCardinality(wait, pg, result.Materialization.ForkRunID, "item.received"); err != nil || count != 0 {
 		t.Fatalf("rejected publication executed or survived rollback: count=%d err=%v", count, err)
 	}
 	afterACK, found, err := pg.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
 	if err != nil || !found || !reflect.DeepEqual(ack, afterACK) {
-		t.Fatalf("publication failure rewrote its committed activation ACK: %+v err=%v", afterACK, err)
+		t.Fatalf("publication failure rewrote its materialized operation: %+v err=%v", afterACK, err)
 	}
 	afterSource, err := pg.LoadRunHeader(wait, sourceRunID)
 	if err != nil || !reflect.DeepEqual(beforeSource, afterSource) {
-		t.Fatalf("publication failure rewrote the original source freeze: %+v err=%v", afterSource, err)
+		t.Fatalf("publication failure changed the original source: %+v err=%v", afterSource, err)
 	}
 }
 
@@ -4669,7 +4636,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 		runforkrevision.FamilyDeadLetters,
 	)
 
-	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
 		At:                sourceEventID,
 		AllowSourceFreeze: true,
@@ -4683,33 +4650,8 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
-	if executionErr != nil {
-		t.Fatalf("retained selected execution: %v", executionErr)
-	}
-
-	if !result.Activation.Activated || result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus {
-		t.Fatalf("activation = %#v, want activated fork", result.Activation)
-	}
-	if result.Activation.SourceFrozen || !result.Activation.SourceAdvancedAfterFork {
-		t.Fatalf("branch activation flags = frozen:%v advanced:%v", result.Activation.SourceFrozen, result.Activation.SourceAdvancedAfterFork)
-	}
-	if result.Activation.BranchDivergence == nil {
-		t.Fatalf("branch divergence missing from result: %#v", result.Activation)
-	}
-	if result.Activation.BranchDivergence.Owner != runfork.RunForkSelectedContractBranchDivergenceOwner ||
-		result.Activation.BranchDivergence.Policy != runfork.RunForkSelectedContractSourceAdvancedBranchPolicy ||
-		result.Activation.BranchDivergence.SourceFrozen {
-		t.Fatalf("branch divergence = %#v", result.Activation.BranchDivergence)
-	}
-	for _, fact := range []string{
-		"source_events_advanced_after_fork_point",
-		"source_run_terminal_at_activation",
-		"source_receipts_advanced_after_fork_point",
-	} {
-		if !containsString(result.Activation.BranchDivergence.SourceAdvancedFacts, fact) {
-			t.Fatalf("branch facts = %#v, want %s", result.Activation.BranchDivergence.SourceAdvancedFacts, fact)
-		}
+	if result.Activation.Activated || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+		t.Fatalf("selected component did not execute its one fixed input without a public handoff: %#v", result)
 	}
 
 	var sourceStatus, forkStatus string
@@ -4719,8 +4661,8 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus || sourceStatus != "cancelled" || forkStatus != string(storerunlifecycle.StateCompleted) {
-		t.Fatalf("branch statuses ACK/source/fork = %s/%s/%s, want running/cancelled/completed", result.Activation.ForkRunStatus, sourceStatus, forkStatus)
+	if sourceStatus != "cancelled" || forkStatus != string(storerunlifecycle.StatePaused) {
+		t.Fatalf("component source/fork = %s/%s, want cancelled/paused", sourceStatus, forkStatus)
 	}
 
 	var branchRows int
@@ -4742,11 +4684,11 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	`, result.Materialization.ForkRunID, sourceRunID, sourceEventID, runfork.RunForkSelectedContractSourceAdvancedBranchPolicy).Scan(&branchRows); err != nil {
 		t.Fatalf("count branch divergence rows: %v", err)
 	}
-	if branchRows != 1 {
-		t.Fatalf("branch divergence rows = %d, want 1", branchRows)
+	if branchRows != 0 {
+		t.Fatalf("private component fabricated %d legacy activation rows", branchRows)
 	}
 
-	forkEventID := retainedExecution.ForkEvents[0].ForkEventID
+	forkEventID := result.ForkEvents[0].ForkEventID
 	var copiedPostTEvents, copiedPostTDeliveries, forkReceipts, emittedFollowUps int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_id = $2::uuid`, result.Materialization.ForkRunID, afterEventID).Scan(&copiedPostTEvents); err != nil {
 		t.Fatalf("count copied post-T source event: %v", err)

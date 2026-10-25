@@ -41,25 +41,44 @@ func (s *RunLifecyclePostgresOwner) ObserveRunExecution(ctx context.Context, q s
 	if s == nil {
 		return false, errors.New("run execution observation requires lifecycle owner")
 	}
-	return observeRunExecution(ctx, q, true, runID, s.runAuthority)
+	return observeRunExecution(ctx, q, true, runID, s.runAuthority, false)
 }
 
 func (s *RunLifecycleSQLiteOwner) ObserveRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, runID string) (bool, error) {
 	if s == nil {
 		return false, errors.New("run execution observation requires lifecycle owner")
 	}
-	return observeRunExecution(ctx, q, false, runID, s.runAuthority)
+	return observeRunExecution(ctx, q, false, runID, s.runAuthority, false)
 }
 
-func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, owner runAuthorityOwner) (bool, error) {
+// This is the same execution observation restricted to its private pre-ACK
+// phase, not permission for an ordinarily paused run to dispatch work.
+func (s *RunLifecyclePostgresOwner) ObserveMaterializedSelectedExecution(ctx context.Context, q sourceadmission.ExecutionQuery, runID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("materialized execution observation requires lifecycle owner")
+	}
+	return observeRunExecution(ctx, q, true, runID, s.runAuthority, true)
+}
+
+func (s *RunLifecycleSQLiteOwner) ObserveMaterializedSelectedExecution(ctx context.Context, q sourceadmission.ExecutionQuery, runID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("materialized execution observation requires lifecycle owner")
+	}
+	return observeRunExecution(ctx, q, false, runID, s.runAuthority, true)
+}
+
+func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, owner runAuthorityOwner, materializedOnly bool) (bool, error) {
 	if ctx == nil || q == nil {
 		return false, errors.New("run execution observation requires context and query authority")
 	}
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	if materializedOnly && !selectedExecutionContext(ctx) {
+		return false, nil
+	}
 	if runID == "" {
-		return !selectedExecutionContext(ctx), nil
+		return !materializedOnly && !selectedExecutionContext(ctx), nil
 	}
 	var err error
 	var fact runtimecorrelation.SourceArtifactFact
@@ -79,7 +98,7 @@ func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, 
 		return false, err
 	}
 	if selectedRunID == "" {
-		return !selectedExecutionContext(ctx), nil
+		return !materializedOnly && !selectedExecutionContext(ctx), nil
 	}
 	if !selectedExecutionContext(ctx) {
 		state, err := executionRunState(ctx, q, postgres, runID)
@@ -88,19 +107,22 @@ func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, 
 		}
 		return sourceadmission.ObserveLiveHandoff(ctx, q, runID, fact.BundleHash())
 	}
-	return observeSelectedRunExecution(ctx, q, postgres, runID, fact, owner)
+	return observeSelectedRunExecution(ctx, q, postgres, runID, fact, owner, materializedOnly)
 }
 
-func observeSelectedRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, fact runtimecorrelation.SourceArtifactFact, owner runAuthorityOwner) (bool, error) {
+func observeSelectedRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, fact runtimecorrelation.SourceArtifactFact, owner runAuthorityOwner, materializedOnly bool) (bool, error) {
 	state, err := executionRunState(ctx, q, postgres, runID)
 	if err != nil {
 		return false, err
+	}
+	if materializedOnly && state != runtimerunlifecycle.StatePaused {
+		return false, nil
 	}
 	if state != runtimerunlifecycle.StateRunning {
 		if state != runtimerunlifecycle.StatePaused {
 			return false, nil
 		}
-		materialized, err := observeMaterializedSelectedExecution(ctx, q, runID, fact.BundleHash())
+		materialized, err := ObserveMaterializedSelectedExecution(ctx, q, runID, fact.BundleHash())
 		if err != nil || !materialized {
 			return false, err
 		}
@@ -175,7 +197,7 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 	if state != runtimerunlifecycle.StateRunning {
 		materialized := false
 		if state == runtimerunlifecycle.StatePaused {
-			materialized, err = observeMaterializedSelectedExecution(ctx, tx, runID, fact.BundleHash())
+			materialized, err = ObserveMaterializedSelectedExecution(ctx, tx, runID, fact.BundleHash())
 			if err != nil {
 				return err
 			}
