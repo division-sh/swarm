@@ -49,77 +49,9 @@ func projectStateContract(root yamlsource.Value, types TypeCatalogDocument) (Ent
 func projectStateField(value yamlsource.Value, types TypeCatalogDocument) (EntityFieldDecl, error) {
 	switch value.Presence() {
 	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
-		fields, err := uniqueYAMLMappingFields(value, "indexed state field")
-		if err != nil {
-			return EntityFieldDecl{}, err
-		}
-		if err := rejectLongListField(fields, "state field"); err != nil {
-			return EntityFieldDecl{}, err
-		}
-		var typeValue yamlsource.Value
-		indexed := false
-		for _, field := range fields {
-			switch field.Name {
-			case "type":
-				typeValue = field.Value
-			case "indexed":
-				if scalar, err := field.Value.Scalar(); err != nil || scalar.Tag != "!!bool" || scalar.Value != "true" {
-					return EntityFieldDecl{}, fmt.Errorf("the indexed mapping requires indexed: true")
-				}
-				indexed = true
-			default:
-				return EntityFieldDecl{}, NewUndefinedFieldDiagnostic("state field", field.Name, map[string]struct{}{"type": {}, "indexed": {}}, field)
-			}
-		}
-		if !indexed || typeValue.Presence() == yamlsource.PresenceMissing {
-			return EntityFieldDecl{}, fmt.Errorf("the only state field mapping is {type: T, indexed: true}")
-		}
-		if typeValue.Presence() == yamlsource.PresenceMapping || typeValue.Presence() == yamlsource.PresenceEmptyMapping {
-			return EntityFieldDecl{}, fmt.Errorf("indexed type must be a type name or [T], not a mapping")
-		}
-		var typeRef string
-		if typeValue.Presence() == yamlsource.PresenceSequence {
-			typeRef, err = listDeclarationSequence(typeValue, "state field")
-		} else {
-			typeRef, err = listDeclarationScalar(typeValue, "state field", true)
-		}
-		if err != nil {
-			return EntityFieldDecl{}, err
-		}
-		declaration, err := stateTypeDeclaration(typeRef, types)
-		if err != nil {
-			return EntityFieldDecl{}, err
-		}
-		declaration.Indexed = true
-		return declaration, nil
+		return projectIndexedStateField(value, types)
 	case yamlsource.PresenceSequence:
-		items, err := value.Sequence()
-		if err != nil {
-			return EntityFieldDecl{}, err
-		}
-		if len(items) == 1 {
-			if token, err := items[0].Scalar(); err == nil && token.Tag == "!!str" && token.Style == 0 {
-				declaration, err := stateTypeDeclaration("["+token.Value+"]", types)
-				if err != nil {
-					return EntityFieldDecl{}, err
-				}
-				return declaration, nil
-			}
-		}
-		var itemType string
-		initial := make([]any, 0, len(items))
-		for _, item := range items {
-			declaration, err := stateLiteral(item)
-			if err != nil {
-				return EntityFieldDecl{}, err
-			}
-			if itemType != "" && itemType != declaration.Type {
-				return EntityFieldDecl{}, fmt.Errorf("list initial values must have one homogeneous scalar type")
-			}
-			itemType = declaration.Type
-			initial = append(initial, declaration.Initial)
-		}
-		return EntityFieldDecl{Type: "[" + itemType + "]", Initial: initial}, nil
+		return projectStateList(value, types)
 	case yamlsource.PresenceScalar, yamlsource.PresenceEmptyScalar:
 		scalar, err := value.Scalar()
 		if err != nil {
@@ -132,6 +64,82 @@ func projectStateField(value yamlsource.Value, types TypeCatalogDocument) (Entit
 	default:
 		return EntityFieldDecl{}, fmt.Errorf("state field requires a type or a non-null literal; empty lists are not declarations (use [T])")
 	}
+}
+
+func projectIndexedStateField(value yamlsource.Value, types TypeCatalogDocument) (EntityFieldDecl, error) {
+	fields, err := uniqueYAMLMappingFields(value, "indexed state field")
+	if err != nil {
+		return EntityFieldDecl{}, err
+	}
+	if err := rejectLongListField(fields, "state field"); err != nil {
+		return EntityFieldDecl{}, err
+	}
+	var typeValue yamlsource.Value
+	indexed := false
+	for _, field := range fields {
+		switch field.Name {
+		case "type":
+			typeValue = field.Value
+		case "indexed":
+			if scalar, err := field.Value.Scalar(); err != nil || scalar.Tag != "!!bool" || scalar.Value != "true" {
+				return EntityFieldDecl{}, fmt.Errorf("the indexed mapping requires indexed: true")
+			}
+			indexed = true
+		default:
+			return EntityFieldDecl{}, NewUndefinedFieldDiagnostic("state field", field.Name, map[string]struct{}{"type": {}, "indexed": {}}, field)
+		}
+	}
+	if !indexed || typeValue.Presence() == yamlsource.PresenceMissing {
+		return EntityFieldDecl{}, fmt.Errorf("the only state field mapping is {type: T, indexed: true}")
+	}
+	if typeValue.Presence() == yamlsource.PresenceMapping || typeValue.Presence() == yamlsource.PresenceEmptyMapping {
+		return EntityFieldDecl{}, fmt.Errorf("indexed type must be a type name or [T], not a mapping")
+	}
+	var typeRef string
+	if typeValue.Presence() == yamlsource.PresenceSequence {
+		typeRef, err = listDeclarationSequence(typeValue, "state field")
+	} else {
+		typeRef, err = listDeclarationScalar(typeValue, "state field", true)
+	}
+	if err != nil {
+		return EntityFieldDecl{}, err
+	}
+	declaration, err := stateTypeDeclaration(typeRef, types)
+	if err != nil {
+		return EntityFieldDecl{}, err
+	}
+	declaration.Indexed = true
+	return declaration, nil
+}
+
+func projectStateList(value yamlsource.Value, types TypeCatalogDocument) (EntityFieldDecl, error) {
+	items, err := value.Sequence()
+	if err != nil {
+		return EntityFieldDecl{}, err
+	}
+	if len(items) == 1 {
+		if token, err := items[0].Scalar(); err == nil && token.Tag == "!!str" && token.Style == 0 {
+			declaration, err := stateTypeDeclaration("["+token.Value+"]", types)
+			if err != nil {
+				return EntityFieldDecl{}, err
+			}
+			return declaration, nil
+		}
+	}
+	var itemType string
+	initial := make([]any, 0, len(items))
+	for _, item := range items {
+		declaration, err := stateLiteral(item)
+		if err != nil {
+			return EntityFieldDecl{}, err
+		}
+		if itemType != "" && itemType != declaration.Type {
+			return EntityFieldDecl{}, fmt.Errorf("list initial values must have one homogeneous scalar type")
+		}
+		itemType = declaration.Type
+		initial = append(initial, declaration.Initial)
+	}
+	return EntityFieldDecl{Type: "[" + itemType + "]", Initial: initial}, nil
 }
 
 func stateTypeDeclaration(raw string, types TypeCatalogDocument) (EntityFieldDecl, error) {

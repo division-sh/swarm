@@ -138,10 +138,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {id: reminder, after: 1h, emit: work.completed}\n", 1)
 	case LifecycleStaticLoopScopeMatrix:
 		for _, scope := range []string{"left", "right", "left/deep"} {
-			for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "state.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/state.yaml"} {
-				if _, err := os.Stat(filepath.Join(root, file)); os.IsNotExist(err) && strings.HasSuffix(file, "state.yaml") {
-					continue
-				}
+			for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/state.yaml"} {
 				writeClosedVariantFile(t, root, scope+"/"+file, lifecycleStaticRead(t, root, file))
 			}
 		}
