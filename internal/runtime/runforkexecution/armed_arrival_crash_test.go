@@ -54,12 +54,15 @@ func (s armedArrivalCrashScheduleStore) CommitGenericScheduleOccurrence(ctx cont
 	if result.Outcome != genericschedule.CommitCommitted {
 		return result, err
 	}
+	if result.Next.ForkJoinOrigin == nil {
+		return result, err
+	}
 	if validationErr := result.Validate(); validationErr != nil {
 		return result, errors.Join(err, validationErr)
 	}
 	if result.PublicationAlreadyCommitted || result.Next.Status != genericschedule.StatusFired ||
 		result.Next.ID != command.Activation.ID || result.Next.CurrentEventID != command.Occurrence.EventID ||
-		result.Next.Command.RunID != command.Activation.Command.RunID || result.Next.ForkJoinOrigin == nil {
+		result.Next.Command.RunID != command.Activation.Command.RunID {
 		return result, errors.Join(err, errors.New("armed arrival crash requires its first acknowledged inherited occurrence"))
 	}
 	// The native transaction acknowledged; lifecycle finalization/dispatch has
@@ -70,7 +73,6 @@ func (s armedArrivalCrashScheduleStore) CommitGenericScheduleOccurrence(ctx cont
 
 type armedArrivalCrashActivationStore struct {
 	SelectedContractForkLifecycle
-	schedules  genericschedule.Store
 	checkpoint func(string, string)
 }
 
@@ -79,13 +81,11 @@ func (s armedArrivalCrashActivationStore) ActivateRunForkForSelectedContractExec
 	if !result.Activated {
 		return result, err
 	}
-	rows, readErr := s.schedules.(interface {
-		ListActiveGenericScheduleActivationsForRun(context.Context, string) ([]genericschedule.Activation, error)
-	}).ListActiveGenericScheduleActivationsForRun(correlation.WithRunID(ctx, request.ForkRunID), request.ForkRunID)
-	if readErr != nil || len(rows) != 1 {
+	plan, readErr := s.SelectedContractForkLifecycle.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: request.ForkRunID})
+	if readErr != nil || len(plan.JoinSchedules) != 1 || plan.JoinSchedules[0].Command.RunID != request.ForkRunID || plan.JoinSchedules[0].ForkJoinOrigin == nil {
 		return result, errors.Join(err, readErr, errors.New("armed arrival activation requires its exact authorized native schedule"))
 	}
-	s.checkpoint(request.ForkRunID, rows[0].ID)
+	s.checkpoint(request.ForkRunID, plan.JoinSchedules[0].ID)
 	return result, err
 }
 
@@ -194,28 +194,34 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 				if err := genericschedule.ValidateWorkflowJoinScheduleRelation(originalJoin, source); err != nil {
 					t.Fatal(err)
 				}
-				sourceDigest, err := source.EvidenceDigest()
-				if err != nil {
+				preservedSource, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(t.Context(), source.ID)
+				if err != nil || !found || preservedSource.ImmutableHash != source.ImmutableHash || preservedSource.Status != genericschedule.StatusFired {
+					t.Fatalf("ordinary source setup lost its exact deferred clock: %+v err=%v", preservedSource, err)
+				}
+				if _, err := preservedSource.ValidatePublishedOccurrence(storetest.LoadCanonicalEventRecord(t, t.Context(), selected, preservedSource.CurrentEventID)); err != nil {
 					t.Fatal(err)
 				}
-				if count, err := storetest.ReadLifecycleEventCardinality(t.Context(), selected, checkpoint.SourceRun, "platform.join_timeout"); err != nil || count != 0 {
-					t.Fatalf("crash published the source timeout: count=%d err=%v", count, err)
+				if count, err := storetest.ReadLifecycleEventCardinality(t.Context(), selected, checkpoint.SourceRun, "platform.join_timeout"); err != nil || count != 1 {
+					t.Fatalf("ordinary source setup publication: count=%d err=%v", count, err)
 				}
 				sourceSettlement, err := selected.(deliverylifecycle.Store).SummarizeRun(t.Context(), checkpoint.SourceRun)
-				if err != nil || sourceSettlement.Total != 0 {
-					t.Fatalf("crash created a source timeout obligation: %+v err=%v", sourceSettlement, err)
+				if err != nil || sourceSettlement.Total != 1 || sourceSettlement.Pending != 1 {
+					t.Fatalf("paused source did not retain its deferred original delivery: %+v err=%v", sourceSettlement, err)
 				}
 				before, err := storetest.ReadSelectedForkSourceDomain(t.Context(), selected, checkpoint.SourceRun)
 				if err != nil {
 					t.Fatal(err)
 				}
 				child := checkpoint.ForkRun
-				published := cut == "retained_armed_join_occurrence_committed"
 				// The exact-row reader grants no execution authority and does not
 				// invent an event cut before the child's first publication.
 				atCrash, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(t.Context(), checkpoint.ScheduleID)
 				if err != nil || !found || checkpoint.ScheduleID == "" || atCrash.ID == source.ID || atCrash.Command.RunID != child || atCrash.ForkJoinOrigin == nil {
 					t.Fatalf("crash lost its exact native inherited deadline: %+v found=%v err=%v", atCrash, found, err)
+				}
+				published := atCrash.Status == genericschedule.StatusFired
+				if cut == "retained_armed_join_occurrence_committed" && !published {
+					t.Fatal("native occurrence checkpoint preceded its acknowledged publication")
 				}
 				eventID := genericschedule.OccurrenceEventID(atCrash.ID, source.CurrentDueAt)
 				if eventID == genericschedule.OccurrenceEventID(source.ID, source.CurrentDueAt) || eventID == source.CurrentEventID {
@@ -238,7 +244,8 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 						t.Fatal(err)
 					}
 					delivery, err := selected.(deliverylifecycle.Store).Snapshot(t.Context(), id)
-					if err != nil || delivery.Status != deliverylifecycle.StatusPending {
+					if err != nil || cut == "retained_armed_join_occurrence_committed" && delivery.Status != deliverylifecycle.StatusPending ||
+						cut == "retained_armed_join_after_activation" && delivery.Status != deliverylifecycle.StatusPending && delivery.Status != deliverylifecycle.StatusDelivered {
 						t.Fatalf("publication checkpoint dispatched its native delivery: %+v err=%v", delivery, err)
 					}
 				} else if atCrash.Status != genericschedule.StatusActive || atCrash.CurrentEventID != "" {
@@ -264,13 +271,21 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 				})
-				if err != nil || len(recovered) != 1 || recovered[0].RunID != child || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+				if err != nil || len(recovered) != 1 || recovered[0].RunID != child || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
 					t.Fatalf("armed arrival successor recovery: %+v err=%v", recovered, err)
 				}
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+					SourceRunID: child, Selection: acknowledged.Request.ContractSelection,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ordinary, _ := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
 				wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 				defer cancel()
 				reader := selected.(interface {
 					LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+					LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 				})
 				for {
 					header, err := reader.LoadRunHeader(wait, child)
@@ -283,7 +298,11 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					owner.ports.contexts.mu.Lock()
 					retained := len(owner.ports.contexts.entries)
 					owner.ports.contexts.mu.Unlock()
-					if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+					settlement, err := reader.LoadRunTestQuiescence(wait, child, time.Now().UTC())
+					if err != nil {
+						t.Fatal(err)
+					}
+					if header.Status == "live" && header.EndedAt == nil && settlement.Ready && retained == 0 {
 						break
 					}
 					select {
@@ -291,6 +310,9 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 						t.Fatalf("armed arrival recovery did not settle/release: header=%+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
 					case <-time.After(10 * time.Millisecond):
 					}
+				}
+				if err := ordinary.Shutdown(); err != nil || process.ActiveCount() != baseline {
+					t.Fatalf("ordinary recovery did not join its exact resources: work=%d baseline=%d err=%v", process.ActiveCount(), baseline, err)
 				}
 				header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait,
 					flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(".", child, child)})
@@ -367,20 +389,23 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 				if err != nil || !found {
 					t.Fatalf("source deadline disappeared: found=%v err=%v", found, err)
 				}
-				afterDigest, err := original.EvidenceDigest()
-				if err != nil || afterDigest != sourceDigest || original.Status != genericschedule.StatusActive || original.CurrentEventID != source.CurrentEventID ||
-					!original.CurrentEventAdmittedAt.Equal(source.CurrentEventAdmittedAt) {
+				if !reflect.DeepEqual(original, preservedSource) {
 					t.Fatalf("recovery changed or published its source deadline: %+v err=%v", original, err)
 				}
-				if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, checkpoint.SourceRun, "platform.join_timeout"); err != nil || count != 0 {
+				if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, checkpoint.SourceRun, "platform.join_timeout"); err != nil || count != 1 {
 					t.Fatalf("source timeout was published: count=%d err=%v", count, err)
 				}
-				sourceSettlement, err = owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, checkpoint.SourceRun)
-				if err != nil || sourceSettlement.Total != 0 {
-					t.Fatalf("timeout recovery created a source delivery obligation: %+v err=%v", sourceSettlement, err)
+				afterSourceSettlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, checkpoint.SourceRun)
+				if err != nil || !reflect.DeepEqual(sourceSettlement, afterSourceSettlement) {
+					t.Fatalf("timeout recovery changed its original source delivery obligation: %+v err=%v", afterSourceSettlement, err)
 				}
 				after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
 				if err != nil || !reflect.DeepEqual(before, after) {
+					for table, old := range before {
+						if !reflect.DeepEqual(old, after[table]) {
+							t.Logf("SOURCE_RECOVERY_DELTA table=%s before=%+v after=%+v", table, old, after[table])
+						}
+					}
 					t.Fatalf("timeout recovery changed source business facts: %v", err)
 				}
 				retry, found, err := operations.LoadForkOperation(wait, acknowledged.Request.Actor, acknowledged.Request.IdempotencyKey, acknowledged.Request.TransportHash)

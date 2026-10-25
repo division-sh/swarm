@@ -198,6 +198,22 @@ func (f *q1BranchPointAttachment) activate() (runfork.RunForkActivation, error) 
 	})
 }
 
+func (f *q1BranchPointAttachment) serveSelectedControls(t *testing.T) {
+	t.Helper()
+	if _, err := f.prepared.owner.ports.busDurable.RunLifecycle.TransitionActiveRun(f.container.attachment.ctx, runlifecycle.ActiveTransitionRequest{
+		RunID: f.materialized.ForkRunID, State: runlifecycle.StateRunning,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.prepared.owner.retainPrepared(f.prepared); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.container.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	waitSelectedRuntimeStartup(t, f.prepared.operation.Context(), f.prepared.owner, f.materialized.ForkRunID)
+}
+
 func (f *q1BranchPointAttachment) close(t *testing.T) {
 	t.Helper()
 	if err := f.closeResult(); err != nil {
@@ -208,6 +224,14 @@ func (f *q1BranchPointAttachment) close(t *testing.T) {
 func (f *q1BranchPointAttachment) closeResult() error {
 	if f.closed {
 		return nil
+	}
+	f.prepared.bindMu.Lock()
+	closing := f.prepared.closed
+	f.prepared.bindMu.Unlock()
+	if closing {
+		err := f.prepared.Close()
+		f.closed = err == nil
+		return err
 	}
 	ctx := f.prepared.operation.Context()
 	if runtime := f.container.attachment.runtime; runtime != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -101,6 +102,7 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				t.Fatalf("removed-rule fixture lost its exact retained stage: %v", err)
 			}
 			raw = []byte(strings.Replace(string(raw), "  awaiting: {}\n", "  awaiting: {final: true}\n", 1))
+			raw = []byte(strings.Replace(string(raw), "  ready:\n    final: true\n  attention:\n    final: true\n", "", 1))
 			if err := os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -120,8 +122,11 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "removed-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "removed-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, target, sourceRun, executionposture.MockOnly)
+			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
+				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
@@ -140,6 +145,7 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			defer cancel()
 			reader := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 			})
 			for {
 				header, err := reader.LoadRunHeader(wait, child)
@@ -149,7 +155,11 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+				settled, settleErr := reader.LoadRunTestQuiescence(wait, child, time.Now().UTC())
+				if settleErr != nil {
+					t.Fatal(settleErr)
+				}
+				if header.Status == "live" && header.EndedAt == nil && settled.Ready && process.ActiveCount() == baseline && retained == 0 {
 					break
 				}
 				select {
@@ -223,8 +233,8 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				t.Fatal(err)
 			}
 			terminal, err := terminalOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
-			if err != nil || len(terminal) != 1 || terminal[0].RunID != child || terminal[0].Disposition != runfork.SelectedForkRecoveryTerminal {
-				t.Fatalf("removed-rule terminal recovery reopened work: %+v err=%v", terminal, err)
+			if err != nil || len(terminal) != 1 || terminal[0].RunID != child || terminal[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
+				t.Fatalf("removed-rule closed selected recovery reopened work: %+v err=%v", terminal, err)
 			}
 			stateAfter, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
 			if err != nil || !reflect.DeepEqual(stateBefore, stateAfter) || process.ActiveCount() != baseline {

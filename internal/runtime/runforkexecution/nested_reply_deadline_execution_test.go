@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"net/http/httptest"
 
 	"reflect"
 	"sync"
@@ -39,6 +40,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -98,11 +101,45 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	}
 	process, _ := worklifetime.ProcessFromContext(ctx)
 	p := owner.ports
+	options := rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
+		SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
+		WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}}
+	var gateway *httptest.Server
+	if semanticview.SourceDeclaresAgents(loaded.Source) {
+		gateway = httptest.NewUnstartedServer(nil)
+		t.Cleanup(gateway.Close)
+		endpoint := "http://" + gateway.Listener.Addr().String()
+		token, err := toolgateway.GenerateAuthToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.ToolGatewayBinding, err = toolgateway.NewRuntimeOwnedBinding(toolgateway.TransportHTTP, endpoint, endpoint, token,
+			toolgateway.LifecycleOwnerServeBoot, toolgateway.SourceBoundMCPListener)
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.EnableToolGateway = true
+		host := workspace.NewHostManager()
+		config := workspace.DefaultHostConfig()
+		config.WorkspaceRoot = t.TempDir()
+		host.SetConfig(config)
+		host.SetSemanticSource(loaded.Source)
+		if err := host.BindSourceProjection(loaded.RuntimeProjection); err != nil {
+			t.Fatal(err)
+		}
+		if err := host.EnsurePrereqs(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := host.ReleaseSourceProjection(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		options.WorkspaceLifecycle = host
+	}
 	rt, err := rootruntime.NewRuntime(ctx, rootruntime.RuntimeDeps{
-		Config: &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4, RecoveryOnStartup: live}, LLM: config.LLMConfig{Backend: "anthropic"}},
-		Options: rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
-			SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
-			WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}},
+		Config:              &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4, RecoveryOnStartup: live}, LLM: config.LLMConfig{Backend: "anthropic"}},
+		Options:             options,
 		WorkflowPersistence: p.workflow, EventStore: p.events, EventBusDurable: p.busDurable,
 		EventPayloadAdmissionBinder: selected.(rootruntime.EventPayloadAdmissionBinder), AuthorActivityRegistrars: []rootruntime.AuthorActivityCatalogRegistrar{p.fork},
 		RunBundleAvailability: p.fork, RunControlStore: selected.(runcontrol.Store), RunLifecycleCandidates: p.candidates,
@@ -117,12 +154,21 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	if err != nil {
 		t.Fatal(err)
 	}
+	if gateway != nil {
+		gateway.Config.Handler = rt.ToolGateway.Handler()
+		gateway.Start()
+	}
 	t.Cleanup(func() {
 		if err := rt.Shutdown(); err != nil {
 			t.Error(err)
 		}
 	})
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: loaded.SourceArtifactFact.BundleHash()}}, nil)
+	coordinate := agenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()}
+	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +254,22 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 			t.Fatalf("park source before ordinary runtime recovery: outcome=%+v err=%v", outcome, err)
 		}
 	}
+	rt, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, posture)
+	availability, err = owner.ports.fork.LoadRunBundleAvailability(ctx, sourceRunID)
+	if err != nil || !availability.Available() || availability.BundleHash != sourceHash || availability.Status != "paused" {
+		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
+	}
+	return rt, contexts
+}
+
+func ordinaryForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
+	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
+	bundle, found := semanticview.Bundle(loaded.Source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("ordinary fork fixture requires its retained source artifact")
+	}
+	storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), selected.(storetest.DurableDataCatalogStore), bundle)
 	rt, _ := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, true)
 	definition := rootruntime.BundleContext{
 		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source,
@@ -232,14 +294,6 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 	use, lookup, err := contexts.AcquireBundleHash(ctx, loaded.SourceArtifactFact.BundleHash())
 	if err != nil || !lookup.Loaded() || use == nil {
 		t.Fatalf("acquire original live fixture: loaded=%t err=%v", lookup.Loaded(), err)
-	}
-	controlCtx = correlation.WithRuntimeInstanceID(use.WorkContext(), rt.Options.RuntimeInstanceID)
-	controlCtx = correlation.WithSourceArtifactFact(controlCtx, rt.Options.SourceArtifactFact)
-	controlCtx = authoractivity.WithScope(controlCtx, authoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.SourceArtifactFact.BundleHash()))
-	availability, err = owner.ports.fork.LoadRunBundleAvailability(controlCtx, sourceRunID)
-	if err != nil || !availability.Available() || availability.BundleHash != sourceHash || availability.Status != "paused" {
-		_ = use.Done()
-		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
 	}
 	if err := use.Done(); err != nil {
 		t.Fatal(err)

@@ -99,7 +99,7 @@ func seedIssue642TimerCrashSource(t *testing.T, ctx context.Context, selected an
 	}
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+		RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, Artifact: bundle.SourceArtifact,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at,
 	})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "timer.scheduled", "source-runtime", "", []byte(`{}`), 0, runID,

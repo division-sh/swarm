@@ -85,7 +85,7 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			}
 			// Advance the ordinary source so the earlier fork cut cannot freeze it.
 			publishPendingReplyInput(t, ctx, rt.Bus, source, "request.note", []byte(`{"note":"source-still-owns-its-card"}`))
-			result := activatePendingDecisionFork(t, ctx, owner, source, page.Events[0].EventID, loader, loaded)
+			result := preparePendingDecisionControlComponent(t, ctx, owner, source, page.Events[0].EventID, loader, loaded)
 			child := result.Materialization.ForkRunID
 			card := requirePendingReplyCard(t, ctx, store, child)
 			principal, err := store.EnsureOperatorPrincipal(ctx, at)
@@ -236,9 +236,9 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 	}
 }
 
-// This is the same supported staged/start-cut source surface as the original
-// pending-effect positive test. It does not widen event-point execution policy.
-func activatePendingDecisionFork(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, sourceRun, cut string,
+// This retains the selected pre-handoff control reach. It creates no public ACK
+// and does not widen either public execution entrypoint.
+func preparePendingDecisionControlComponent(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, sourceRun, cut string,
 	loader admittedFixtureSelectedContractSourceLoader, loaded LoadedSelectedContractSource) SelectedContractExecutionResult {
 	t.Helper()
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability}
@@ -264,14 +264,11 @@ func activatePendingDecisionFork(t *testing.T, ctx context.Context, owner Select
 	if err := prepared.Close(); err != nil {
 		t.Fatal(err)
 	}
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true,
+	component := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true,
 		AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 		ForkOperation: pendingDecisionStartInvocation(staged.ForkRunID, loaded, selection)})
-	if err != nil || !result.Activation.Activated {
-		t.Fatalf("activate the admitted pending-effect start cut: %+v error=%v", result, err)
-	}
-	waitSelectedRuntimeStartup(t, ctx, owner, result.Materialization.ForkRunID)
-	return result
+	component.serveSelectedControls(t)
+	return SelectedContractExecutionResult{Materialization: component.materialized}
 }
 
 func pendingDecisionStartInvocation(sourceRun string, loaded LoadedSelectedContractSource, selection runfork.RunForkContractSelection) *runfork.ForkOperationRequest {

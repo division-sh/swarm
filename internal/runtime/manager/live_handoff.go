@@ -5,6 +5,9 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 // ParkLiveRun joins process-local attempts without terminalizing the retained
@@ -49,6 +52,10 @@ func (am *AgentManager) ParkLiveRun(ctx context.Context, runID string) (_ func()
 func (am *AgentManager) ReconcileLiveRun(ctx context.Context, runID string) error {
 	if am == nil || runID == "" {
 		return errors.New("live reconciliation requires its exact Manager and run")
+	}
+	ctx = correlation.WithRunID(ctx, runID)
+	if err := am.ReconcileDynamicFlowRuntimeReadinessPlansForRun(ctx, time.Now().UTC()); err != nil {
+		return err
 	}
 	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
 	if err != nil {

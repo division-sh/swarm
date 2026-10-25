@@ -85,7 +85,7 @@ func TestIssue642ForkOrderedGateInputUsesOwnCurrentGenerationBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			result := activatePendingDecisionFork(t, ctx, owner, source, page.Events[0].EventID, loader, loaded)
+			result := preparePendingDecisionControlComponent(t, ctx, owner, source, page.Events[0].EventID, loader, loaded)
 			child := result.Materialization.ForkRunID
 			card := requirePendingOrderedGate(t, ctx, store, child)
 			principal, err := store.EnsureOperatorPrincipal(ctx, at)
