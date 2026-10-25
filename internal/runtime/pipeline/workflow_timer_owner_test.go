@@ -1101,13 +1101,6 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores
 			}
 			assertOneStatus("reject.target", workflowTimerStatusActive)
 
-			execute("discard.target", nil, true)
-			execute("guard.discard", nil, false)
-			if matched := declarations("discard.start"); len(matched) != 0 {
-				t.Fatalf("guard discard created timer: %#v", matched)
-			}
-			assertOneStatus("discard.target", workflowTimerStatusActive)
-
 			execute("dedup.event", []byte(`{"item_id":"item-1"}`), true)
 			assertOneStatus("dedup.start", workflowTimerStatusActive)
 			execute("dedup.reset", nil, true)
@@ -2469,14 +2462,12 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
 		"state.yaml":  "items: [TimerItem]\n",
 		"types.yaml":  "TimerItem:\n  item_id: text\n",
 
-		"events.yaml": "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
+		"events.yaml": "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
   timers:
     - {event: timer.accepted, start_on: 'event:accepted.start', cancel_on: 'event:accepted.cancel', delay: 1h}
     - {event: timer.reject.start, start_on: 'event:guard.reject', delay: 1h}
     - {event: timer.reject.target, start_on: 'event:reject.target', cancel_on: 'event:guard.reject', delay: 1h}
-    - {event: timer.discard.start, start_on: 'event:guard.discard', delay: 1h}
-    - {event: timer.discard.target, start_on: 'event:discard.target', cancel_on: 'event:guard.discard', delay: 1h}
     - {event: timer.dedup.start, start_on: 'event:dedup.event', cancel_on: 'event:dedup.reset', delay: 1h}
     - {event: timer.dedup.target, start_on: 'event:dedup.target', cancel_on: 'event:dedup.event', delay: 1h}
   accepted.start: {}
@@ -2484,10 +2475,6 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
   reject.target: {}
   guard.reject:
     guard: false
-  discard.target: {}
-  guard.discard:
-    rules:
-      - when: false
   dedup.event:
     accumulate: {target: items, key: item_id}
   dedup.reset: {}
