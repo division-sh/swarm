@@ -352,7 +352,7 @@ func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, attem
 		LiveScope: scope,
 	})
 	if err != nil {
-		return err
+		return &publicationRunCreationFailure{cause: err}
 	}
 	return storescenarioexecution.EnsurePostgresFromContext(ctx, tx, runID, time.Now().UTC())
 }
