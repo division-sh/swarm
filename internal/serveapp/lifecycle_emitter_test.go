@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -84,7 +85,39 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 
 func readLifecycleLoop(t *testing.T, rt servedControlProofRuntime, runID, entityID string) loopruntime.PublicActivation {
 	t.Helper()
-	return readLifecycleLoopFromEndpoint(t, rt.Endpoint, runID, entityID)
+	var loops []loopruntime.PublicActivation
+	err := rt.ReceiverStateReader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+		instances, err := rt.ReceiverStateReader.ListWorkflowInstances(ctx, runID)
+		if err != nil {
+			return err
+		}
+		matches := 0
+		for _, instance := range instances {
+			if instance.EntityID != entityID {
+				continue
+			}
+			matches++
+			_, exact, err := loadReceiverTargetState(ctx, rt.ReceiverStateReader, runID, instance.WorkflowName, instance.StorageRef, entityID)
+			if err != nil {
+				return err
+			}
+			loops, err = loopruntime.PublicActivations(exact.StateBuckets)
+			if err != nil {
+				return err
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("expected one loop receiver %s, got %d", entityID, matches)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loops) != 1 {
+		t.Fatalf("expected one loop activation: %#v", loops)
+	}
+	return loops[0]
 }
 
 func readLifecycleLoopFromEndpoint(t *testing.T, endpoint, runID, entityID string) loopruntime.PublicActivation {
