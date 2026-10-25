@@ -114,8 +114,8 @@ inputs:
 	}
 	var inputs, outputs, connects, events strings.Builder
 	for _, event := range []string{"work.seeded", "work.first", "work.second"} {
-		inputs.WriteString("    - " + event + "\n")
-		outputs.WriteString("    - " + event + "\n")
+		inputs.WriteString("  - " + event + "\n")
+		outputs.WriteString("  - " + event + "\n")
 		field, kind := "choice", "text"
 		if event == "work.seeded" {
 			field, kind = "seed", "boolean"
@@ -125,7 +125,7 @@ inputs:
 			connects.WriteString(fmt.Sprintf("  - {event: %s, from: ., to: %s}\n", event, child))
 		}
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: selected-carriers\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\ninputs:\n"+inputs.String()+"  outputs:\n"+outputs.String()+"connect:\n"+connects.String())
+	writeClosedVariantFile(t, root, "schema.yaml", "name: selected-carriers\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\ninputs:\n"+inputs.String()+"outputs:\n"+outputs.String()+"connect:\n"+connects.String())
 	events.WriteString("work.completed:\n  result: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", events.String())
 	return root

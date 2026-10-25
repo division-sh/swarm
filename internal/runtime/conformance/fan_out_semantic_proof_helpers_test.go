@@ -90,11 +90,11 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	modify("schema.yaml", func(raw string) string {
 		var inputs, outputs, connects strings.Builder
 		for _, name := range eventsToAdd {
-			fmt.Fprintf(&inputs, "    - %s\n", name)
-			fmt.Fprintf(&outputs, "    - %s\n", name)
+			fmt.Fprintf(&inputs, "  - %s\n", name)
+			fmt.Fprintf(&outputs, "  - %s\n", name)
 			fmt.Fprintf(&connects, "  - event: %s\n    from: .\n    to: portfolio\n", name)
 		}
-		raw = replace(raw, "  outputs:\n", inputs.String()+"  outputs:\n")
+		raw = replace(raw, "outputs:\n", inputs.String()+"outputs:\n")
 		raw = replace(raw, "connect:\n", outputs.String()+"connect:\n")
 		return raw + connects.String()
 	})
@@ -107,61 +107,56 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	modify("portfolio/schema.yaml", func(raw string) string {
 		var added strings.Builder
 		for _, name := range eventsToAdd {
-			fmt.Fprintf(&added, "    - %s\n", name)
+			fmt.Fprintf(&added, "  - %s\n", name)
 		}
-		return replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
+		return replace(raw, "outputs:\n", added.String()+"outputs:\n")
 	})
 	modify("portfolio/events.yaml", func(raw string) string {
 		raw = replace(raw, "  eligible: boolean\n", "  eligible: boolean\n  ordinal: integer\n  source_count: integer\n  snapshot_threshold: integer\n")
 		return raw
 	})
 	modify("portfolio/nodes.yaml", func(raw string) string {
-		var subscriptions strings.Builder
-		for _, name := range eventsToAdd {
-			fmt.Fprintf(&subscriptions, "    - %s\n", name)
-		}
-		raw = replace(raw, "    - portfolio.opened\n", "    - portfolio.opened\n"+subscriptions.String())
 		// Existing producers of account.registered must satisfy the extended
 		// output contract too, even though these proofs use the new handlers.
-		raw = replace(raw, "            eligible: state.threshold >= 70\n", "            eligible: state.threshold >= 70\n            ordinal: fan_out.index\n            source_count: fan_out.count\n            snapshot_threshold: state.threshold\n")
+		raw = replace(raw, "          eligible: state.threshold >= 70\n", "          eligible: state.threshold >= 70\n          ordinal: fan_out.index\n          source_count: fan_out.count\n          snapshot_threshold: state.threshold\n")
 		for _, producer := range []struct{ event, site, source string }{
 			{semanticProofPayloadEvent, "rules", "payload.account_ids"},
 			{semanticProofEntityEvent, "on_complete", "state.account_ids"},
 		} {
-			raw += fmt.Sprintf(`    %s:
-      data_accumulation:
-        writes:
-          - source_field: account_ids
-            target_field: account_ids
-          - source_field: threshold
-            target_field: threshold
-      %s:
-        - fan_out:
-            items_from: %s
-            as: account
-            identity: account.account_id
-            max_items: 100
-            emit:
-              event: account.registered
-              fields:
-                portfolio_id: payload.portfolio_id
-                account_id: account.account_id
-                eng_roles: account.eng_roles
-                gem_score: account.gem_score
-                external_id: account.external_id
-                eligible: state.threshold >= 70
-                ordinal: fan_out.index
-                source_count: fan_out.count
-                snapshot_threshold: state.threshold
+			raw += fmt.Sprintf(`  %s:
+    data_accumulation:
+      writes:
+        - source_field: account_ids
+          target_field: account_ids
+        - source_field: threshold
+          target_field: threshold
+    %s:
+      - fan_out:
+          items_from: %s
+          as: account
+          identity: account.account_id
+          max_items: 100
+          emit:
+            event: account.registered
+            fields:
+              portfolio_id: payload.portfolio_id
+              account_id: account.account_id
+              eng_roles: account.eng_roles
+              gem_score: account.gem_score
+              external_id: account.external_id
+              eligible: state.threshold >= 70
+              ordinal: fan_out.index
+              source_count: fan_out.count
+              snapshot_threshold: state.threshold
 `, producer.event, producer.site, producer.source)
 		}
-		raw += fmt.Sprintf(`    %s:
-      data_accumulation:
-        writes:
-          - source_field: account_ids
-            target_field: account_ids
-          - source_field: threshold
-            target_field: threshold
+		raw += fmt.Sprintf(`  %s:
+    data_accumulation:
+      writes:
+        - source_field: account_ids
+          target_field: account_ids
+        - source_field: threshold
+          target_field: threshold
 `, semanticProofOverwriteEvent)
 		return raw
 	})

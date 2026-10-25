@@ -225,7 +225,7 @@ func CopySelectedForkLocalReadiness(t testing.TB, declarations int, frontier str
 	}
 	schema := read("schema.yaml")
 	schema = replaceSelectedReadiness(t, schema, "inputs:\n", "inputs:\n  - source.prepare\n  - source.recorded\n")
-	schema = replaceSelectedReadiness(t, schema, "  outputs:\n", "  outputs:\n    - source.prepare\n")
+	schema = replaceSelectedReadiness(t, schema, "outputs:\n", "outputs:\n  - source.prepare\n")
 	schema += "  - {event: source.prepare, from: ., to: worker-flow, resolution: select}\n"
 	events := read("events.yaml") + "\nsource.prepare:\n  worker_id: text\nsource.recorded:\n  worker_id: text\n"
 	child := read("worker-flow/schema.yaml")

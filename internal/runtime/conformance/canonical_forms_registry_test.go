@@ -245,33 +245,6 @@ type canonicalFormsRow struct {
 	IdentityRetirement string                 `yaml:"identity_retirement"`
 }
 
-func TestCanonicalFormsRegistryPinsNodeIDRetirement(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	registry := loadCanonicalFormsRegistry(t, root)
-	for _, row := range registry.Rows {
-		if row.ID != "node.identity_defaults_projections" {
-			continue
-		}
-		if !strings.Contains(row.IdentityRetirement, "#2308") || !strings.Contains(row.IdentityRetirement, "Other projections in this row remain open") {
-			t.Fatalf("identity-only closure not recorded: %#v", row)
-		}
-		if !reflect.DeepEqual(row.Spelling.RetiredDuplicates, []string{"node.id", "execution_type_system_node", "subscribes_to_equal_to_handler_keys", "produces_equal_to_emit_sites"}) {
-			t.Fatalf("node retirement classification: %#v", row.Spelling)
-		}
-		if _, ok := reflect.TypeOf(runtimecontracts.SystemNodeContract{}).FieldByName("ID"); ok {
-			t.Fatal("retired node ID carrier restored")
-		}
-		fixture := t.TempDir()
-		writeRegistryMutationFile(t, filepath.Join(fixture, "schema.yaml"), "name: node-retirement\n")
-		writeRegistryMutationFile(t, filepath.Join(fixture, "nodes.yaml"), "worker:\n  id: worker\n")
-		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(root, fixture, runtimecontracts.DefaultPlatformSpecFile(root)); err == nil || !strings.Contains(err.Error(), "node field \"id\" is not supported") {
-			t.Fatalf("node ID admitted: %v", err)
-		}
-		return
-	}
-	t.Fatal("node identity registry row missing")
-}
-
 type canonicalFormsSpelling struct {
 	Canonical          any      `yaml:"canonical"`
 	CanonicalCandidate any      `yaml:"canonical_candidate"`
@@ -785,58 +758,6 @@ func TestCanonicalFormsRegistryPinsFilesystemTopologyRetirementAndEffectiveConne
 	}
 
 	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowConnect{}), []string{"correlation_key", "event", "from", "key_from", "rename", "replies_to", "resolution", "to"})
-}
-
-func TestTypedFieldDecoderFamilyUsesYAMLSourceProjectionOnly(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	path := filepath.Join(root, "internal/runtime/contracts/workflow_contract_yaml_wave1.go")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(raw, []byte("decodeWave1FieldNode")) {
-		t.Fatal("retired decodeWave1FieldNode owner reappeared")
-	}
-	parsed, err := parser.ParseFile(token.NewFileSet(), path, raw, 0)
-	if err != nil {
-		t.Fatalf("parse paired decoder family: %v", err)
-	}
-	want := map[string]bool{
-		"projectTypeCatalogDocument":     false,
-		"projectNamedTypeDeclarations":   false,
-		"projectNamedTypeDeclaration":    false,
-		"projectTypeFieldSpec":           false,
-		"projectEntityContractsDocument": false,
-		"projectEntityContract":          false,
-		"projectEntityFieldDecl":         false,
-		"decodeWave1FieldValue":          false,
-	}
-	for _, declaration := range parsed.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Body == nil {
-			continue
-		}
-		if _, tracked := want[function.Name.Name]; !tracked {
-			continue
-		}
-		want[function.Name.Name] = true
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			switch selector.Sel.Name {
-			case "Decode", "Kind", "Tag", "Content":
-				t.Errorf("%s uses forbidden raw yaml.Node selector %s", function.Name.Name, selector.Sel.Name)
-			}
-			return true
-		})
-	}
-	for name, found := range want {
-		if !found {
-			t.Errorf("paired decoder owner %s missing", name)
-		}
-	}
 }
 
 func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {

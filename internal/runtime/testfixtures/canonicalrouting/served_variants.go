@@ -335,9 +335,7 @@ connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    advances_to: processed\n", "    advances_to: waiting\n")
-	applyClosedReplacement(t, filepath.Join(root, "state.yaml"), `item_id: text
-`, `owner: text
-`)
+	writeClosedVariantFile(t, root, "state.yaml", "owner: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `item.processed:
   item_id: text?
 `, `item.processed:
@@ -352,8 +350,8 @@ opco.create_requested:
   instance_id: text
   product_id: text
 `)
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  item.processed:\n    advances_to: done\n", `    item.processed:
-      advances_to: done
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  item.processed:\n    advances_to: done\n", `  item.processed:
+    advances_to: done
 portfolio-bootstrap:
   opco.bootstrap_requested:
     data_accumulation:
