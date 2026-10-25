@@ -61,7 +61,7 @@ func TestReceiverCompositionSharedChildJourney(t *testing.T) {
 					t.Fatal("shared static child has no successful execution")
 				}
 				rows.Close()
-				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "state", "pending", started.RunID, "ready", 1, map[string]any{})
+				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "", "pending", started.RunID, "ready", 1, nil)
 				requireReceiverPublicReadback(t, rt, started.RunID)
 			})
 		}
