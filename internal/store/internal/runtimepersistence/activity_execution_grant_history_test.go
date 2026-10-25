@@ -89,7 +89,7 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			control := &activityGrantHistoryConnector{}
-			fixture, _ := openCompletionOutcomeNativeStore(t, backend, func(native driver.Connector) driver.Connector {
+			fixture, _ := openCompletionOutcomeFixture(t, backend, func(native driver.Connector) driver.Connector {
 				control.Connector = native
 				return control
 			})

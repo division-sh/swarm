@@ -126,13 +126,13 @@ func (tx *completionOutcomeTx) Commit() error {
 	return err
 }
 
-func openCompletionOutcomeFixture(t *testing.T, backend string, wrappers ...func(driver.Connector) driver.Connector) (completionSettlementFixture, *completionOutcomeConnector) {
+func openCompletionSettlementOutcomeFixture(t *testing.T, backend string, wrappers ...func(driver.Connector) driver.Connector) (completionSettlementFixture, *completionOutcomeConnector) {
 	t.Helper()
-	fixture, control := openCompletionOutcomeNativeStore(t, backend, wrappers...)
+	fixture, control := openCompletionOutcomeFixture(t, backend, wrappers...)
 	return newCompletionSettlementFixture(t, fixture.store, fixture.db, fixture.sqlite), control
 }
 
-func openCompletionOutcomeNativeStore(t *testing.T, backend string, wrappers ...func(driver.Connector) driver.Connector) (completionSettlementFixture, *completionOutcomeConnector) {
+func openCompletionOutcomeFixture(t *testing.T, backend string, wrappers ...func(driver.Connector) driver.Connector) (completionSettlementFixture, *completionOutcomeConnector) {
 	t.Helper()
 	var native driver.Connector
 	if backend == "postgres" {
@@ -171,7 +171,7 @@ func TestCompletionTransactionAcknowledgementBoundaryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, phase := range []string{"entry_cancel", "callback_cancel", "commit_admitted_cancel", "commit_refused", "commit_ack_lost", "healthy"} {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
-				fixture, control := openCompletionOutcomeFixture(t, backend)
+				fixture, control := openCompletionSettlementOutcomeFixture(t, backend)
 				handle := beginObservedCompletionForSettlementTest(t, fixture.context, "claude_cli", "completion-outcome")
 				attempt := handle.Attempt()
 				settlement := completionSettlementForTest(t, attempt.Authority.Target, fixture, "claude_cli", "", "")
