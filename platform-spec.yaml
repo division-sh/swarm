@@ -39402,14 +39402,6 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           current_status:
             $ref: '#/components/schemas/RunStatus'
-      RUN_NEVER_COMPLETES:
-        type: object
-        additionalProperties: false
-        required: [flow_id, detail]
-        properties:
-          flow_id: {type: string}
-          detail: {type: string}
-        description: Finite run.start requires an explicit final stage in every instance-bearing flow of its canonical constructor/routing closure. A no-final service remains valid for serve.
       RUN_FLOW_ALREADY_LIVE:
         type: object
         additionalProperties: false
@@ -40220,21 +40212,12 @@ api_specification:
         identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext;
         an existing run cannot acquire new run-creation data.
 
-        After exact source/input/feed admission, including canonical event payload preflight,
-        and before either atomic creation owner, require an explicit final stage for the selected root,
-        eagerly constructed keyless descendants, and possible compiled routing receivers/templates and
-        their constructor children. Independently selected nested imports and pins seed this closure
-        with the exact receivers matched by their already-admitted declaration/routing evidence;
-        they do not instantiate the source producer or select its unrelated output routes.
-        Unknown or contradictory catalog evidence fails closed. Do not
-        infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or
-        treat stateless instances as exempt containers. A no-final service is structurally valid but
-        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow.
-        Malformed event payloads fail PAYLOAD_VALIDATION_FAILED before this finite-eligibility
-        check; a valid payload cannot waive the no-final refusal. Committed
-        idempotency replay/conflicts retain their existing owners; existing-run event.publish and
-        standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,
-        resource, feed and permanent-receipt effects.
+        Source/input/feed admission, including canonical event payload preflight, precedes either
+        atomic creation owner. A final stage is not an initiation prerequisite: persistent flows
+        accept inputs without a finite-completion refusal. Malformed payloads still fail
+        PAYLOAD_VALIDATION_FAILED before run, event, resource, feed and permanent-receipt effects.
+        Committed idempotency replay/conflicts and exact constructor/routing admission retain
+        their existing owners.
 
         Both initiation variants reserve the same process-wide public-completion capacity before
         construction and mutation. Feed-only replay/conflict also precedes fresh source/feed admission;
@@ -40321,7 +40304,6 @@ api_specification:
       - RUN_DATA_REJECTED
       - RUN_DATA_HEAD_CONFLICT
       - DATA_INTEGRITY_ERROR
-      - RUN_NEVER_COMPLETES
     run.fork:
       tier: should_have
       description: >-

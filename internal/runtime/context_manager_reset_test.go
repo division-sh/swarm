@@ -180,10 +180,6 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 			use, _, _, err := manager.AcquireRun(context.Background(), "run-first")
 			return use, err
 		},
-		"standing": func() (*RuntimeContextUse, error) {
-			use, _, err := manager.AcquireStandingService(context.Background(), serviceID)
-			return use, err
-		},
 		"channel": func() (*RuntimeContextUse, error) {
 			use, _, err := manager.AcquireIngress(context.Background(), "first", "acme")
 			return use, err

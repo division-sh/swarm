@@ -1,13 +1,11 @@
 package cliapp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -449,158 +447,6 @@ func loadRunCommandPayload(path string) (map[string]any, error) {
 		return nil, fmt.Errorf("--payload must be a JSON object")
 	}
 	return payload, nil
-}
-
-type runStartupOutput struct {
-	mu      sync.Mutex
-	buffer  bytes.Buffer
-	discard bool
-}
-
-func (o *runStartupOutput) Write(p []byte) (int, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.discard {
-		return len(p), nil
-	}
-	return o.buffer.Write(p)
-}
-
-func (o *runStartupOutput) finish() []byte {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.discard = true
-	output := append([]byte(nil), o.buffer.Bytes()...)
-	o.buffer.Reset()
-	return output
-}
-
-func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runCommandOptions, startupErrOut io.Writer) (func(), error) {
-	opts.apiOptions.invocationRoot = root
-	repo := root.Path()
-	runServe := opts.apiOptions.runServe
-	if runServe == nil {
-		return nil, fmt.Errorf("serve runtime is unavailable")
-	}
-	resolvedPaths, err := ResolveCLISourcePaths(repo, CLISourcePathOptions{
-		SourceRoot: opts.sourceRoot,
-		ConfigPath: opts.configPath,
-	})
-	if err != nil {
-		return nil, err
-	}
-	releaseProjectClaim, err := prepareLocalRunProjectClaim(ctx, repo, opts, resolvedPaths)
-	if err != nil {
-		return nil, err
-	}
-	serveOpts := DefaultServeOptions()
-	swarmDirOpts := opts.apiOptions.swarmDirResolutionOptions()
-	serveOpts.SwarmDir = swarmDirOpts.SwarmDir
-	serveOpts.SwarmDirSet = swarmDirOpts.SwarmDirFlagSet
-	serveOpts.ConfigPath = opts.configPath
-	serveOpts.Backend = opts.backend
-	serveOpts.SourceRoot = resolvedPaths.SourceRoot
-	serveOpts.LocalRun = true
-	var startupOutput runStartupOutput
-	serveOpts.Output = &startupOutput
-	serveOpts.ErrorOutput = &startupOutput
-	if opts.apiPort > 0 {
-		serveOpts.APIListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.apiPort))
-	}
-	if opts.mcpPort > 0 {
-		serveOpts.MCPListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.mcpPort))
-		serveOpts.MCPListenAddrSource = ListenerAddressFlag
-	}
-	serveCtx, cancel := context.WithCancel(ctx)
-	done := make(chan int, 1)
-	go func() {
-		done <- runServe(serveCtx, root, serveOpts)
-		close(done)
-	}()
-	stop := func() {
-		cancel()
-		<-done
-		if releaseProjectClaim != nil {
-			releaseProjectClaim()
-			releaseProjectClaim = nil
-		}
-	}
-	if err := waitForRunCommandReady(ctx, opts, done); err != nil {
-		stop()
-		if output := startupOutput.finish(); startupErrOut != nil && len(output) > 0 {
-			_, _ = startupErrOut.Write(output)
-		}
-		return nil, err
-	}
-	startupOutput.finish()
-	return stop, nil
-}
-
-func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runCommandOptions, resolvedPaths CLISourcePaths) (func(), error) {
-	project := resolveLocalRuntimeStateProject(repo, resolvedPaths)
-	if strings.TrimSpace(project.CanonicalProjectRoot) == "" {
-		return nil, nil
-	}
-	cliCfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
-	if err != nil {
-		return nil, err
-	}
-	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.invocationRoot, opts.apiOptions.swarmDirResolutionOptions(), cliCfg)
-	if err != nil {
-		return nil, err
-	}
-	contextName := localProjectContextName(project.CanonicalProjectRoot)
-	registry := newLocalContextRegistry(swarmDir.Path)
-	cliProject := cliProjectResolution{
-		projectRoot:          project.ProjectRoot,
-		canonicalProjectRoot: project.CanonicalProjectRoot,
-	}
-	if err := guardServeProjectContext(ctx, registry, cliProject, contextName, false); err != nil {
-		return nil, fmt.Errorf("local swarm run start requires exclusive project runtime: %w; use --connect to target an existing runtime explicitly or stop the existing project runtime", err)
-	}
-	release, err := registry.AcquireProjectClaim(project.CanonicalProjectRoot, contextName)
-	if err != nil {
-		return nil, err
-	}
-	return release, nil
-}
-
-func waitForRunCommandReady(ctx context.Context, opts runCommandOptions, done <-chan int) error {
-	timeout := opts.apiOptions.runReadyTimeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	poll := opts.apiOptions.runReadyPoll
-	if poll <= 0 {
-		poll = 250 * time.Millisecond
-	}
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
-	for {
-		select {
-		case code := <-done:
-			if code == 0 {
-				return fmt.Errorf("local serve exited before readiness")
-			}
-			return fmt.Errorf("local serve exited before readiness: code=%d", code)
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
-			return fmt.Errorf("local serve did not become ready before timeout")
-		case <-ticker.C:
-			client, err := newCLIAPIClient(opts.apiOptions)
-			if err != nil {
-				return err
-			}
-			if _, err := runCommandHealth(ctx, client); err == nil {
-				return nil
-			} else if runCommandErrorExitCode(err) == 4 {
-				return err
-			}
-		}
-	}
 }
 
 func runCommandHealth(ctx context.Context, client *cliAPIClient) (diagnosticHealthCheckResult, error) {
@@ -1341,7 +1187,6 @@ func runCommandErrorExitCode(err error) int {
 			"EVENT_PUBLISH_FAILED",
 			"PAYLOAD_VALIDATION_FAILED",
 			"IDEMPOTENCY_CONFLICT",
-			"RUN_NEVER_COMPLETES",
 		},
 	})
 }

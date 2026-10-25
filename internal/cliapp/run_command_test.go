@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -198,102 +197,6 @@ func awaitRunCommandTraceRequest(t *testing.T, requestRead <-chan struct{}) {
 	case <-requestRead:
 	case <-time.After(5 * time.Second):
 		t.Error("timed out waiting for subscription request read before terminal run.get")
-	}
-}
-
-func TestStartLocalRunServeConsumesPositionalSourceOwner(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	repo := t.TempDir()
-	configContracts := filepath.Join(t.TempDir(), "config-contracts")
-	if err := os.Mkdir(configContracts, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"api_token_file": writeCLIAPITokenFile(t, "test-token"),
-	}))
-	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			if req.Method != "health.check" {
-				t.Fatalf("unexpected method = %q", req.Method)
-			}
-			return runCommandHealthResult()
-		},
-	})
-	defer server.Close()
-
-	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), apiPort: 19001, sourceRoot: configContracts}
-	serveStarted := make(chan ServeOptions, 1)
-	opts.apiOptions.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
-		serveStarted <- serveOpts
-		<-ctx.Done()
-		return 0
-	}
-
-	stop, err := startLocalRunServe(context.Background(), mustInvocationRootForTest(repo), opts, io.Discard)
-	if err != nil {
-		t.Fatalf("startLocalRunServe: %v", err)
-	}
-	stop()
-	serveOpts := <-serveStarted
-	if want := mustInvocationRootForTest(configContracts).Path(); serveOpts.SourceRoot != want {
-		t.Fatalf("contracts path = %q, want %q", serveOpts.SourceRoot, want)
-	}
-	if serveOpts.APIListenAddr != "127.0.0.1:19001" {
-		t.Fatalf("api listen addr = %q, want API listener owner from --api-port", serveOpts.APIListenAddr)
-	}
-	if serveOpts.MCPListenAddr != defaultMCPListenAddr {
-		t.Fatalf("mcp listen addr = %q, want unchanged default %q", serveOpts.MCPListenAddr, defaultMCPListenAddr)
-	}
-	if serveOpts.StoreMode != "sqlite" || serveOpts.StoreModeSet {
-		t.Fatalf("store opts = mode %q set %v, want sqlite default with no flag source", serveOpts.StoreMode, serveOpts.StoreModeSet)
-	}
-	if serveOpts.DataSource != "" {
-		t.Fatalf("data source = %q, want unset so serve resolver owns default selection", serveOpts.DataSource)
-	}
-	if serveOpts.Verbose {
-		t.Fatalf("serve verbose = true, want local run default to consume non-verbose serve boot owner")
-	}
-}
-
-func TestRunStartLocalServeUsesMCPListenerOwner(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	repo := t.TempDir()
-	configContracts := filepath.Join(t.TempDir(), "config-contracts")
-	if err := os.Mkdir(configContracts, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"api_token_file": writeCLIAPITokenFile(t, "test-token"),
-	}))
-	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			if req.Method != "health.check" {
-				t.Fatalf("unexpected method = %q", req.Method)
-			}
-			return runCommandHealthResult()
-		},
-	})
-	defer server.Close()
-
-	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), mcpPort: 19002, sourceRoot: configContracts}
-	serveStarted := make(chan ServeOptions, 1)
-	opts.apiOptions.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
-		serveStarted <- serveOpts
-		<-ctx.Done()
-		return 0
-	}
-
-	stop, err := startLocalRunServe(context.Background(), mustInvocationRootForTest(repo), opts, io.Discard)
-	if err != nil {
-		t.Fatalf("startLocalRunServe: %v", err)
-	}
-	stop()
-	serveOpts := <-serveStarted
-	if serveOpts.MCPListenAddr != "127.0.0.1:19002" {
-		t.Fatalf("mcp listen addr = %q, want MCP listener owner from --mcp-port", serveOpts.MCPListenAddr)
-	}
-	if serveOpts.APIListenAddr != defaultAPIListenAddr {
-		t.Fatalf("api listen addr = %q, want unchanged default %q", serveOpts.APIListenAddr, defaultAPIListenAddr)
 	}
 }
 
@@ -683,7 +586,7 @@ func TestRunCommandServedSourceSerializesExactIdentityAndMapsUnsupported(t *test
 func TestRunCommandStartApplicationErrorsExitSixAndDoNotFollow(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	for _, codeName := range []string{"BUNDLE_SCOPE_REQUIRED", "BUNDLE_UNAVAILABLE", "BUNDLE_DATA_INTEGRITY_ERROR", "BUNDLE_MISMATCH", "EVENT_NOT_DECLARED", "PAYLOAD_VALIDATION_FAILED", "EVENT_PUBLISH_FAILED", "RUN_NEVER_COMPLETES"} {
+	for _, codeName := range []string{"BUNDLE_SCOPE_REQUIRED", "BUNDLE_UNAVAILABLE", "BUNDLE_DATA_INTEGRITY_ERROR", "BUNDLE_MISMATCH", "EVENT_NOT_DECLARED", "PAYLOAD_VALIDATION_FAILED", "EVENT_PUBLISH_FAILED"} {
 		t.Run(codeName, func(t *testing.T) {
 			var calls []jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1110,8 +1013,6 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 
 	var serveCalled atomic.Bool
 	opts := testRunCommandOptions(server)
-	opts.runReadyTimeout = time.Minute
-	opts.runReadyPoll = time.Millisecond
 	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveCalled.Store(true)
 		return 0
@@ -1510,8 +1411,6 @@ func testRunCommandOptions(server *httptest.Server) rootCommandOptions {
 		opts.apiRPCEndpointOverride = server.URL + "/v1/rpc"
 		opts.httpClient = server.Client()
 	}
-	opts.runReadyTimeout = time.Second
-	opts.runReadyPoll = time.Millisecond
 	opts.runStatusPoll = time.Millisecond
 	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		<-ctx.Done()

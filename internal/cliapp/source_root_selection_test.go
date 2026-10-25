@@ -3,14 +3,12 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
@@ -126,30 +124,6 @@ func TestSourceInvocationCommandsShareSelectedRoot(t *testing.T) {
 		code := executeRootCommandWithOptions(context.Background(), base, []string{"test", alias, "--config", config}, &out, &stderr, defaultRootCommandOptions())
 		if code == 0 || !strings.Contains(stderr.String(), "no scenario files found in an admitted tests/ resource branch") {
 			t.Fatalf("scenario discovery not reached: %d %s %s", code, &out, &stderr)
-		}
-	})
-	t.Run("local run serve handoff", func(t *testing.T) {
-		server, _, _ := newRunCommandServer(t, runCommandServerOptions{expectedToken: apiv1.DefaultLoopbackAPIToken, rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			if req.Method != "health.check" {
-				t.Errorf("unexpected RPC %s", req.Method)
-			}
-			return runCommandHealthResult()
-		}})
-		defer server.Close()
-		opts := runCommandOptions{apiOptions: testRunCommandOptions(server), sourceRoot: alias, configPath: config}
-		captured := make(chan ServeOptions, 1)
-		opts.apiOptions.runServe = func(ctx context.Context, _ InvocationRoot, serve ServeOptions) int {
-			captured <- serve
-			<-ctx.Done()
-			return 0
-		}
-		stop, err := startLocalRunServe(context.Background(), mustInvocationRootForTest(base), opts, io.Discard)
-		if err != nil {
-			t.Fatal(err)
-		}
-		stop()
-		if got := <-captured; got.SourceRoot != root {
-			t.Fatalf("local serve selected %s, want %s", got.SourceRoot, root)
 		}
 	})
 	t.Run("import writes selected root", func(t *testing.T) {

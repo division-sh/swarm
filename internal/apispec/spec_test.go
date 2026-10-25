@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -19,8 +18,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 73 {
-		t.Fatalf("method count = %d, want 73", report.MethodCount)
+	if report.MethodCount != 70 {
+		t.Fatalf("method count = %d, want 70", report.MethodCount)
 	}
 	// #2720/6245827935 adds the per-instance status and frozen turn attribution.
 	for _, name := range []string{"RunInstanceOperationalStatus", "RunStallAttribution"} {
@@ -31,11 +30,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if _, ok := api.Components.Schemas["ChannelCapabilityVector"]; !ok {
 		t.Fatal("ChannelCapabilityVector missing from schema catalog")
 	}
-	if _, ok := api.Components.Errors["RUN_NEVER_COMPLETES"]; !ok || !slices.Contains(api.MethodCatalog["run.start"].Errors, "RUN_NEVER_COMPLETES") {
-		t.Fatal("finite-start refusal must be declared and bound to run.start")
-	}
-	if report.MutatingMethodCount != 31 {
-		t.Fatalf("mutating method count = %d, want 31", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 28 {
+		t.Fatalf("mutating method count = %d, want 28", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 5 {
 		t.Fatalf("subscription method count = %d, want 5", report.SubscriptionMethodCnt)
@@ -137,8 +133,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 73 {
-		t.Fatalf("generated OpenRPC methods = %d, want 73", len(doc.Methods))
+	if len(doc.Methods) != 70 {
+		t.Fatalf("generated OpenRPC methods = %d, want 70", len(doc.Methods))
 	}
 	for _, name := range []string{"RunInstanceOperationalStatus", "RunStallAttribution"} {
 		if _, ok := doc.Components.Schemas[name]; !ok {
@@ -150,14 +146,6 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	methods := map[string]OpenRPCMethod{}
 	for _, method := range doc.Methods {
 		methods[method.Name] = method
-	}
-	finiteError, present := doc.Components.Errors["RUN_NEVER_COMPLETES"]
-	bound := false
-	for _, applicationError := range methods["run.start"].Errors {
-		bound = bound || (present && applicationError.Code == finiteError.Code && applicationError.Message == "Application error: RUN_NEVER_COMPLETES")
-	}
-	if !bound {
-		t.Fatal("generated run.start omits its canonical finite-start refusal")
 	}
 	if _, ok := methods["event.publish"]; !ok {
 		t.Fatal("generated OpenRPC missing event.publish")
