@@ -3,7 +3,6 @@ package runtimepersistence
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
@@ -14,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -22,7 +20,7 @@ import (
 
 // The C4 timer family has no agents or providers. Its post-materialization
 // assertions still require a real admitted ordinary runtime and live handoff.
-func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, sourceRunID string, loaded runforkexecution.LoadedSelectedContractSource, capability startupownership.ProcessCapability) (*runtimepkg.Runtime, *runtimepkg.RuntimeContextManager) {
+func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, loaded runforkexecution.LoadedSelectedContractSource, capability startupownership.ProcessCapability) (*runtimepkg.Runtime, *runtimepkg.RuntimeContextManager) {
 	t.Helper()
 	value, _ := storeTestWorkFixtures.Load(t)
 	work := value.(*storeTestWorkFixture)
@@ -80,13 +78,6 @@ func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, sourceR
 	coordinates, err := capability.Evidence()
 	if err != nil {
 		t.Fatal(err)
-	}
-	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(coordinates.RuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
-	paused, err := deps.RunControlStore.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{
-		RunID: sourceRunID, Reason: "C4 retained source", ControlledBy: "native timer fixture", Now: time.Now().UTC(),
-	})
-	if err != nil || !paused.Acknowledged || paused.State.Status != "paused" {
-		t.Fatalf("park exact C4 source before runtime recovery: %+v err=%v", paused, err)
 	}
 	// The construction fixture owns a different generation. Start the real
 	// runtime from the same process, not by replacing that fixture's custody.

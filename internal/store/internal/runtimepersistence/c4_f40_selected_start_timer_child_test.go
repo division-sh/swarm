@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -39,6 +40,12 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				t.Fatalf("real timer-bearing deployment creation: %+v err=%v", created, err)
 			}
 			sourceRun, bundleHash := creation.RunCreation.RunID, creation.RunCreation.BundleHash
+			paused, err := selected.(runcontrol.Store).PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{
+				RunID: sourceRun, Reason: "C4 retained source", ControlledBy: "native timer fixture", Now: time.Now().UTC(),
+			})
+			if err != nil || !paused.Acknowledged || paused.State.Status != "paused" {
+				t.Fatalf("park exact C4 source before capturing its admitted plan: %+v err=%v", paused, err)
+			}
 			sourcePlan := c4RequireExclusiveStart(t, ctx, selected, sourceRun, bundleHash, "")
 			c4RequireRevisionCount(t, ctx, selected, sourceRun, 1)
 			if len(sourcePlan.WorkflowTimers) != 1 {
@@ -132,7 +139,7 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 					}
 				})
 			}
-			ordinary, contexts := c4LiveTimerRuntime(t, ctx, selected, sourceRun, loaded, capability)
+			ordinary, contexts := c4LiveTimerRuntime(t, ctx, selected, loaded, capability)
 			executionRequest.LiveRuntime, executionRequest.LiveContexts = ordinary, contexts
 			executionRequest.LiveRuns = selected.(runlifecycle.LiveRunReader)
 			preparationBaseline := work.process.ActiveCount()
