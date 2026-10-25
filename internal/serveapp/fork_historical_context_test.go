@@ -33,6 +33,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
 			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			applicationSnapshot := func() map[string][]string { return snapshotForkReceiverApplication(t, rt) }
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-seed",
@@ -114,10 +115,10 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				}
 			}
 			writeFact(corrupt)
-			before := snapshotForkReceiverApplication(t, rt)
+			before := applicationSnapshot()
 			requireUnchanged := func() {
 				t.Helper()
-				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+				if after := applicationSnapshot(); !reflect.DeepEqual(before, after) {
 					for table := range before {
 						if !reflect.DeepEqual(before[table], after[table]) {
 							t.Errorf("refusal changed complete table %s", table)
@@ -183,8 +184,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			// The public refusals above retain a live predecessor. Subsequent
 			// retained-row controls must not compare across its lawful retirement.
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.pause", map[string]any{"run_id": sibling.RunID}, &paused)
-			waitForkReceiverSourceCompletion(t, rt, sibling.RunID)
-			before = snapshotForkReceiverApplication(t, rt)
+			before = applicationSnapshot()
 			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			requireHistoricalRefusal(err)
 			writeFact(original)
@@ -199,7 +199,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			writeFact(corrupt)
 			// The staged child, binding, readiness and revision rows are lawful.
 			// Each refusal must preserve them exactly, not pretend no child exists.
-			before = snapshotForkReceiverApplication(t, rt)
+			before = applicationSnapshot()
 			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			requireHistoricalRefusal(err)
 			_, eventIDs, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
@@ -250,11 +250,11 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				!reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt, sibling.RunID)) {
 				t.Fatal("healthy fork changed complete source/sibling business rows, companions, or notices")
 			}
-			completed := snapshotForkReceiverApplication(t, rt)
+			completed := applicationSnapshot()
 			for attempt := 0; attempt < 2; attempt++ {
 				var replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-				if !reflect.DeepEqual(result, replay) || !reflect.DeepEqual(completed, snapshotForkReceiverApplication(t, rt)) {
+				if !reflect.DeepEqual(result, replay) || !reflect.DeepEqual(completed, applicationSnapshot()) {
 					t.Fatalf("successful API replay %d changed response or application rows", attempt)
 				}
 			}

@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -48,11 +47,9 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 					if family == "stop_unloaded" {
 						response := requestServedJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": created.RunID, "idempotency_key": "stop-unloaded"})
 						t.Logf("R12 paused/unloaded stop: result=%s error=%+v", response.Result, response.Error)
-						var status string
-						if err := rt.DB.QueryRowContext(context.Background(), `SELECT status FROM runs WHERE run_id=$1`, created.RunID).Scan(&status); err != nil {
-							t.Fatal(err)
-						}
-						t.Logf("R12 paused/unloaded stop durable status=%s", status)
+						var run map[string]any
+						requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": created.RunID}, &run)
+						t.Logf("R12 paused/unloaded stop durable run=%+v", run)
 						return
 					}
 				}
