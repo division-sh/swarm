@@ -118,7 +118,7 @@ func newOperationSurfaceFixture(t *testing.T) (context.Context, models.AgentConf
 		t.Fatal(err)
 	}
 	reader := &operationSurfaceReader{row: map[string]any{
-		"entity_id": instance.EntityID, "flow_instance": instance.InstancePath, "entity_type": "case",
+		"entity_id": instance.EntityID, "flow_instance": instance.InstancePath, "entity_type": "state",
 		"current_state": "marginal_review", "fields": fields,
 	}}
 	fresh, err := entityruntime.NormalizeState(contract, fields)
@@ -258,7 +258,9 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			actor := models.AgentConfig{ExecutionMode: "live", ID: "writer", Role: "writer"}
-			bundle := loadWave1EntityToolBundle(t, actor, "review", "case", "", "case:\n  items: [text]\n")
+			bundle := loadWave1EntityToolBundle(t, actor, "review", "state", "", `
+items: [text]
+`)
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, unmanagedToolTestContext())
@@ -272,7 +274,7 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 			inbound := eventtest.RunCreatingRootIngress("fresh-index", events.EventType("review.started"), "", "", nil, 0, entityToolTestRunID, "",
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "review/inst-1"), time.Time{})
 			ctx = runtimetools.WithActor(runtimebus.WithInboundEvent(ctx, inbound), actor)
-			stale := &operationSurfaceReader{row: map[string]any{"entity_id": entityID, "flow_instance": "review/inst-1", "entity_type": "case", "current_state": "queued", "fields": map[string]any{"items": []any{}}}}
+			stale := &operationSurfaceReader{row: map[string]any{"entity_id": entityID, "flow_instance": "review/inst-1", "entity_type": "state", "current_state": "queued", "fields": map[string]any{"items": []any{}}}}
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{EntityStore: stale, EntityWriter: fixture.pipeline, WorkflowSource: fixture.source})
 			if out, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "update", "index": 1, "value": "updated"}); err != nil || out == nil {
 				t.Fatalf("stale reader refused fresh valid slot: %#v, %v", out, err)

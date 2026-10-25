@@ -545,7 +545,7 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
 			instance := WorkflowInstance{Status: testCase.status, CurrentState: testCase.state, TerminatedAt: testCase.terminated,
-				EntityType: "review_entity"}
+				EntityType: "state"}
 			if got := deliveryTargetWorkflowInstanceUnavailable(source, ".", instance); got != testCase.unavailable {
 				t.Fatalf("delivery target unavailable = %t, want %t for status=%q state=%q", got, testCase.unavailable, testCase.status, testCase.state)
 			}
@@ -585,10 +585,10 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 				Condition: "state.status == 'ready'",
 			}),
 			"pin-creator":  deliveryTargetOwnershipEventNode("pin-creator", "work.created", runtimecontracts.SystemNodeEventHandler{}),
-			"pin-selector": deliveryTargetOwnershipEventNode("pin-selector", "work.selected", runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}),
+			"pin-selector": deliveryTargetOwnershipEventNode("pin-selector", "work.selected", runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"}}),
 			"pin-upserter": deliveryTargetOwnershipEventNode("pin-upserter", "work.upserted", runtimecontracts.SystemNodeEventHandler{}),
 			"key-selector": deliveryTargetOwnershipEventNode("key-selector", "work.keyed", runtimecontracts.SystemNodeEventHandler{
-				Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+				Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"},
 			}),
 			"key-upserter": deliveryTargetOwnershipEventNode("key-upserter", "work.keyed", runtimecontracts.SystemNodeEventHandler{}),
 		},

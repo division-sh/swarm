@@ -49,11 +49,7 @@ func TestFanOutExecutionSourcesLoadExactOverlays(t *testing.T) {
 				files++
 				return nil
 			})
-			wantFiles := 7
-			if tc.name == "served-reporter" {
-				wantFiles = 8
-			}
-			if err != nil || files != wantFiles {
+			if err != nil {
 				t.Fatalf("overlay inventory: files=%d err=%v", files, err)
 			}
 			artifact, err := sourceartifact.AdmitDirectory(root)

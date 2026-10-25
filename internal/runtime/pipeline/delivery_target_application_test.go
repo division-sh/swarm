@@ -66,7 +66,7 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	exact := materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: instanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
 		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active", Fields: expected,
-		EntityType: "review_entity",
+		EntityType: "state",
 	})
 	if err := fixture.Construct(ctx, exact); err != nil {
 		t.Fatalf("seed exact appearing target: %v", err)
@@ -87,7 +87,7 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: siblingID, StorageRef: siblingPath, EntityID: siblingEntityID,
 		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active", Fields: siblingFields,
-		EntityType: "review_entity",
+		EntityType: "state",
 	})); err != nil {
 		t.Fatalf("seed later matching sibling: %v", err)
 	}
@@ -136,7 +136,7 @@ func VerifyDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPay
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "awaiting", Mode: "static",
-		Fields: map[string]any{"portfolio_id": "portfolio-main"}, EntityType: "test_entity",
+		Fields: map[string]any{"portfolio_id": "portfolio-main"}, EntityType: "state",
 	})); err != nil {
 		t.Fatalf("seed exact declaration target: %v", err)
 	}
@@ -182,7 +182,7 @@ func VerifyDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMuta
 	})
 	node := pipelineNode(t, ".", "node-a")
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"}}
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: eventtest.UUID("missing-existing-target")}
 	evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); !errors.Is(err, runtimeengine.ErrUnconstructedWorkflowTarget) {
@@ -232,7 +232,7 @@ func VerifyDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBo
 					InstanceID: wrongRunID, StorageRef: wrongRunID, EntityID: entityID,
 					WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: runtimecontracts.FlowModeStatic,
 					CurrentState: "active", Fields: map[string]any{"marker": "unchanged"},
-					EntityType: "test_entity",
+					EntityType: "state",
 				})); err != nil {
 					t.Fatalf("seed complete wrong-run root: %v", err)
 				}
@@ -240,7 +240,7 @@ func VerifyDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBo
 				if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: wrongRunID, StorageRef: wrongRunID, EntityID: entityID,
 					WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: runtimecontracts.FlowModeStatic,
-					CurrentState: "active", Fields: map[string]any{"marker": "unchanged"}, EntityType: "test_entity",
+					CurrentState: "active", Fields: map[string]any{"marker": "unchanged"}, EntityType: "state",
 					EnteredStageAt: now, CreatedAt: now, UpdatedAt: now,
 				})); err != nil {
 					t.Fatalf("construct wrong-run root component: %v", err)
@@ -269,7 +269,7 @@ func VerifyDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBo
 			stateBefore, lifecycleBefore := countRows("entity_state"), countRows("flow_instances")
 			node := pipelineNode(t, ".", "node-a")
 			handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"}}
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
 				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: wrongRunID, EntityID: entityID}), now,
@@ -322,7 +322,7 @@ func VerifyDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBoth
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
 		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active",
-		EntityType: "review_entity", Fields: map[string]any{"instance_key": "chosen-parent"},
+		EntityType: "state", Fields: map[string]any{"instance_key": "chosen-parent"},
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func VerifyDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBoth
 		InstanceID: "instance", StorageRef: instancePath, EntityID: entityID,
 		WorkflowName: "review/child", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
-		CurrentState: "active", EntityType: "review_item", Fields: map[string]any{"marker": "unchanged"},
+		CurrentState: "active", EntityType: "state", Fields: map[string]any{"marker": "unchanged"},
 		EnteredStageAt: now, CreatedAt: now, UpdatedAt: now,
 	})); err != nil {
 		t.Fatalf("construct native child prestate: %v", err)
@@ -422,7 +422,7 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runtimeflowidentity.LogicalInstanceID(instancePath), StorageRef: instancePath, EntityID: entityID,
 				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
-				CurrentState: "active", Fields: map[string]any{"marker": "unchanged"}, EntityType: "test_entity",
+				CurrentState: "active", Fields: map[string]any{"marker": "unchanged"}, EntityType: "state",
 			})
 			switch testCase.name {
 			case "lifecycle-only":
@@ -474,7 +474,7 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 
 			node := pipelineNode(t, ".", "node-a")
 			handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"}}
 			target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
 			evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 			_, err = pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target))
@@ -523,7 +523,7 @@ func VerifyNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutati
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: instancePath, StorageRef: instancePath, EntityID: entityID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", CurrentState: "active",
-		Fields: map[string]any{"marker": "unchanged"}, EntityType: "test_entity",
+		Fields: map[string]any{"marker": "unchanged"}, EntityType: "state",
 	})); err != nil {
 		t.Fatalf("seed delayed target: %v", err)
 	}
@@ -558,7 +558,7 @@ func VerifyNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutati
 	before := readStorage()
 	countsBefore := nativeWorkflowEnginePhysicalCountsForTest(t, fixture, ctx)
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+		Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"},
 		Emit:       runtimecontracts.EmitSpec{Event: "work.emitted"},
 	}
 	execute := func(label string, coordinator *PipelineCoordinator) {
@@ -606,7 +606,7 @@ func VerifyDeliveryTargetApplicationCarriesConstructedScenarioPreStateThroughMut
 	// declared scenario state. Imported fields alone remain non-runnable.
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: instancePath, StorageRef: instancePath, EntityID: entityID,
-		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", EntityType: "test_entity",
+		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", EntityType: "state",
 		CurrentState: "active", Fields: map[string]any{"marker": "preserved"}, Gates: map[string]bool{"./approved": true},
 		CreatedAt: occurredAt, EnteredStageAt: occurredAt,
 	})); err != nil {
@@ -632,7 +632,7 @@ func VerifyDeliveryTargetApplicationCarriesConstructedScenarioPreStateThroughMut
 		}
 	}()
 	result, err := pc.executeNodeContractHandler(deliveryCtx, node, runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+		Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"},
 	}, workflowTriggerContext{Event: evt}, false)
 	if err != nil {
 		t.Fatalf("execute exact entity-only pre-state: %v", err)
@@ -666,7 +666,7 @@ func VerifyDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres
 		InstanceID: "scoped-gates", StorageRef: instancePath, EntityID: entityID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", CurrentState: "active",
 		Fields: map[string]any{"marker": "durable"}, Gates: map[string]bool{"./approved": true},
-		EntityType: "test_entity",
+		EntityType: "state",
 	})
 	if err := fixture.Construct(ctx, persisted); err != nil {
 		t.Fatalf("seed exact scoped-gate target: %v", err)
@@ -674,7 +674,7 @@ func VerifyDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres
 
 	node := pipelineNode(t, ".", "node-a")
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"}}
 	evt := handlerTestRootIngress(
 		uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}), time.Now().UTC(),
@@ -720,7 +720,7 @@ func TestDeliveryTargetApplicationRequiresExactPreviewOwnerAndRejectsConflict(t 
 	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
 	node := pipelineNode(t, ".", "node-a")
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"}}
 	entityID := eventtest.UUID("preview-exact-target")
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}
 	evt := handlerTestRootIngress(
@@ -736,7 +736,7 @@ func TestDeliveryTargetApplicationRequiresExactPreviewOwnerAndRejectsConflict(t 
 		t.Fatalf("empty preview became execution identity: %v", err)
 	}
 	preview := WorkflowState{EntityID: entityID, Stage: "active", Metadata: map[string]any{"marker": "preview"}, Control: runtimeengine.StateControl{
-		EntityType: "test_entity", FlowPath: target.FlowInstance, StorageRef: target.FlowInstance, InstanceID: target.FlowInstance,
+		EntityType: "state", FlowPath: target.FlowInstance, StorageRef: target.FlowInstance, InstanceID: target.FlowInstance,
 	}}
 	application, err := pc.prepareDeliveryTargetApplication(context.Background(), node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target), preview)
 	if err != nil {

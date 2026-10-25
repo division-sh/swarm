@@ -77,7 +77,7 @@ func TestA2KnownTargetUnarmedPublicationRetainsEarlyRefusalAfterArmAndRestartOnB
 				now := time.Now().UTC()
 				constructed := commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, EntityID: entityID, WorkflowName: "orders", WorkflowVersion: source.WorkflowVersion(),
-					CurrentState: "dispatching", EntityType: "order_state", Fields: map[string]any{"order_id": instanceID, "expected": []any{"a", "b"}},
+					CurrentState: "dispatching", EntityType: "state", Fields: map[string]any{"order_id": instanceID, "expected": []any{"a", "b"}},
 				}, now)
 				requireConstruction := func() {
 					t.Helper()
@@ -261,7 +261,7 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 			now := time.Now().UTC()
 			parent := commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-				CurrentState: "active", EntityType: "root_state", Fields: map[string]any{"work_count": int64(0)},
+				CurrentState: "active", EntityType: "state", Fields: map[string]any{"work_count": int64(0)},
 			}, now)
 			// Existing-receiver readiness/route fixtures do not prove C/E eager
 			// construction or same-commit runtime boot activation.
@@ -274,7 +274,7 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 			constructed := commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 				InstanceID: instanceID, StorageRef: path, EntityID: entityID, WorkflowName: "orders", WorkflowVersion: source.WorkflowVersion(),
 				ParentFlowID: parent.Identity.TemplateID, ParentFlowInstance: parent.Identity.InstancePath, ParentEntityID: parent.Identity.EntityID,
-				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "dispatching", EntityType: "order_state",
+				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "dispatching", EntityType: "state",
 				Fields: map[string]any{"order_id": instanceID, "expected": []any{"a", "b"}},
 			}, now)
 			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)

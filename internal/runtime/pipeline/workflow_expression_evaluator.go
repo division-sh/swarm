@@ -62,7 +62,6 @@ func (e *workflowExpressionEvaluator) EvalBoolWithOptions(expression string, ctx
 		return false, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
 	opts.RequireBool = true
-	opts.AllowAccumulated = true
 	out, err := workflowexpr.EvalValueExpressionWithOptions(normalized, workflowexpr.ValueContext{
 		Entity: normalizedCtx.Entity, PlatformEntity: normalizedCtx.PlatformEntity,
 		Event: normalizedCtx.Event, Payload: normalizedCtx.Payload, Policy: normalizedCtx.Policy,

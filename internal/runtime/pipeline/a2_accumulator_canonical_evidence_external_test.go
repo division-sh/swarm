@@ -14,7 +14,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -88,7 +87,7 @@ func TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores(t *testing.T) 
 						t.Fatal("new publication reused the original delivery identity")
 					}
 					want := before
-					want.Revision++ // The new delivery settles without another business effect.
+					// The exact claim settles without a business-state revision.
 					if got := a2CanonicalAccumulatorEvidence(t, proof); got != want {
 						rows, err := proof.selected.db.QueryContext(proof.ctx, `SELECT domain,path,CAST(old_value AS TEXT),CAST(new_value AS TEXT) FROM entity_mutations WHERE caused_by_event=$1`, duplicate.event.ID())
 						if err != nil {
@@ -164,6 +163,8 @@ func TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores(t *testing.T) 
 			t.Run("schema_refusal", func(t *testing.T) {
 				proof := newA2CanonicalAccumulatorProof(t, selected)
 				for _, malformed := range []string{
+					`{"id":1,"value":3,"amount":7,"nested":{"numbers":[1,2],"fraction":1.0}}`,
+					`{"id":true,"value":3,"amount":7,"nested":{"numbers":[1,2],"fraction":1.0}}`,
 					`{"id":"bad","value":3,"amount":"7","nested":{"numbers":[1,2],"fraction":1.0}}`,
 					`{"id":"bad","value":3,"amount":null,"nested":{"numbers":[1,2],"fraction":1.0}}`,
 					`{"id":"bad","value":3,"amount":7,"nested":null}`,
@@ -192,94 +193,12 @@ func TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores(t *testing.T) 
 	}
 }
 
-func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testing.T) {
-	for _, backend := range []struct {
-		name string
-		open func(*testing.T) gateRecoveryStoreCase
-	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
-		t.Run(backend.name, func(t *testing.T) {
-			proof := newA2CanonicalAccumulatorProof(t, backend.open(t))
-			proof.execute(t, proof.publish(t, "numeric.requested",
-				`{"id":"original","value":3,"amount":7,"nested":{"numbers":[1,2],"fraction":1.0}}`), "")
-			var original []byte
-			if err := proof.selected.db.QueryRowContext(proof.ctx,
-				`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, proof.runID).Scan(&original); err != nil {
-				t.Fatal(err)
-			}
-			var buckets map[string]any
-			if err := canonicaljson.DecodePreservingNumberLexemes(original, &buckets); err != nil {
-				t.Fatal(err)
-			}
-			node := proof.module.nodes[1].Node
-			handlers := buckets[node.Key()].(map[string]any)["handler_accumulators"].(map[string]any)
-			stored := handlers[timeridentity.NewAccumulatorBucketRef(node, "numeric.requested").Key()].(map[string]any)
-			items := stored["items"].([]any)
-			if len(items) != 1 {
-				t.Fatalf("canonical writer produced %d items, want one", len(items))
-			}
-			stored["items"] = append(items, items[0])
-			receipts := stored["received"].(map[string]any)
-			receipts["orphan"] = receipts["original"]
-			hostile, err := canonicaljson.MarshalPreservingNumberKinds(buckets)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Corrupt the constructed header, which owns runtime accumulator state,
-			// only while this component driver is idle;
-			// all positive state, publications, claims and outcomes use real owners.
-			write := func(raw []byte) {
-				t.Helper()
-				result, err := proof.selected.db.ExecContext(proof.ctx,
-					`UPDATE flow_instances SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2`, string(raw), proof.runID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-					t.Fatalf("hostile fixture changed %d receivers: %v", rows, err)
-				}
-			}
-			write(hostile)
-			t.Cleanup(func() { write(original) })
-			restartA2CanonicalAccumulatorProof(t, proof)
-			before := a2CanonicalAccumulatorEvidence(t, proof)
-			payload := `{"id":"next","value":4,"amount":8,"nested":{"numbers":[3,4],"fraction":0.5}}`
-			refused := proof.publish(t, "numeric.requested", payload)
-			proof.execute(t, refused, failures.ClassSchemaInvalid)
-			if after := a2CanonicalAccumulatorEvidence(t, proof); after != before {
-				t.Fatalf("corrupt keyed evidence changed business state/history/output: before=%#v after=%#v", before, after)
-			}
-			requireRefusal := func() {
-				t.Helper()
-				var status string
-				var attempts, settled, open int
-				if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT d.status,
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE),
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.open_marker=TRUE)
- FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, refused.event.ID()).Scan(&status, &attempts, &settled, &open); err != nil {
-					t.Fatal(err)
-				}
-				if status != "dead_letter" || attempts != 1 || settled != 1 || open != 0 {
-					t.Fatalf("corruption refusal did not settle its exact claim: status=%s attempts=%d settled=%d open=%d", status, attempts, settled, open)
-				}
-			}
-			requireRefusal()
-			write(original)
-			restartA2CanonicalAccumulatorProof(t, proof)
-			lawful := proof.publish(t, "numeric.requested", payload)
-			proof.execute(t, lawful, "")
-			requireA2CanonicalAccumulatorClaim(t, proof, lawful)
-			requireRefusal()
-		})
-	}
-}
-
 func newA2CanonicalAccumulatorProof(t *testing.T, selected gateRecoveryStoreCase) *a2AccumulatorPersistenceProof {
 	t.Helper()
 	root := canonicalrouting.CopySemanticNumericIngress(t)
 	// Extend the canonical numeric fixture's schema and per-arrival handler;
 	// its original arithmetic, output schema and entity declaration remain live.
-	for _, name := range []string{"events.yaml", "types.yaml", "nodes.yaml"} {
+	for _, name := range []string{"events.yaml", "types.yaml", "state.yaml", "nodes.yaml"} {
 		path := filepath.Join(root, name)
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -294,10 +213,13 @@ func newA2CanonicalAccumulatorProof(t *testing.T, selected gateRecoveryStoreCase
 			fields := document["numeric.requested"].(map[string]any)
 			fields["id"], fields["amount"], fields["optional"] = "text", "numeric", "text?"
 		case "types.yaml":
-			document["types"].(map[string]any)["NumericInput"].(map[string]any)["note"] = "text?"
+			document["NumericInput"].(map[string]any)["note"] = "text?"
+			document["AccumulatedNumericItem"] = map[string]any{"id": "text", "value": "integer", "amount": "numeric", "optional": "text?", "nested": "NumericInput"}
+		case "state.yaml":
+			document["items"] = []any{"AccumulatedNumericItem"}
 		case "nodes.yaml":
-			handler := document["numeric"].(map[string]any)["event_handlers"].(map[string]any)["numeric.requested"].(map[string]any)
-			handler["accumulate"] = map[string]any{"into": "items", "from": "payload", "key": "payload.id"}
+			handler := document["numeric"].(map[string]any)["numeric.requested"].(map[string]any)
+			handler["accumulate"] = map[string]any{"target": "items", "key": "id"}
 			handler["data_accumulation"] = map[string]any{"writes": []any{map[string]any{"target_field": "score", "value": "payload.value"}}}
 		}
 		updated, err := yaml.Marshal(document)

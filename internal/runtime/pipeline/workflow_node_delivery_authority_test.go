@@ -71,7 +71,7 @@ func VerifyPipelinePreclaimFailurePreservesErrorAndReturnsExactCarrierForTest(t 
 			entityID := testPipelineRunID
 			if err := fixture.Construct(runCtx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), runCtx, WorkflowInstance{
 				InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
-				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "queued", Fields: map[string]any{}, EntityType: "test_entity",
+				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "queued", Fields: map[string]any{}, EntityType: "state",
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -190,7 +190,7 @@ func VerifyPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthorit
 	entityID := testPipelineRunID
 	if err := fixture.Construct(runCtx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), runCtx, WorkflowInstance{
 		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
-		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "queued", Fields: map[string]any{}, EntityType: "test_entity",
+		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "queued", Fields: map[string]any{}, EntityType: "state",
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func VerifyNativeWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParityForTest(t
 				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC())
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(), CurrentState: "queued",
-				EntityID: entityID, EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(), EntityType: "test_entity", Fields: map[string]any{},
+				EntityID: entityID, EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(), EntityType: "state", Fields: map[string]any{},
 			})); err != nil {
 				t.Fatal(err)
 			}

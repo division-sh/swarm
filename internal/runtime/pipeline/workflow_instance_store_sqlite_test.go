@@ -42,7 +42,7 @@ func VerifySQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutation
 			"region": "west",
 			"tier":   int64(1),
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	})); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)
 	}
@@ -169,7 +169,7 @@ func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTes
 		StageDefined:       true,
 		EnteredStageAt:     time.Now().UTC(),
 		Fields:             map[string]any{"instance_key": "inst-1"},
-		EntityType:         "test_entity",
+		EntityType:         "state",
 	})
 	// Keep the original unrelated coordinate as a pre-mutation ancestry refusal.
 	unrelated := instance
@@ -228,7 +228,7 @@ func VerifySQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunnerFo
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: runID, StorageRef: storageRef, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState: "running", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
-		EntityType: "test_entity",
+		EntityType: "state",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -252,7 +252,7 @@ func VerifySQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailureForTest(t 
 	fixture := open(t, runID)
 	store, ctx := fixture.Persistence.store, fixture.Context
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Fields: map[string]any{},
-		EntityType: "test_entity"})
+		EntityType: "state"})
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

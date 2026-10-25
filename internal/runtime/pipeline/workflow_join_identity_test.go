@@ -103,7 +103,7 @@ func seedExactJoinScope(t *testing.T, fixture *PipelineDeliveryNativeFixtureForT
 		InstanceID: route.InstanceID, StorageRef: path, WorkflowName: executionFlowID, WorkflowVersion: source.WorkflowVersion(),
 		EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(),
 		Fields:     map[string]any{"expected": []any{"a", "b"}, "instance_key": strings.TrimPrefix(path, declarationFlowID+"/")},
-		EntityType: "test_entity",
+		EntityType: "state",
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -422,13 +422,13 @@ func VerifyNativeSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothSt
 		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
 			t.Run(storeCase.name+"/"+order.name, func(t *testing.T) {
 				files := workflowJoinLifecycleFixtureFiles(false, "")
-				const expectedField = "  expected: [text]\n"
-				for _, name := range []string{"state.yaml", "orders/state.yaml"} {
+				const expectedField = "expected: [text]\n"
+				for _, name := range []string{"orders/state.yaml"} {
 					if strings.Count(files[name], expectedField) != 1 {
 						t.Fatalf("%s requires its exact expected-member declaration", name)
 					}
 					files[name] = strings.Replace(files[name], expectedField,
-						"  expected: {type: '[text]', initial: ['a', 'b']}\n", 1)
+						"expected: ['a', 'b']\n", 1)
 				}
 				for _, name := range []string{"schema.yaml", "state.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 					for _, flowID := range []string{"a", "b"} {

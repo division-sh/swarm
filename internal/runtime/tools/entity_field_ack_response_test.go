@@ -43,7 +43,10 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, operation := range []string{"set", "append"} {
 			t.Run(backend+"/"+operation, func(t *testing.T) {
-				bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  items: [text]\n")
+				bundle := loadWave1EntityToolBundle(t, actor, "review", "state", "", `
+status: text
+items: [text]
+`)
 				var base runtimetools.EntityPersistence
 				var sourceCtx context.Context
 				if backend == "sqlite" {

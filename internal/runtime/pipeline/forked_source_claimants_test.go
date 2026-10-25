@@ -69,7 +69,7 @@ func VerifyForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadbackForTest
 				InstanceID: instanceID, StorageRef: storageRef, EntityID: entityID, WorkflowName: "freeze", WorkflowVersion: "1",
 				CurrentState: "active", EnteredStageAt: fixture.frozenAt.Add(-time.Minute),
 				Fields:     map[string]any{"marker": "source"},
-				EntityType: "test_entity",
+				EntityType: "state",
 			}
 			instance = materializedWorkflowInstanceForTest(instance)
 			if err := fixture.native.Construct(fixture.ctx, instance); err != nil {

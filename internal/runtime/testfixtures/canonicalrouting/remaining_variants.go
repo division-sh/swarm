@@ -230,14 +230,14 @@ review_score: integer
 business_brief: Brief
 feature_list: [Feature]
 review_scores: map[text]integer
+review_ready: false
 `,
 		"operating/types.yaml":  "Brief:\n  summary: text\nFeature:\n  name: text\n",
 		"operating/events.yaml": "opco.product_review_requested:\n  note: text\n",
 		"operating/nodes.yaml": `reviewer:
-  gate_state:
-    gates: [review_ready]
   opco.product_review_requested:
-    sets_gate: review_ready
+    data_accumulation:
+      writes: [{target_field: review_ready, value: true}]
     advances_to: ready
 `,
 		"secondary/schema.yaml": "name: secondary\nstages:\n  open: {}\n  closed: {final: true}\n",

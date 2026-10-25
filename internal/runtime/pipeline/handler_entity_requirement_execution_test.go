@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -25,17 +24,13 @@ func VerifyExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgresForTest(t *t
 
 	t.Run("accumulator", func(t *testing.T) {
 		ctx := nativeWorkflowHandlerRunContextForTest(t, fixture)
-		nodeKey := pipelineNode(t, ".", "node-a").Key()
 		instance, result := executeExistingOwnerBehavior(t, fixture, ctx, pc, "accumulator", "work.ready", json.RawMessage(`{"item_id":"a"}`), nil, nil)
 		if !result.handled {
 			t.Fatal("accumulator execution was not handled")
 		}
-		nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any)
-		if !ok {
-			t.Fatalf("accumulator node bucket = %#v, want persisted node-a bucket", instance.StateBuckets)
-		}
-		if _, ok := nodeBucket["handler_accumulators"]; !ok {
-			t.Fatalf("accumulator bucket = %#v, want persisted handler_accumulators", nodeBucket)
+		items, ok := instance.Fields["items"].([]any)
+		if !ok || len(items) != 1 || !reflect.DeepEqual(items[0], map[string]any{"item_id": "a"}) {
+			t.Fatalf("collected state list = %#v, want the exact admitted item", instance.Fields["items"])
 		}
 	})
 
@@ -57,16 +52,6 @@ func VerifyExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgresForTest(t *t
 		}
 	})
 
-	t.Run("guard_kill", func(t *testing.T) {
-		ctx := nativeWorkflowHandlerRunContextForTest(t, fixture)
-		instance, result := executeExistingOwnerBehavior(t, fixture, ctx, pc, "guard-kill", "work.kill", nil, nil, nil)
-		if !result.handled || (result.status != "" && result.status != HandlerOutcomeKilled) {
-			t.Fatalf("guard kill outcome = handled:%t status:%q, want handled killed outcome", result.handled, result.status)
-		}
-		if got := strings.TrimSpace(instance.CurrentState); got != "killed" {
-			t.Fatalf("guard kill current state = %q, want killed", got)
-		}
-	})
 }
 
 func VerifyNativeEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
@@ -154,7 +139,7 @@ func executeExistingOwnerBehavior(
 		CurrentState:    "active",
 		Fields:          seedMetadata,
 		StateBuckets:    stateBuckets,
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("seed %s workflow instance: %v", name, err)
 	}

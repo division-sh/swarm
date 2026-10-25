@@ -135,6 +135,14 @@ func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "accumulated unavailable" {
+				for _, context := range []WorkflowConditionContext{WorkflowConditionContextGuard, WorkflowConditionContextRule, WorkflowConditionContextOnComplete, WorkflowConditionContextFilter, WorkflowConditionContextCount, WorkflowConditionContextQueryFilter} {
+					if err := ValidateConditionCEL(tt.expression, context); err == nil || !strings.Contains(err.Error(), "state.<field>.size()") {
+						t.Fatalf("retired accumulated context %s: %v", context, err)
+					}
+				}
+				return
+			}
 			err := ValidateConditionCELWithOptions(tt.expression, WorkflowConditionContextRule, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType})
 			if tt.wantErr {
 				if err == nil {
@@ -197,18 +205,17 @@ func TestWorkflowExpressionEvaluatorProjectsEveryNumericContextSeam(t *testing.T
 	eval := newWorkflowExpressionEvaluator()
 	valueType := pipelineExpressionObjectType("numeric.value", map[string]runtimecontracts.CatalogTypeKind{"value": runtimecontracts.CatalogTypeInteger})
 	ok, err := eval.EvalBoolWithOptions(
-		`state.value == 1 && instance.value == 2 && payload.value == 4 && policy.value == 5 && computed.value == 6 && accumulated[0] == 7 && fan_out.count == 8 && loop.attempt == 9 && count(accumulated >= 7) == 2`,
+		`state.value == 1 && instance.id == "instance-2" && payload.value == 4 && policy.value == 5 && computed.value == 6 && fan_out.count == 8 && loop.attempt == 9`,
 		workflowExpressionContext{
 			Entity:         map[string]any{"value": json.Number("1")},
-			PlatformEntity: map[string]any{"value": json.Number("2")},
+			PlatformEntity: map[string]any{"id": "instance-2"},
 			Event:          map[string]any{"value": json.Number("3")},
 			Payload:        map[string]any{"value": json.Number("4")},
 			Policy:         map[string]any{"value": json.Number("5")},
 			Computed:       map[string]any{"value": json.Number("6")},
-			Accumulated:    []any{json.Number("7"), json.Number("7.25")},
 			FanOut:         map[string]any{"count": json.Number("8")},
 			Loop:           map[string]any{"attempt": json.Number("9")},
-		}, workflowexpr.ValueExpressionOptions{EntityType: &valueType, PayloadType: &valueType, AllowAccumulated: true},
+		}, workflowexpr.ValueExpressionOptions{EntityType: &valueType, PayloadType: &valueType},
 	)
 	if err != nil {
 		t.Fatalf("EvalBool projected roots: %v", err)
@@ -328,8 +335,8 @@ func TestWorkflowConditionMissingRecognizedPrefix_AllowsStaticBracketRoots(t *te
 			context:    WorkflowConditionContextRule,
 		},
 		{
-			name:       "entity bracket root",
-			expression: `entity["revision_count"] == 0`,
+			name:       "state bracket root",
+			expression: `state["revision_count"] == 0`,
 			context:    WorkflowConditionContextRule,
 		},
 		{
@@ -442,19 +449,17 @@ func TestWorkflowExpressionEvaluator_EvalBoolFailsClosedOnMissingEntityField(t *
 
 func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEntity(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText, "reviewed": runtimecontracts.CatalogTypeBoolean})
 	ok, err := eval.EvalBoolWithOptions(
 		`state.current_state == "business-current-state" && instance.stage == "platform-current-state" && instance.id == "ent-1" && state.reviewed`,
 		workflowExpressionContext{
 			Entity: map[string]any{
 				"current_state": "business-current-state",
+				"reviewed": true,
 			},
 			PlatformEntity: map[string]any{
 				"id":            "ent-1",
-				"current_state": "platform-current-state",
-				"gates": map[string]any{
-					"reviewed": true,
-				},
+				"stage": "platform-current-state",
 			},
 			Payload: map[string]any{},
 			Policy:  map[string]any{},

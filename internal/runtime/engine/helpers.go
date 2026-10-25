@@ -219,10 +219,6 @@ func handlerAccumulatorEventType(req ExecutionRequest) events.EventType {
 	return events.EventType(eventType)
 }
 
-func handlerAccumulatorBucketRef(req ExecutionRequest) timeridentity.AccumulatorBucketRef {
-	return accumulatorBucketRef(req.Node, handlerAccumulatorEventType(req))
-}
-
 func loadAccumulator(state StateSnapshot, node identity.ExecutableNode, eventType events.EventType) (*Accumulator, bool) {
 	return loadAccumulatorForBucket(state, accumulatorBucketRef(node, eventType))
 }

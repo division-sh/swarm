@@ -90,7 +90,7 @@ func TestToolInputValidator_UsesActorScopedDefinitionsWhenAvailable(t *testing.T
 func TestToolInputValidator_RejectsUnknownKeysAgainstClosedSchema(t *testing.T) {
 	validator := NewToolInputValidator(func(*models.AgentConfig) ([]llm.ToolDefinition, error) {
 		return []llm.ToolDefinition{{
-			Name:            "save_validation_case_business_brief",
+			Name:            "save_state_business_brief",
 			GeneratedSchema: true,
 			Schema: map[string]any{
 				"type": "object",
@@ -111,7 +111,7 @@ func TestToolInputValidator_RejectsUnknownKeysAgainstClosedSchema(t *testing.T) 
 		}}, nil
 	})
 
-	err := validator.Validate(nil, "save_validation_case_business_brief", map[string]any{
+	err := validator.Validate(nil, "save_state_business_brief", map[string]any{
 		"value": map[string]any{
 			"summary":    "ok",
 			"confidence": 8,

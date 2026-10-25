@@ -69,11 +69,7 @@ outputs:
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema+connect)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), rootEvents)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-parent-listener:
-`+parentSubscription+`]
-  parent.lead_enriched: {}
-`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "parent-listener:\n  "+parentSubscription+": {}\n")
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
 name: worker

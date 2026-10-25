@@ -132,20 +132,19 @@ func snapshotEvaluationValue(value any, seen map[evaluationSnapshotVisit]bool) (
 }
 
 type ValueExpressionOptions struct {
-	DeclaredPolicy   map[string]any
-	KnownPresence    []string
-	AllowBareItem    bool
-	ItemAlias        string
-	AllowJoin        bool
-	RequireBool      bool
-	JoinResultType   runtimecontracts.CatalogTypeReference
-	JoinContext      JoinContext
-	EntityType       *runtimecontracts.ResolvedCatalogType
-	PayloadType      *runtimecontracts.ResolvedCatalogType
-	ItemType         *runtimecontracts.ResolvedCatalogType
-	ResultType       *runtimecontracts.ResolvedCatalogType
-	ResultOptional   bool
-	AllowAccumulated bool
+	DeclaredPolicy map[string]any
+	KnownPresence  []string
+	AllowBareItem  bool
+	ItemAlias      string
+	AllowJoin      bool
+	RequireBool    bool
+	JoinResultType runtimecontracts.CatalogTypeReference
+	JoinContext    JoinContext
+	EntityType     *runtimecontracts.ResolvedCatalogType
+	PayloadType    *runtimecontracts.ResolvedCatalogType
+	ItemType       *runtimecontracts.ResolvedCatalogType
+	ResultType     *runtimecontracts.ResolvedCatalogType
+	ResultOptional bool
 }
 
 // ValueResult preserves CEL optional absence without introducing null into the
@@ -1117,9 +1116,6 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 			cel.Overload("swarm_r2_format_dyn", []*cel.Type{cel.DynType}, cel.StringType,
 				cel.UnaryBinding(formatR2InterpolationValue)),
 		),
-	}
-	if opts.AllowAccumulated {
-		variables = append(variables, cel.Variable("accumulated", cel.DynType))
 	}
 	variables = append(variables, workflowNumericEnvOptions()...)
 	base, err := newWorkflowExpressionEnv(append(variables, cel.OptionalTypes())...)

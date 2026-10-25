@@ -124,6 +124,7 @@ outputs:
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
+		applyClosedReplacement(t, ownerNodes, "    guard: has(state.account_ids)\n", "")
 		applyClosedReplacement(t, ownerNodes, `          command: payload.command
 `, `          command: payload.command
     join:
@@ -180,12 +181,12 @@ portfolio.notify.completed:
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `  account_ids: [text]
 `, `  account_ids: [NumericAccount]
 `)
-		applyClosedReplacement(t, ownerEntities, `  portfolio_id: text
-`, `  portfolio_id: text
-  threshold: integer
+		applyClosedReplacement(t, ownerEntities, `portfolio_id: text
+`, `portfolio_id: text
+threshold: integer
 `)
-		applyClosedReplacement(t, ownerEntities, `  account_ids: {type: "[text]", initial: []}
-`, `  account_ids: {type: "[NumericAccount]", initial: []}
+		applyClosedReplacement(t, ownerEntities, `account_ids: [text]
+`, `account_ids: [NumericAccount]
 `)
 		applyClosedReplacement(t, ownerNodes, `        - source_field: portfolio_id
           target_field: portfolio_id
@@ -255,15 +256,13 @@ portfolio.notify.completed:
         - source_field: eligible
           target_field: eligible
 `)
-		applyClosedReplacement(t, accountEntities, `account_state:
-  account_id: text
-  last_command: text
-`, `account_state:
-  account_id: text
-  eng_roles: integer
-  gem_score: number
-  eligible: boolean
-  last_command: text
+		applyClosedReplacement(t, accountEntities, `account_id: text
+last_command: text
+`, `account_id: text
+eng_roles: integer
+gem_score: number
+eligible: boolean
+last_command: text
 `)
 		if opts.NumericReporterSink || opts.NumericInternalSettlement {
 			applyClosedReplacement(t, accountNodes, `  account.registered:
@@ -278,7 +277,7 @@ portfolio.notify.completed:
         - source_field: eligible
           target_field: eligible
 `, "")
-			applyClosedReplacement(t, accountSchema, "    - account.registered\n", "")
+			applyClosedReplacement(t, accountSchema, "  - account.registered\n", "")
 		}
 		if opts.NumericReporterSink {
 			applyClosedReplacement(t, connectFile, `  - event: account.registered
@@ -289,8 +288,8 @@ portfolio.notify.completed:
     from: portfolio
     to: .
 `)
-			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\n", "    - portfolio.notify.requested\n    - account.registered\n")
-			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.registered\nconnect:\n")
+			applyClosedReplacement(t, connectFile, "  - portfolio.notify.requested\n", "  - portfolio.notify.requested\n  - account.registered\n")
+			applyClosedReplacement(t, connectFile, "  - portfolio.notify.requested\nconnect:\n", "  - portfolio.notify.requested\n  - account.registered\nconnect:\n")
 			writeClosedVariantFile(t, root, "nodes.yaml", `numeric-registration-reporter:
   account.registered: {}
 `)
@@ -307,7 +306,7 @@ portfolio-coordinator:
 `)
 		}
 		if opts.RegistrationUUIDField {
-			applyClosedReplacement(t, filepath.Join(root, "types.yaml"), "    external_id: text?\n", "    external_id: text\n")
+			applyClosedReplacement(t, filepath.Join(root, "types.yaml"), "  external_id: text?\n", "  external_id: text\n")
 			applyClosedReplacement(t, ownerNodes, `          gem_score: account.gem_score
           eligible: state.threshold >= 70
 `, `          gem_score: account.gem_score

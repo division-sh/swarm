@@ -135,15 +135,6 @@ store_parity:
       required_children: [sqlite, postgres]
       purpose_ids: [runtime]
       capabilities: [{claim_id: event_delivery}, {claim_id: source_artifact}]
-    - id: catalog-type-detached-retained-artifact
-      kind: go_test
-      name: TestCatalogTypeDetachmentRetainedArtifactBothStores
-      path: internal/runtime/tools/catalog_type_detachment_retained_test.go
-      profile: lifecycle
-      backends: [default_sqlite, explicit_postgres]
-      required_children: [sqlite, postgres]
-      purpose_ids: [runtime]
-      capabilities: [{claim_id: source_artifact}]
     - id: event-catalog-refined-publication
       kind: go_test
       name: TestEventCatalogFactoringRefinedPublicationBothStores

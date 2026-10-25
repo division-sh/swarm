@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -23,6 +24,8 @@ func commitA2FixtureConstruction(t *testing.T, coordinator *pipeline.PipelineCoo
 	if !found {
 		t.Fatal("component construction requires its exact declared flow")
 	}
+	contract, _ := entityruntime.ResolveForFlow(source, initial.WorkflowName)
+	initial.EntityType = contract.EntityType
 	if initial.Mode == "" {
 		initial.Mode = "static"
 		if !schema.Instance.Empty() {

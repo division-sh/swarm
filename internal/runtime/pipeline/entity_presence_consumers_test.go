@@ -33,7 +33,7 @@ func TestEntityPresenceAtGateConsumer(t *testing.T) {
 				var err error
 				switch consumer {
 				case "gate":
-					instance := materializedWorkflowInstanceForTest(WorkflowInstance{StorageRef: testPipelineRunID, EntityID: entityID.String(), WorkflowName: ".", EntityType: "work", CurrentState: "review", Fields: fields})
+					instance := materializedWorkflowInstanceForTest(WorkflowInstance{StorageRef: testPipelineRunID, EntityID: entityID.String(), WorkflowName: ".", EntityType: "state", CurrentState: "review", Fields: fields})
 					got, err = evalWorkflowGateContext(expression, testWorkflowInstanceRoute(testPipelineRunID), entityID, instance, source, ".")
 				}
 				if safe && (err != nil || got != "fallback") {

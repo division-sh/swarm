@@ -93,7 +93,7 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 	}
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: entityID, WorkflowName: "review", WorkflowVersion: "v1",
-		Mode: "template", Status: "active", CurrentState: "review", EntityType: "work",
+		Mode: "template", Status: "active", CurrentState: "review", EntityType: "state",
 		InstanceKey: "exact", ParentInstance: runID,
 		Fields: json.RawMessage(`{"case_id":"exact"}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
 		Accumulator: json.RawMessage(`{}`), Config: rawConfig, InitialFields: json.RawMessage(`{}`),

@@ -83,7 +83,7 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 						uuid.NewString(), events.EventType(tc.flowID+"/read.requested"), "test", "", nil, 0, entityToolTestRunID, "",
 						events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), path), time.Now().UTC(),
 					))
-					output, err := executor.Execute(current, "read_accounts", map[string]any{})
+					output, err := executor.Execute(current, "read_state", map[string]any{})
 					if err != nil {
 						t.Fatal(err)
 					}

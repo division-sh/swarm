@@ -161,7 +161,7 @@ func VerifyPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStoresFor
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: contracts.FlowModeStatic,
-		CurrentState: "ready", Fields: map[string]any{"marker": "unchanged"}, EntityType: "test_entity",
+		CurrentState: "ready", Fields: map[string]any{"marker": "unchanged"}, EntityType: "state",
 	})
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatal(err)

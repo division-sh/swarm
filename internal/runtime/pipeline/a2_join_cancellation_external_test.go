@@ -73,13 +73,13 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 					runID, lastID, untilID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 					files := a2CountJoinFiles(2)
 					files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  ready: {final: true}", "  ready: {final: true}\n  dispatching: {}\n  cancelled: {final: true}", 1)
-					files["schema.yaml"] = strings.Replace(files["schema.yaml"], "[item.completed, halt.requested]", "[item.completed, halt.requested, abort.requested, resume.requested]", 1)
+					files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  - halt.requested\n", "  - halt.requested\n  - abort.requested\n  - resume.requested\n", 1)
 					files["events.yaml"] += "abort.requested:\nresume.requested:\n"
 					next := "dispatching"
 					if mode != "stage_exit" {
 						next = "cancelled"
 					}
-					files["nodes.yaml"] += "controller:\n  abort.requested: {advances_to: " + next + "}\n    resume.requested: {advances_to: awaiting}\n"
+					files["nodes.yaml"] += "controller:\n  abort.requested: {advances_to: " + next + "}\n  resume.requested: {advances_to: awaiting}\n"
 					source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
 					ctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)
 					collector := externalPipelineSourceNode(t, source, ".", "collector")
@@ -120,7 +120,7 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 					owner := testRunScopedWorkflowInstanceForRun(runID, runID)
 					commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
 						InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-						CurrentState: "awaiting", EntityType: "count_state", Fields: map[string]any{
+						CurrentState: "awaiting", EntityType: "state", Fields: map[string]any{
 							"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": "",
 						},
 					}, time.Now().UTC())

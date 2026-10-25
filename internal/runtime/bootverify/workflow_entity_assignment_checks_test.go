@@ -35,7 +35,7 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 					case "read before write":
 						contents = strings.Replace(contents, `guard: instance.stage == 'assess'`, `guard: instance.stage == 'assess' && state.business_brief != ''`, 1)
 					case "retired stage spelling":
-						contents = strings.ReplaceAll(contents, "instance.stage", "instance.stage")
+						contents = strings.ReplaceAll(contents, "instance.stage", "instance.current_state")
 					case "naive optional without decision", "naive optional fallback":
 						contents = strings.Replace(contents, "        - business_brief\n", "", 1)
 						contents = strings.Replace(contents, "  work.assessed:\n", "  work.assessed:\n    rules:\n      - when: payload.business_brief != ''\n        data_accumulation:\n          writes: [business_brief]\n        advances_to: consume\n        emit: {event: work.consume}\n      - advances_to: consume\n        emit: {event: work.consume}\n", 1)
@@ -58,7 +58,7 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 					t.Fatalf("optional declaration admitted without a decision: %#v", report.Errors())
 				}
 			} else if variant == "retired stage spelling" {
-				if !reportContains(report.Errors(), "expression_field_reference_validation", "instance.stage is not a supported") {
+				if !reportContains(report.Errors(), "expression_field_reference_validation", "instance.current_state is not a supported") {
 					t.Fatalf("unsupported stage alias admitted: %#v", report.Errors())
 				}
 			} else if !reportContains(report.Errors(), "expression_field_reference_validation", "not definitely assigned") {
@@ -156,7 +156,7 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 				{DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(0)}}}},
 			}
 			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "adjusted_score", Value: c.RefExpression("state.base_score")}}
-		}, false},
+		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadWave1ExpressionFixtureBundle(t)
@@ -176,30 +176,6 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestEntityOnCompleteCannotBorrowLaterTopLevelWrite(t *testing.T) {
-	root := writeWave1ExpressionFixture(t)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
-worker:
-  task.assigned:
-    on_complete:
-      - condition: state.base_score > 0
-        advances_to: done
-    data_accumulation:
-      writes:
-        - target_field: base_score
-          value: 7
-`)
-	repo := repoRootForBootverifyTest(t)
-	bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
-	checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}
-	for _, finding := range checker.expressionFieldReferences() {
-		if strings.Contains(finding.Message, "on_complete[0]: condition state.base_score > 0.condition") && strings.Contains(finding.Message, "not definitely assigned") {
-			return
-		}
-	}
-	t.Fatal("source-loaded on_complete borrowed a later top-level write")
 }
 
 func TestEntityDefiniteAssignmentStages(t *testing.T) {

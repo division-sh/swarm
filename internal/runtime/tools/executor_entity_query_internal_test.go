@@ -143,7 +143,7 @@ func testEntityFilterSchema() entityToolSchema {
 		Defined: true,
 		Contract: entityruntime.Contract{
 			FlowID:     "review",
-			EntityType: "accounts",
+			EntityType: "state",
 			Entity: runtimecontracts.EntityContract{
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"status":   {Type: "text"},

@@ -175,9 +175,8 @@ func writeNestedNodeReplyChain(t testing.TB, root string, twoRequesters bool) {
 		requests = []string{"r1.requested", "r2.requested"}
 	}
 	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
-pins:
-  inputs: [`+strings.Join(requests, ", ")+`, t.replied]
-  outputs: [t.requested, provider.replied]
+inputs: [`+strings.Join(requests, ", ")+`, t.replied]
+outputs: [t.requested, provider.replied]
 `)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `provider.replied:
   account_id: text

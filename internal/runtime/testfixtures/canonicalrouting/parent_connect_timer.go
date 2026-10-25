@@ -17,6 +17,6 @@ inputs:
 outputs:
   - work.ready
 `)
-	writeClosedVariantFile(t, root, "producer/state.yaml", "")
+	removeClosedVariantFiles(t, root, "producer/state.yaml")
 	return root
 }

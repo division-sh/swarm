@@ -80,11 +80,10 @@ stages:
 		if action == "connected_renamed" {
 			event, rename = "exported", ", rename: enter.s2"
 		}
-		files["schema.yaml"] += "pins:\n  inputs: [enter.s2]\nconnect:\n  - {event: " + event + ", from: producer, to: ." + rename + "}\n"
+		files["schema.yaml"] += "inputs: [enter.s2]\nconnect:\n  - {event: " + event + ", from: producer, to: ." + rename + "}\n"
 		files["events.yaml"] = "enter.s1:\nnote:\nobserved:\n"
-		files["producer/schema.yaml"] = "name: producer\npins:\n  outputs: [" + event + "]\n"
+		files["producer/schema.yaml"] = "name: producer\noutputs: [" + event + "]\n"
 		files["producer/events.yaml"] = event + ":\n"
-		files["producer/state.yaml"] = "test_entity: {}\n"
 	}
 	bundle := loadWorkflowTempBundle(t, files)
 	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)

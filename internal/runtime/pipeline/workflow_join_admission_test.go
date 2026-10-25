@@ -41,7 +41,7 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(plan.Node), Target: events.MustExistingEntityTarget(target)}
 	instance := materializedWorkflowInstanceForSource(t, source, correlation.WithRunID(context.Background(), run), WorkflowInstance{
 		InstanceID: owner.Route.InstanceID, StorageRef: owner.Route.InstancePath, EntityID: target.EntityID,
-		WorkflowName: "orders", EntityType: "test_entity", CurrentState: "awaiting", Revision: 1,
+		WorkflowName: "orders", EntityType: "state", CurrentState: "awaiting", Revision: 1,
 		Fields: map[string]any{"instance_key": "one"},
 	})
 	arm := func(entry timeridentity.StageEntryRef) {

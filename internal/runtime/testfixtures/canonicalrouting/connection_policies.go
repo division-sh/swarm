@@ -38,7 +38,7 @@ func CopyIntegerConnectionPolicies(t testing.TB) string {
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "creation_id: text", "creation_id: integer")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "reuse_id: text", "reuse_id: integer")
 	}
-	applyClosedReplacement(t, filepath.Join(root, "worker/state.yaml"), "type: text", "type: integer")
+	applyClosedReplacement(t, filepath.Join(root, "worker/state.yaml"), "worker_id: text", "worker_id: integer")
 	applyClosedReplacement(t, filepath.Join(root, "worker/nodes.yaml"), "payload.creation_id != ''", "payload.creation_id > 0")
 	return root
 }
@@ -65,7 +65,7 @@ func CopyMixedConnectionProjections(t testing.TB, reverse bool, intrinsic string
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "creation_id: text", "creation_id: uuid")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "reuse_id: text", "reuse_id: uuid")
 	}
-	applyClosedReplacement(t, filepath.Join(root, "worker/state.yaml"), "type: text", "type: uuid")
+	applyClosedReplacement(t, filepath.Join(root, "worker/state.yaml"), "worker_id: text", "worker_id: uuid")
 	return root
 }
 

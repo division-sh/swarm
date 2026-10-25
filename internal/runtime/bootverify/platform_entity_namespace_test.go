@@ -31,7 +31,7 @@ func TestWave1EntityResolverSplitsBusinessEntityAndPlatformEntity(t *testing.T) 
 		t.Fatalf("state.current_state = %#v, want scalar text", got)
 	}
 
-	for _, ref := range []string{"id", "current_state", "flow_instance", "state.reviewed"} {
+	for _, ref := range []string{"id", "stage", "path"} {
 		got, err := wave1ResolvePlatformEntityPath(ref)
 		if err != nil {
 			t.Fatalf("instance.%s failed to resolve: %v", ref, err)
@@ -64,7 +64,7 @@ func TestWave1EntityResolverRejectsLegacyAndUnsupportedPlatformEntityFields(t *t
 		t.Fatalf("state.entity_id error = %q, want instance.id guidance", err)
 	}
 
-	for _, ref := range []string{"entity_id", "revision", "created_at", "updated_at", "workflow_name", "name"} {
+	for _, ref := range []string{"entity_id", "current_state", "flow_instance", "state.reviewed", "revision", "created_at", "updated_at", "workflow_name", "name"} {
 		if _, err := wave1ResolvePlatformEntityPath(ref); err == nil {
 			t.Fatalf("expected instance.%s to be unsupported", ref)
 		}
@@ -72,7 +72,7 @@ func TestWave1EntityResolverRejectsLegacyAndUnsupportedPlatformEntityFields(t *t
 }
 
 func TestWave1EntityResolverRejectsRetiredFanOutCountRead(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
@@ -80,7 +80,12 @@ func TestWave1EntityResolverRejectsRetiredFanOutCountRead(t *testing.T) {
 				},
 			},
 		},
-	})
+	}
+	source := semanticview.Wrap(bundle)
+	if _, _, err := wave1ResolveEntityPathWithOwner(source, "", "fan_out_count"); err != nil {
+		t.Fatalf("declared business field refused: %v", err)
+	}
+	delete(bundle.RootEntities["state"].Fields, "fan_out_count")
 
 	_, _, err := wave1ResolveEntityPathWithOwner(source, "", "fan_out_count")
 	if err == nil || !strings.Contains(err.Error(), "state.fan_out_count is platform bookkeeping; use the handler-local fan_out.count") {

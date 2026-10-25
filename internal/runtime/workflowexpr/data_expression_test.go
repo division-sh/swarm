@@ -407,9 +407,10 @@ func TestEvalValueExpression_RejectsBareItemByDefault(t *testing.T) {
 }
 
 func TestValidateValueExpression_RejectsAccumulatedNamespace(t *testing.T) {
-	err := ValidateValueExpression(`accumulated.size()`)
-	if err == nil {
-		t.Fatal("expected accumulated namespace to be rejected for data expressions")
+	for _, opts := range []ValueExpressionOptions{{}, {AllowBareItem: true, RequireBool: true}} {
+		if err := ValidateValueExpressionWithOptions(`accumulated.size() >= 1`, opts); err == nil || !strings.Contains(err.Error(), "state.<field>.size()") {
+			t.Fatalf("retired namespace must refuse with state-list teaching: %v", err)
+		}
 	}
 }
 

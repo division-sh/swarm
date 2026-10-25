@@ -7,7 +7,7 @@ import "testing"
 func ConversationForkConstructionDocuments() map[string]string {
 	return map[string]string{
 		"flow/schema.yaml": "name: flow\ninstance: name\nstages:\n  draft: {}\n  after: {}\ninputs: [conversation.created]\n",
-		"flow/state.yaml":  "name: text\ncurrent_state: text?\ngates: json?\naccumulator: json?\nbookkeeping: json?\n",
+		"flow/state.yaml":  "name: text\n",
 		"flow/nodes.yaml":  "advance:\n  conversation.created:\n    advances_to: after\n",
 	}
 }

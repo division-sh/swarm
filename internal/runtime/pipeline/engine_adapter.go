@@ -52,7 +52,6 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
 	}
-	options.AllowAccumulated = true
 	if workflowexpr.ExpressionReferencesRoot(expression, "payload") {
 		if options.PayloadType == nil {
 			return false, fmt.Errorf("workflow payload expression has no exact structural schema")

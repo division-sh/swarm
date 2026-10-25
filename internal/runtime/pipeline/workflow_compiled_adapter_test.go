@@ -182,7 +182,7 @@ func newNativeCompiledAdapterFixture(t *testing.T, backend string, bundle *contr
 	if seed {
 		instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 			InstanceID: testWorkflowInstanceRoute(path).InstanceID, StorageRef: path, EntityID: f.entityID,
-			WorkflowName: flow, WorkflowVersion: pc.SemanticSource().WorkflowVersion(), EntityType: "test_entity",
+			WorkflowName: flow, WorkflowVersion: pc.SemanticSource().WorkflowVersion(), EntityType: "state",
 			CurrentState: stage, Fields: map[string]any{"marker": "unchanged"}, EnteredStageAt: time.Now().UTC().Add(-time.Minute),
 		})
 		if schema, found := pc.SemanticSource().FlowSchemaByID(flow); found && !schema.Instance.Empty() {
@@ -923,7 +923,7 @@ func VerifyNativePipelineCompiledTransitionInitialAdmissionOnBothStoresForTest(t
 func (f *compiledAdapterFixture) initialInstance(stage string) WorkflowInstance {
 	return WorkflowInstance{
 		InstanceID: testWorkflowInstanceRoute(f.path).InstanceID, StorageRef: f.path, EntityID: f.entityID,
-		WorkflowName: f.flow, WorkflowVersion: f.pc.SemanticSource().WorkflowVersion(), EntityType: "test_entity", Mode: "static",
+		WorkflowName: f.flow, WorkflowVersion: f.pc.SemanticSource().WorkflowVersion(), EntityType: "state", Mode: "static",
 		CurrentState: stage, Fields: map[string]any{"marker": "unchanged"},
 	}
 }

@@ -16,7 +16,7 @@ func loadAccumulateTarget2293(t *testing.T, target, payload string) *c.WorkflowC
 	root, repo := t.TempDir(), repoRootForBootverifyTest(t)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: collect-reviews\nstages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "Review:\n  reviewer_id: text\n  rating: Rating\nRating: ['low', 'high']\nOtherRating: ['other', 'high']\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "Work:\n  "+target+"\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), target+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "review.received:\n  "+strings.ReplaceAll(payload, "\n", "\n  ")+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "collector:\n  review.received:\n    accumulate: {target: reviews, key: reviewer_id}\n")
 	return loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
@@ -26,17 +26,17 @@ func Test2293Q1VerifyBindsAccumulateTargetFromSource(t *testing.T) {
 	for _, tc := range []struct {
 		name, target, payload, want string
 	}{
-		{"matching", `reviews: {type: '[Review]?'}`, "reviewer_id: text\nrating: Rating", ""},
+		{"matching", `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text\nrating: Rating", ""},
 		{"missing_target", "other: text", "reviewer_id: text\nrating: Rating", "reviews"},
 		{"non_list", "reviews: Review", "reviewer_id: text\nrating: Rating", "list"},
 		{"map_not_list", "reviews: map[text]Review", "reviewer_id: text\nrating: Rating", "list"},
-		{"extra_payload", `reviews: {type: '[Review]?'}`, "reviewer_id: text\nrating: Rating\nextra: text", "payload must equal"},
-		{"missing_payload", `reviews: {type: '[Review]?'}`, "reviewer_id: text", "payload must equal"},
-		{"optional_payload", `reviews: {type: '[Review]?'}`, "reviewer_id: text\nrating: Rating?", "payload must equal"},
-		{"different_enum", `reviews: {type: '[Review]?'}`, "reviewer_id: text\nrating: OtherRating", "payload must equal"},
-		{"plain_text", `reviews: {type: '[Review]?'}`, "reviewer_id: text\nrating: text", "payload must equal"},
-		{"optional_key", `reviews: {type: '[Review]?'}`, "reviewer_id: text?\nrating: Rating", "required scalar"},
-		{"non_scalar_key", `reviews: {type: '[Review]?'}`, "reviewer_id: [text]\nrating: Rating", "required scalar"},
+		{"extra_payload", `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text\nrating: Rating\nextra: text", "payload must equal"},
+		{"missing_payload", `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text", "payload must equal"},
+		{"optional_payload", `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text\nrating: Rating?", "payload must equal"},
+		{"different_enum", `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text\nrating: OtherRating", "payload must equal"},
+		{"plain_text", `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text\nrating: text", "payload must equal"},
+		{"optional_key", `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text?\nrating: Rating", "required scalar"},
+		{"non_scalar_key", `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: [text]\nrating: Rating", "required scalar"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadAccumulateTarget2293(t, tc.target, tc.payload)
@@ -79,7 +79,7 @@ func Test2293Q1AccumulateSelectorsAreDeclarationsNotExpressions(t *testing.T) {
 		})
 	}
 	// Exercise the real source entrance as well as the closed reader inventory.
-	bundle := loadAccumulateTarget2293(t, `reviews: {type: '[Review]?'}`, "reviewer_id: text\nrating: Rating")
+	bundle := loadAccumulateTarget2293(t, `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text\nrating: Rating")
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if reportContains(report.HardInvalidities(), "executable_reader_expression_validation", "accumulate.") {
 		t.Fatalf("canonical collection declaration was evaluated as CEL: %#v", report.HardInvalidities())
@@ -99,7 +99,7 @@ func Test2293Q1VerifyAccumulateUsesEffectiveExactSchema(t *testing.T) {
 				name += "/different_enum"
 			}
 			t.Run(name, func(t *testing.T) {
-				bundle := loadAccumulateTarget2293(t, `reviews: {type: '[Review]?'}`, "reviewer_id: text\nrating: Rating")
+				bundle := loadAccumulateTarget2293(t, `reviews: {type: '[Review]?', indexed: true}`, "reviewer_id: text\nrating: Rating")
 				entry := bundle.Events["review.received"]
 				values := []any{"other", "high"}
 				if matching {

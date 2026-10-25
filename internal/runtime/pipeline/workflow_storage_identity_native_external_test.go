@@ -128,7 +128,7 @@ func workflowParentRouteControlNativeFixture(t *testing.T, backend string, sourc
 			InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
 			ParentFlowID: parent.ParentRoute.FlowID, ParentFlowInstance: parent.ParentRoute.FlowInstance, ParentEntityID: parent.ParentEntityID,
 			WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "template", InstanceKey: parentKey,
-			CurrentState: "created", StageDefined: true, EntityType: "test_entity", Fields: map[string]any{"instance_key": "root"},
+			CurrentState: "created", StageDefined: true, EntityType: "state", Fields: map[string]any{"instance_key": "root"},
 			CreatedAt: instance.CreatedAt, EnteredStageAt: instance.EnteredStageAt,
 		}, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)
 		if err != nil {

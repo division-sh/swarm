@@ -68,7 +68,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	nodes := lifecycleStaticRead(t, root, "nodes.yaml")
 	switch variant {
 	case LifecycleStaticLoopLocal, LifecycleStaticLoopDangling, LifecycleStaticLoopNoEmit, LifecycleStaticLoopLocalNodeInvalid:
-		schema = strings.Split(schema, "  outputs:\n")[0]
+		schema = strings.Split(schema, "outputs:\n")[0]
 		removeClosedVariantFiles(t, root, "sink/schema.yaml", "sink/nodes.yaml", "sink/state.yaml")
 		if err := os.Remove(filepath.Join(root, "sink")); err != nil {
 			t.Fatal(err)
@@ -99,7 +99,6 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 			writeClosedVariantFile(t, root, scope+"/schema.yaml", schema)
 			writeClosedVariantFile(t, root, scope+"/events.yaml", events)
 			writeClosedVariantFile(t, root, scope+"/nodes.yaml", nodes)
-			writeClosedVariantFile(t, root, scope+"/state.yaml", lifecycleStaticRead(t, root, "state.yaml"))
 		}
 		if variant == LifecycleStaticForeignOnly {
 			nodes = strings.Split(nodes, "collector:\n")[0]
@@ -109,8 +108,8 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		// counterexample, not an extra producer to satisfy a gate-only fixture.
 		nodes += "worker:\n  work.handled:\n    emit:\n      event: work.completed\n      fields: {result: \"handled\"}\n"
 		events += "work.handled:\n"
-		schema += "    - work.handled\n"
-		schema += "  outputs: [work.completed]\n"
+		schema += "  - work.handled\n"
+		schema += "outputs: [work.completed]\n"
 		if variant == LifecycleStaticMixedOutput {
 			schema += "connect:\n  - {event: work.completed, from: ., to: sink}\n"
 			writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\ninputs:\n  - work.completed\n")
@@ -135,6 +134,11 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticLoopScopeMatrix:
 		for _, scope := range []string{"left", "right", "left/deep"} {
 			for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "state.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/state.yaml"} {
+				if file == "state.yaml" {
+					if _, err := os.Stat(filepath.Join(root, file)); os.IsNotExist(err) {
+						continue
+					}
+				}
 				writeClosedVariantFile(t, root, scope+"/"+file, lifecycleStaticRead(t, root, file))
 			}
 		}
@@ -148,7 +152,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		// Unlike the journey shell with its removed collector, this minimal
 		// dangling contract has no unrelated unused state or entity fields.
 		schema = strings.Replace(schema, "  approved: {}\n  done: {final: true}", "  approved: {final: true}", 1)
-		writeClosedVariantFile(t, root, "state.yaml", "")
+		removeClosedVariantFiles(t, root, "state.yaml")
 	case LifecycleStaticLoopUnknownEvent:
 		schema = strings.Replace(schema, "event: loop.escaped", "event: absent.event", 1)
 	case LifecycleStaticLoopBadField:
@@ -156,7 +160,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticLoopBadCap:
 		schema = strings.Replace(schema, "max_attempts: 2", "max_attempts: 0", 1)
 	case LifecycleStaticTwoLoopsShared:
-		declaration := schema[strings.Index(schema, "  revision:\n"):strings.Index(schema, "pins:\n")]
+		declaration := schema[strings.Index(schema, "  revision:\n"):strings.Index(schema, "inputs:\n")]
 		second := strings.NewReplacer("  revision:\n", "  second:\n", "revision_id", "second_revision_id").Replace(declaration)
 		// Both sites share an event schema but carry their own required revision
 		// field from the active loop, never from the other loop's state.
@@ -165,7 +169,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema = strings.Replace(schema, declaration, strings.Replace(declaration, "fields: {", "fields: {second_revision_id: \"first\", ", 1)+second, 1)
 		schema = strings.Replace(schema, "  drafting: {}", "  drafting: {}\n  drafting_second: {}\n  review_second: {}", 1)
 		for _, event := range []string{"start", "admit", "repeat", "close"} {
-			schema = strings.Replace(schema, "  outputs:\n", "    - second."+event+"\n  outputs:\n", 1)
+			schema = strings.Replace(schema, "outputs:\n", "  - second."+event+"\noutputs:\n", 1)
 		}
 		events = strings.Replace(events, "loop.escaped:\n", "loop.escaped:\n  second_revision_id: text\n", 1)
 		events += "second.start:\n  seed: boolean\nsecond.admit:\n  second_revision_id: text\nsecond.repeat:\n  second_revision_id: text\nsecond.close:\n  second_revision_id: text\n"

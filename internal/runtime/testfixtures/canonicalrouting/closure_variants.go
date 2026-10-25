@@ -205,11 +205,11 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	} else {
 		childEvents += "ticket.closed:\n  entity_id: string\n"
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-validation\ninputs: "+inputs+"\n  outputs: "+inputs+"\nconnect:\n"+connections)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-validation\ninputs: "+inputs+"\noutputs: "+inputs+"\nconnect:\n"+connections)
 	writeClosedVariantFile(t, root, "events.yaml", rootEvents)
 	flowPins := "inputs: " + inputs + "\n"
 	if settings.flowOutput {
-		flowPins += "  outputs:\n    - timer.reminder\n"
+		flowPins += "outputs:\n  - timer.reminder\n"
 	}
 	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\n"+flowPins)
 	agents := ""
@@ -297,7 +297,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 
 	removeClosedVariantFiles(t, root, "state.yaml")
-	writeClosedVariantFile(t, root, "support/state.yaml", "")
+	removeClosedVariantFiles(t, root, "support/state.yaml")
 	inputs := []string{"ticket.opened"}
 	if settings.includeClosePath {
 		inputs = append(inputs, "ticket.closed")
@@ -307,7 +307,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	for _, event := range inputs {
 		connections += "  - {event: " + event + ", from: ., to: support}\n"
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-state-cancel-reachability\npins:\n  inputs: ["+pinList+"]\n  outputs: ["+pinList+"]\nconnect:\n"+connections)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-state-cancel-reachability\ninputs: ["+pinList+"]\noutputs: ["+pinList+"]\nconnect:\n"+connections)
 	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\nticket.closed:\n  entity_id: string\n")
 	reviewMetadata := "{}"
 	if settings.treatReviewAsTerminalActivation {
@@ -323,7 +323,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 			waiting += "      - {after: 1h, advances_to: review}\n"
 		}
 	}
-	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n"+waiting+"  active: {}\n  review: "+reviewMetadata+"\n  done: {final: true}\npins:\n  inputs: ["+pinList+"]\n")
+	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n"+waiting+"  active: {}\n  review: "+reviewMetadata+"\n  done: {final: true}\ninputs: ["+pinList+"]\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder:\n")
 	timerBlock := "    - owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {
@@ -371,7 +371,7 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-model-alias\ninputs:\n  - task.assigned\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "state.yaml", "nodes.yaml", "events.yaml")
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n")
-	writeClosedVariantFile(t, root, "child/state.yaml", "")
+	removeClosedVariantFiles(t, root, "child/state.yaml")
 	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  subscriptions: [task.assigned]\n", model))
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", "closer:\n  task.assigned:\n    advances_to: done\n")

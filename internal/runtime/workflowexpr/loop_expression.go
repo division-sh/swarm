@@ -9,6 +9,9 @@ import (
 )
 
 func validateAuthoredContextRoots(expression string, opts ValueExpressionOptions) error {
+	if ExpressionReferencesRoot(expression, "accumulated") {
+		return fmt.Errorf("accumulated is retired; read the declared state list with state.<field>.size()")
+	}
 	for _, root := range []string{"entity", "_entity", "gates"} {
 		if ExpressionReferencesRoot(expression, root) {
 			return fmt.Errorf("%s is retired; use state.<declared field> or instance.id, instance.stage, instance.path", root)

@@ -14,10 +14,10 @@ func TestRunValidatesScalarTemplateInstanceIdentity(t *testing.T) {
 name: scoring
 instance: account_id
 `, `
-account:
-  tenant_id: text
-  account_id: uuid
-`)
+tenant_id: text
+account_id: uuid
+`,
+	)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -70,9 +70,9 @@ name: scoring
 instance: missing_id
 `,
 			flowEntities: `
-account:
-  account_id: uuid
+account_id: uuid
 `,
+
 			want: "not declared",
 		},
 		{
@@ -82,9 +82,9 @@ name: scoring
 instance: tags
 `,
 			flowEntities: `
-account:
-  tags: [text]
+tags: [text]
 `,
+
 			want: "scalar or enum",
 		},
 	}
@@ -102,13 +102,4 @@ account:
 			}
 		})
 	}
-}
-
-func mustBootverifyTemplateInstanceField(t testing.TB, raw string) runtimecontracts.TemplateInstanceField {
-	t.Helper()
-	field, err := runtimecontracts.ParseTemplateInstanceField(raw)
-	if err != nil {
-		t.Fatalf("ParseTemplateInstanceField(%q): %v", raw, err)
-	}
-	return field
 }

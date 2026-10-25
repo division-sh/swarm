@@ -49,7 +49,7 @@ stages: []
 inputs:
   - observer.requested
 `)
-	writeClosedVariantFile(t, root, "observers/state.yaml", "")
+	removeClosedVariantFiles(t, root, "observers/state.yaml")
 	writeClosedVariantFile(t, root, "observers/nodes.yaml", `start:
   observer.requested: {}
 `)

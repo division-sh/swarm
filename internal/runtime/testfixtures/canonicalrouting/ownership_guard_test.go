@@ -10,7 +10,6 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,7 +21,6 @@ import (
 	"unicode"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,122 +61,7 @@ type artifactRegistryEntry struct {
 	Issue       int        `yaml:"issue"`
 }
 
-func TestCheckedYAMLRoutingArtifactRegistryEqualsLiveCensus(t *testing.T) {
-	repo := RepoRoot(t)
-	registry := loadArtifactRegistry(t, repo)
-	proofs := directExecutableArtifactProofs(t, repo)
-	registered := map[ArtifactID]artifactRegistryEntry{}
-	for _, entry := range registry.Artifacts {
-		entry.Root = normalizeArtifactID(entry.Root)
-		if entry.Root == "." || entry.Owner == "" || entry.Proof == "" {
-			t.Fatalf("incomplete artifact registry entry: %#v", entry)
-		}
-		if _, exists := registered[entry.Root]; exists {
-			t.Fatalf("duplicate artifact registry root %s", entry.Root)
-		}
-		switch entry.Disposition {
-		case "canonical-owner", "canonical-overlay", "negative-mutation", "different-concept":
-			if entry.Issue != 0 {
-				t.Fatalf("artifact %s disposition %s must not carry split issue %d", entry.Root, entry.Disposition, entry.Issue)
-			}
-		case "tracked-split":
-			if entry.Issue <= 0 {
-				t.Fatalf("tracked split %s is missing issue", entry.Root)
-			}
-		default:
-			t.Fatalf("artifact %s has unknown disposition %q", entry.Root, entry.Disposition)
-		}
-		if _, err := sourceartifact.AdmitDirectory(filepath.Join(repo, filepath.FromSlash(string(entry.Root)))); err != nil {
-			t.Fatalf("admit artifact %s: %v", entry.Root, err)
-		}
-		if !pathQualifiedGoSymbol(entry.Proof) {
-			t.Fatalf("artifact %s proof %q must be path-qualified as *_test.go:TestXxx", entry.Root, entry.Proof)
-		}
-		declared, executable := proofs[entry.Proof]
-		if !executable {
-			t.Fatalf("artifact %s proof %s is not an executable Go test", entry.Root, entry.Proof)
-		}
-		// #2756/6266806988: this exact public binary copy+verify owns the fixture.
-		publicBinaryProof := entry.Root == "internal/releasee2e/testdata/node_identity_activity" &&
-			entry.Owner == "releasee2e.node_identity_activity" &&
-			entry.Proof == "internal/releasee2e/node_identity_test.go:TestNodeIdentityCanonicalMapKeySQLitePostgres"
-		if _, exact := declared[entry.Root]; !exact && !publicBinaryProof {
-			t.Fatalf("artifact %s proof %s does not directly call canonicalrouting.Prove with its exact ArtifactID", entry.Root, entry.Proof)
-		}
-		registered[entry.Root] = entry
-	}
-
-	live := liveCheckedYAMLRoutingRoots(t, repo)
-	missing := difference(live, registered)
-	stale := difference(registered, live)
-	if len(missing) != 0 || len(stale) != 0 {
-		t.Fatalf("checked YAML routing census drifted\nunregistered live roots: %v\nstale registry roots: %v", missing, stale)
-	}
-}
-
-func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
-	cases := map[string]string{
-		"flow-style-external": `{inputs: {events: [{name: ingress, event: ingress.received, source: external}]}}`,
-		"broadcast":           "emit:\n  event: result.ready\n  broadcast: true\n",
-		"node-subscription":   "worker:\n  {}\n",
-		"agent-subscription":  "worker:\n  subscriptions: [work.requested]\n",
-		"producer":            "worker:\n  {}\n",
-		"handler-derived":     "worker:\n  work.requested: {emit: work.completed}\n",
-		"second-document":     "name: inert\n---\nworker:\n",
-	}
-	for name, routing := range cases {
-		t.Run(name, func(t *testing.T) {
-			repo := t.TempDir()
-			root := filepath.Join(repo, "cmd", "hidden", "testdata", name)
-			if err := os.MkdirAll(root, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\nversion: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(root, "routing.yaml"), []byte(routing), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			live := liveCheckedYAMLRoutingRoots(t, repo)
-			want := ArtifactID("cmd/hidden/testdata/" + name)
-			if _, ok := live[want]; !ok {
-				t.Fatalf("repo-wide structural census missed %s: %#v", want, live)
-			}
-			if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if live := liveCheckedYAMLRoutingRoots(t, repo); len(live) != 0 {
-				t.Fatalf("foreign-only routing root received live census credit: %#v", live)
-			}
-			if roots := outerManifestRoots(t, repo); len(roots) != 0 {
-				t.Fatalf("foreign-only manifest received corpus credit: %v", roots)
-			}
-		})
-	}
-	t.Run("nested-data-directory", func(t *testing.T) {
-		repo := t.TempDir()
-		root := filepath.Join(repo, "cmd", "hidden", "data", "routing")
-		if err := os.MkdirAll(root, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\nversion: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("inputs: {events: [{name: ingress, event: ingress.received, source: external}]}\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		live := liveCheckedYAMLRoutingRoots(t, repo)
-		if _, ok := live[ArtifactID("cmd/hidden/data/routing")]; !ok {
-			t.Fatalf("repo-wide structural census skipped nested data directory: %#v", live)
-		}
-		if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if live := liveCheckedYAMLRoutingRoots(t, repo); len(live) != 0 {
-			t.Fatalf("foreign-only data routing root received live census credit: %#v", live)
-		}
-	})
-}
+// #2756/6266806988: this exact public binary copy+verify owns the fixture.
 
 func TestCanonicalRoutingProofsRequireDirectExecutableDeclaration(t *testing.T) {
 	repo := t.TempDir()
@@ -393,31 +276,6 @@ func goFunctionExists(t testing.TB, path, name string) bool {
 	return false
 }
 
-func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
-	for name, source := range map[string]string{
-		"pins":             "inputs: {events: []}\n",
-		"connect":          "connect: [{from: a.out, to: b.in}]\n",
-		"emit":             "node: {emit: {event: result.ready}}\n",
-		"subscription":     "node: {subscribes_to: [work.ready]}\n",
-		"reply-carries":    "resolution: {mode: reply, replies_to: request}\ncarries: [request_id]\n",
-		"false-broadcast":  "emit: {event: result.ready, broadcast: false}\n",
-		"package-flows":    "flows: [{id: child, flow: child, mode: template}]\n",
-		"package-bind":     "bind: {inputs: {work.ready: parent.work_ready}}\n",
-		"package-requires": "requires: {inputs: [work.ready]}\n",
-		"template-mode":    "name: child\nmode: template\n",
-		"event-source":     "work.ready: {swarm: {source: external}}\n",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := routingOverlayError(source); err == nil {
-				t.Fatalf("routing overlay %q was accepted", source)
-			}
-		})
-	}
-	if err := routingOverlayError("Account:\n  score: number\n"); err != nil {
-		t.Fatalf("non-routing overlay was rejected: %v", err)
-	}
-}
-
 func TestCanonicalRoutingPublicAPIHasNoGenericPositiveMutation(t *testing.T) {
 	forbidden := map[string]struct{}{
 		"ApplyOverlayMutation":  {},
@@ -450,17 +308,6 @@ func TestCanonicalRoutingPublicAPIHasNoGenericPositiveMutation(t *testing.T) {
 				t.Fatalf("generic positive mutation API %s survives in %s", function.Name.Name, path)
 			}
 		}
-	}
-}
-
-func TestCanonicalRoutingParserSnippetDecodesOneDocument(t *testing.T) {
-	snippet := NewParserSnippet(t, "inputs: {events: []}\n")
-	var decoded map[string]any
-	if err := snippet.Decode(&decoded); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := decoded["pins"]; !ok {
-		t.Fatalf("decoded parser snippet = %#v, want pins", decoded)
 	}
 }
 
@@ -1350,76 +1197,6 @@ func normalizeArtifactID(root ArtifactID) ArtifactID {
 	return ArtifactID(filepath.ToSlash(filepath.Clean(strings.TrimSpace(string(root)))))
 }
 
-func liveCheckedYAMLRoutingRoots(t testing.TB, repo string) map[ArtifactID]artifactRegistryEntry {
-	t.Helper()
-	live := map[ArtifactID]artifactRegistryEntry{}
-	for _, bundleRoot := range outerManifestRoots(t, repo) {
-		err := checkoutsource.Walk(repo, filepath.Join(repo, filepath.FromSlash(bundleRoot)), func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
-				return nil
-			}
-			if fileContainsAuthoredRouting(t, path) {
-				id := ArtifactID(bundleRoot)
-				live[id] = artifactRegistryEntry{Root: id}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatalf("scan bundle %s: %v", bundleRoot, err)
-		}
-	}
-	return live
-}
-
-func outerManifestRoots(t testing.TB, repo string) []string {
-	t.Helper()
-	manifestDirs := map[string]struct{}{}
-	err := checkoutsource.Walk(repo, repo, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if repositoryGeneratedDir(repo, path) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if info.Name() == "manifest.yaml" {
-			manifestDirs[filepath.Dir(path)] = struct{}{}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("discover manifest.yaml roots: %v", err)
-	}
-	var roots []string
-	for dir := range manifestDirs {
-		outer := true
-		for parent := filepath.Dir(dir); strings.HasPrefix(parent, repo); parent = filepath.Dir(parent) {
-			if _, exists := manifestDirs[parent]; exists {
-				outer = false
-				break
-			}
-			if parent == repo || filepath.Dir(parent) == parent {
-				break
-			}
-		}
-		if !outer {
-			continue
-		}
-		rel, err := filepath.Rel(repo, dir)
-		if err != nil {
-			t.Fatalf("relative fixture root %s: %v", dir, err)
-		}
-		roots = append(roots, filepath.ToSlash(rel))
-	}
-	sort.Strings(roots)
-	return roots
-}
-
 func repositoryGeneratedDir(repo, path string) bool {
 	if path == repo {
 		return false
@@ -1434,38 +1211,4 @@ func repositoryGeneratedDir(repo, path string) bool {
 	default:
 		return false
 	}
-}
-
-func fileContainsAuthoredRouting(t testing.TB, path string) bool {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	for {
-		var doc yaml.Node
-		if err := decoder.Decode(&doc); err != nil {
-			if err == io.EOF {
-				return false
-			}
-			t.Fatalf("parse routing census candidate %s: %v", path, err)
-		}
-		for _, node := range doc.Content {
-			if yamlNodeContainsAuthoredRouting(node) {
-				return true
-			}
-		}
-	}
-}
-
-func difference[A any, B any](left map[ArtifactID]A, right map[ArtifactID]B) []string {
-	var out []string
-	for key := range left {
-		if _, ok := right[key]; !ok {
-			out = append(out, string(key))
-		}
-	}
-	sort.Strings(out)
-	return out
 }

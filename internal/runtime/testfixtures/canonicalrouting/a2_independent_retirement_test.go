@@ -21,7 +21,7 @@ func TestA2IndependentForkAccumulatorProducerAdmitsAuthoredKey(t *testing.T) {
 			bundle := loadA2IndependentProducer(t, CopyForkLoopAccumulator(t, clearOnAdmit))
 			node := identitytest.FlowNode(t, "review", "controller")
 			handler := bundle.FlowTree.ByPath["review"].Nodes["controller"].EventHandlers["review.requested"]
-			if handler.Accumulate == nil || handler.Accumulate.Key != "payload.token" || handler.Accumulate.Into != "reviews" || handler.Accumulate.From != "payload" {
+			if handler.Accumulate == nil || handler.Accumulate.Key != "token" || handler.Accumulate.Target != "reviews" {
 				t.Fatalf("generated keyed accumulation changed: %#v", handler.Accumulate)
 			}
 			if handler.Loop == nil || handler.Loop.Admit != "revision" || handler.Loop.From != "working" || handler.AdvancesTo != "reviewing" {

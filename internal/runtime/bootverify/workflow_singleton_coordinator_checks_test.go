@@ -31,7 +31,7 @@ name: coordinator
 inputs:
   - job.received
 `, `
-coordinator_state: {}
+{}
 `, `
 memory-agent:
   role: analyst
@@ -56,42 +56,15 @@ instance: vertical_id
 inputs:
   - job.received
 `, `
-coordinator_state:
-  vertical_id: text
-  verticals: map[text]VerticalState
-`, "", "")
+vertical_id: text
+verticals: map[text]VerticalState
+`,
+		"", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if reportContains(report.Errors(), "singleton_coordinator_validation", "") {
 		t.Fatalf("an inert typed declaration must not manufacture coordinator demand: %#v", report.Errors())
-	}
-}
-
-func TestRun_RejectsSingletonCoordinatorUnresolvedContainedType(t *testing.T) {
-	root := writeSingletonCoordinatorFixtureRoot(t, `
-name: coordinator
-inputs:
-  - job.received
-`, `
-coordinator_state:
-  verticals: map[text]MissingType
-`, "", "")
-
-	repoRoot := repoRootForBootverifyTest(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err == nil || bundle != nil {
-		t.Fatalf("unresolved contained type escaped source admission: bundle=%v err=%v", bundle != nil, err)
-	}
-	diagnostic, typed := runtimecontracts.AsLoaderDiagnostic(err)
-	if !typed || diagnostic.Code != "contract_loader.invalid_type_reference" {
-		t.Fatalf("unresolved contained type lost typed admission refusal: %v", err)
-	}
-	if diagnostic.Location.File != "coordinator/state.yaml" || diagnostic.Location.YAMLPath != "entity coordinator_state.verticals" {
-		t.Fatalf("unresolved contained type lost exact source location: %+v", diagnostic.Location)
-	}
-	if !strings.Contains(err.Error(), `coordinator/state.yaml: entity coordinator_state.verticals: unknown catalog type "MissingType"`) {
-		t.Fatalf("unresolved contained type lost source and cause: %v", err)
 	}
 }
 
@@ -101,9 +74,9 @@ name: coordinator
 inputs:
   - job.received
 `, `
-coordinator_state:
-  status: text
-`, "", "")
+status: text
+`,
+		"", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -176,11 +149,9 @@ func TestBuildSingletonCoordinatorDemandProjection_CoversScopedReadersWithoutInt
 		{
 			name: "group_by source",
 			entities: `
-coordinator_state:
-  verticals:
-    type: map[text]VerticalState
-    initial: {}
+verticals: map[text]VerticalState
 `,
+
 			nodes: `
 coordinator-node:
   job.received:
@@ -195,11 +166,9 @@ coordinator-node:
 		{
 			name: "join state membership",
 			entities: `
-coordinator_state:
-  members:
-    type: "[text]"
-    initial: []
+members: [text]
 `,
+
 			nodes: `
 coordinator-node:
   job.received:
@@ -269,11 +238,10 @@ name: coordinator
 inputs:
   - job.received
 `, `
-coordinator_state:
-  verticals:
-    type: map[text]VerticalState
-    initial: {}
-`, "", `
+{}
+`,
+
+		"", `
 coordinator-node:
   job.received:
     query:
@@ -395,11 +363,10 @@ name: coordinator
 inputs:
   - job.received
 `, `
-coordinator_state:
-  verticals:
-    type: map[text]VerticalState
-    initial: {}
-`, "", `
+{}
+`,
+
+				"", `
 coordinator-node:
   job.received:
       `+tc.operator+`
@@ -430,11 +397,10 @@ loops:
 inputs:
   - job.received
 `, `
-coordinator_state:
-  verticals:
-    type: map[text]VerticalState
-    initial: {}
-`, "", `
+{}
+`,
+
+		"", `
 coordinator-node:
   job.received:
     loop: {start: revision, from: state.verticals}
@@ -476,10 +442,18 @@ coordinator-node:
 		name     string
 		entities string
 	}{
-		{name: "declared stateless primary", entities: "coordinator_state: {}\n"},
-		{name: "unused scalar", entities: "coordinator_state:\n  unused_label: text\n"},
-		{name: "unused list", entities: "coordinator_state:\n  unused_members: [text]\n"},
-		{name: "unused map", entities: "coordinator_state:\n  unused_verticals: map[text]VerticalState\n"},
+		{name: "declared stateless primary", entities: `
+{}
+`},
+		{name: "unused scalar", entities: `
+unused_label: text
+`},
+		{name: "unused list", entities: `
+unused_members: [text]
+`},
+		{name: "unused map", entities: `
+unused_verticals: map[text]VerticalState
+`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -536,7 +510,9 @@ func writeSingletonCoordinatorFixtureRoot(t *testing.T, flowSchema, flowEntities
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-fixture\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), singletonCoordinatorTypesYAML())
-	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "state.yaml"), strings.TrimSpace(flowEntities)+"\n")
+	if state := strings.TrimSpace(flowEntities); state != "" && state != "{}" {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "state.yaml"), state+"\n")
+	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "events.yaml"), `
 job.received:
   vertical_id: text
@@ -563,7 +539,7 @@ Job:
 
 func singletonCoordinatorEntitiesYAML() string {
 	return `
-coordinator_state:
-  verticals: map[text]VerticalState
+verticals: map[text]VerticalState
 `
+
 }

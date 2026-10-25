@@ -253,42 +253,6 @@ func canonicalFanOutExecutableReaders(t testing.TB, handler runtimecontracts.Sys
 	return handlerExecutableReaderExpressionsForSource(source, owner, "order.accepted", compiled)
 }
 
-func TestRun_CompleteReaderCensusOwnsEntityReferenceValidation(t *testing.T) {
-	tests := []struct {
-		name     string
-		handler  runtimecontracts.SystemNodeEventHandler
-		wantKind string
-	}{
-		{
-			name: "direct expression value ref",
-			handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-				Writes: []runtimecontracts.WorkflowDataWrite{{
-					TargetRef: "metadata.copy",
-					Value:     runtimecontracts.RefExpression("state.missing"),
-				}},
-			}},
-			wantKind: "data_accumulation.writes[0].value.ref",
-		},
-		{
-			name: "accumulate source",
-			handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
-				Into: "items",
-				From: "state.missing",
-			}},
-			wantKind: "accumulate.from",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			report := Run(context.Background(), semanticview.Wrap(handBuiltScopedReaderBundle(tc.handler)), Options{})
-			if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "state.missing", tc.wantKind, "root-reader") {
-				t.Fatalf("expression reference findings = %#v, want state.missing in %s at root-reader", report.Errors(), tc.wantKind)
-			}
-		})
-	}
-}
-
 func TestRun_ExpressionValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)

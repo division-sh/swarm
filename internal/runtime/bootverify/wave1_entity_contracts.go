@@ -72,15 +72,15 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 	}
 	segments := strings.Split(ref, ".")
 	head := strings.TrimSpace(segments[0])
-	if head == "fan_out_count" {
-		return wave1ResolvedType{}, "", fmt.Errorf("state.fan_out_count is platform bookkeeping; use the handler-local fan_out.count")
-	}
 	view := wave1EntityContractForFlow(source, flowID)
 	if !view.Defined {
 		return wave1ResolvedType{}, "", fmt.Errorf("flow %s has no declared entity contract for state.%s", defaultFlowLabel(flowID), head)
 	}
 	field, ok := view.Contract.Fields[head]
 	if !ok {
+		if head == "fan_out_count" {
+			return wave1ResolvedType{}, "", fmt.Errorf("state.fan_out_count is platform bookkeeping; use the handler-local fan_out.count")
+		}
 		if platformcontext.LegacyEntityMetadataField(head) {
 			return wave1ResolvedType{}, "", fmt.Errorf("%s", legacyEntityMetadataDiagnostic(head))
 		}
@@ -170,8 +170,10 @@ func legacyEntityMetadataDiagnostic(field string) string {
 	switch field {
 	case "entity_id":
 		return "state.entity_id is platform entity metadata; use instance.id"
-	case "current_state", "flow_instance", "gates":
-		return fmt.Sprintf("state.%s is platform entity metadata; use instance.%s", field, field)
+	case "current_state":
+		return "state.current_state is platform entity metadata; use instance.stage"
+	case "flow_instance":
+		return "state.flow_instance is platform entity metadata; use instance.path"
 	default:
 		return fmt.Sprintf("state.%s is platform entity metadata and is not supported through state.*", field)
 	}

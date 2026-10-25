@@ -203,7 +203,7 @@ func VerifyIssue2564H2BaselineMechanismsForTest(t *testing.T, factory WorkflowTi
 				run := correlation.RunIDFromContext(ctx)
 				owner := testRunScopedWorkflowInstanceFromContext(ctx, run)
 				at := canonicalWorkflowTimerTime(time.Now().Add(-2 * time.Second))
-				fixture.CommitConstruction(ctx, owner, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(), Mode: "static", EntityType: "hub", CurrentState: "s1", StageDefined: true, Fields: map[string]any{"count": 0, "c1": 0, "c2": 0}, CreatedAt: at, EnteredStageAt: at}, at)
+				fixture.CommitConstruction(ctx, owner, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(), Mode: "static", EntityType: "state", CurrentState: "s1", StageDefined: true, Fields: map[string]any{"count": 0, "c1": 0, "c2": 0}, CreatedAt: at, EnteredStageAt: at}, at)
 				rows := listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, run)
 				if len(rows) != 1 || rows[0].FireAt.Sub(rows[0].CreatedAt) != time.Second {
 					t.Fatalf("H2 did not create its real one-second initial entry: %+v", rows)
