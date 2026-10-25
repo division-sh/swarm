@@ -213,19 +213,14 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	if err := runtime.stopExecutionWork(); err != nil {
 		return out, err
 	}
-	if req.LiveRuntime == nil && req.AcquireLiveRuntime != nil {
-		use, err := req.AcquireLiveRuntime(p.operation.Context(), p.loadedSource.SourceArtifactFact.BundleHash())
-		if use != nil {
-			defer func() { finalErr = errors.Join(finalErr, use.Done()) }()
-		}
-		if err != nil {
-			return out, err
-		}
-		if use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(p.loadedSource.SourceArtifactFact) {
-			return out, errors.New("live fork requires its exact ordinarily admitted target")
-		}
-		req.LiveRuntime = use.Runtime()
+	target, use, err := p.acquireOrdinaryLiveTarget(req)
+	if use != nil {
+		defer func() { finalErr = errors.Join(finalErr, use.Done()) }()
 	}
+	if err != nil {
+		return out, err
+	}
+	req.LiveRuntime = target
 	evidence, err := req.LiveRuntime.CurrentStartupGrantEvidence()
 	if err != nil {
 		return out, err
@@ -274,6 +269,20 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	}
 	// Post-commit reconciliation can fail without undoing the immutable ACK.
 	return out, err
+}
+
+func (p *PreparedSelectedFork) acquireOrdinaryLiveTarget(req SelectedContractExecutionRequest) (*runtimepkg.Runtime, *runtimepkg.RuntimeContextUse, error) {
+	if req.LiveRuntime != nil {
+		return req.LiveRuntime, nil, nil
+	}
+	use, err := req.AcquireLiveRuntime(p.operation.Context(), p.loadedSource.SourceArtifactFact.BundleHash())
+	if err != nil {
+		return nil, use, err
+	}
+	if use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(p.loadedSource.SourceArtifactFact) {
+		return nil, use, errors.New("live fork requires its exact ordinarily admitted target")
+	}
+	return use.Runtime(), use, nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) restoreLiveSelectedWork(continuations *deliverycontinuation.Coordinator, recovered bool) error {

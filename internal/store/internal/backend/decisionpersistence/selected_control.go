@@ -60,15 +60,8 @@ func RequireCardRunControl(ctx context.Context, q runstate.RowQueryer, runID str
 	if !transactional || tx == nil {
 		return fmt.Errorf("selected card control requires its native transaction snapshot")
 	}
-	if ordinary {
-		if admission.AuthorizesNormal() && (evidence.BundleHash != admission.BundleHash ||
-			evidence.GrantID != admission.ExecutionAuthorityID || evidence.RuntimeGeneration != admission.Generation) {
-			return fmt.Errorf("live card control requires its own ordinary generation grant")
-		}
-	} else if !present || evidence.SelectedFork == nil || evidence.SelectedFork.BindingID != binding.BindingID ||
-		evidence.SelectedFork.ForkRunID != runID || evidence.BundleHash != admission.BundleHash ||
-		!admission.AuthorizesSelected(evidence.SelectedFork.ExecutionID, runID, evidence.SelectedFork.ExecutionGeneration) {
-		return fmt.Errorf("selected card control requires its own admitted generation grant")
+	if err := requireCardGrantEvidence(runID, binding, admission, evidence, present, ordinary); err != nil {
+		return err
 	}
 	var ownership manager.RunExecutionOwnership
 	if lock {
@@ -83,4 +76,18 @@ func RequireCardRunControl(ctx context.Context, q runstate.RowQueryer, runID str
 		return fmt.Errorf("selected card control generation does not own its exact run")
 	}
 	return ctx.Err()
+}
+
+func requireCardGrantEvidence(runID string, binding runfork.RunForkSelectedContractBinding, admission managedexecution.Admission, evidence startupownership.GrantEvidence, present, ordinary bool) error {
+	if ordinary {
+		if admission.AuthorizesNormal() && (evidence.BundleHash != admission.BundleHash ||
+			evidence.GrantID != admission.ExecutionAuthorityID || evidence.RuntimeGeneration != admission.Generation) {
+			return fmt.Errorf("live card control requires its own ordinary generation grant")
+		}
+	} else if !present || evidence.SelectedFork == nil || evidence.SelectedFork.BindingID != binding.BindingID ||
+		evidence.SelectedFork.ForkRunID != runID || evidence.BundleHash != admission.BundleHash ||
+		!admission.AuthorizesSelected(evidence.SelectedFork.ExecutionID, runID, evidence.SelectedFork.ExecutionGeneration) {
+		return fmt.Errorf("selected card control requires its own admitted generation grant")
+	}
+	return nil
 }
