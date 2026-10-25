@@ -171,7 +171,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					state, found, err := h.workflow.Load(ctx, owner)
-					if err != nil || !found || state.CurrentState != "complete" || state.EntityID != entity || state.EntityType != "worker" {
+					if err != nil || !found || state.CurrentState != "complete" || state.EntityID != entity || state.EntityType != "state" {
 						t.Fatalf("recovered agent did not reach its exact final consumer: %#v, %t, %v", state, found, err)
 					}
 					if sourceCleanup != nil {

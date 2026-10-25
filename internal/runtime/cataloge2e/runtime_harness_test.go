@@ -1447,7 +1447,11 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 		h.t.Fatalf("load workflow instance for entity field seeding %s: %v", entityID, err)
 	}
 	if !ok {
-		entityType := h.requireRootEntityType()
+		contract, _ := entityruntime.ResolveForFlow(semanticview.Wrap(h.bundle), "")
+		entityType := contract.EntityType
+		if len(expected.Trigger.EntityFieldsBefore) != 0 || len(expected.Trigger.Entity) != 0 {
+			entityType = h.requireRootEntityType()
+		}
 		instance = runtimepipeline.WorkflowInstance{
 			InstanceID:      catalogRuntimeRunID,
 			StorageRef:      catalogRuntimeRunID,
@@ -1479,7 +1483,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if seededState := strings.TrimSpace(expected.Trigger.EntityStateBefore); seededState != "" {
 		instance.CurrentState = seededState
 	}
-	if instance.Fields == nil {
+	if instance.Fields == nil && instance.EntityType != "" {
 		instance.Fields = map[string]any{}
 	}
 	for key, value := range expected.Trigger.Entity {

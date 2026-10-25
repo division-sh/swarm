@@ -1624,7 +1624,7 @@ expect:
     include: [item.received, item.processed]
   no_dead_letters: true
   entities:
-    - type: item
+    - flow: .
       current_state: done
 `)
 	return sourceRoot

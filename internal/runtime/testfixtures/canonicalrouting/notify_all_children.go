@@ -1,6 +1,7 @@
 package canonicalrouting
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 )
@@ -42,6 +43,7 @@ type NotifyAllChildrenOptions struct {
 	AutoEmitOnCreate            bool
 	AutoEmitEventRevision       int
 	FanOutDeliveryBarrier       bool
+	InitialMembership           *[]string
 	NumericRegistrationRows     bool
 	NumericReporterSink         bool
 	NumericInternalSettlement   bool
@@ -125,6 +127,14 @@ auto_emit_on_create:
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
+		applyClosedReplacement(t, ownerNodes, "      guard: {check: has(state.account_ids)}\n", "")
+		if opts.InitialMembership != nil {
+			membership, err := json.Marshal(*opts.InitialMembership)
+			if err != nil || len(*opts.InitialMembership) == 0 {
+				t.Fatalf("finite barrier fixture requires its nonempty construction membership: %v", err)
+			}
+			applyClosedReplacement(t, ownerEntities, "account_ids: [text]\n", "account_ids: "+string(membership)+"\n")
+		}
 		applyClosedReplacement(t, ownerNodes, `            command: payload.command
 `, `            command: payload.command
       join:
@@ -267,6 +277,7 @@ eligible: boolean
 last_command: text
 `)
 		if opts.NumericReporterSink || opts.NumericInternalSettlement {
+			applyClosedReplacement(t, accountEntities, "eng_roles: integer\ngem_score: number\neligible: boolean\n", "")
 			applyClosedReplacement(t, accountNodes, "    - account.registered\n", "")
 			applyClosedReplacement(t, accountNodes, `    account.registered:
       data_accumulation:

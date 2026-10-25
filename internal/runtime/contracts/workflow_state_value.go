@@ -96,7 +96,7 @@ func projectIndexedStateField(value yamlsource.Value, types TypeCatalogDocument)
 		return EntityFieldDecl{}, fmt.Errorf("indexed type must be a type name or [T], not a mapping")
 	}
 	var typeRef string
-	if typeValue.Presence() == yamlsource.PresenceSequence {
+	if typeValue.Presence() == yamlsource.PresenceSequence || typeValue.Presence() == yamlsource.PresenceEmptySequence {
 		typeRef, err = listDeclarationSequence(typeValue, "state field")
 	} else {
 		typeRef, err = listDeclarationScalar(typeValue, "state field", true)
@@ -118,6 +118,13 @@ func projectStateList(value yamlsource.Value, types TypeCatalogDocument) (Entity
 		return EntityFieldDecl{}, err
 	}
 	if len(items) == 1 {
+		if items[0].Presence() == yamlsource.PresenceSequence || items[0].Presence() == yamlsource.PresenceEmptySequence {
+			typeRef, err := listDeclarationSequence(value, "state field")
+			if err != nil {
+				return EntityFieldDecl{}, err
+			}
+			return stateTypeDeclaration(typeRef, types)
+		}
 		if token, err := items[0].Scalar(); err == nil && token.Tag == "!!str" && token.Style == 0 {
 			declaration, err := stateTypeDeclaration("["+token.Value+"]", types)
 			if err != nil {
