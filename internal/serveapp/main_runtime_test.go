@@ -5034,6 +5034,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
+	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID})
 	requireServedOKJSONRPC(t, endpoint, "run.stop", map[string]any{"run_id": runID})
 	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 		"event_name":      "item.processed",
