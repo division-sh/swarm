@@ -1212,7 +1212,7 @@ func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (conte
 		"events.yaml": "records.ready:\n  body: text\n",
 	}
 	if withTimer {
-		files["schema.yaml"] += "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n"
+		files["schema.yaml"] += "    - timer.elapsed\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n"
 		files["events.yaml"] += "timer.elapsed:\n"
 	} else {
 		files["nested/schema.yaml"] = "name: nested\n"
