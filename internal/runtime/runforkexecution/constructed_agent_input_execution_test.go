@@ -420,8 +420,6 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			err = errors.Join(err, c.attachment.runtime.bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
 		}
 		err = errors.Join(err, attachment.closeResult())
-	} else if proof.changedVersionRecovery {
-		result, err = ExecuteSelectedContractRunFork(ctx, request)
 	} else {
 		result, err = q1ExecuteSelectedPhaseComponent(t, ctx, request)
 	}

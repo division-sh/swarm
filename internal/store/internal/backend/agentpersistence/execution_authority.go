@@ -402,18 +402,27 @@ func observeOrdinaryRunSource(ctx context.Context, source correlation.SourceArti
 	}
 	var matches bool
 	err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		hash, binding, err := loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, false)
-		if err != nil {
-			return err
-		}
-		if binding.Valid && hash == source.BundleHash() {
-			matches, err = sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, runID, hash)
-			return err
-		}
-		matches = classifyOrdinaryRunSource(hash, binding, source.BundleHash()) == manager.RunExecutionOwned
-		return ctx.Err()
+		var err error
+		matches, err = ObserveOrdinaryRunSourceTx(ctx, tx, source, runID, sqlite)
+		return err
 	})
 	return matches && err == nil, err
+}
+
+// ObserveOrdinaryRunSourceTx shares the caller's read snapshot. It supplies no
+// execution admission, even when the retained handoff names an ordinary source.
+func ObserveOrdinaryRunSourceTx(ctx context.Context, tx *sql.Tx, source correlation.SourceArtifactFact, runID string, sqlite bool) (bool, error) {
+	if err := source.Validate(); err != nil {
+		return false, err
+	}
+	hash, binding, err := loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, false)
+	if err != nil {
+		return false, err
+	}
+	if binding.Valid && hash == source.BundleHash() {
+		return sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, runID, hash)
+	}
+	return classifyOrdinaryRunSource(hash, binding, source.BundleHash()) == manager.RunExecutionOwned, ctx.Err()
 }
 
 func loadRunExecutionBindingModeTx(ctx context.Context, tx *sql.Tx, runID string, sqlite, lock bool) (string, sql.NullString, error) {

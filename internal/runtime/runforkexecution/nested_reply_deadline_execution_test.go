@@ -127,7 +127,15 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 		t.Fatal(err)
 	}
 	capability := owner.ports.contexts.capability
-	if _, err := capability.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+	current, present, err := capability.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if present {
+		if current.Revision != plan.Revision {
+			t.Fatal("native live fixture requires its exact retained complete source set")
+		}
+	} else if _, err := capability.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: loaded.SourceArtifactFact.BundleHash(),
