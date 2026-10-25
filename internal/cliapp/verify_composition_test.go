@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -245,6 +246,44 @@ func TestVerifyPublicExistingStoreReportsGeneratedPreparationBothStores(t *testi
 					}
 				}
 			}
+			t.Run("compatible upgrade leaves the admitted run unchanged", func(t *testing.T) {
+				process, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+					OwnerID: "upgrade-setup", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = process.Release(context.Background()) })
+				original, err := startupownership.WithProcessMutationAuthority(ctx, process)
+				if err != nil {
+					t.Fatal(err)
+				}
+				runID := uuid.NewString()
+				storetest.RequireRun(t, original, owner, storetest.RunFixture{
+					RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+				})
+				if err := process.Release(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(edited+"\n# compatible source revision\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				var out, diagnostic bytes.Buffer
+				code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+				var result verifyCommandResult
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || code != 0 || !result.OK || !result.AdmissionComplete {
+					t.Fatalf("compatible retained run refused: code=%d result=%+v err=%v stderr=%s", code, result, err, &diagnostic)
+				}
+				if result.BundleHash == "" || result.BundleHash == bundle.SourceArtifact.BundleHash() {
+					t.Fatalf("upgrade witness did not change the candidate artifact: %q", result.BundleHash)
+				}
+				availability, err := owner.(interface {
+					LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
+				}).LoadRunBundleAvailability(ctx, runID)
+				if err != nil || availability.BundleHash != bundle.SourceArtifact.BundleHash() {
+					t.Fatalf("read-only upgrade inspection changed admitted source: %+v, %v", availability, err)
+				}
+			})
 		})
 	}
 }

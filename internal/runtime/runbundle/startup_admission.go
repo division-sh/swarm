@@ -115,6 +115,24 @@ type UpgradeBlocker struct {
 	Location     string
 }
 
+// UpgradeConflictError reports all stranded obligations without changing them.
+type UpgradeConflictError struct {
+	Blockers []UpgradeBlocker
+}
+
+func (e *UpgradeConflictError) Error() string {
+	details := make([]string, 0, len(e.Blockers))
+	for _, blocker := range e.Blockers {
+		details = append(details, fmt.Sprintf("run %s instance %s entity %s: %s (%s) at %s",
+			blocker.RunID, blocker.FlowInstance, blocker.EntityID, blocker.Kind, blocker.Detail, blocker.Location))
+	}
+	return "bundle upgrade would strand retained work: " + strings.Join(details, "; ")
+}
+
+func (e *UpgradeConflictError) Unwrap() error {
+	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "bundle_upgrade_blocked", "run-bundle", "upgrade", nil)
+}
+
 // CheckUpgrade is shared by verify and serve. The native transition owner must
 // reread at its fenced commit boundary; this result is not a reusable admission.
 func CheckUpgrade(ctx context.Context, current, candidate semanticview.Source, state UpgradeState) ([]UpgradeBlocker, error) {
