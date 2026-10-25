@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -148,8 +149,13 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
 				acknowledged, found, err := operations.LoadForkOperation(t.Context(), "retained-crash", "fixed-cut", "retained-crash-transport")
-				if err != nil || !found || acknowledged.Status != runfork.ForkOperationActivated || acknowledged.ForkRunID != checkpoint.ForkRun || acknowledged.Result == nil || acknowledged.Request.ResolvedPoint == nil {
-					t.Fatalf("armed arrival crash lost its permanent acknowledgment: %+v found=%v err=%v", acknowledged, found, err)
+				preACK := cut == "retained_armed_join_occurrence_committed"
+				wantStatus := runfork.ForkOperationActivated
+				if preACK {
+					wantStatus = runfork.ForkOperationMaterialized
+				}
+				if err != nil || !found || acknowledged.Status != wantStatus || acknowledged.ForkRunID != checkpoint.ForkRun || (acknowledged.Result == nil) != preACK || acknowledged.Request.ResolvedPoint == nil {
+					t.Fatalf("armed arrival crash lost its exact operation phase: %+v found=%v err=%v", acknowledged, found, err)
 				}
 				lifecycle := selected.(SelectedContractForkLifecycle)
 				plan, err := lifecycle.PlanRunFork(t.Context(), runfork.RunForkPlanRequest{
@@ -282,19 +288,28 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					}
 				})
 				loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
-				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
-					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
-				})
-				if err != nil || len(recovered) != 1 || recovered[0].RunID != child || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
-					t.Fatalf("armed arrival successor recovery: %+v err=%v", recovered, err)
-				}
 				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 					SourceRunID: child, Selection: acknowledged.Request.ContractSelection,
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
-				ordinary, _ := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+				ordinary, liveContexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
+					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+					LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+						use, _, err := liveContexts.AcquireBundleHash(ctx, hash)
+						return use, err
+					},
+				})
+				wantDisposition := runfork.SelectedForkRecoveryControlOnly
+				if preACK {
+					wantDisposition = runfork.SelectedForkRecoveryResume
+				}
+				if err != nil || len(recovered) != 1 || recovered[0].RunID != child || recovered[0].Disposition != wantDisposition {
+					t.Fatalf("armed arrival successor recovery: %+v err=%v", recovered, err)
+				}
 				rebootGrant, err := ordinary.CurrentStartupGrantEvidence()
 				if err != nil {
 					t.Fatal(err)
@@ -423,7 +438,11 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 				}
 				requirePendingSourceRebootConservation(t, wait, selected, before, sourceDelivery, rebootAuthority)
 				retry, found, err := operations.LoadForkOperation(wait, acknowledged.Request.Actor, acknowledged.Request.IdempotencyKey, acknowledged.Request.TransportHash)
-				if err != nil || !found || !reflect.DeepEqual(acknowledged, retry) {
+				if preACK {
+					if err != nil || !found || retry.Status != runfork.ForkOperationActivated || retry.Result == nil || retry.ForkRunID != child || retry.BindingID != acknowledged.BindingID || retry.SemanticHash != acknowledged.SemanticHash || !reflect.DeepEqual(retry.Request, acknowledged.Request) {
+						t.Fatalf("timeout recovery did not settle its exact retained operation: %+v err=%v", retry, err)
+					}
+				} else if err != nil || !found || !reflect.DeepEqual(acknowledged, retry) {
 					t.Fatalf("timeout recovery changed permanent acknowledgment: %+v err=%v", retry, err)
 				}
 			})

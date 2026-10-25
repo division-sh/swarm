@@ -145,12 +145,15 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		if err != nil {
 			return err
 		}
-		result.ReplayResumeAdmission, err = requireMaterializedRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
+		if err := port.attachment(txctx, tx, runForkSelectedContractActivationEvidence{lineage, binding, plan, req}); err != nil {
+			return addRunForkActivationBlocker(&result, err)
+		}
+		result.ReplayResumeAdmission, err = requireContinuingRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
 			plan, lineage.ForkRunID, req.InheritedSchedules, port.workflowTimers, port.arrivalSchedules, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
 		if err != nil {
 			return err
 		}
-		result.ReplayResumeAdmission, err = requireMaterializedRunForkReplyContexts(txctx, tx, port.replies, plan, lineage.ForkRunID, port.postgres, result.ReplayResumeAdmission)
+		result.ReplayResumeAdmission, err = requireContinuingRunForkReplyContexts(txctx, tx, port.replies, plan, lineage.ForkRunID, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
 		if err != nil {
 			return err
 		}
@@ -171,10 +174,6 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		sourceAdvancedFacts = append(sourceAdvancedFacts, runfork.ActiveSourceDeliveryConversationCouplingFacts(result.ReplayResumeAdmission)...)
 		sourceAdvancedFacts = uniqueNonEmptyStrings(sourceAdvancedFacts)
 		result.SourceAdvancedAfterFork = len(sourceAdvancedFacts) > 0
-		if err := port.attachment(txctx, tx, runForkSelectedContractActivationEvidence{lineage, binding, plan, req}); err != nil {
-			return addRunForkActivationBlocker(&result, err)
-		}
-
 		if req.ForkOperation == nil {
 			return errors.New("live fork activation requires its durable operation")
 		}

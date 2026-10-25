@@ -175,24 +175,8 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	}
 	retireContinuations := sync.OnceValue(func() error { return continuations.Retire(context.WithoutCancel(c.attachment.ctx)) })
 	defer func() { finalErr = errors.Join(finalErr, retireContinuations()) }()
-	if err := c.attachment.pipeline.RestoreWorkflowTimers(c.attachment.ctx); err != nil {
-		return out, err
-	}
-	if err := runtime.genericSchedules.ReconcileRunWakeups(c.attachment.ctx, c.req.ForkRunID); err != nil {
-		return out, err
-	}
-	if err := c.admitSelectedDeploymentFeeds(c.attachment.ctx); err != nil {
-		return out, err
-	}
-	// Recovered handlers may await already-owed fan-out or an original deadline.
-	// Their existing selected owners must be running before recovery is joined.
 	recovered := p.recoveryFromExecutionID != ""
-	if recovered {
-		if err := c.startSelectedServing(c.attachment.ctx); err != nil {
-			return out, err
-		}
-	}
-	if err := c.reconcileRecoveredDeliveries(c.attachment.ctx, continuations); err != nil {
+	if err := c.restoreLiveSelectedWork(continuations, recovered); err != nil {
 		return out, err
 	}
 	inputs, err := c.commitSelectedInputs()
@@ -218,17 +202,7 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 			SourceEventID: input.sourceEventID, ForkEventID: input.prepared.Event.ID(), EventName: string(input.prepared.Event.Type()),
 		})
 	}
-	if err := continuations.Synchronize(c.attachment.ctx); err != nil {
-		return out, err
-	}
-	timeout := c.req.AgentRuntime.Options.QuiescenceTimeout
-	if timeout <= 0 {
-		timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
-	}
-	wait, cancel := context.WithTimeout(c.attachment.ctx, timeout)
-	err = runtime.WaitForQuiescence(wait, runtime.bus)
-	cancel()
-	if err != nil {
+	if err := c.joinLiveSelectedWork(continuations); err != nil {
 		return out, err
 	}
 	if err := retireContinuations(); err != nil {
@@ -289,4 +263,37 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	}
 	// Post-commit reconciliation can fail without undoing the immutable ACK.
 	return out, err
+}
+
+func (c selectedContractForkLocalRuntimeContainer) restoreLiveSelectedWork(continuations *deliverycontinuation.Coordinator, recovered bool) error {
+	ctx := c.attachment.ctx
+	if err := c.attachment.pipeline.RestoreWorkflowTimers(ctx); err != nil {
+		return err
+	}
+	if err := c.attachment.runtime.genericSchedules.ReconcileRunWakeups(ctx, c.req.ForkRunID); err != nil {
+		return err
+	}
+	if err := c.admitSelectedDeploymentFeeds(ctx); err != nil {
+		return err
+	}
+	// Recovered handlers may await already-owed fan-out or an original deadline.
+	if recovered {
+		if err := c.startSelectedServing(ctx); err != nil {
+			return err
+		}
+	}
+	return c.reconcileRecoveredDeliveries(ctx, continuations)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) joinLiveSelectedWork(continuations *deliverycontinuation.Coordinator) error {
+	if err := continuations.Synchronize(c.attachment.ctx); err != nil {
+		return err
+	}
+	timeout := c.req.AgentRuntime.Options.QuiescenceTimeout
+	if timeout <= 0 {
+		timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
+	}
+	ctx, cancel := context.WithTimeout(c.attachment.ctx, timeout)
+	defer cancel()
+	return c.attachment.runtime.WaitForQuiescence(ctx, c.attachment.runtime.bus)
 }
