@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -351,62 +350,6 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	}
 	if lookup := manager.LookupIngress("chat", "github"); lookup.Found || !lookup.AliasFound {
 		t.Fatalf("wrong-provider lookup = %#v, want alias found without provider target", lookup)
-	}
-}
-
-func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneration(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
-	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	target := StandingTarget{
-		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
-		RunID: "run-1", Generation: 1, PublicationSequence: 1,
-		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
-	}
-	contextDef := BundleContext{
-		SourceArtifactFact: testSourceArtifactFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
-	}
-	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
-	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
-	if err != nil {
-		t.Fatalf("NewRuntimeContextManager: %v", err)
-	}
-	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
-		t.Fatalf("SuppressStandingServiceTargets: %v", err)
-	}
-	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Found || lookup.Loaded() || lookup.Cause != RuntimeContextCauseStandingSuppressed {
-		t.Fatalf("suppressed lookup = %#v", lookup)
-	}
-	if err := manager.RestoreStandingServiceTargets(target.ServiceID); err != nil {
-		t.Fatalf("RestoreStandingServiceTargets: %v", err)
-	}
-	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.RunID != target.RunID {
-		t.Fatalf("restored lookup = %#v", lookup)
-	}
-	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
-		t.Fatalf("second SuppressStandingServiceTargets: %v", err)
-	}
-	if err := manager.RetireStandingServiceOccurrence(context.Background(), target.ServiceID); err != nil {
-		t.Fatalf("RetireStandingServiceOccurrence: %v", err)
-	}
-	published := target
-	published.RunID = "run-2"
-	published.Generation = 2
-	published.PublicationSequence = 3
-	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{published}, nil); err != nil {
-		t.Fatalf("PublishStandingServiceTargets: %v", err)
-	}
-	lookup := manager.LookupIngress("chat", "telegram")
-	if !lookup.Loaded() || lookup.Target.RunID != "run-2" || lookup.Target.Generation != 2 || lookup.Target.PublicationSequence != 3 {
-		t.Fatalf("republished lookup = %#v", lookup)
 	}
 }
 

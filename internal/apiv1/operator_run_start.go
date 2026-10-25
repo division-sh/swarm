@@ -15,7 +15,6 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -128,8 +127,7 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	if err != nil {
 		return nil, err
 	}
-	selectedFeeds, err := admitRunStartDeploymentFeeds(selectedOpts.Source, data)
-	if err != nil {
+	if _, err := admitRunStartDeploymentFeeds(selectedOpts.Source, data); err != nil {
 		return nil, err
 	}
 	owner, ok := selectedOpts.Acknowledged.(deploymentRunStartOwner)
@@ -149,9 +147,6 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	}
 	if _, _, command, err = command.RequestHash(); err != nil {
 		return nil, NewInvalidParamsError(map[string]any{"field": "data", "reason": err.Error()})
-	}
-	if err := runtimerunstart.ValidateFinite(selectedOpts.Source, selectedFeeds); err != nil {
-		return nil, finiteRunStartApplicationError(err)
 	}
 	committed, err := owner.StartDeploymentRunAcknowledged(ctx, command, idempotency)
 	if err != nil {
@@ -178,16 +173,6 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 			"run creation %s", record.Summary.Outcome))
 	}
 	return recordedPublicCompletionResult(committed.Completion)
-}
-
-func finiteRunStartApplicationError(err error) error {
-	var refusal *runtimerunstart.FiniteStartError
-	if !errors.As(err, &refusal) {
-		return err
-	}
-	return NewApplicationError(RunNeverCompletesCode, false, map[string]any{
-		"flow_id": refusal.FlowID, "detail": refusal.Error(),
-	})
 }
 
 func admitRunStartDeploymentFeeds(source semanticview.Source, data durabledata.RunCreationDataEnvelope) ([]runtimepinrouting.SourceEvent, error) {
