@@ -78,10 +78,13 @@ func assertIssue2655ChildCutContents(t *testing.T, ctx context.Context, f *deplo
 			}
 		}
 	}
-	for _, table := range []string{"flow_instances", "entity_state", "run_fork_fact_revisions"} {
+	for _, table := range []string{"flow_instances", "run_fork_fact_revisions"} {
 		if counts[table] == 0 {
 			t.Fatalf("child has no retained at-cut %s evidence", table)
 		}
+	}
+	if counts["entity_state"] != 0 {
+		t.Fatal("stateless source acquired an authored state record in its fork")
 	}
 	lineage := false
 	for _, row := range rows["runs"] {

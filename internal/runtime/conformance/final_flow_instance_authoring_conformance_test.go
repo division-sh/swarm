@@ -140,12 +140,6 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			checkID:     "flow_boundary_create_entity_validation",
 			wantMessage: "caller-selected entity_id",
 		},
-		{
-			name:        "retired root default caller-selected entity id",
-			opts:        finalflowinstanceauthoring.Options{RootDefaultEntityIDSource: true},
-			checkID:     "flow_boundary_create_entity_validation",
-			wantMessage: "caller-selected entity_id",
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

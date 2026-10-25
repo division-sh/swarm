@@ -18,7 +18,7 @@ const (
 
 	TemplateFlowID       = "account"
 	TemplateNodeID       = "account-node"
-	TemplateEntityType   = "account_state"
+	TemplateEntityType   = "state"
 	TemplateInputPin     = "account.ready"
 	TemplateInstanceBy   = "account_id"
 	TemplatePayloadKey   = "account_id"
@@ -34,11 +34,10 @@ type Options struct {
 	ProducerTarget              bool
 	ProducerBroadcast           bool
 
-	StaticCreateEntity        bool
-	StaticSelectEntity        bool
-	StaticSelectOrCreate      bool
-	StaticMissingAcquisition  bool
-	RootDefaultEntityIDSource bool
+	StaticCreateEntity       bool
+	StaticSelectEntity       bool
+	StaticSelectOrCreate     bool
+	StaticMissingAcquisition bool
 }
 
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
@@ -68,9 +67,6 @@ func Write(t testing.TB, opts Options) string {
 	root := canonicalrouting.CopyTemplateSelectOrCreateFinalAuthoring(t)
 	if opts.StaticCreateEntity || opts.StaticSelectEntity || opts.StaticSelectOrCreate || opts.StaticMissingAcquisition {
 		addLegacyStaticOverlay(t, root, opts)
-	}
-	if opts.RootDefaultEntityIDSource {
-		canonicalrouting.AddRootDefaultEntityIDForNegativeMutation(t, root)
 	}
 	applyRoutingMutation(t, root, opts)
 	addTemplateLifecycleOverlay(t, root)

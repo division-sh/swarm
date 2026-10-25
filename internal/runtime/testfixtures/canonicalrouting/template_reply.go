@@ -83,10 +83,10 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
 	requestKey = closedScalarLiteral(t, "request key", requestKey, "human-request")
 	accountID = closedScalarLiteral(t, "account ID", accountID, "account-a")
 	providerSchema := filepath.Join(root, "provider", "schema.yaml")
-	applyClosedReplacement(t, providerSchema, "    - provider.requested\n  outputs:\n", `    - provider.requested
-    - human_task.deferred
-    - human_task.approved
-  outputs:
+	applyClosedReplacement(t, providerSchema, "  - provider.requested\noutputs:\n", `  - provider.requested
+  - human_task.deferred
+  - human_task.approved
+outputs:
 `)
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
   provider.requested: {}

@@ -63,7 +63,7 @@ func TestFanOutServingPayloadAndEntitySnapshotsPreserveOrdinalsBothStores(t *tes
 				t.Fatalf("entity/on_complete owner changed: %+v", entityIntent)
 			}
 			var mutationEvent string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT caused_by_event FROM entity_mutations WHERE run_id=$1 AND mutation_id=$2 AND entity_id=$3 AND domain='authored_field' AND path='account_ids'`, f.runID, entityIntent.Source.MutationID, entityIntent.Source.EntityID).Scan(&mutationEvent); err != nil || mutationEvent != entityID {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT caused_by_event FROM entity_mutations WHERE run_id=$1 AND mutation_id=$2 AND entity_id=$3 AND domain='fan_out_source' AND path='account_ids'`, f.runID, entityIntent.Source.MutationID, entityIntent.Source.EntityID).Scan(&mutationEvent); err != nil || mutationEvent != entityID {
 				t.Fatalf("entity source not bound to its own handler mutation: event=%s err=%v", mutationEvent, err)
 			}
 			if _, copied := entityIntent.Request.Capsule.Entity["account_ids"]; copied {

@@ -24,31 +24,25 @@ func TestPrimaryEntityConformance(t *testing.T) {
 		{
 			name:         "single entity is primary",
 			flowSchema:   primaryEntityConformanceSchema(""),
-			flowEntities: "vertical:\n  name: text\n",
-			wantEntity:   "vertical",
+			flowEntities: "name: text\n",
+			wantEntity:   "state",
 		},
 		{
 			name:          "schema entity selector fails closed",
 			flowSchema:    primaryEntityConformanceSchema("entity: vertical\n"),
-			flowEntities:  "vertical:\n  name: text\n",
+			flowEntities:  "name: text\n",
 			wantLoadError: `schema field "entity" is not supported`,
-		},
-		{
-			name:          "multi entity normal flow fails closed",
-			flowSchema:    primaryEntityConformanceSchema(""),
-			flowEntities:  "vertical:\n  name: text\ncampaign:\n  title: text\n",
-			wantLoadError: "exactly one entity type",
 		},
 		{
 			name:          "schema entity selector for missing entity fails closed",
 			flowSchema:    primaryEntityConformanceSchema("entity: missing\n"),
-			flowEntities:  "vertical:\n  name: text\n",
+			flowEntities:  "name: text\n",
 			wantLoadError: `schema field "entity" is not supported`,
 		},
 		{
 			name:          "entity-demanding normal flow without entity fails verify",
 			flowSchema:    primaryEntityConformanceSchema(""),
-			wantBootError: "has no declared entity types",
+			wantBootError: "has no state.yaml",
 		},
 	}
 

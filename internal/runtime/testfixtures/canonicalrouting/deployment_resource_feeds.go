@@ -62,7 +62,7 @@ func CopySelectedOperationPinnedResource(t testing.TB) string {
 	t.Helper()
 	root := CopySelectedDeploymentResource(t, "root", false)
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"),
-		"  inputs: [root.ready, fixture.close.requested]\n", "  inputs: [root.ready, fixture.seed.requested, fixture.close.requested]\n")
+		"inputs: [root.ready, fixture.close.requested]\n", "inputs: [root.ready, fixture.seed.requested, fixture.close.requested]\n")
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "events.yaml"),
 		DeploymentFixtureCloseDeclaration, DeploymentFixtureCloseDeclaration+"fixture.seed.requested:\n")
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "nodes.yaml"),
@@ -76,13 +76,13 @@ func CopySelectedDeploymentResourceFiniteSingleton(t testing.TB) string {
 	t.Helper()
 	root := CopySelectedDeploymentResource(t, "singleton", true)
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "events.yaml"), DeploymentFixtureCloseDeclaration, "")
-	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "    - fixture.close.requested\n", "")
+	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "  - fixture.close.requested\n", "")
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"),
 		"  - event: fixture.close.requested\n    from: .\n    to: consumer\n",
 		"  - event: fixture.close.requested\n    from: consumer\n    to: .\n")
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/schema.yaml"),
-		"  inputs: [root.ready, fixture.close.requested]\n",
-		"  inputs: [root.ready]\n  outputs: [fixture.close.requested]\n")
+		"inputs: [root.ready, fixture.close.requested]\n",
+		"inputs: [root.ready]\noutputs: [fixture.close.requested]\n")
 	writeClosedVariantFile(t, root, "consumer/events.yaml", DeploymentFixtureCloseDeclaration)
 	writeClosedVariantFile(t, root, "consumer/nodes.yaml", `consumer-node:
   root.ready:

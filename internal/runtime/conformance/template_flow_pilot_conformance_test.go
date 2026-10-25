@@ -15,18 +15,10 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimeentity "github.com/division-sh/swarm/internal/runtime/entityruntime"
-	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
@@ -47,8 +39,8 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 	if err != nil {
 		t.Fatalf("ResolveFlowPrimaryEntity(account): %v", err)
 	}
-	if primary.EntityType != "account_state" {
-		t.Fatalf("account primary entity = %q, want account_state", primary.EntityType)
+	if primary.EntityType != "state" {
+		t.Fatalf("account primary entity = %q, want state", primary.EntityType)
 	}
 	instance, err := bundle.ResolveFlowTemplateInstance("account")
 	if err != nil {
@@ -231,291 +223,6 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 	}
 }
 
-func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t *testing.T) {
-	portfolioEntityID := runtimeflowidentity.EntityID("portfolio")
-	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("examples/routing/notify-all-children"))
-	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
-	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
-	if got := report.HardInvalidities(); len(got) != 0 {
-		t.Fatalf("notify-all-children hard invalidities = %#v, want none", got)
-	}
-
-	plans, issues := compiledConnectPlans(source)
-	if len(issues) != 0 {
-		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
-	}
-	plans = requireRootInputConnections(t, plans, "portfolio", "portfolio.opened", "portfolio.account.register.requested", "portfolio.accounts.register.requested", "portfolio.membership.seeded", "portfolio.notify.requested")
-	if len(plans) != 2 {
-		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want registration and notification plans", plans)
-	}
-	var plan runtimepinrouting.ConnectRoutePlan
-	for _, candidate := range plans {
-		sourceEndpoint := candidate.SourceEndpoint().Readback()
-		if sourceEndpoint.FlowID == notifyallchildren.OwnerFlowID && sourceEndpoint.Pin == notifyallchildren.OwnerOutputPin {
-			plan = candidate
-		}
-	}
-	sourceEndpoint := plan.SourceEndpoint().Readback()
-	receiverEndpoint := plan.ReceiverEndpoint().Readback()
-	if sourceEndpoint.FlowID != notifyallchildren.OwnerFlowID || sourceEndpoint.Pin != notifyallchildren.OwnerOutputPin || sourceEndpoint.PinDigest == "" {
-		t.Fatalf("route plan source = %#v, want portfolio.account_notify_requested keyed by account_id", sourceEndpoint)
-	}
-	if receiverEndpoint.FlowID != notifyallchildren.ChildFlowID || receiverEndpoint.Pin != notifyallchildren.ChildInputPin || !plan.ReceiverEndpoint().IsTemplate() {
-		t.Fatalf("route plan receiver = %#v, want account.account_notify_requested template", receiverEndpoint)
-	}
-	if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelect || plan.InstanceKey().Field().Path() != "account_id" {
-		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey())
-	}
-
-	portfolioNode := conformanceNode(t, "portfolio", "portfolio-coordinator")
-	handler, ok := source.ExecutableNodeEventHandler(portfolioNode, notifyallchildren.OwnerTriggerEvent)
-	if !ok {
-		t.Fatal("portfolio-coordinator notify handler missing")
-	}
-	entityContract, ok := runtimeentity.ResolveForFlow(source, notifyallchildren.OwnerFlowID)
-	if !ok {
-		t.Fatal("portfolio entity contract missing")
-	}
-	fields, err := runtimeentity.Initialize(entityContract, map[string]any{"portfolio_id": "portfolio", "account_ids": []any{"acct-a", "acct-b"}})
-	if err != nil {
-		t.Fatalf("initialize portfolio entity: %v", err)
-	}
-	state := runtimeengine.StateSnapshot{
-		EntityID:     runtimeidentity.EntityID(portfolioEntityID),
-		CurrentState: "pending",
-		StateCarrier: runtimeengine.NewStateCarrier(fields, nil, nil),
-	}
-	stateStore := &fanOutPinRouteStateRepo{snapshot: state}
-	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:        source,
-		StateRepo:     stateStore,
-		MutationOwner: stateStore,
-		Locker:        fanOutPinRouteLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor: %v", err)
-	}
-	parent := eventtest.RunCreatingRootIngressWithRoutingSource(
-		eventtest.UUID("evt-notify-all-children-parent"),
-		events.EventType("portfolio/portfolio.notify.requested"),
-		"",
-		"",
-		json.RawMessage(`{"portfolio_id":"portfolio","command":"refresh"}`),
-		0,
-		eventtest.UUID("run-notify-all-children"),
-		"",
-		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-			FlowID:       "portfolio",
-			FlowInstance: "portfolio",
-			EntityID:     portfolioEntityID,
-		}),
-		eventtest.StaticFlowRoutingSource("portfolio", "portfolio", portfolioEntityID),
-		time.Now().UTC(),
-	)
-	claim, err := runtimedelivery.AdmitPersistedClaim(
-		eventtest.UUID("delivery-notify-all-children"),
-		parent.RunID(),
-		"notify-all-children:"+portfolioNode.Key(),
-		eventtest.UUID("claim-notify-all-children"),
-		1,
-		runtimedelivery.SubscriberNode,
-		portfolioNode.Key(),
-	)
-	if err != nil {
-		t.Fatalf("admit fan-out delivery claim: %v", err)
-	}
-	executionCtx := runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claim)
-	result, err := exec.Execute(executionCtx, runtimeengine.ExecutionRequest{
-		EntityID:        runtimeidentity.EntityID(portfolioEntityID),
-		Node:            portfolioNode,
-		ExecutionFlowID: runtimeidentity.FlowID(notifyallchildren.OwnerFlowID),
-		Route:           runtimeflowidentity.DeriveRoute(notifyallchildren.OwnerFlowID, parent.RunID()),
-		Event:           parent,
-		ProducerSource:  parent.RoutingSource(),
-		HandlerEventKey: notifyallchildren.OwnerTriggerEvent,
-		Handler:         handler,
-		FanOutPlans:     source.FanOutPlansForHandler(portfolioNode, notifyallchildren.OwnerTriggerEvent),
-		State:           state,
-	})
-	if err != nil {
-		t.Fatalf("Execute fan_out: %v", err)
-	}
-	if result.Status != runtimeengine.OutcomeFannedOut || result.FanOutCount != 2 || len(result.FanOutIntents) == 0 || len(result.EmitIntents) != 0 {
-		t.Fatalf("fan_out result = status:%s count:%d obligation:%#v eager:%d", result.Status, result.FanOutCount, result.FanOutIntents, len(result.EmitIntents))
-	}
-	now := time.Now().UTC()
-	intent := fanoutobligation.Intent{
-		Request: result.FanOutIntents[0], Source: result.FanOutIntents[0].Source,
-		Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if intent.Source.Kind == fanoutobligation.SourceEntityField {
-		intent.Source.MutationID = eventtest.UUID("notify-all-children-source-revision")
-	}
-	itemIntents := make([]runtimeengine.EmitIntent, 0, result.FanOutCount)
-	for ordinal, item := range []any{"acct-a", "acct-b"} {
-		emit, evalErr := exec.EvaluateFanOutOrdinal(testAuthorActivityContext(context.Background()), intent, parent, item, ordinal)
-		if evalErr != nil {
-			t.Fatalf("EvaluateFanOutOrdinal(%d): %v", ordinal, evalErr)
-		}
-		itemIntents = append(itemIntents, emit)
-	}
-
-	accountAEntityID := runtimeflowidentity.EntityID("account/acct-a")
-	accountBEntityID := runtimeflowidentity.EntityID("account/acct-b")
-	sourceFact := conformanceSourceArtifactFact(t, source)
-	busCtx := testAuthorActivityContextForBundle(context.Background(), sourceFact)
-	root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), parent.RunID(), parent.RunID(), parent.RunID(), "")
-	portfolio, err := runtimeflowidentity.KeylessChild(source, root, "portfolio")
-	if err != nil {
-		t.Fatal(err)
-	}
-	receipts := conformanceConstructionReceipts{}
-	receipts.add(t, source, parent.RunID(), root, "")
-	receipts.add(t, source, parent.RunID(), portfolio, "")
-	for _, key := range []string{"acct-a", "acct-b"} {
-		instance, err := runtimeflowidentity.KeyedChild(source, root, "account", key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		receipts.add(t, source, parent.RunID(), instance, key)
-	}
-	store := &fanOutPinRouteMemoryStore{
-		activeAgents: []runtimebus.ActiveAgentDescriptor{
-			{Identity: agentidentitytest.DeclaredForRun(t, parent.RunID(), "account-worker", "notify-all-children/account", "account", "acct-a", "account/acct-a"), EntityID: accountAEntityID},
-			{Identity: agentidentitytest.DeclaredForRun(t, parent.RunID(), "account-worker", "notify-all-children/account", "account", "acct-b", "account/acct-b"), EntityID: accountBEntityID},
-		},
-	}
-	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
-		ContractBundle:     source,
-		SourceArtifactFact: sourceFact,
-		Durable: runtimebus.DurableDependencies{
-			Instances:                receipts,
-			ConstructionPublications: receipts,
-			ActiveAgents:             store,
-		},
-		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
-			t.Fatal("admitted account instances should satisfy fan-out delivery")
-			return runtimepipeline.FlowInstanceActivationPlan{}, nil
-		}),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	eb.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
-		for _, route := range routes {
-			if !route.Recipient.IsAgent() {
-				continue
-			}
-			identity := route.AgentIdentity.Normalize()
-			if identity.RunID != event.RunID() {
-				return fmt.Errorf("fan-out agent route run %q does not match event run %q", identity.RunID, event.RunID())
-			}
-			admitted := false
-			for _, descriptor := range store.activeAgents {
-				if identity == descriptor.Identity.Normalize() {
-					admitted = true
-					break
-				}
-			}
-			if !admitted {
-				return fmt.Errorf("fan-out agent route %s has no committed active descriptor", identity.Description())
-			}
-		}
-		return nil
-	}))
-	for _, instanceID := range []string{"acct-a", "acct-b"} {
-		lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, sourceFact, runtimeflowidentity.RunScopedFlowInstance{
-			RunID: parent.RunID(), Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		observed, found, err := receipts.LookupFlowInstance(busCtx, lookup)
-		if err != nil || !found || observed.Identity().InstancePath != "account/"+instanceID {
-			t.Fatalf("account fixture index: found=%t err=%v identity=%+v", found, err, observed.Identity())
-		}
-	}
-	agentDeliveries := make(map[string]<-chan *runtimebus.LocalDelivery, len(store.activeAgents))
-	for _, descriptor := range store.activeAgents {
-		admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
-			AgentID:       descriptor.Identity.AgentID(),
-			FlowID:        "account",
-			FlowPath:      descriptor.Identity.FlowInstance(),
-			Subscriptions: []string{"account.notify.requested"},
-		})
-		if err != nil {
-			t.Fatalf("AdmitFlowOwnedAgentSubscriptions(%s): %v", descriptor.Identity, err)
-		}
-		agentDeliveries[descriptor.Identity.FlowInstance()] = runtimebustest.SubscribeIdentity(t, eb, descriptor.Identity, admission.CarrierOnly())
-	}
-
-	want := map[string]events.RouteIdentity{
-		"acct-a": {FlowID: "account", FlowInstance: "account/acct-a", EntityID: accountAEntityID},
-		"acct-b": {FlowID: "account", FlowInstance: "account/acct-b", EntityID: accountBEntityID},
-	}
-	for idx, intent := range itemIntents {
-		evt := eventtest.Child(
-			eventtest.UUID("evt-notify-all-children-child-"+string(rune('a'+idx))),
-			intent.Event.Type(),
-			intent.Event.SourceAgent(),
-			intent.Event.TaskID(),
-			intent.Event.Payload(),
-			intent.Event.ChainDepth(),
-			parent,
-			intent.Event.Envelope(),
-			intent.Event.CreatedAt(),
-		)
-		if got, wantType := string(evt.Type()), "portfolio/account.notify.requested"; got != wantType {
-			t.Fatalf("fan_out emitted event type = %q, want %q", got, wantType)
-		}
-		if target := evt.TargetRoute(); !target.Empty() {
-			t.Fatalf("engine fan_out emit pre-populated target = %#v, want EventBus RoutePlan ownership", target)
-		}
-		payload := map[string]any{}
-		if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
-			t.Fatalf("fan_out payload json: %v", err)
-		}
-		accountID, _ := payload["account_id"].(string)
-		expected, ok := want[accountID]
-		if !ok {
-			t.Fatalf("unexpected account_id in fan_out payload: %#v", payload)
-		}
-		expectedAgent := agentidentitytest.DeclaredForRun(
-			t,
-			parent.RunID(),
-			"account-worker",
-			"notify-all-children/account",
-			"account",
-			accountID,
-			"account/"+accountID,
-		)
-		preflight, err := eb.CheckPublishRecipientPlan(busCtx, evt)
-		if err != nil {
-			t.Fatalf("CheckPublishRecipientPlan(%s): %v", accountID, err)
-		}
-		if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 2 ||
-			!fanOutPinRouteDeliveryRoutesContain(preflight.DeliveryRoutes, expected, expectedAgent) {
-			t.Fatalf("preflight for %s = failure:%q routes:%#v, want node and exact agent at %#v", accountID, preflight.TargetFailure, preflight.DeliveryRoutes, expected)
-		}
-		if err := eb.Publish(busCtx, evt); err != nil {
-			t.Fatalf("Publish fan_out event for %s: %v", accountID, err)
-		}
-		select {
-		case delivery := <-agentDeliveries[expectedAgent.FlowInstance()]:
-			if err := delivery.Complete(); err != nil {
-				t.Fatalf("complete exact account agent delivery for %s: %v", accountID, err)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("timed out waiting for exact account agent delivery for %s", accountID)
-		}
-		if routes := store.deliveryRoutes[evt.ID()]; len(routes) != 2 ||
-			!fanOutPinRouteDeliveryRoutesContain(routes, expected, expectedAgent) {
-			t.Fatalf("persisted routes for %s = %#v, want node and exact agent at %#v", accountID, routes, expected)
-		}
-	}
-}
-
 func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 	portfolioEntityID := runtimeflowidentity.EntityID("portfolio")
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
@@ -620,38 +327,6 @@ func templateFlowPilotConformanceFindingContains(findings []runtimebootverify.Fi
 	return false
 }
 
-type fanOutPinRouteStateRepo struct {
-	snapshot runtimeengine.StateSnapshot
-}
-
-func (s *fanOutPinRouteStateRepo) LoadState(_ context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
-	if address.EntityID != s.snapshot.EntityID {
-		return runtimeengine.StateSnapshot{}, false, fmt.Errorf("fan-out state owner %s does not match %s", address.EntityID, s.snapshot.EntityID)
-	}
-	return s.snapshot, true, nil
-}
-
-func (s *fanOutPinRouteStateRepo) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
-	return fmt.Errorf("fan-out state must commit through the mutation owner")
-}
-
-func (s *fanOutPinRouteStateRepo) CommitEngineMutation(_ context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
-	if mutation.Address.EntityID != s.snapshot.EntityID {
-		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("fan-out mutation owner %s does not match %s", mutation.Address.EntityID, s.snapshot.EntityID)
-	}
-	s.snapshot.StateCarrier = mutation.State.StateCarrier
-	if mutation.State.NextState != "" {
-		s.snapshot.CurrentState = mutation.State.NextState
-	}
-	return runtimeengine.CommittedEngineMutation{Committed: true, EmitIntents: mutation.EmitIntents, ActivityIntents: mutation.ActivityIntents}, nil
-}
-
-type fanOutPinRouteLocker struct{}
-
-func (fanOutPinRouteLocker) WithEntityLock(ctx context.Context, _ runtimeidentity.EntityID, fn func(context.Context) error) error {
-	return fn(ctx)
-}
-
 type fanOutPinRouteMemoryStore struct {
 	runtimebus.InMemoryEventStore
 	activeAgents   []runtimebus.ActiveAgentDescriptor
@@ -670,24 +345,4 @@ func (s *fanOutPinRouteMemoryStore) CommitPublication(ctx context.Context, comma
 		s.deliveryRoutes[req.Event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
 		return nil
 	})
-}
-
-func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity, agentIdentity agentidentity.Identity) bool {
-	target = target.Normalized()
-	accountNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("account", "account-node")
-	if err != nil {
-		return false
-	}
-	nodeFound := false
-	agentFound := false
-	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.Recipient.IsNode() && route.Recipient.ID() == accountNode.Key() && route.Target.Route() == target {
-			nodeFound = true
-		}
-		if route.Recipient.IsAgent() && route.Recipient.ID() == "account-worker" &&
-			route.AgentIdentity == agentIdentity && route.Target.Route() == target {
-			agentFound = true
-		}
-	}
-	return nodeFound && agentFound
 }

@@ -124,6 +124,9 @@ outputs:
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
+		// Barrier scenarios settle their membership write before notification;
+		// use the normal literal initializer so construction is independently valid.
+		applyClosedReplacement(t, ownerEntities, "account_ids: [text]\n", "account_ids: ['acct-a']\n")
 		applyClosedReplacement(t, ownerNodes, "    guard: has(state.account_ids)\n", "")
 		applyClosedReplacement(t, ownerNodes, `          command: payload.command
 `, `          command: payload.command

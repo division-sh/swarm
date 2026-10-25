@@ -389,27 +389,6 @@ amount: 0
 `)
 }
 
-// AddRootDefaultEntityIDForNegativeMutation adds the one closed root-static
-// caller-selected identity invalidity used by the retirement proof.
-func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
-	t.Helper()
-	writeClosedNegativeFile(t, root, "state.yaml", "display_name: text\n")
-	writeClosedNegativeFile(t, root, "events.yaml", "subject.created:\n  entity_id: text\n  display_name: text\n")
-	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
-stages:
-  active: {}
-inputs:
-  - subject.created
-`)
-	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
-  subject.created:
-    data_accumulation:
-      writes:
-        - source_field: display_name
-          target_field: display_name
-`)
-}
-
 func writeClosedNegativeFile(t testing.TB, root, relativePath, source string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relativePath))
