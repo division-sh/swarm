@@ -55,7 +55,7 @@ func (s *PipelineSQLiteOwner) ReadBundleUpgradeState(ctx context.Context, runID 
 	return state, nil
 }
 
-// The same reader can be called with C's existing native switch transaction;
+// The same reader can be called with the native source-switch transaction;
 // no pool read or second transaction is needed at that boundary.
 func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgradeReadOwner, sqlite bool, runID string, source semanticview.Source) (runbundle.UpgradeState, error) {
 	state := runbundle.UpgradeState{RunID: runID}
