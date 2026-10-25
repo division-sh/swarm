@@ -70,9 +70,7 @@ func (p PayloadProducer) ValidateForEvent(event Event) error {
 		if !platformPayloadIdentity(p.class, p.event, p.producer) || p.producer.Type() != EventProducerPlatform {
 			return fmt.Errorf("platform payload producer requires an admitted platform event class")
 		}
-		if err := ValidateEventContract(event); err != nil {
-			return err
-		}
+		return ValidateEventContract(event)
 	default:
 		return fmt.Errorf("explicit payload producer is required")
 	}

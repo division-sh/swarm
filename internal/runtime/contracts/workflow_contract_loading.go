@@ -103,50 +103,9 @@ func LoadWorkflowContractBundleFromRootedSource(repoRoot string, rooted sourcear
 		Tools:                 map[string]ToolSchemaEntry{},
 		FlowSchemas:           map[string]FlowSchemaDocument{},
 	}
-	flowViewsByID := map[string]FlowContractView{}
-	for _, source := range sortedFlowSources(flowSources) {
-		schema := FlowSchemaDocument{}
-		if source.Schema != "" {
-			document, ok := artifact.YAML(source.Schema)
-			if !ok {
-				return nil, fmt.Errorf("admitted schema source %q is missing", source.Schema)
-			}
-			schema, err = AdmitFlowSchemaValue(document.Root())
-			if err != nil {
-				return nil, fmt.Errorf("decode %s: %w", source.Schema, err)
-			}
-		}
-		view, err := loadFlowContractViewFromSource(artifact, source, schema)
-		if err != nil {
-			return nil, err
-		}
-		flowViewsByID[source.FlowPath] = view
-		flowTypes, err := loadOptionalTypeDeclarationsFromSource(artifact, source.Types)
-		if err != nil {
-			return nil, err
-		}
-		flowEntities, err := loadOptionalEntityDeclarationsFromSource(artifact, source.Entities)
-		if err != nil {
-			return nil, err
-		}
-		if source.FlowPath == "." {
-			if source.Schema != "" {
-				root := schema
-				bundle.RootSchema = &root
-			}
-			bundle.RootTypes = flowTypes
-			bundle.RootEntities = flowEntities
-		} else {
-			if source.Schema != "" {
-				bundle.FlowSchemas[source.FlowPath] = schema
-			}
-			if len(flowTypes.Scalars) > 0 || len(flowTypes.Enums) > 0 || len(flowTypes.Types) > 0 {
-				bundle.flowTypes[source.FlowPath] = flowTypes
-			}
-			if len(flowEntities) > 0 {
-				bundle.flowEntities[source.FlowPath] = flowEntities
-			}
-		}
+	flowViewsByID, err := loadWorkflowFlowDeclarations(bundle)
+	if err != nil {
+		return nil, err
 	}
 	if err := buildFilesystemFlowTree(bundle, flowViewsByID); err != nil {
 		return nil, err
@@ -195,6 +154,57 @@ func LoadWorkflowContractBundleFromRootedSource(repoRoot string, rooted sourcear
 		return nil, err
 	}
 	return bundle, nil
+}
+
+func loadWorkflowFlowDeclarations(bundle *WorkflowContractBundle) (map[string]FlowContractView, error) {
+	artifact := bundle.SourceArtifact
+	flowViewsByID := map[string]FlowContractView{}
+	for _, source := range sortedFlowSources(bundle.FlowSources) {
+		schema := FlowSchemaDocument{}
+		if source.Schema != "" {
+			document, ok := artifact.YAML(source.Schema)
+			if !ok {
+				return nil, fmt.Errorf("admitted schema source %q is missing", source.Schema)
+			}
+			var err error
+			schema, err = AdmitFlowSchemaValue(document.Root())
+			if err != nil {
+				return nil, fmt.Errorf("decode %s: %w", source.Schema, err)
+			}
+		}
+		view, err := loadFlowContractViewFromSource(artifact, source, schema)
+		if err != nil {
+			return nil, err
+		}
+		flowViewsByID[source.FlowPath] = view
+		flowTypes, err := loadOptionalTypeDeclarationsFromSource(artifact, source.Types)
+		if err != nil {
+			return nil, err
+		}
+		flowEntities, err := loadOptionalEntityDeclarationsFromSource(artifact, source.Entities)
+		if err != nil {
+			return nil, err
+		}
+		if source.FlowPath == "." {
+			if source.Schema != "" {
+				root := schema
+				bundle.RootSchema = &root
+			}
+			bundle.RootTypes = flowTypes
+			bundle.RootEntities = flowEntities
+			continue
+		}
+		if source.Schema != "" {
+			bundle.FlowSchemas[source.FlowPath] = schema
+		}
+		if len(flowTypes.Scalars) > 0 || len(flowTypes.Enums) > 0 || len(flowTypes.Types) > 0 {
+			bundle.flowTypes[source.FlowPath] = flowTypes
+		}
+		if len(flowEntities) > 0 {
+			bundle.flowEntities[source.FlowPath] = flowEntities
+		}
+	}
+	return flowViewsByID, nil
 }
 
 func finalizeWorkflowContractBundle(bundle *WorkflowContractBundle) error {

@@ -15,22 +15,7 @@ func (b *WorkflowContractBundle) IntroductionLocation(file, slot string, declara
 	if b == nil {
 		return yamlsource.Location{}, false
 	}
-	var raw []byte
-	if entry, ok := b.SourceArtifact.Entry(file); ok {
-		raw = entry.Bytes()
-	} else {
-		for _, entry := range b.PackInventory.Entries() {
-			for label, body := range entry.Provider().Members() {
-				if file == path.Join(entry.Directory(), label) {
-					raw = body
-					break
-				}
-			}
-			if raw != nil {
-				break
-			}
-		}
-	}
+	raw := b.introductionSourceBytes(file)
 	if raw == nil {
 		return yamlsource.Location{}, false
 	}
@@ -54,24 +39,41 @@ func (b *WorkflowContractBundle) IntroductionLocation(file, slot string, declara
 			}
 			value = items[index]
 			location = value.IntroductionLocation()
-		} else {
-			fields, err := value.Mapping()
-			if err != nil {
-				return yamlsource.Location{}, false
-			}
-			fieldIndex := slices.IndexFunc(fields, func(field yamlsource.MappingField) bool { return field.Name == key })
-			if fieldIndex < 0 {
-				return yamlsource.Location{}, false
-			}
-			field := fields[fieldIndex]
-			value = field.Value
-			location = value.IntroductionLocation()
-			if declarationKey && slot == "" {
-				location = field.IntroductionLocation()
-			}
+			continue
+		}
+		fields, err := value.Mapping()
+		if err != nil {
+			return yamlsource.Location{}, false
+		}
+		fieldIndex := slices.IndexFunc(fields, func(field yamlsource.MappingField) bool { return field.Name == key })
+		if fieldIndex < 0 {
+			return yamlsource.Location{}, false
+		}
+		field := fields[fieldIndex]
+		value = field.Value
+		location = value.IntroductionLocation()
+		if declarationKey && slot == "" {
+			location = field.IntroductionLocation()
 		}
 	}
 	return location, location.Line > 0 && location.Column > 0
+}
+
+func (b *WorkflowContractBundle) introductionSourceBytes(file string) []byte {
+	if entry, ok := b.SourceArtifact.Entry(file); ok {
+		return entry.Bytes()
+	}
+	for _, entry := range b.PackInventory.Entries() {
+		for label, body := range entry.Provider().Members() {
+			if file == path.Join(entry.Directory(), label) {
+				if body != nil {
+					return body
+				}
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // Decode the existing diagnostic slot spelling without normalizing map keys.
