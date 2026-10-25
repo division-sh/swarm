@@ -506,8 +506,14 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 			resumeChild := func() { releaseChild.Do(func() { close(childHold.release) }) }
 			t.Cleanup(resumeChild)
 			options.AgentManagerOptions.TestLifecycleProbe = childHold
+			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
+				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true}
+			var initialOperation *runfork.ForkOperationRequest
+			if restartVariant != "context_only" {
+				initialOperation = operation
+			}
 			prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut, AllowSourceFreeze: true,
-				SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+				SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ForkOperation: initialOperation})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -516,20 +522,11 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 					t.Error(err)
 				}
 			}()
-			request, err := prepared.MaterializationRequest()
-			if err != nil {
-				t.Fatal(err)
-			}
-			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
-				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true}
-			if restartVariant != "context_only" {
-				request.ForkOperation = operation
-			}
 			var immediateRows []replycontext.Record
 			immediateArms := map[string]joinruntime.Activation{}
-			staged, err := owner.ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
-			if err != nil {
-				t.Fatal(err)
+			staged, acknowledged, err := owner.materializePrepared(prepared.operation.PreparationContext(), prepared)
+			if err != nil || !acknowledged {
+				t.Fatalf("native prepared deadline child: %+v acknowledged=%t err=%v", staged, acknowledged, err)
 			}
 			if restartVariant == "context_only" {
 				immediateRows, err = storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
@@ -552,11 +549,7 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				}
 			}
 			if restartVariant == "" {
-				attachment := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut,
-					AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ForkOperation: operation})
-				if attachment.materialized.ForkRunID != staged.ForkRunID {
-					t.Fatalf("selected component changed its exact child: %+v", attachment.materialized)
-				}
+				attachment := q1AttachBranchPointComponent(t, prepared, staged)
 				attachment.serveSelectedControls(t)
 			} else {
 				if err := prepared.Close(); err != nil {
