@@ -44,7 +44,6 @@ type testOperatorCapabilities struct {
 	Idempotency               APIIdempotencyStore
 	Events                    EventPublisher
 	RunControl                RunControlController
-	StandingServices          StandingServiceController
 	RuntimeIngress            RuntimeIngressController
 	RuntimeContexts           *runtime.RuntimeContextManager
 	RuntimePublication        RuntimePublicationReader
@@ -156,7 +155,6 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		testOperatorEventReplayHandlers(c),
 		testOperatorRunForkHandlers(c),
 		OperatorRunControlHandlers(RunControlHandlerOptions{Now: c.Now, Controller: c.RunControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts, SelectedForkControls: c.SelectedForkControls}),
-		OperatorStandingServiceHandlers(StandingServiceHandlerOptions{Controller: c.StandingServices, Idempotency: c.Idempotency}),
 		OperatorRuntimeControlHandlers(RuntimeControlHandlerOptions{Now: c.Now, Ingress: c.RuntimeIngress, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
 		OperatorRuntimeNukeHandlers(RuntimeNukeHandlerOptions{Now: c.Now, Coordinator: c.ResetCoordinator, Idempotency: c.Idempotency}),
 		OperatorObservabilityHandlers(ObservabilityHandlerOptions{Observability: c.Observability}),
