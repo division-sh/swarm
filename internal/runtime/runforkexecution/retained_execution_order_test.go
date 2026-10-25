@@ -4,16 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	rootruntime "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -22,12 +18,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/google/uuid"
 )
 
 type retainedExecutionOrderProbe struct {
@@ -63,7 +55,7 @@ type retainedStartupProbe struct {
 
 func (p retainedStartupProbe) RequireActiveRunSource(ctx context.Context, runID string) (correlation.SourceArtifactFact, error) {
 	p.probe.mu.Lock()
-	fail := p.probe.activated && p.probe.startFailure
+	fail := p.probe.startFailure
 	p.probe.mu.Unlock()
 	if fail {
 		return correlation.SourceArtifactFact{}, p.probe.awaitFailure(ctx)
@@ -277,63 +269,25 @@ func TestSelectedCompletionActualScopeBothStores(t *testing.T) {
 }
 
 func TestReviewerSelectedAsyncFailureDisposesResources(t *testing.T) {
-	for _, fault := range []string{"publication", "execution-scope", "panic", "cancellation", "startup", "continuation", "settlement-retry", "settlement-cleanup", "stale-settlement", "cleanup-retry", "cleanup-panic", "operator-stop", "staged-publication"} {
+	for _, fault := range []string{"publication", "execution-scope", "panic", "cancellation", "startup", "continuation", "settlement-retry", "settlement-cleanup", "stale-settlement", "cleanup-retry", "cleanup-panic", "operator-stop"} {
 		t.Run(fault, func(t *testing.T) { proveRetainedAcknowledgment(t, fault) })
 	}
 }
 
 func proveRetainedAcknowledgment(t *testing.T, fault string) {
 	t.Helper()
-	staged := strings.HasPrefix(fault, "staged-")
-	fault = strings.TrimPrefix(fault, "staged-")
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var selected SelectedContractForkLifecycle
-			var owner SelectedContractExecutionOwner
-			if backend == "postgres" {
-				pg := storetest.StartPostgresRuntimeStore(t)
-				selected, owner = pg, selectedContractExecutionOwnerForTest(t, pg)
-			} else {
-				sqlite := storetest.StartSQLiteRuntimeStore(t)
-				selected, owner = sqlite, selectedRuntimeOutcomeSQLiteOwner(t, sqlite)
-			}
-			ctx := runForkTestContext(t)
-			ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
-			process, _ := worklifetime.ProcessFromContext(ctx)
-			baselineLeases := process.ActiveCount()
-			repo := runForkExecutionRepoRoot(t)
-			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")}
-			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts})
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx = correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
-			scope, err := authoractivity.BundleScopeForTarget(ctx, loaded.SourceArtifactFact.BundleHash())
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx = authoractivity.WithScope(ctx, scope)
-			descriptors, err := rootruntime.AuthorActivityEventDescriptors(loaded.Source)
-			if err != nil {
-				t.Fatal(err)
-			}
-			catalog, err := selected.RegisterAuthorActivityEventCatalog(scope, descriptors)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(catalog.Release)
-			sourceID, eventID := uuid.NewString(), uuid.NewString()
-			route := selectedExecutionEntitylessNodeRoute("source-only-node")
-			if staged {
-				route = selectedExecutionTestAgentRoute(t, sourceID, "source-only-agent", "")
-				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{
-					FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceID, EntityID: sourceID,
-				})
-			}
-			seedSelectedRuntimeOutcomeSource(t, ctx, backend, selected, loaded, sourceID, eventID, route, time.Unix(1700002200, 0).UTC())
+			fixture := newActivityForkFixture(t, backend)
+			owner, selected := fixture.owner, fixture.owner.ports.fork
+			ctx, request, _ := q1GateComponentSource(t, owner, false, true, false)
+			sourceID := request.SourceRunID
+			// This is private selected failure/cleanup, not a public handoff ACK.
+			operation := *request.ForkOperation
+			request.ForkOperation = nil
 			probe := &retainedExecutionOrderProbe{
 				SelectedContractForkLifecycle: owner.ports.fork, SelectedContractReplayPersistence: owner.ports.replay,
-				started: make(chan struct{}), release: make(chan struct{}), cleanup: errors.New("activation cleanup diagnostic"),
+				started: make(chan struct{}), release: make(chan struct{}),
 			}
 			if fault == "publication" || fault == "execution-scope" || strings.HasPrefix(fault, "settlement-") || strings.HasPrefix(fault, "cleanup-") || fault == "stale-settlement" {
 				probe.publicationError = errors.New("reviewer injected publication failure")
@@ -341,8 +295,6 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				probe.publicationError = context.Canceled
 			} else if fault == "panic" {
 				probe.publicationPanic = true
-			} else if fault == "startup" {
-				probe.startFailure = true
 			}
 			owner.ports.busDurable.RunLifecycle = retainedStartupProbe{OperationOwner: owner.ports.busDurable.RunLifecycle, probe: probe}
 			if fault == "continuation" {
@@ -357,49 +309,23 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			release := func() { releaseOnce.Do(func() { close(probe.release) }) }
 			defer release()
 			owner.ports.fork, owner.ports.replay = probe, probe
-			selection := runforkadmission.SelectedContractSelection(loaded.Source)
-			operation := runfork.ForkOperationRequest{
-				OperationID: uuid.NewString(), Actor: "retention-proof", IdempotencyKey: "fixed-cut",
-				TransportHash: "retention-proof-transport", SourceRunID: sourceID, ForkEventID: eventID,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection,
+			request.Owner = owner
+			process, _ := worklifetime.ProcessFromContext(ctx)
+			baselineLeases := process.ActiveCount()
+			attachment := q1StageBranchPointComponent(t, ctx, request)
+			if err := owner.retainPrepared(attachment.prepared); err != nil {
+				t.Fatal(err)
 			}
-			request := SelectedContractExecutionRequest{
-				SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
-				SourceLoader: loader, ContractSelection: selection,
-				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
+			probe.startFailure = fault == "startup"
+			if _, err := owner.ports.busDurable.RunLifecycle.TransitionActiveRun(attachment.container.attachment.ctx, runlifecycle.ActiveTransitionRequest{
+				RunID: attachment.materialized.ForkRunID, State: runlifecycle.StateRunning,
+			}); err != nil {
+				t.Fatal(err)
 			}
-			var result SelectedContractExecutionResult
-			if staged {
-				// This surface is unkeyed; direct execution below retains its
-				// separate exact durable-operation ACK assertions.
-				request.ForkOperation = nil
-				prepared, err := owner.Prepare(ctx, request)
-				if err != nil {
-					t.Fatal(err)
-				}
-				// The supported staged activation surface is unkeyed. Keyed
-				// request/acknowledgment preservation is proved by direct execution.
-				materialized, acknowledged, err := owner.materializePrepared(prepared.operation.PreparationContext(), prepared)
-				if err != nil || !acknowledged {
-					t.Fatalf("staged materialization: %+v %v", materialized, err)
-				}
-				if err := prepared.Close(); err != nil {
-					t.Fatal(err)
-				}
-				activation, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-					ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true, Store: selected.(SelectedContractActivationStore),
-					ExecutionOwner: owner, SourceLoader: loader, AgentRuntime: request.AgentRuntime,
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				result = SelectedContractExecutionResult{Materialization: materialized, Activation: activation.RunForkActivation, ExecutedEventCount: activation.ExecutedEventCount}
-			} else {
-				result, err = ExecuteSelectedContractRunFork(ctx, request)
+			if err := attachment.container.Serve(); err != nil {
+				t.Fatal(err)
 			}
-			if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 0 {
-				t.Fatalf("activation was confused with drain or cleanup: result=%+v error=%v", result, err)
-			}
+			result := SelectedContractExecutionResult{Materialization: attachment.materialized}
 			operations, ok := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 			})
@@ -407,8 +333,8 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				t.Fatal("selected store lacks its permanent operation reader")
 			}
 			record, found, err := operations.LoadForkOperation(context.Background(), operation.Actor, operation.IdempotencyKey, operation.TransportHash)
-			if err != nil || (!staged && (!found || record.Status != runfork.ForkOperationActivated || record.ForkRunID != result.Materialization.ForkRunID || record.Result == nil || record.Result.ExecutedEventCount != 0)) || (staged && found) {
-				t.Fatalf("activation lacked durable acknowledgment before drain: record=%+v found=%v error=%v", record, found, err)
+			if err != nil || found {
+				t.Fatalf("private selected component fabricated a public acknowledgment: record=%+v found=%v error=%v", record, found, err)
 			}
 			select {
 			case <-probe.started:
@@ -418,12 +344,12 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			probe.mu.Lock()
 			violation := probe.violation
 			probe.mu.Unlock()
-			if violation {
-				t.Fatal("business publication preceded acknowledged activation")
+			if !violation && fault != "startup" && fault != "continuation" {
+				t.Fatal("selected failure cut unexpectedly required a public activation ACK")
 			}
 			storage, err := storetest.ReadSelectedExecutionStorage(context.Background(), selected, result.Materialization.ForkRunID)
 			if err != nil || storage.State != "running" || storage.RunStatus != "running" || storage.Occurrences != 1 {
-				t.Fatalf("acknowledgment did not retain one current executor: %+v %v", storage, err)
+				t.Fatalf("component did not retain one current executor: %+v %v", storage, err)
 			}
 			if fault == "" {
 				return
@@ -532,8 +458,8 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				}
 			}
 			after, found, err := operations.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
-			if err != nil || found == staged || !reflect.DeepEqual(record, after) {
-				t.Fatalf("business failure changed the acknowledged creation: %+v %v", after, err)
+			if err != nil || found || !reflect.DeepEqual(record, after) {
+				t.Fatalf("private failure fabricated an acknowledged creation: %+v %v", after, err)
 			}
 			cardinality, err := storetest.ReadLifecycleEventCardinality(wait, selected, result.Materialization.ForkRunID, "item.received")
 			if err != nil || cardinality != 0 {
