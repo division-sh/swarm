@@ -9,7 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -53,9 +56,22 @@ func rootedContextForSource(t *testing.T, source semanticview.Source, root sourc
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtime := &Runtime{
+		Bus: bus, Manager: manager.NewAgentManagerWithOptions(bus, nil, manager.AgentManagerOptions{
+			ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
+		}), workOccurrence: owner,
+		Options: RuntimeOptions{SourceArtifactFact: fact, RuntimeInstanceID: owner.Identity().RuntimeInstanceID},
+	}
+	_, grant, err := newRuntimeTestProcessCapability(t, runtime.Manager, source, fact, owner.Identity().RuntimeInstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.InstallStartupGrant(grant); err != nil {
+		t.Fatal(err)
+	}
 	return BundleContext{
 		Source: source, SourceArtifactFact: fact, RootAdmission: root.Admission(), WorkOwner: owner,
-		Runtime:             &Runtime{Bus: bus, workOccurrence: owner},
+		Runtime:             runtime,
 		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), ProviderTriggerCatalog: catalog,
 		InstalledTriggerSubjects: subjects,
 	}

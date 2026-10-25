@@ -85,6 +85,7 @@ type AuthorActivityCatalogRegistrar interface {
 type RuntimeOptions struct {
 	TriggerEntries                   map[string]config.TriggerConfig
 	ExecutionPosture                 executionposture.Posture
+	PublicIngressAbsent              bool
 	EnableDeclaredClockBinding       bool
 	SelfCheck                        bool
 	WorkspaceLifecycle               workspace.Lifecycle
@@ -786,6 +787,7 @@ func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmse
 		}
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials, posture)
+	validationOpts.PublicIngressAbsent = opts.PublicIngressAbsent
 	validationOpts.TriggerEntries = triggers
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderCredentials = opts.ProviderCredentials
@@ -1015,6 +1017,28 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 		}
 		if err := add(proof.EventKey(), disposition); err != nil {
 			return nil, err
+		}
+		schema, found, err := source.ResolveEffectiveCompiledFlowEventSchema(endpoint.FlowID, proof.Local)
+		if err != nil {
+			return nil, err
+		}
+		if found && schema.Classification() == runtimecontracts.CompiledEventSchemaImported {
+			if err := add(schema.EventName(), runtimeauthoractivity.StoryDifferent); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, provenance := range source.SemanticCapabilities().ProviderTriggerEventProvenance() {
+		for _, flow := range provenance.FlowScopes {
+			schema, found, err := source.ResolveEffectiveCompiledFlowEventSchema(flow, provenance.Event)
+			if err != nil {
+				return nil, err
+			}
+			if found && schema.Classification() == runtimecontracts.CompiledEventSchemaImported {
+				if err := add(schema.EventName(), runtimeauthoractivity.StoryDifferent); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	for _, join := range source.WorkflowJoins() {

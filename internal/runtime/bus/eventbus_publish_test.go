@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -2439,25 +2438,17 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			if _, err := newScopedTestEventBus(seedStore, runtimebus.EventBusOptions{ContractBundle: source}); err != nil {
 				t.Fatalf("prepare replay seed author activity catalog: %v", err)
 			}
-			eventIDs := make([]string, poolSize)
-			runIDs := make([]string, poolSize)
-			decisionRoute := surface == "decision_periodic"
-			for i := 0; i < poolSize; i++ {
-				runIDs[i] = uuid.NewString()
-				storetest.RequireRun(t, ctx, seedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: testSourceArtifactFact(source).BundleHash()})
-				eventIDs[i] = seedReplayPoolEvent(t, ctx, seedStore, testSourceArtifactFact(source), runIDs[i], decisionRoute)
-			}
 			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), seedStore); err != nil {
 				t.Fatal(err)
 			}
 			eventIDs := make([]string, poolSize)
 			runIDs := make([]string, poolSize)
-			seedCtx := originalEventBusFixtureContext(t, testAuthorActivityContext(context.Background()), seedStore)
+			seedCtx := originalEventBusFixtureContext(t, ctx, seedStore)
 			decisionRoute := surface == "decision_periodic"
 			for i := 0; i < poolSize; i++ {
 				runIDs[i] = uuid.NewString()
-				storetest.RequireRun(t, seedCtx, seedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash})
-				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
+				storetest.RequireRun(t, seedCtx, seedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: testSourceArtifactFact(source).BundleHash()})
+				eventIDs[i] = seedReplayPoolEvent(t, seedCtx, seedStore, testSourceArtifactFact(source), runIDs[i], decisionRoute)
 			}
 			claimed := make(chan struct{}, poolSize)
 			release := make(chan struct{})
@@ -2536,7 +2527,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 
 func seedReplayPoolEvent(t *testing.T, ctx context.Context, selected *store.PostgresStore, fact runtimecorrelation.SourceArtifactFact, runID string, decisionRoute bool) string {
 	t.Helper()
-	ctx := originalEventBusFixtureContext(t, testAuthorActivityContext(context.Background()), selected)
+	ctx = originalEventBusFixtureContext(t, ctx, selected)
 	eventID, entityID := uuid.NewString(), uuid.NewString()
 	eventType := events.EventType("custom.replay_pool_saturation")
 	payload := []byte(`{}`)
@@ -3110,6 +3101,10 @@ func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycle
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx, err := eb.AdmitSourceArtifactFact(testAuthorActivityContextForSource(context.Background(), semanticview.Wrap(bundle)))
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(uuid.NewString(),
 

@@ -208,7 +208,7 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 			if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&runID); err != nil {
 				t.Fatal(err)
 			}
-			card := waitChannelAnchorCard(t, db, runID, "stage_gate", ".")
+			card := waitChannelAnchorCard(t, db, runID, "stage_gate", runID)
 			waitChannelAnchorReceipt(t, db, card)
 			waitChannelDeliverySendsSettled(t, db, backend)
 			var deliveryID string

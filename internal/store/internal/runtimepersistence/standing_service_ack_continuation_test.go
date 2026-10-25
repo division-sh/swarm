@@ -8,10 +8,12 @@ import (
 	"testing"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type standingServicePostCommitFaultOwner struct {
@@ -62,13 +64,17 @@ func TestStandingServiceAcknowledgedCleanupErrorStillSignalsContinuationBothStor
 			workflow := newWorkflowTestCoordinator(t, db, runtimepipeline.NewWorkflowPersistence(owner), selected)
 			ctx := testAuthorActivityRuntimeContext()
 			ctx = originalStoreFixtureContext(t, ctx, selected)
-			artifact := storeTestSourceArtifact("standing-ack-continuation-" + backend)
-			seedStoreTestPersistedArtifact(t, db, artifact)
+			rooted, _ := sourceartifactfixture.Rooted(t, "standing-ack", storeTestSourceArtifact("standing-ack-continuation-"+backend))
+			artifact := rooted.Artifact()
 			source := mustStoreTestSourceArtifactFact(artifact.BundleHash())
+			ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, source), rooted.Admission())
+			if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			candidate := func(path string) runtimepipeline.StandingServiceCandidate {
 				return runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 					ServiceID: runtimeflowidentity.StandingServiceID(path), FlowPath: path,
-					Source: source,
+					Source: source, RootAdmission: rooted.Admission(),
 				}
 			}
 			suspendedCandidate := candidate("project/standing-ack-suspend")

@@ -159,6 +159,7 @@ func TestSelectedForkPublicationLineagePhasesRollbackBothStores(t *testing.T) {
 			t.Run(backend.name+"/"+phase, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+				ctx = requireDefaultSourceArtifactForTest(t, ctx, fixture.store)
 				foreignRunID, foreignEventID := uuid.NewString(), uuid.NewString()
 				if phase == "after_side_effects" {
 					foreign := eventtest.RunCreatingRootIngress(foreignEventID, "atomic.source", "gateway", "foreign-task", []byte(`{"source":true}`), 0, foreignRunID, "", events.EventEnvelope{}, time.Date(2026, 7, 18, 18, 0, 0, 0, time.UTC))

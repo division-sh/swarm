@@ -309,7 +309,11 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 	}
 	source := semanticview.Wrap(bundle)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-	ctx, cancel := context.WithTimeout(correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(fact.BundleHash()), fact), runID), 40*time.Second)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(correlation.WithRootAdmission(correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(fact.BundleHash()), fact), runID), rooted.Admission()), 40*time.Second)
 	defer cancel()
 	request := testStartupAcquireRequest("publication-group-crash-" + mode)
 	process, err := fixture.store.(startupownership.Store).AcquireProcessCapability(ctx, request)
@@ -334,7 +338,11 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 			t.Fatalf("not exact process crash takeover: old=%+v next=%+v", old, authority)
 		}
 	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

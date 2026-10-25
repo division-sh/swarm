@@ -31,7 +31,7 @@ const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc
 const debtQuiescenceCollectorFrom = "65fe2e66c01eb0e19ce2b44d53f545cc76dd823f5f8b58562e139a362cc9c267"
 const debtRunFixtureCollectorFrom = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e4d80d904832757ae047"
 const debtDeploymentRegistrationCollectorFrom = "4a683b60cf5147aece5eabc4e8f044555f64a15623f9e7106ddb4d9726961f9a"
-const debtS1CollectorFrom = "f765afc073439ecaa3e031c497a8bee3f06af9d9a0b3a816e97ab28f366c4834"
+const debtS1CollectorFrom = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
@@ -192,6 +192,28 @@ func debtWithDeploymentRegistrationStubs(sites map[string]authorityDebtSite) map
 	return out
 }
 
+// LEAD #2667/6396880696 permits only these two additional counted sites.
+// D24's one-symbol classification and every other site's limit are unchanged.
+func debtWithS1RetainedSourceConstructors(sites map[string]authorityDebtSite) map[string]authorityDebtSite {
+	out := make(map[string]authorityDebtSite, len(sites)+2)
+	for key, site := range sites {
+		out[key] = site
+	}
+	for _, result := range [2]string{
+		"*github.com/division-sh/swarm/internal/store.PostgresStore",
+		"*github.com/division-sh/swarm/internal/store.SQLiteRuntimeStore",
+	} {
+		site := authorityDebtSite{
+			Kind: "selected-store-construction", File: "internal/store/internal/backend/runforkpersistence/selected_rooted_source_test.go",
+			Declaration: "newSelectedRootedSourceFixture", Operation: "construction:" + result, Resolved: result,
+			Family: "authority-carrier", Replacement: "original selected construction/work-lifetime owner; no getter or transaction-context recovery",
+			Multiplicity: 1,
+		}
+		out[site.identity()] = site
+	}
+	return out
+}
+
 // Reviewed at 2b699b9af7c05fb8f319ae190f9c2f802bd7bd10 ->
 // 762f3084c5f6f50539c9f56a3dc15a1b603822f3 (ruling 6091976606).
 // These nine unchanged calls reuse the registrar's existing selected owner.
@@ -222,24 +244,48 @@ func debtRunFixtureSignatureSite(declaration, resolved string) authorityDebtSite
 
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
-	for index, pair := range append(runFixtures[:], selectedFixtures[:]...) {
+	pairs := append(runFixtures[:], selectedFixtures[:]...)
+	pairs = append(pairs, debtSelectedBindingRootArgumentTransition())
+	for _, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
 			if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
 				return head, base, source, []string{"both reviewed run-fixture signature identities survive: " + old.Declaration}
 			}
 		}
-		sourcePredecessor := source[old.identity()] == old && source[current.identity()].Multiplicity == 0
-		sourceLanded := index >= len(runFixtures) && source[current.identity()] == current && source[old.identity()].Multiplicity == 0
 		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
 			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
-			(sourcePredecessor || sourceLanded) {
+			source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
 			head = debtForwardQuiescenceUncertainty(head, old, current)
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 			source = debtForwardQuiescenceUncertainty(source, old, current)
 		}
 	}
+	// The selected-owner calls may already be landed while their allowance
+	// retains the old signature. Only the exact reviewed source proves this arm.
+	for _, pair := range selectedFixtures {
+		old, current := pair[0], pair[1]
+		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+			source[current.identity()] == current && source[old.identity()].Multiplicity == 0 &&
+			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 {
+			head = debtForwardQuiescenceUncertainty(head, old, current)
+			base = debtForwardQuiescenceUncertainty(base, old, current)
+		}
+	}
 	return head, base, source, nil
+}
+
+// #2791/6396939990 preserves the same counted INSERT with exact rooted arguments.
+func debtSelectedBindingRootArgumentTransition() [2]authorityDebtSite {
+	old := authorityDebtSite{
+		Kind: "raw-operation", File: "internal/runtime/runforkexecution/execution_test.go", Declaration: "buildSelectedForkProofContainer",
+		Operation: "call:database/sql.(*database/sql.DB).ExecContext",
+		Resolved:  "func=func(ctx context.Context, query string, args ...any) (database/sql.Result, error)|recv=*database/sql.DB|arg=context.Context|arg=string|arg=string|arg=string|arg=string|arg=int64|arg=string|arg=time.Time|results=(database/sql.Result,error)",
+		Family:    "fork", Replacement: "selected fork/source/event/lifecycle operation and bounded fork observation", Multiplicity: 1,
+	}
+	current := old
+	current.Resolved = "func=func(ctx context.Context, query string, args ...any) (database/sql.Result, error)|recv=*database/sql.DB|arg=context.Context|arg=string|arg=string|arg=string|arg=string|arg=int64|arg=string|arg=time.Time|arg=string|arg=string|results=(database/sql.Result,error)"
+	return [2]authorityDebtSite{old, current}
 }
 
 func debtQuiescenceUncertaintyTransition() (authorityDebtSite, authorityDebtSite) {
@@ -875,6 +921,15 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		comparisonBaseline = debtWithDeploymentRegistrationStubs(comparisonBaseline)
 		comparisonSource = debtWithDeploymentRegistrationStubs(comparisonSource)
 	}
+	if trusted.Collector == debtS1CollectorFrom && collector == debtS1CollectorTo {
+		for key, site := range debtWithS1RetainedSourceConstructors(nil) {
+			if actual[key] != site || baseActual[key].Multiplicity != 0 {
+				t.Fatal("reviewed S1 constructor additions do not match the exact two counted sites")
+			}
+		}
+		comparisonBaseline = debtWithS1RetainedSourceConstructors(comparisonBaseline)
+		comparisonSource = debtWithS1RetainedSourceConstructors(comparisonSource)
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, comparisonBaseline, comparisonSource)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
@@ -1009,7 +1064,8 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == debtS1CollectorFrom && trusted.Collector == base &&
 		current == debtS1CollectorTo && head.Collector == current &&
-		debtSitesEqual(head.Sites, trusted.Sites) {
+		authorityDebtCount(head.Sites) == authorityDebtCount(trusted.Sites)+2 &&
+		debtSitesEqual(head.Sites, debtWithS1RetainedSourceConstructors(trusted.Sites)) {
 		return nil
 	}
 	if base == debtCacheCollectorFrom && trusted.Collector == debtCacheCollectorFrom &&

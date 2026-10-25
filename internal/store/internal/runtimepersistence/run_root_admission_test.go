@@ -31,7 +31,7 @@ func TestS1RunRootCreationRequiresRetainedPairBothStores(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedRunStore)
 			sourceA, _ := admittedRootForStorage(t, "shop-a")
 			sourceB, _ := admittedRootForStorage(t, "shop-b")
-			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			if _, err := selected.EnsureRootedSource(ctx, sourceB); err != nil {
 				t.Fatal(err)
 			}
@@ -66,7 +66,7 @@ func TestS1RunRootRevisionAndHistoryBothStores(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedRunStore)
 			sourceA, pathA := admittedRootForStorage(t, "shop-a")
 			sourceB, pathB := admittedRootForStorage(t, "shop-b")
-			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			if _, err := selected.EnsureRootedSource(ctx, sourceA); err != nil {
 				t.Fatal(err)
 			}
@@ -134,7 +134,7 @@ func TestS1RunRootActiveAdmissionRejectsForeignContextBothStores(t *testing.T) {
 			writer := selectedAdmissionLifecycleWriter(selected)
 			sourceA, _ := admittedRootForStorage(t, "shop-a")
 			sourceB, _ := admittedRootForStorage(t, "shop-b")
-			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
 				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 					t.Fatal(err)
@@ -215,7 +215,7 @@ func TestS1RunRootCommitUncertaintyBothStores(t *testing.T) {
 					selected := owner.(rootedRunStore)
 					sourceA, _ := admittedRootForStorage(t, "shop-a")
 					sourceB, _ := admittedRootForStorage(t, "shop-b")
-					ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+					ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 					for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
 						if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 							t.Fatal(err)
@@ -274,7 +274,7 @@ func TestS1RunRootReadRefusesUnacknowledgedSnapshotBothStores(t *testing.T) {
 			owner, _, connector := newStopCommitStore(t, backend)
 			selected := owner.(rootedRunStore)
 			source, _ := admittedRootForStorage(t, "shop-a")
-			ctx := testAuthorActivityContextForBundle(source.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.Artifact().BundleHash()), selected)
 			if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 				t.Fatal(err)
 			}

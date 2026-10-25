@@ -20,7 +20,7 @@ func TestS1StandingCandidatesRetainCompiledRoot(t *testing.T) {
 	bundle, first, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
 		"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
-		"telegram/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n"),
+		"telegram/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message], verify_secret: webhook_signing_secret}, cannot: [bypass journal]}\n"),
 		"telegram/trigger.yaml":  []byte(strings.Replace(string(packfixture.NeutralProviderMembers()["trigger.yaml"]), "transport: session\n", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\n", 1)),
 	})
 	second, _ := sourceartifactfixture.Rooted(t, "other", first.Artifact())

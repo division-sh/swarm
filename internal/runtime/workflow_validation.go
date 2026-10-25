@@ -25,6 +25,7 @@ type WorkflowContractValidationOptions struct {
 	TriggerEntries                 map[string]config.TriggerConfig
 	Purpose                        runtimebootverify.ValidationPurpose
 	ExecutionPosture               executionposture.Posture
+	PublicIngressAbsent            bool
 	Credentials                    runtimecredentials.Store
 	ProviderCredentials            runtimecredentials.Store
 	ManagedCredentials             runtimemanagedcredentials.Store
@@ -121,7 +122,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 			return result, err
 		}
 	} else {
-		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, opts.LLMProfile, opts.ExecutionPosture)
+		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, opts.LLMProfile, opts.ExecutionPosture, opts.PublicIngressAbsent)
 		if err != nil {
 			return result, err
 		}

@@ -68,7 +68,9 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	if materialized.ForkRunID == "" || materialized.SelectedContractBinding == nil || !materialized.DeliveryResumeBlocked {
 		t.Fatalf("materialization = %#v", materialized)
 	}
-	replayed, err := pg.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, request)
+	readbackRequest := request
+	readbackRequest.ForkOperation = nil
+	replayed, err := pg.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, readbackRequest)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution exact replay: %v", err)
 	}
@@ -807,7 +809,8 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, activationRequest)
+	activationCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), request.RootAdmission)
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(activationCtx, activationRequest)
 	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
 		t.Fatalf("activation error = %v, want post-frontier active delivery blocker", err)
 	}
@@ -849,7 +852,7 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(time.Minute))
 	// Timer ownership is rejected before preparation can authorize materialization.
-	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustCanonicalSelectedContractStoreHash(t))
 	if err == nil || !strings.Contains(err.Error(), "fixed workflow timer contradicts captured construction owner") {
 		t.Fatalf("preparation error=%v, want exact timer construction refusal", err)
 	}
@@ -910,7 +913,7 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	if !runForkTestHasPlanBlocker(repeatedPlan, runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("repeated fixed-revision plan lost timer blocker: %#v", repeatedPlan.ReplayResumeAdmission)
 	}
-	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustCanonicalSelectedContractStoreHash(t))
 	if err != nil || prepared == nil {
 		t.Fatalf("selected historical preparation=%v error=%v", prepared, err)
 	}
@@ -938,6 +941,7 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	seedCanonicalSelectedContractExecutionStoreSource(t, ctx, db, sourceRunID, entityID, eventID, at)
 
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+	request.ForkOperation.AllowSourceFreeze = false
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
@@ -1337,6 +1341,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"), "active")
 
 			request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+			request.ForkOperation.AllowSourceFreeze = false
 			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			if err != nil {
 				t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
@@ -1395,6 +1400,7 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+	request.ForkOperation.AllowSourceFreeze = false
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
@@ -1826,8 +1832,16 @@ func captureSelectedStoreActivationRequest(t *testing.T, ctx context.Context, pg
 	if !loaded.SourceArtifactFact.Matches(request.SourceArtifactFact) || !reflect.DeepEqual(loaded.EffectiveSourceIdentity, request.EffectiveSourceIdentity) {
 		t.Fatal("activation source differs from its captured preparation")
 	}
+	storeTestWorkOwner(t)
+	value, _ := storeTestWorkFixtures.Load(t)
+	process := selectedMaterializationProcessForTest(t, value.(*storeTestWorkFixture), pg)
+	evidence, err := process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkOperation: request.ForkOperation, ForkRunID: materialized.ForkRunID,
+		Process: evidence.LeaseStamp(), OriginalRootAdmission: request.OriginalRootAdmission,
 		DataPins: materialized.DataPins, ExecutionSource: loaded.Source,
 		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
 	}
@@ -1895,10 +1909,14 @@ func seedCanonicalSelectedContractExecutionStoreSourceRawWithPayload(t *testing.
 
 func seedSelectedContractExecutionSourceWithRun(t *testing.T, ctx context.Context, db *sql.DB, run semanticRunFixture, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
 	t.Helper()
-	event := semanticEventRecordFixture(
-		eventID, run.RunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), payload,
-		semanticEventRecordFixtureEnvelope(entityID, ""), at,
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(
+		eventID, "item.received", "test", "", payload, 0, run.RunID,
+		semanticEventRecordFixtureEnvelope(entityID, ""), eventtest.RootRoutingSource(run.RunID), at,
 	)
+	event, err := eventtest.AdmitPayload(event, ".", "item.received")
+	if err != nil {
+		t.Fatal(err)
+	}
 	seedSelectedContractExecutionSourceWithEvent(t, ctx, db, run, entityID, event, at, routes, "flow-a/1")
 }
 

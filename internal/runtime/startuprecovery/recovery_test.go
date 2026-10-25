@@ -14,7 +14,7 @@ import (
 )
 
 func TestRecoverFailsClosedWhenAnyActiveRunLacksItsSourceArtifact(t *testing.T) {
-	artifact := recoveryArtifact(t)
+	artifact, root := recoveryArtifact(t)
 	reader := fakeAvailabilityReader{items: []runbundle.Availability{
 		{
 			RunID:      "11111111-1111-1111-1111-111111111111",
@@ -27,6 +27,8 @@ func TestRecoverFailsClosedWhenAnyActiveRunLacksItsSourceArtifact(t *testing.T) 
 			RunID:                 "22222222-2222-2222-2222-222222222222",
 			Status:                "running",
 			BundleHash:            artifact.BundleHash,
+			RootReference:         root,
+			RootAdmissionPresent:  true,
 			SourceArtifactPresent: true,
 		},
 	}}
@@ -41,12 +43,14 @@ func TestRecoverFailsClosedWhenAnyActiveRunLacksItsSourceArtifact(t *testing.T) 
 }
 
 func TestRecoverAcceptsOnlyAvailableSourceArtifacts(t *testing.T) {
-	artifact := recoveryArtifact(t)
+	artifact, root := recoveryArtifact(t)
 	reader := fakeAvailabilityReader{items: []runbundle.Availability{
 		{
 			RunID:                 "11111111-1111-1111-1111-111111111111",
 			Status:                "running",
 			BundleHash:            artifact.BundleHash,
+			RootReference:         root,
+			RootAdmissionPresent:  true,
 			SourceArtifactPresent: true,
 		},
 	}}
@@ -61,7 +65,7 @@ func TestRecoverAcceptsOnlyAvailableSourceArtifacts(t *testing.T) {
 }
 
 func TestRecoverValidatesStoredBytesAndNeverTreatsPresenceAsIntegrity(t *testing.T) {
-	valid := recoveryArtifact(t)
+	valid, root := recoveryArtifact(t)
 	readErr := errors.New("selected store unavailable")
 	for _, name := range []string{"valid", "missing after census", "corrupt blob", "hash mismatch", "read failure"} {
 		t.Run(name, func(t *testing.T) {
@@ -76,7 +80,8 @@ func TestRecoverValidatesStoredBytesAndNeverTreatsPresenceAsIntegrity(t *testing
 			case "read failure":
 				reader.err = readErr
 			}
-			availability := runbundle.Availability{RunID: "first", Status: "running", BundleHash: valid.BundleHash, SourceArtifactPresent: true}
+			availability := runbundle.Availability{RunID: "first", Status: "running", BundleHash: valid.BundleHash,
+				RootReference: root, RootAdmissionPresent: true, SourceArtifactPresent: true}
 			peer := availability
 			peer.RunID = "second"
 			_, err := Inspect(context.Background(), Request{
@@ -123,7 +128,7 @@ func (r cancellingAvailabilityReader) ActiveNonStandingRunBundleAvailabilities(c
 	return nil, errors.New("late read failure")
 }
 
-func recoveryArtifact(t *testing.T) sourceartifact.Persisted {
+func recoveryArtifact(t *testing.T) (sourceartifact.Persisted, sourceartifact.RootAdmissionReference) {
 	t.Helper()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
@@ -140,7 +145,11 @@ func recoveryArtifact(t *testing.T) sourceartifact.Persisted {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return persisted
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return persisted, rooted.Admission().Reference()
 }
 
 type fakeArtifactReader struct {

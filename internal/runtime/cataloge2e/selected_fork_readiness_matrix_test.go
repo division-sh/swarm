@@ -527,7 +527,8 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						}
 						var result forkexecution.SelectedContractExecutionResult
 						if stage == "staged" {
-							result.Materialization = stageCatalogSelectedContractFork(t, ctx, forkStore, executionOwner, loader, selection, options, catalogRuntimeRunID, frontierID)
+							operation := catalogStagedForkOperation(t, ctx, forkStore, selection, catalogRuntimeRunID, frontierID)
+							result.Materialization = stageCatalogSelectedContractFork(t, ctx, forkStore, executionOwner, loader, selection, options, catalogRuntimeRunID, frontierID, operation)
 						} else {
 							result, err = forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
 								SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,

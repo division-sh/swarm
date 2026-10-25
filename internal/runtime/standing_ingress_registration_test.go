@@ -182,7 +182,7 @@ func publicIngressRegistrationRuntime(t *testing.T, mode string) (*Runtime, *run
 	}
 	if mode == "mixed" {
 		members["coordinator/schema.yaml"] = []byte("stages: []\npins: {inputs: [inbound.telegram.raw, inbound.partner.raw]}\n")
-		members["coordinator/partner/manifest.yaml"] = []byte(metadata + "capabilities: {can: {}, cannot: [execute code]}\n")
+		members["coordinator/partner/manifest.yaml"] = []byte(metadata + "capabilities: {can: {emit_events: [raw], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n")
 		members["coordinator/partner/trigger.yaml"] = []byte("secret: {required: true}\nsignature: {type: hmac_sha256, header: X-Signature, prefix: 'sha256=', signed_payload: raw_body}\ndelivery_id: {header: X-Delivery, required: true}\nevent_type: {literal: fixture, required: true}\nevent_name: {literal: raw}\n")
 	}
 	bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)

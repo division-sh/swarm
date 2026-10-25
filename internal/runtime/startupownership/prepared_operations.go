@@ -400,7 +400,11 @@ func PreparedForkActivateOperation(ctx context.Context, process ProcessCapabilit
 	}
 	request.AllowedSourceEventIDs = slices.Clone(request.AllowedSourceEventIDs)
 	op.kind = PreparedForkActivate
+	op.stamp = &request.Process
 	op.run = func(owned context.Context) error {
+		if !PreparedOperationEntered(owned, PreparedForkActivate, store) {
+			return ErrProcessNotCurrent
+		}
 		if err := p.requirePreparedOriginal(ctx); err != nil {
 			return err
 		}

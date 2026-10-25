@@ -144,8 +144,7 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					root = fixture
 					// Native timer coordinates use microsecond precision: 1ns is
 					// due at construction, without sleeping or editing store rows.
-					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/schema.yaml"), `stages:
+					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   warming:
     timers:
       - id: warmup
@@ -167,14 +166,14 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
     final: true
 pins:
   inputs:
-    - inbound.telegram
+    - inbound.telegram.text_message
   outputs:
     - inbound.telegram.text_message
-ingress:
-  alias: chat
-  providers:
-    - provider: telegram
-      signing_secret: webhook_signing.telegram
+connect:
+  - event: inbound.telegram.text_message
+    from: .
+    to: telegram-chat
+    resolution: select-or-create
 `,
 					)
 				} else {
@@ -304,11 +303,11 @@ ingress:
 					t.Fatal("selected timer activation owner is required")
 				}
 				if workflowCase {
-					child, err := flowidentity.StandingForGeneration(candidate.loaded.source, "telegram-ingress", frontierRun)
+					instance, err := flowidentity.StandingForGeneration(candidate.loaded.source, ".", frontierRun)
 					if err != nil {
 						t.Fatal(err)
 					}
-					dormant, err = timerReader.ListWorkflowTimerActivations(ctx, frontierRun, child.EntityID, true)
+					dormant, err = timerReader.ListWorkflowTimerActivations(ctx, frontierRun, instance.EntityID, true)
 					if err != nil || len(dormant) != 1 {
 						t.Fatalf("initial/adopted registration omitted durable timer: %+v err=%v", dormant, err)
 					}

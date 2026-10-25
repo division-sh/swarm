@@ -566,13 +566,14 @@ func c4CreationReplayContext(t *testing.T, selected any, record c4CreationCrashR
 			t.Fatalf("creation crash record lost a canonical run/input coordinate: %q", id)
 		}
 	}
-	fact, err := selected.(interface {
-		RequirePresentRunSource(context.Context, string) (correlation.SourceArtifactFact, error)
-	}).RequirePresentRunSource(testAuthorActivityRuntimeContext(), record.RunID)
-	if err != nil || fact.BundleHash() != record.BundleHash {
+	rooted, err := selected.(interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	}).LoadRunRootedSource(testAuthorActivityRuntimeContext(), record.RunID)
+	if err != nil || rooted.Admission().BundleHash() != record.BundleHash {
 		t.Fatalf("creation retry source disagrees with its committed run: err=%v", err)
 	}
-	ctx := correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact)
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	ctx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact), rooted.Admission())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	return originalStoreFixtureContext(t, correlation.WithRunID(effects.WithExecutionMode(ctx, effects.ExecutionModeLive), record.RunID), selected)
 }
@@ -709,9 +710,7 @@ func c4RunCreationCrashChild(t *testing.T) {
 	fixture, _ := openPipelineCrashStore(t, backend, location, p16CommitConnector{connector})
 	ctx := testAuthorActivityContext()
 	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
-	if err := sourceartifactfixture.Ensure(ctx, fixture.store.(sourceartifactfixture.Writer)); err != nil {
-		t.Fatal(err)
-	}
+	ctx = requireDefaultSourceArtifactForTest(t, ctx, fixture.store)
 	record := c4CreationCrashRecord{Origin: origin, RunID: uuid.NewString(), EventID: uuid.NewString(), BundleHash: sourceartifactfixture.BundleHash,
 		At: time.Now().UTC().Truncate(time.Microsecond)}
 	var create func()
@@ -783,10 +782,14 @@ func c4RunCreationCrashChild(t *testing.T) {
 			t.Fatal(err)
 		}
 		record.ForkPoint = sourcePlan.ForkPoint
+		root, present, err := correlation.RootAdmissionFromContext(ctx)
+		if err != nil || !present {
+			t.Fatalf("creation fork source root: present=%t err=%v", present, err)
+		}
 		create = func() {
 			forkWitness = connector.armForkInsert(record.SourceRunID, record.ForkPoint, record.BundleHash)
 			arm()
-			if _, err := fixture.store.(c4ForkCreationOwner).MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID}); err != nil {
+			if _, err := fixture.store.(c4ForkCreationOwner).MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID, RootAdmission: root}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -794,8 +797,14 @@ func c4RunCreationCrashChild(t *testing.T) {
 		record.FlowPath, record.EventID = "c4-crash-standing", ""
 		candidate := pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: flowidentity.StandingServiceID(record.FlowPath), FlowPath: record.FlowPath, Source: sourceartifactfixture.Fact()}
 		record.RunID = flowidentity.StandingGenerationRunID(candidate.ServiceID, 1)
-		ctx = testAuthorActivityRuntimeContext()
+		ctx = correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), sourceartifactfixture.Fact())
 		ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+		ctx = requireDefaultSourceArtifactForTest(t, ctx, fixture.store)
+		root, present, err := correlation.RootAdmissionFromContext(ctx)
+		if err != nil || !present {
+			t.Fatalf("standing creation source root: present=%t err=%v", present, err)
+		}
+		candidate.RootAdmission = root
 		workflow := newWorkflowTestCoordinator(t, fixture.db, pipeline.NewWorkflowPersistence(fixture.store.(workflowTestSelectedStore)), fixture.store.(workflowTestSelectedStore))
 		create = func() {
 			arm()
@@ -836,8 +845,12 @@ func c4ReplayCreationAfterCrash(t *testing.T, ctx context.Context, fixture autho
 		}
 		origin = runlifecycle.DeploymentRunOrigin()
 	case "fork":
+		root, present, rootErr := correlation.RootAdmissionFromContext(ctx)
+		if rootErr != nil || !present {
+			t.Fatalf("fork replay source root: present=%t err=%v", present, rootErr)
+		}
 		replayed := c4ReadExactForkWithoutMutation(t, ctx, fixture.store, backend, record.RunID,
-			runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID}, true, nil)
+			runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID, RootAdmission: root}, true, nil)
 		point := record.ForkPoint
 		if point.Kind != runfork.RunForkPointEvent || point.EventID != record.EventID || point.Revision != 1 ||
 			replayed.ForkRunID != record.RunID || replayed.ForkPoint != point {
@@ -852,6 +865,11 @@ func c4ReplayCreationAfterCrash(t *testing.T, ctx context.Context, fixture autho
 			t.Fatal("standing retry lost its native committed source")
 		}
 		candidate := pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: flowidentity.StandingServiceID(record.FlowPath), FlowPath: record.FlowPath, Source: fact}
+		root, present, rootErr := correlation.RootAdmissionFromContext(ctx)
+		if rootErr != nil || !present {
+			t.Fatalf("standing replay source root: present=%t err=%v", present, rootErr)
+		}
+		candidate.RootAdmission = root
 		workflow := newWorkflowTestCoordinator(t, fixture.db, pipeline.NewWorkflowPersistence(fixture.store.(workflowTestSelectedStore)), fixture.store.(workflowTestSelectedStore))
 		replayed, replayErr := workflow.ReconcileStandingService(ctx, candidate)
 		if replayErr != nil || replayed.RunID != record.RunID || replayed.Generation != 1 {

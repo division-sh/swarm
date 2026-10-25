@@ -80,6 +80,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 		Now: func() time.Time { return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC) },
 	})
 	bus.SetRunDispatchGate(controller)
+	ctx := admittedAPITestBusContext(t, context.Background(), bus)
 	handler := testHandlerWithOriginalContext(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -89,8 +90,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 			Idempotency: pg,
 			RunControl:  controller,
 		}),
-	})
-	ctx := admittedAPITestBusContext(t, context.Background(), bus)
+	}, ctx)
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
@@ -177,6 +177,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	}
 	controller := runtimeruncontrol.NewController(pg, bus, runtimeruncontrol.Options{})
 	bus.SetRunDispatchGate(controller)
+	ctx := admittedAPITestBusContext(t, context.Background(), bus)
 	handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Idempotency: pg, RunControl: controller})}, ctx)
 	missingRunID := uuid.NewString()
 	for _, method := range []string{"run.stop", "run.pause", "run.continue"} {

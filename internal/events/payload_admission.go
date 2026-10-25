@@ -79,6 +79,9 @@ func NewPlatformPayloadSchemaBinding(input PayloadSchemaBindingInput, producer P
 // RestoreEventPayloadSchemaBinding uses the complete durable producer/class
 // tuple. An empty flow column or platform schema label alone selects nothing.
 func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class EventAdmissionClass, eventType EventType, producer ProducerIdentity) (PayloadSchemaBinding, error) {
+	if producer.Type() == EventProducerPlatform && producer.ID() == "agent-turn-timeout" && !authoredTurnTimeoutPayloadIdentity(class, eventType, producer) {
+		return PayloadSchemaBinding{}, fmt.Errorf("turn timeout payload contradicts its persisted producer or class")
+	}
 	p := PayloadProducer{kind: "platform", producer: producer, class: class, event: eventType}
 	if joinOccurrenceEventType(eventType) && !joinOccurrencePayloadIdentity(p) {
 		return PayloadSchemaBinding{}, fmt.Errorf("join occurrence payload contradicts its persisted producer or class")

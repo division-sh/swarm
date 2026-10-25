@@ -1250,15 +1250,24 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if _, err := pg.backend.ExecContext(ctx, `CREATE TABLE generated_node_state_fixture (entity_id UUID NOT NULL, node_id TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(entity_id, node_id))`); err != nil {
 		t.Fatalf("create generated node fixture: %v", err)
 	}
-	sourceartifactfixture.RequireArtifact(t, ctx, pg, destructiveResetCleanupArtifactA)
-	sourceartifactfixture.RequireArtifact(t, ctx, pg, destructiveResetCleanupArtifactB)
-	ctx = requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+	rootA, _ := sourceartifactfixture.Rooted(t, "cleanup", destructiveResetCleanupArtifactA)
+	rootB, _ := sourceartifactfixture.Rooted(t, "cleanup", destructiveResetCleanupArtifactB)
+	parent := ctx
+	ctxA, _, err := semanticRunFixtureContext(parent, rootA.Admission().BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctxB, _, err := semanticRunFixtureContext(parent, rootB.Admission().BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = requireRunFixtureForTest(t, ctxA, pg, semanticRunFixture{
 		RunID: runA, Origin: semanticEventRunOriginForTest(t, sourceEvent, "source.event"),
-		BundleHash: destructiveResetCleanupBundleHashA, StartedAt: seededAt.Add(-time.Hour),
+		Artifact: rootA.Artifact(), BundleHash: destructiveResetCleanupBundleHashA, StartedAt: seededAt.Add(-time.Hour),
 	})
-	ctx = requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+	ctxB = requireRunFixtureForTest(t, ctxB, pg, semanticRunFixture{
 		RunID: runB, Origin: semanticEventRunOriginForTest(t, forkEvent, "source.event"),
-		BundleHash: destructiveResetCleanupBundleHashB, StartedAt: seededAt.Add(-time.Hour),
+		Artifact: rootB.Artifact(), BundleHash: destructiveResetCleanupBundleHashB, StartedAt: seededAt.Add(-time.Hour),
 	})
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO decision_cards (
@@ -1362,7 +1371,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed destructive-reset fan-out barrier: %v", err)
 	}
 	if err := commitDeliveryReplayEventFixture(
-		ctx, pg, sourceSemanticEvent, runB, sourceDeliverySnapshot.DeliveryID, "", "agent", "agent-a", seededAt.Add(4*time.Second),
+		ctxB, pg, sourceSemanticEvent, runB, sourceDeliverySnapshot.DeliveryID, "", "agent", "agent-a", seededAt.Add(4*time.Second),
 	); err != nil {
 		t.Fatalf("seed delivery replay event: %v", err)
 	}
@@ -1370,11 +1379,11 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		forkEvent, events.EventType("source.event"), eventtest.Producer(events.EventProducerExternal, "cleanup-ingress"), "",
 		[]byte(`{}`), 0, runB, "", entityEnvelope, seededAt.Add(5*time.Second),
 	)
-	if err := insertCanonicalEventRecordFixture(ctx, pg, runBEvent); err != nil {
+	if err := insertCanonicalEventRecordFixture(ctxB, pg, runBEvent); err != nil {
 		t.Fatalf("seed second run event: %v", err)
 	}
 	if _, err := markRunTerminalStatusForTest(
-		ctx,
+		ctxB,
 		pg,
 		runB,
 		string(storerunlifecycle.StateCancelled),

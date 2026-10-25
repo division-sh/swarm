@@ -13,107 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			root := copyClockMixedIngress(t)
-			credentialPath := filepath.Join(t.TempDir(), "clock-credentials.json")
-			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-			file, err := credentials.NewFileStore(credentialPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			opts, start := clockDeploymentHarness(t, backend, root)
-			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
-			first, served := start()
-			rt := servedTestProcessRuntime(t, first)
-			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 {
-				t.Fatalf("mixed binding inventory=%+v err=%v", statuses, err)
-			}
-			var rootRun, rootService, siblingService string
-			for _, status := range statuses {
-				if status.FlowPath == "." {
-					rootRun, rootService = status.RunID, status.ServiceID
-					if !status.RestartDisposition.Executable() {
-						t.Fatalf("disabled ingress hid an enabled clock: %+v", status)
-					}
-				} else {
-					t.Fatalf("clock invented an unbound sibling generation: %+v", status)
-				}
-			}
-			dormant, err := rt.IneligibleStandingIngress()
-			if err != nil || len(dormant) != 2 {
-				t.Fatalf("disabled provider bindings disappeared: dormant=%+v err=%v", dormant, err)
-			}
-			initial := readServedClockHeader(t, served.Endpoint, rootRun).ClockSchedules[0]
-			if !initial.RetainsRun || initial.Status != genericschedule.StatusActive {
-				t.Fatalf("enabled clock failed independent retention: %+v", initial)
-			}
-			if code := first.stop(); code != 0 {
-				t.Fatalf("dormant-ingress clock shutdown=%d", code)
-			}
-			for _, key := range []string{"telegram_bot_token", "webhook_signing.alpha", "webhook_signing.beta"} {
-				if err := file.Set(context.Background(), key, "clock-binding-secret"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			second, restarted := start()
-			rt = servedTestProcessRuntime(t, second)
-			statuses, err = rt.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 2 {
-				t.Fatalf("enabled ingress inventory=%+v err=%v", statuses, err)
-			}
-			for _, status := range statuses {
-				if status.FlowPath == "beta" {
-					siblingService = status.ServiceID
-				} else if status.FlowPath == "." && (status.RunID != rootRun || status.ServiceID != rootService) {
-					t.Fatalf("credential enabling replaced the clock's standing owner: %+v", status)
-				}
-				if !status.RestartDisposition.Executable() || status.Generation != 1 {
-					t.Fatalf("real credentials failed binding readiness: %+v", status)
-				}
-			}
-			if siblingService == "" {
-				t.Fatal("real sibling ingress binding did not acquire its own generation")
-			}
-			readiness, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(t.Context(), rt.Options.SourceArtifactFact)
-			if err != nil || len(readiness.CurrentPending) != 0 || len(readiness.SourceTransitionRequired) != 0 {
-				t.Fatalf("credential enabling left unfinished startup topology: %+v err=%v", readiness, err)
-			}
-			completedRuns := make(map[string]bool)
-			for _, item := range readiness.CurrentCompleted {
-				completedRuns[item.Plan.RunID] = true
-			}
-			for _, status := range statuses {
-				if !completedRuns[status.RunID] {
-					t.Fatalf("ready service lacks completed topology for its exact run: %+v", status)
-				}
-			}
-			current := readServedClockHeader(t, restarted.Endpoint, rootRun).ClockSchedules[0]
-			if current.ActivationID != initial.ActivationID || !current.RetainsRun || !current.InitialDueAt.Equal(initial.InitialDueAt) {
-				t.Fatalf("ingress enabling replaced clock authority: before=%+v current=%+v", initial, current)
-			}
-			invokeServedStandingOperation(t, restarted.Endpoint, "standing.suspend", rootService, "mixed-bindings-park")
-			if clock := readServedClockHeader(t, restarted.Endpoint, rootRun).ClockSchedules[0]; clock.Status != genericschedule.StatusParked || clock.RetainsRun {
-				t.Fatalf("suspended mixed service retained clock execution: %+v", clock)
-			}
-			statuses, err = rt.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, status := range statuses {
-				if status.ServiceID == siblingService && !status.RestartDisposition.Executable() {
-					t.Fatalf("clock suspension withdrew another enabled binding: %+v", status)
-				}
-			}
-			if code := second.stop(); code != 0 {
-				t.Fatalf("mixed binding joined shutdown=%d", code)
-			}
-		})
-	}
-}
-
 func copyClockMixedIngress(t *testing.T) string {
 	t.Helper()
 	root := canonicalrouting.CopyStandingRootTreePublic(t)
@@ -147,7 +46,7 @@ func TestServedClockMixedEnabledBindingsBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, key := range []string{"telegram_bot_token", "webhook_signing.alpha", "webhook_signing.beta"} {
+			for _, key := range []string{"telegram.telegram_bot_token", "telegram.webhook_signing_secret"} {
 				if err := file.Set(context.Background(), key, "clock-binding-secret"); err != nil {
 					t.Fatal(err)
 				}
@@ -218,24 +117,25 @@ func TestFiniteHostCannotRearmIndependentlyStandingClockBothStores(t *testing.T)
 			if err := yaml.Unmarshal(raw, &schema); err != nil {
 				t.Fatal(err)
 			}
-			schema["pins"].(map[string]any)["inputs"] = []string{"inbound.partner"}
-			schema["ingress"] = map[string]any{
-				"alias": "finite-clock-control",
-				"providers": []any{map[string]any{
-					"provider": "partner",
-					"admission": map[string]any{
-						"kind": "raw", "acknowledge": "unsigned_webhook", "payload": "json", "event": "inbound.partner",
-						"authentication": map[string]any{"kind": "none"}, "delivery_id": map[string]any{"source": "body_sha256"},
-					},
-				}},
-			}
+			schema["pins"].(map[string]any)["inputs"] = []string{"inbound.partner.raw"}
 			updated, err := yaml.Marshal(schema)
 			if err != nil {
 				t.Fatal(err)
 			}
 			writeWorkflowValidationFixtureFile(t, path, string(updated))
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "poll.tick:\ninbound.partner:\n")
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  execution_type: system_node\n  subscribes_to: [inbound.partner]\n  event_handlers:\n    inbound.partner:\n      guard: {check: true}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "poll.tick:\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  execution_type: system_node\n  subscribes_to: [inbound.partner.raw]\n  event_handlers:\n    inbound.partner.raw:\n      guard: {check: true}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [raw]\n    verify_secret: webhook_signing_secret\n  cannot: [execute code]\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), "transport: webhook\npayload_object_required: true\nsecret: {required: true}\nsignature: {type: token_equality, header: X-Partner-Token}\ndelivery_id: {json_path: $.id, required: true}\nevent_type: {literal: update, required: true}\nevent_name: {literal: raw}\n")
+			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+			file, err := credentials.NewFileStore(credentialPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := file.Set(t.Context(), "partner.webhook_signing_secret", "finite-clock-secret"); err != nil {
+				t.Fatal(err)
+			}
 			opts, start := clockDeploymentHarness(t, backend, root)
 			first, served := start()
 			rt := servedTestProcessRuntime(t, first)

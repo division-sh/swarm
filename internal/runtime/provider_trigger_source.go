@@ -74,10 +74,9 @@ func compileProviderTriggerEventSchemas(byProject map[string]map[string]runtimec
 	return out, nil
 }
 
-func bindProviderTriggerInputPins(source semanticview.Source, compiledByProject map[string]map[string]runtimecontracts.CompiledEventSchema) (map[string][]runtimecontracts.CompiledFlowInputPin, error) {
-	out := map[string][]runtimecontracts.CompiledFlowInputPin{}
+func bindProviderTriggerInputPins(source semanticview.Source, compiledByProject map[string]map[string]runtimecontracts.CompiledEventSchema, out map[string][]runtimecontracts.CompiledFlowInputPin) (map[string][]runtimecontracts.CompiledFlowInputPin, error) {
 	bind := func(flowID, ownerFlowPath string) error {
-		pins := source.FlowInputEventPins(flowID)
+		pins := out[normalizedProviderTriggerProjectKey(flowID)]
 		if len(pins) == 0 {
 			return nil
 		}
@@ -356,6 +355,12 @@ func (s providerTriggerEventSource) ResolvedEventCatalog() map[string]runtimecon
 func (s providerTriggerEventSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
 	if !s.hasExactFlow(flowID) {
 		return runtimecontracts.EventCatalogEntry{}, "", false
+	}
+	if schema, owned, err := s.connectionInputs.ReceiverCommonEventSchema(flowID, eventType); err != nil {
+		return runtimecontracts.EventCatalogEntry{}, "", false
+	} else if owned && schema.Classification() == runtimecontracts.CompiledEventSchemaImported {
+		entry, present := s.byFlow[schema.FlowPath()][schema.EventName()]
+		return cloneProviderTriggerEventCatalogEntry(entry), schema.EventName(), present
 	}
 	if entry, resolved, ok := s.Source.ResolveFlowEventCatalogEntry(flowID, eventType); ok {
 		return entry, resolved, true

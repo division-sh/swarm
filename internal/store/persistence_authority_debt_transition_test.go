@@ -14,7 +14,7 @@ const debtG01CollectorTo = "b42ea974646e7b666459091174645baa501d91da16871813568d
 const debtQuiescenceCollectorTo = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e4d80d904832757ae047"
 const debtRunFixtureCollectorTo = "dd36814075a0641f1085eb8fe8d74ae1cd61d8fba3b6047a8514b175ddbfa53e"
 const debtDeploymentRegistrationCollectorTo = "f765afc073439ecaa3e031c497a8bee3f06af9d9a0b3a816e97ab28f366c4834"
-const debtS1CollectorTo = "2bcf1d0f240845f33017c58acee4c83ec6e418d2341af9137770009009c64102"
+const debtS1CollectorTo = "ca174b47aca4559644fb561ed8ebb6f37b81720c97677fe15af493abf1d4dd41"
 
 func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
@@ -31,12 +31,15 @@ func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.
 	}
 	for _, transition := range []struct{ name, from, to string }{
 		{"g01", debtG01CollectorFrom, debtG01CollectorTo},
-		{"s1-d24", debtS1CollectorFrom, debtS1CollectorTo},
+		{"s1", debtS1CollectorFrom, debtS1CollectorTo},
 	} {
 		t.Run(transition.name, func(t *testing.T) {
 			old := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: transition.from, Sites: debtControlSet(debtControlSite("call:QueryRow", 2))}
 			current := old
 			current.Collector = transition.to
+			if transition.name == "s1" {
+				current.Sites = debtWithS1RetainedSourceConstructors(current.Sites)
+			}
 			for _, tc := range []struct {
 				name, base, collector string
 				trusted, head         authorityDebtBaseline
@@ -74,10 +77,32 @@ func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.
 					case "head-metadata":
 						head.Collector = strings.Repeat("e", 64)
 					}
+					if transition.name == "s1" {
+						head.Sites = debtWithS1RetainedSourceConstructors(head.Sites)
+					}
 					if err := debtValidateCollectorIdentity(transition.from, transition.to, trusted, head, ""); err == nil {
 						t.Fatal("transition admitted a non-metadata baseline change")
 					}
 				})
+			}
+			if transition.name == "s1" {
+				for key, site := range debtWithS1RetainedSourceConstructors(nil) {
+					for _, mutation := range []string{"identity", "multiplicity"} {
+						head := current
+						head.Sites = debtWithS1RetainedSourceConstructors(old.Sites)
+						delete(head.Sites, key)
+						changed := site
+						if mutation == "identity" {
+							changed.Declaration += "Other"
+						} else {
+							changed.Multiplicity++
+						}
+						head.Sites[changed.identity()] = changed
+						if err := debtValidateCollectorIdentity(transition.from, transition.to, old, head, ""); err == nil {
+							t.Fatalf("S1 constructor allowance admitted %s change for %s", mutation, key)
+						}
+					}
+				}
 			}
 			foreign := current
 			foreign.Collector = strings.Repeat("f", 64)

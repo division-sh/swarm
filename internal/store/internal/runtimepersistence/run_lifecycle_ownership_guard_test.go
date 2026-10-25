@@ -1,11 +1,8 @@
 package runtimepersistence
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"fmt"
 	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -231,64 +228,122 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	}
 }
 
-// #642 6190268703: these are three observer/oracle literals, not a file or
-// function exemption. Exact AST pins also fence their def-use paths and the
-// concrete fake driver; any added use or executable receiver invalidates them.
+// Only the witness decoder's two comparison literals are non-writers. Their
+// query and constant cannot escape into an executable or additional use.
 func classifyForkInsertWitnessOracleLiterals(path string, file *ast.File) map[token.Pos]bool {
 	approved := map[token.Pos]bool{}
 	if path != "internal/store/internal/runtimepersistence/stop_commit_fork_witness_test.go" {
 		return approved
 	}
-	functions := map[string]*ast.FuncDecl{}
-	hashes := map[string]string{}
+	standardStrings := false
+	for _, imported := range file.Imports {
+		if imported.Path.Value == `"strings"` && (imported.Name == nil || imported.Name.Name == "strings") {
+			standardStrings = true
+		}
+	}
+	if !standardStrings {
+		return approved
+	}
+	var decoder *ast.FuncDecl
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "decode" || fn.Recv == nil || len(fn.Recv.List) != 1 || revisionGuardNode(fn.Recv.List[0].Type) != "*stopCommitForkWitness" {
+			continue
+		}
+		if decoder != nil {
+			return approved
+		}
+		decoder = fn
+	}
+	if decoder == nil || decoder.Body == nil || len(decoder.Type.Params.List) != 2 || len(decoder.Type.Params.List[0].Names) != 1 || revisionGuardNode(decoder.Type.Params.List[0].Type) != "string" {
+		return approved
+	}
+	query := decoder.Type.Params.List[0].Names[0]
+	if query.Obj == nil {
+		return approved
+	}
+	var columns *ast.ValueSpec
+	for _, statement := range decoder.Body.List {
+		declaration, ok := statement.(*ast.DeclStmt)
 		if !ok {
 			continue
 		}
-		name := fn.Name.Name
-		if fn.Recv != nil {
-			name = revisionGuardNode(fn.Recv.List[0].Type) + "." + name
-		}
-		var out bytes.Buffer
-		if err := format.Node(&out, token.NewFileSet(), fn); err != nil {
+		group, ok := declaration.Decl.(*ast.GenDecl)
+		if !ok || group.Tok != token.CONST || len(group.Specs) != 1 {
 			continue
 		}
-		if functions[name] != nil {
-			return approved
+		spec, ok := group.Specs[0].(*ast.ValueSpec)
+		if ok && len(spec.Names) == 1 && spec.Names[0].Name == "columns" && len(spec.Values) == 1 {
+			if columns != nil {
+				return approved
+			}
+			columns = spec
 		}
-		functions[name] = fn
-		hashes[name] = fmt.Sprintf("%x", sha256.Sum256(out.Bytes()))
 	}
-	const prefix = "insert into runs ("
-	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash ) values ("
-	for _, site := range []struct {
-		name, digest string
-		count        int
-	}{
-		{"*stopCommitForkWitness.decode", "1b09c8ea59a5c256f8a550d253cf64afd1d5adc2b70e83a1ab4fa766ab3337af", 2},
-		{"TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction", "a92a0fd285117a8a6caa167a4e911d8fd4a2464e079db427c83b095b3168a13c", 1},
-	} {
-		if hashes[site.name] != site.digest || site.count == 1 && hashes["*stopCommitWitnessNativeConn.ExecContext"] != "62a483f2a9969561bccc8979c899824125b0846d218bd8b822f13731bc23f998" {
-			continue
+	if columns == nil || columns.Names[0].Obj == nil {
+		return approved
+	}
+	columnLiteral, ok := columns.Values[0].(*ast.BasicLit)
+	if !ok || columnLiteral.Kind != token.STRING {
+		return approved
+	}
+	columnText, err := strconv.Unquote(columnLiteral.Value)
+	if err != nil || !strings.HasPrefix(columnText, "insert into runs (") || !strings.HasSuffix(columnText, ") values (") {
+		return approved
+	}
+	allowed := map[*ast.Ident]bool{query: true, columns.Names[0]: true}
+	var prefix *ast.BasicLit
+	prefixCount, columnUses, normalizations := 0, 0, 0
+	ast.Inspect(decoder.Body, func(node ast.Node) bool {
+		if assignment, ok := node.(*ast.AssignStmt); ok && len(assignment.Lhs) == 1 && len(assignment.Rhs) == 1 && assignment.Tok == token.ASSIGN && revisionGuardNode(assignment.Rhs[0]) == `strings.Join(strings.Fields(strings.ToLower(query)), " ")` {
+			if id, ok := assignment.Lhs[0].(*ast.Ident); ok && id.Obj == query.Obj {
+				allowed[id] = true
+				normalizations++
+			}
 		}
-		var positions []token.Pos
-		ast.Inspect(functions[site.name], func(node ast.Node) bool {
-			literal, ok := node.(*ast.BasicLit)
-			if !ok || literal.Kind != token.STRING {
-				return true
-			}
-			value, err := strconv.Unquote(literal.Value)
-			if err == nil && (site.count == 2 && (value == prefix || value == columns) || site.count == 1 && compactSQLForLifecycleGuard(value) == "INSERT INTO runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash ) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?)") {
-				positions = append(positions, literal.Pos())
-			}
+		call, ok := node.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
 			return true
-		})
-		if len(positions) == site.count {
-			for _, position := range positions {
-				approved[position] = true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := selector.X.(*ast.Ident)
+		if !ok || pkg.Name != "strings" || pkg.Obj != nil {
+			return true
+		}
+		id, ok := call.Args[0].(*ast.Ident)
+		if !ok || id.Obj != query.Obj {
+			return true
+		}
+		if selector.Sel.Name == "ToLower" && len(call.Args) == 1 || (selector.Sel.Name == "HasPrefix" || selector.Sel.Name == "Contains") && len(call.Args) == 2 {
+			allowed[id] = true
+		}
+		if selector.Sel.Name == "HasPrefix" && len(call.Args) == 2 {
+			switch argument := call.Args[1].(type) {
+			case *ast.Ident:
+				if argument.Obj == columns.Names[0].Obj {
+					allowed[argument] = true
+					columnUses++
+				}
+			case *ast.BasicLit:
+				if value, err := strconv.Unquote(argument.Value); err == nil && value == "insert into runs (" {
+					prefix, prefixCount = argument, prefixCount+1
+				}
 			}
 		}
+		return true
+	})
+	closed := true
+	ast.Inspect(decoder, func(node ast.Node) bool {
+		if id, ok := node.(*ast.Ident); ok && (id.Obj == query.Obj || id.Obj == columns.Names[0].Obj) && !allowed[id] {
+			closed = false
+		}
+		return true
+	})
+	if closed && prefixCount == 1 && columnUses == 1 && normalizations == 1 {
+		approved[prefix.Pos()], approved[columnLiteral.Pos()] = true, true
 	}
 	return approved
 }
@@ -304,14 +359,15 @@ func TestForkInsertWitnessOracleClassificationRejectsExecutableAndExtraSites(t *
 		name, path, before, after string
 		approved, refused         int
 	}{
-		{"reviewed", path, "", "", 3, 0},
-		{"foreign_path", "internal/runtime/other_test.go", "", "", 0, 3},
-		{"real_store", path, "conn.ExecContext(context.Background(), statement, args)", "db.ExecContext(context.Background(), statement, args)", 2, 1},
-		{"recognizer_to_writer", path, "strings.HasPrefix(query, columns)", "db.ExecContext(ctx, columns)", 1, 2},
-		{"fake_driver_delegates", path, "return driver.RowsAffected(c.rows), c.err", "return db.ExecContext(context.Background(), c.query)", 2, 1},
-		{"extra_executable_literal", path, "\tconst query =", "\tdb.Exec(`DELETE FROM runs`)\n\tconst query =", 2, 2},
-		{"extra_recognizer_site", path, "\tquery = strings.Join(", "\t_ = strings.HasPrefix(query, \"insert into runs (\")\n\tquery = strings.Join(", 1, 3},
-		{"unreviewed_function", path, "func TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction(", "func TestUnreviewedForkWitness(", 2, 1},
+		{"reviewed", path, "", "", 2, 0},
+		{"foreign_path", "internal/runtime/other_test.go", "", "", 0, 2},
+		{"foreign_comparator", path, `"strings"`, `strings "example.test/strings"`, 0, 2},
+		{"recognizer_to_writer", path, "strings.HasPrefix(query, columns)", "db.ExecContext(ctx, columns)", 0, 2},
+		{"query_to_writer", path, "\tquery = strings.Join(", "\tdb.ExecContext(ctx, query)\n\tquery = strings.Join(", 0, 2},
+		{"extra_executable_literal", path, "\tquery = strings.Join(", "\tdb.Exec(`DELETE FROM runs`)\n\tquery = strings.Join(", 2, 1},
+		{"extra_recognizer_site", path, "\tquery = strings.Join(", "\t_ = strings.HasPrefix(query, \"insert into runs (\")\n\tquery = strings.Join(", 0, 3},
+		{"constant_escape", path, "\tif !strings.HasPrefix(query, columns)", "\tother := columns\n\tif !strings.HasPrefix(query, columns)", 0, 2},
+		{"unreviewed_function", path, "func (w *stopCommitForkWitness) decode(", "func (w *stopCommitForkWitness) other(", 0, 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			mutant := source

@@ -608,6 +608,9 @@ type SatisfactionPlan struct {
 	registration      *CompiledChannelRegistration
 	onboarding        *CompiledChannelOnboardingProfile
 	generation        plangeneration.Generation
+
+	capturedChannelMember string
+	capturedHolder        string
 }
 
 type channelPlanIdentity struct {
@@ -733,6 +736,10 @@ type OutboundBindingPlan struct {
 
 func (p SatisfactionPlan) ChannelIdentity() PackIdentity {
 	return p.channel
+}
+
+func (p SatisfactionPlan) MatchesCapturedHolder(flowPath string) bool {
+	return p.capturedHolder != "" && p.capturedHolder == flowPath
 }
 
 func (p SatisfactionPlan) Provider() string {
@@ -1165,7 +1172,11 @@ func (p SatisfactionPlan) CapabilitySubject() (Subject, error) {
 			"interface": p.interfaceRef.String(), "channel_hash": p.channel.ManifestHash(),
 			"trigger_id": p.trigger.ID(), "trigger_hash": p.trigger.ManifestHash(),
 			"connector_id": p.connector.ID(), "connector_hash": p.connector.ManifestHash(),
+			"trigger_generation": p.triggerGeneration.Diagnostic(), "plan_generation": p.generation.Diagnostic(),
 		}}},
+	}
+	if p.capturedChannelMember != "" {
+		subject.ID = p.capturedChannelMember
 	}
 	normalized, err := NormalizeSubjects([]Subject{subject})
 	if err != nil {

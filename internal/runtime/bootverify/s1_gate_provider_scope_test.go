@@ -16,18 +16,19 @@ import (
 
 func TestS1HumanGateRequiresScopedChannelDirectory(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		gateFlow  string
-		channels  []string
-		triggers  []string
-		wantError bool
+		name       string
+		gateFlow   string
+		parentFlow string
+		channels   []string
+		triggers   []string
+		wantError  bool
 	}{
 		{name: "missing", gateFlow: ".", wantError: true},
 		{name: "local", gateFlow: ".", channels: []string{"team"}},
-		{name: "ancestor", gateFlow: "child/deep", channels: []string{"team"}},
+		{name: "ancestor", gateFlow: "child/deep", parentFlow: "child", channels: []string{"team"}},
 		{name: "nearest", gateFlow: "child", channels: []string{"team", "child/team"}},
-		{name: "sibling_not_visible", gateFlow: "child", channels: []string{"sibling/team"}, wantError: true},
-		{name: "descendant_not_visible", gateFlow: ".", channels: []string{"child/team"}, wantError: true},
+		{name: "sibling_not_visible", gateFlow: "child", parentFlow: "sibling", channels: []string{"sibling/team"}, wantError: true},
+		{name: "descendant_not_visible", gateFlow: ".", parentFlow: "child", channels: []string{"child/team"}, wantError: true},
 		{name: "no_role_fallback", gateFlow: "child", channels: []string{"team"}, triggers: []string{"child/team"}, wantError: true},
 		{name: "different_key_remains_visible", gateFlow: "child", channels: []string{"team"}, triggers: []string{"child/other"}},
 	} {
@@ -35,6 +36,9 @@ func TestS1HumanGateRequiresScopedChannelDirectory(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			if tc.parentFlow != "" {
+				writeBootverifyFixtureFile(t, filepath.Join(root, tc.parentFlow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			}
 			writeBootverifyFixtureFile(t, filepath.Join(root, tc.gateFlow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, tc.gateFlow, "schema.yaml"), "stages:\n  review:\n    gate:\n      decision: approve\n      outcomes:\n        accept: {advances_to: done}\n  done: {final: true}\n")
 			for _, directory := range tc.channels {

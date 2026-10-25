@@ -1,4 +1,4 @@
-package runforkpersistence
+package runforkpersistence_test
 
 import (
 	"context"
@@ -29,6 +29,18 @@ func (c *selectedRootReadConnector) Connect(ctx context.Context) (driver.Conn, e
 type selectedRootReadConn struct {
 	driver.Conn
 	owner *selectedRootReadConnector
+}
+
+func (c *selectedRootReadConn) IsValid() bool {
+	validator, present := c.Conn.(driver.Validator)
+	return !present || validator.IsValid()
+}
+
+func (c *selectedRootReadConn) ResetSession(ctx context.Context) error {
+	if resetter, present := c.Conn.(driver.SessionResetter); present {
+		return resetter.ResetSession(ctx)
+	}
+	return nil
 }
 
 func (c *selectedRootReadConn) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {

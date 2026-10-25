@@ -1,3 +1,4 @@
+transport: webhook
 payload_object_required: true
 payload_object_error: telegram update object is required
 secret:

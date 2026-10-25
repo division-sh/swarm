@@ -14,14 +14,14 @@ import (
 
 // Execution ownership follows the exact materialized obligation at each
 // immutable fork cut, never an ancestor selected by content hash or trigger ID.
-func retainFanOutExecutionSources(ctx context.Context, tx *sql.Tx, snapshot *runForkRevisionSnapshot, obligations []runfork.RunForkFanOutObligation, postgres bool) error {
-	requirements, err := runfork.FanOutContinuationRequirements(runfork.RunForkPlan{FanOutObligations: obligations})
+func retainFanOutExecutionSources(ctx context.Context, tx *sql.Tx, snapshot *runForkRevisionSnapshot, plan runfork.RunForkPlan, postgres bool) error {
+	requirements, err := runfork.FanOutContinuationRequirements(plan)
 	if err != nil {
 		return err
 	}
 	resolver := capturedConstructionResolver{tx: tx, snapshots: make(map[constructionCut]*runForkRevisionSnapshot), active: make(map[string]bool)}
-	for i := range obligations {
-		obligation := &obligations[i]
+	for i := range plan.FanOutObligations {
+		obligation := &plan.FanOutObligations[i]
 		if obligation.Intent.Request.Deployment != nil || requirements[obligation.Intent.Request.Key] {
 			continue
 		}
@@ -77,7 +77,7 @@ func inheritedFanOutExecutionSourceAtCut(ctx context.Context, resolver *captured
 	if err != nil {
 		return sourceartifact.RootedSource{}, err
 	}
-	requirements, err := runfork.FanOutContinuationRequirements(runfork.RunForkPlan{FanOutObligations: previous})
+	requirements, err := runfork.FanOutContinuationRequirements(runfork.RunForkPlan{SourceRunID: parent.RunID, PendingWork: pending, FanOutObligations: previous})
 	if err != nil {
 		return sourceartifact.RootedSource{}, err
 	}

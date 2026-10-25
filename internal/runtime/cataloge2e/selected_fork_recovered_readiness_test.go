@@ -49,7 +49,8 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				cfg := testRuntimeConfig()
 				cfg.LLM.Backend = "anthropic"
 				options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
-				staged := stageCatalogSelectedContractFork(t, ctx, forkStore, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, options, catalogRuntimeRunID, frontierID)
+				operation := catalogStagedForkOperation(t, ctx, forkStore, selection, catalogRuntimeRunID, frontierID)
+				staged := stageCatalogSelectedContractFork(t, ctx, forkStore, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, options, catalogRuntimeRunID, frontierID, operation)
 				child := staged.ForkRunID
 				readiness, found, err := h.rt.Pipeline.LoadDynamicFlowRuntimeReadiness(ctx, child, flowidentity.RouteForInstancePath(path))
 				if err != nil || !found || readiness.RunStatus != runfork.RunForkMaterializedStatus || !readiness.Eligible() {

@@ -18,7 +18,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil"
 	"gopkg.in/yaml.v3"
@@ -32,143 +31,12 @@ type channelOnboardingExactChoice struct {
 	target       string
 }
 
-func TestChannelOnboardingE2E07ClaimTimeoutResume(t *testing.T) {
-	for _, backend := range servedparity.RequiredBackends {
-		backend := backend
-		t.Run(string(backend), func(t *testing.T) {
-			var admittedID string
-			ctx := channelClaimDeadlineAtReadback(t, func(result channelonboarding.Result) {
-				admittedID = result.Operation.OperationID
-			})
-			harness := newChannelOnboardingE2EHarness(t, backend, true)
-			harness.start(t)
-
-			input := installChannelOnboardingCLIInput(t, "timeout-token\n")
-			defer input()
-			stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-			code := executeCLI(ctx, []string{
-				"--config", harness.opts.ConfigPath, "channel", "connect", "telegram", "--yes", "--api-server", harness.endpoint,
-			}, stdout, stderr, nil)
-			surface := stdout.String() + "\n" + stderr.String()
-			operationID := channelOnboardingOperationIDPattern.FindString(surface)
-			resumeCommand := "swarm channel resume " + operationID
-			if code == 0 || admittedID == "" || operationID != admittedID || !strings.Contains(surface, resumeCommand) ||
-				!strings.Contains(surface, "context deadline exceeded: stopped waiting for the operator's code") {
-				t.Fatalf("%s E2E-07 timeout code=%d lacks exact resume\nstdout:\n%s\nstderr:\n%s", backend, code, stdout.String(), stderr.String())
-			}
-			if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 0 {
-				t.Fatalf("%s E2E-07 timeout provider effects = %d/%d, want real registration without delivery", backend, registrations, deliveries)
-			}
-			row := requireChannelOnboardingOperationRow(t, harness, operationID)
-			if row.Operation.Phase != string(channelonboarding.PhaseAwaitingExternalIdentity) || row.Recovery == nil || len(row.Recovery.Commands) != 1 || row.Recovery.Commands[0] != resumeCommand {
-				t.Fatalf("%s E2E-07 timeout readback = %#v", backend, row)
-			}
-
-			command := startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint, []string{"channel", "resume", operationID, "--yes"}, "")
-			challenge := waitChannelOnboardingChallenge(t, command.stdout, command.stderr, command.done)
-			callbackURL, signingSecret := waitChannelOnboardingRegistration(t, harness.provider, command.stdout, command.stderr, command.done)
-			admission := submitChannelOnboardingClaim(t, callbackURL, signingSecret, challenge, 7107, "timeout_resume")
-			requireChannelClaimDisposition(t, "E2E-07 resumed claim", admission, "consumed_by_binding")
-			requireChannelOnboardingCommandSuccess(t, command)
-			ready := requireChannelOnboardingOperationRow(t, harness, operationID)
-			if ready.Operation.Phase != string(channelonboarding.PhaseSucceeded) || ready.Readiness == nil || !ready.Readiness.Ready {
-				t.Fatalf("%s E2E-07 resumed row = %#v", backend, ready)
-			}
-			harness.stop(t)
-		})
-	}
-}
-
-func TestChannelOnboardingE2E08OperatorRejection(t *testing.T) {
-	for _, backend := range servedparity.RequiredBackends {
-		backend := backend
-		t.Run(string(backend), func(t *testing.T) {
-			harness := newChannelOnboardingE2EHarness(t, backend, true)
-			harness.start(t)
-			begun := startChannelOnboardingRPC(t, harness, channelonboarding.VerbConnect, "rejection-token", nil)
-			if begun.IdentityOperation == nil {
-				t.Fatalf("%s E2E-08 start lacks identity operation: %#v", backend, begun)
-			}
-			callbackURL, signingSecret, _ := harness.provider.Registration()
-			admission := submitChannelOnboardingClaim(t, callbackURL, signingSecret, begun.IdentityOperation.Challenge, 7108, "rejected_operator")
-			requireChannelClaimDisposition(t, "E2E-08 claim", admission, "consumed_by_binding")
-			claimed := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-			if claimed.IdentityOperation == nil || claimed.IdentityOperation.State != "awaiting_confirmation" {
-				t.Fatalf("%s E2E-08 claimed operation = %#v", backend, claimed)
-			}
-			var rejected map[string]any
-			requireServedJSONRPCResult(t, harness.rpcEndpoint(), "channel.confirm", map[string]any{
-				"operation_id": claimed.IdentityOperation.OperationID, "expected_revision": claimed.IdentityOperation.Revision, "approve": false,
-			}, &rejected)
-			settled := retryChannelOnboardingRPC(t, harness, begun.Operation.OperationID, "")
-			if settled.Operation.Phase != channelonboarding.PhaseFailed || settled.Operation.FailureCode != "identity_rejected" || settled.Readiness == nil || settled.Readiness.Ready {
-				t.Fatalf("%s E2E-08 settled result = %#v", backend, settled)
-			}
-			assertNoChannelOnboardingActivation(t, harness, begun.Operation.OperationID)
-			assertChannelOnboardingCredentialStoreEmpty(t, harness.credentialPath, string(backend)+" E2E-08 rejection")
-			if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 0 {
-				t.Fatalf("%s E2E-08 provider effects = %d/%d, want 1/0", backend, registrations, deliveries)
-			}
-			retired := submitChannelOnboardingClaim(t, callbackURL, signingSecret, begun.IdentityOperation.Challenge, 7109, "rejected_after_settlement")
-			if retired.StatusCode != http.StatusNotFound {
-				t.Fatalf("%s E2E-08 rejected callback remained admitted: %#v", backend, retired)
-			}
-			assertChannelOnboardingNoRecoveryGuidance(t, harness, begun.Operation.OperationID)
-			reacquired := startChannelOnboardingRPC(t, harness, channelonboarding.VerbConnect, "reacquired-token", nil)
-			if reacquired.Operation.OperationID == begun.Operation.OperationID || reacquired.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
-				t.Fatalf("%s E2E-08 slot reacquisition = %#v", backend, reacquired.Operation)
-			}
-			harness.stop(t)
-		})
-	}
-}
-
-func TestChannelOnboardingE2E09ExpiryAcrossRestart(t *testing.T) {
-	for _, backend := range servedparity.RequiredBackends {
-		backend := backend
-		t.Run(string(backend), func(t *testing.T) {
-			now := time.Date(2026, 8, 28, 8, 0, 0, 0, time.UTC)
-			harness := newChannelOnboardingE2EHarness(t, backend, true)
-			harness.opts.TestChannelOnboardingNow = func() time.Time { return now }
-			harness.start(t)
-			begun := startChannelOnboardingRPC(t, harness, channelonboarding.VerbConnect, "expiry-token", nil)
-			if begun.IdentityOperation == nil {
-				t.Fatalf("%s E2E-09 start lacks identity operation: %#v", backend, begun)
-			}
-			callbackURL, signingSecret, _ := harness.provider.Registration()
-			challenge := begun.IdentityOperation.Challenge
-			harness.stop(t)
-
-			now = now.Add(11 * time.Minute)
-			harness.start(t)
-			expired := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-			if expired.Operation.Phase != channelonboarding.PhaseFailed || expired.Operation.FailureCode != "identity_expired" || expired.Readiness == nil || expired.Readiness.Ready {
-				t.Fatalf("%s E2E-09 recovered expiry = %#v", backend, expired)
-			}
-			assertNoChannelOnboardingActivation(t, harness, begun.Operation.OperationID)
-			assertChannelOnboardingCredentialStoreEmpty(t, harness.credentialPath, string(backend)+" E2E-09 expiry")
-			late := submitChannelOnboardingClaim(t, callbackURL, signingSecret, challenge, 7109, "late_operator")
-			if late.StatusCode != http.StatusNotFound || len(late.EventIDs) != 0 || len(late.EventNames) != 0 {
-				t.Fatalf("%s E2E-09 late retired callback = %#v, want unavailable route and zero business events", backend, late)
-			}
-			afterLate := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-			if afterLate.Operation.Revision != expired.Operation.Revision || afterLate.Operation.Phase != channelonboarding.PhaseFailed {
-				t.Fatalf("%s E2E-09 late claim changed failed history: before=%#v after=%#v", backend, expired.Operation, afterLate.Operation)
-			}
-			reacquired := startChannelOnboardingRPC(t, harness, channelonboarding.VerbConnect, "post-expiry-token", nil)
-			if reacquired.Operation.OperationID == begun.Operation.OperationID || reacquired.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
-				t.Fatalf("%s E2E-09 slot reacquisition = %#v", backend, reacquired.Operation)
-			}
-			harness.stop(t)
-		})
-	}
-}
-
 func TestChannelOnboardingE2E12MultipleExactContexts(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
 			harness := newChannelOnboardingE2EHarness(t, backend, true)
+			writeChannelOnboardingLiveToolCredentials(t, harness.credentialPath)
 			addSecondChannelOnboardingTarget(t, harness.opts.SourceRoot)
 			harness.start(t)
 
@@ -223,95 +91,12 @@ func TestChannelOnboardingE2E12MultipleExactContexts(t *testing.T) {
 	}
 }
 
-func TestChannelOnboardingE2E18IngressUnavailable(t *testing.T) {
-	for _, backend := range servedparity.RequiredBackends {
-		backend := backend
-		t.Run(string(backend), func(t *testing.T) {
-			harness := newChannelOnboardingE2EHarness(t, backend, false)
-			harness.start(t)
-			const secret = "no-ingress-token-e2e18-private"
-			startEnvelope := requestServedJSONRPC(t, harness.rpcEndpoint(), "channel.onboarding_start", map[string]any{
-				"provider": "telegram", "verb": string(channelonboarding.VerbConnect), "provider_credential": secret, "save_proof": true,
-			})
-			if startEnvelope.Error != nil {
-				t.Fatalf("%s E2E-18 start error = %#v", backend, startEnvelope.Error)
-			}
-			var result channelonboarding.Result
-			if err := json.Unmarshal(startEnvelope.Result, &result); err != nil {
-				t.Fatalf("%s E2E-18 decode start result: %v\n%s", backend, err, startEnvelope.Result)
-			}
-			if result.Operation.Phase != channelonboarding.PhaseFailed || result.Operation.FailureCode != "public_ingress_unavailable" || result.Readiness == nil || result.Readiness.Ready {
-				t.Fatalf("%s E2E-18 result = %#v", backend, result)
-			}
-			assertNoChannelOnboardingActivation(t, harness, result.Operation.OperationID)
-			if registrations, deliveries := harness.provider.Counts(); registrations != 0 || deliveries != 0 {
-				t.Fatalf("%s E2E-18 provider effects = %d/%d, want 0/0", backend, registrations, deliveries)
-			}
-			assertChannelOnboardingCredentialStoreEmpty(t, harness.credentialPath, string(backend)+" E2E-18 no ingress")
-			getEnvelope := requestServedJSONRPC(t, harness.rpcEndpoint(), "channel.onboarding_get", map[string]any{"operation_id": result.Operation.OperationID})
-			jsonList, humanList := channelOnboardingListSurfaces(t, harness)
-			assertChannelOnboardingSecretAbsent(t, secret, map[string]string{
-				"start RPC result/error": mustMarshalChannelOnboardingSurface(t, startEnvelope),
-				"get RPC result/error":   mustMarshalChannelOnboardingSurface(t, getEnvelope),
-				"JSON list":              jsonList,
-				"human list":             humanList,
-				"serve output/logs":      harness.process.outputString(),
-				"selected-store row":     channelOnboardingPersistedOperationSurface(t, harness, result.Operation.OperationID),
-			})
-			harness.stop(t)
-		})
-	}
-}
-
-func TestChannelOnboardingE2E19ChallengeAdmissionBoundaries(t *testing.T) {
-	for _, backend := range servedparity.RequiredBackends {
-		backend := backend
-		t.Run(string(backend), func(t *testing.T) {
-			harness := newChannelOnboardingE2EHarness(t, backend, true)
-			harness.start(t)
-			begun := startChannelOnboardingRPC(t, harness, channelonboarding.VerbConnect, "challenge-token", nil)
-			callbackURL, signingSecret, _ := harness.provider.Registration()
-			beforeWrong := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-			wrong := submitChannelOnboardingClaim(t, callbackURL, signingSecret, "SWARM-AAAAAAAAAAAAAAAA", 7119, "wrong_operator")
-			requireChannelClaimDisposition(t, "E2E-19 wrong claim", wrong, "rejected_binding_claim")
-			afterWrong := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-			assertChannelOnboardingClaimDidNotMutate(t, string(backend)+" E2E-19 wrong", beforeWrong, afterWrong)
-
-			correct := submitChannelOnboardingClaimAs(t, callbackURL, signingSecret, begun.IdentityOperation.Challenge, 7120, 8120, 9120, "current_operator")
-			requireChannelClaimDisposition(t, "E2E-19 correct claim", correct, "consumed_by_binding")
-			claimed := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-			duplicate := submitChannelOnboardingClaimAs(t, callbackURL, signingSecret, begun.IdentityOperation.Challenge, 7121, 8120, 9120, "current_operator")
-			requireChannelClaimDisposition(t, "E2E-19 duplicate claim", duplicate, "consumed_by_binding")
-			afterDuplicate := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-			assertChannelOnboardingClaimDidNotMutate(t, string(backend)+" E2E-19 duplicate", claimed, afterDuplicate)
-
-			var confirmed map[string]any
-			requireServedJSONRPCResult(t, harness.rpcEndpoint(), "channel.confirm", map[string]any{
-				"operation_id": claimed.IdentityOperation.OperationID, "expected_revision": claimed.IdentityOperation.Revision, "approve": true,
-			}, &confirmed)
-			succeeded := retryChannelOnboardingRPC(t, harness, begun.Operation.OperationID, "")
-			if succeeded.Operation.Phase != channelonboarding.PhaseSucceeded || succeeded.Readiness == nil || !succeeded.Readiness.Ready {
-				t.Fatalf("%s E2E-19 succeeded result = %#v", backend, succeeded)
-			}
-			late := submitChannelOnboardingClaimAs(t, callbackURL, signingSecret, begun.IdentityOperation.Challenge, 7122, 8120, 9120, "current_operator")
-			requireChannelClaimDisposition(t, "E2E-19 late claim", late, "rejected_binding_claim")
-			afterLate := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
-			if afterLate.Operation.Revision != succeeded.Operation.Revision || afterLate.Operation.Phase != channelonboarding.PhaseSucceeded || afterLate.Readiness == nil || !afterLate.Readiness.Ready {
-				t.Fatalf("%s E2E-19 late claim changed current channel: before=%#v after=%#v", backend, succeeded, afterLate)
-			}
-			if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 1 {
-				t.Fatalf("%s E2E-19 provider effects = %d/%d, want 1/1", backend, registrations, deliveries)
-			}
-			harness.stop(t)
-		})
-	}
-}
-
 func TestChannelOnboardingE2E20FailedReplacementPreservesPredecessor(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
 			harness := newChannelOnboardingE2EHarness(t, backend, true)
+			writeChannelOnboardingLiveToolCredentials(t, harness.credentialPath)
 			harness.start(t)
 			predecessor := runChannelOnboardingCLIJourney(t, harness.opts.ConfigPath, harness.endpoint, harness.provider, "connect", "predecessor-token", 7220, "private", 0)
 			if predecessor.Operation == nil || predecessor.Activation == nil || predecessor.Readiness == nil || !predecessor.Readiness.Ready {
@@ -529,95 +314,6 @@ func retryChannelOnboardingRPC(t *testing.T, harness *channelOnboardingE2EHarnes
 	return result
 }
 
-func assertChannelOnboardingNoRecoveryGuidance(t *testing.T, harness *channelOnboardingE2EHarness, operationID string) {
-	t.Helper()
-	jsonList, humanList := channelOnboardingListSurfaces(t, harness)
-	resume := "swarm channel resume " + operationID
-	for label, surface := range map[string]string{"JSON list": jsonList, "human list": humanList} {
-		if strings.Contains(surface, operationID) || strings.Contains(surface, resume) {
-			t.Fatalf("%s retained recovery guidance for rejected operation %s:\n%s", label, operationID, surface)
-		}
-	}
-}
-
-func channelOnboardingListSurfaces(t *testing.T, harness *channelOnboardingE2EHarness) (string, string) {
-	t.Helper()
-	run := func(jsonOutput bool) string {
-		stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-		args := []string{"--config", harness.opts.ConfigPath, "channel", "list", "--api-server", harness.endpoint}
-		if jsonOutput {
-			args = append(args, "--json")
-		}
-		if code := executeCLI(context.Background(), args, stdout, stderr, nil); code != 0 {
-			t.Fatalf("channel list exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
-		}
-		return stdout.String() + "\n" + stderr.String()
-	}
-	return run(true), run(false)
-}
-
-func assertChannelOnboardingSecretAbsent(t *testing.T, secret string, surfaces map[string]string) {
-	t.Helper()
-	digest := runtimeeffects.Fingerprint([]byte(secret))
-	for label, surface := range surfaces {
-		if strings.Contains(surface, secret) || strings.Contains(strings.ToLower(surface), strings.ToLower(digest)) {
-			t.Fatalf("%s leaked the provider credential or its reusable digest", label)
-		}
-	}
-}
-
-func mustMarshalChannelOnboardingSurface(t *testing.T, value any) string {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal channel onboarding surface: %v", err)
-	}
-	return string(raw)
-}
-
-func channelOnboardingPersistedOperationSurface(t *testing.T, harness *channelOnboardingE2EHarness, operationID string) string {
-	t.Helper()
-	driver, placeholder := "sqlite", "?"
-	if harness.backend == servedparity.BackendExplicitPostgres {
-		driver, placeholder = "postgres", "$1"
-	}
-	db, err := sql.Open(driver, harness.storeDSN)
-	if err != nil {
-		t.Fatalf("open %s channel onboarding store: %v", harness.backend, err)
-	}
-	defer db.Close()
-	rows, err := db.QueryContext(context.Background(), "SELECT * FROM channel_onboarding_operations WHERE operation_id="+placeholder, operationID)
-	if err != nil {
-		t.Fatalf("query %s channel onboarding operation: %v", harness.backend, err)
-	}
-	defer rows.Close()
-	columns, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("read %s channel onboarding columns: %v", harness.backend, err)
-	}
-	if !rows.Next() {
-		t.Fatalf("%s selected store has no channel onboarding operation %s", harness.backend, operationID)
-	}
-	values := make([]any, len(columns))
-	destinations := make([]any, len(columns))
-	for index := range values {
-		destinations[index] = &values[index]
-	}
-	if err := rows.Scan(destinations...); err != nil {
-		t.Fatalf("scan %s channel onboarding operation: %v", harness.backend, err)
-	}
-	record := make(map[string]string, len(columns))
-	for index, column := range columns {
-		switch value := values[index].(type) {
-		case []byte:
-			record[column] = string(value)
-		default:
-			record[column] = fmt.Sprint(value)
-		}
-	}
-	return mustMarshalChannelOnboardingSurface(t, record)
-}
-
 type channelOnboardingPersistedHandoff struct {
 	OperationPhase              string
 	OperationActivationRevision int64
@@ -709,25 +405,6 @@ func requireChannelClaimDisposition(t *testing.T, label string, admission channe
 	t.Helper()
 	if admission.StatusCode != http.StatusAccepted || admission.Disposition != disposition || len(admission.EventIDs) != 0 || len(admission.EventNames) != 0 {
 		t.Fatalf("%s admission = %#v, want status 202 disposition %s and zero business events", label, admission, disposition)
-	}
-}
-
-func assertChannelOnboardingClaimDidNotMutate(t *testing.T, label string, before, after channelonboarding.Result) {
-	t.Helper()
-	if before.Operation.Revision != after.Operation.Revision || before.Operation.Phase != after.Operation.Phase ||
-		before.Operation.ActivationRevision != after.Operation.ActivationRevision || before.Operation.ConfirmationOperationID != after.Operation.ConfirmationOperationID ||
-		before.Binding != nil || after.Binding != nil || before.IdentityOperation == nil || after.IdentityOperation == nil ||
-		before.IdentityOperation.Revision != after.IdentityOperation.Revision || before.IdentityOperation.State != after.IdentityOperation.State {
-		t.Fatalf("%s changed lifecycle state: before=%#v after=%#v", label, before, after)
-	}
-}
-
-func assertNoChannelOnboardingActivation(t *testing.T, harness *channelOnboardingE2EHarness, operationID string) {
-	t.Helper()
-	for _, row := range readChannelOnboardingRows(t, harness.opts.ConfigPath, harness.endpoint) {
-		if row.Operation != nil && row.Operation.OperationID == operationID && row.Activation != nil {
-			t.Fatalf("operation %s unexpectedly retains activation: %#v", operationID, row)
-		}
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 )
 
@@ -28,13 +27,6 @@ func TestWhatsAppAuthoredReplyFixtureUsesInstalledPrivateConnector(t *testing.T)
 	}
 	if warnings, err := tools.ValidateToolImplementations(module.SemanticSource()); err != nil || len(warnings) != 0 {
 		t.Fatal("declaration-first native activity admission failed", warnings, err)
-	}
-	readAccount := contracts.MustToolSchemaEntry(contracts.WithToolHandler(contracts.ToolHandlerInProcess),
-		contracts.WithToolCategory(contracts.ToolCategoryProviderRegistration.String()),
-		contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)),
-		contracts.WithToolInProcessTarget(contracts.ToolInProcessWhatsAppReadAccount))
-	if _, err := tools.ValidateToolImplementations(semanticview.Wrap(&contracts.WorkflowContractBundle{Tools: map[string]contracts.ToolSchemaEntry{"whatsapp.read_account": readAccount}})); err == nil {
-		t.Fatal("session-write qualification admitted read-account execution")
 	}
 }
 

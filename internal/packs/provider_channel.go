@@ -40,7 +40,15 @@ func CompileProviderChannel(registry *InterfaceRegistry, provider packartifact.A
 	if err := validateProviderRoleIdentity(provider, packmodel.BodyConnector, connector.Identity, connector.Provider); err != nil {
 		return SatisfactionPlan{}, err
 	}
-	return compileChannelSatisfaction(compilation, trigger, connector)
+	plan, err := compileChannelSatisfaction(compilation, trigger, connector)
+	if err != nil {
+		return SatisfactionPlan{}, err
+	}
+	if flow := provider.DeclaringFlow(); flow != "" {
+		plan.capturedChannelMember = body.Label()
+		plan.capturedHolder = flow
+	}
+	return plan, nil
 }
 
 func validateProviderRoleIdentity(provider packartifact.AdmittedProvider, role packmodel.BodyRole, actual PackIdentity, key string) error {

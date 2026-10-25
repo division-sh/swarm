@@ -318,6 +318,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	if !ok {
 		t.Fatalf("inbound publication proof store %T cannot register author activity catalog", store)
 	}
+	registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
 	standing, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatalf("ReconcileStandingService: %v", err)
@@ -621,7 +622,8 @@ func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Co
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, err := inboundOperatorProofPlan(t).InterfaceIdentity()
+	channelPlan, _ := inboundOperatorProofPlan(t)
+	identity, err := channelPlan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1093,7 +1095,7 @@ func inboundPublicationProofBundle(t *testing.T, flowPath string) *runtimecontra
 		"schema.yaml":               rootSchema + fmt.Sprintf("connect:\n  - event: inbound.github.push.normalized\n    from: %s\n    to: .\n", flowPath),
 		flowPath + "/manifest.yaml": manifest,
 		flowPath + "/schema.yaml":   leafSchema,
-		"github/manifest.yaml":      manifest + "capabilities: {can: {emit_events: [push, push.normalized]}, cannot: [bypass journal]}\n",
+		"github/manifest.yaml":      manifest + "capabilities: {can: {emit_events: [push, push.normalized], verify_secret: webhook_signing_secret}, cannot: [bypass journal]}\n",
 		"github/trigger.yaml": `secret: {required: true}
 signature: {type: hmac_sha256, header: X-Signature, prefix: "sha256=", signed_payload: raw_body}
 delivery_id: {json_path: "$.delivery_id", required: true}

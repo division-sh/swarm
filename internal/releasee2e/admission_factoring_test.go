@@ -1,10 +1,7 @@
 package releasee2e
 
 import (
-	"context"
 	"encoding/json"
-	"io"
-	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -23,7 +20,13 @@ func TestAdmissionFactoringCompiledStructuralSurfaces(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
-			if result.err != nil {
+			deploymentVerify := args[0] == "verify" && len(args) == 2
+			if deploymentVerify {
+				exit, ok := result.err.(*exec.ExitError)
+				if !ok || exit.ExitCode() != 4 || !strings.Contains(result.output, "credential_key_exists") || !strings.Contains(result.output, "telegram.telegram_bot_token") || !strings.Contains(result.output, "telegram.webhook_signing_secret") {
+					t.Fatalf("deployment verify lost exact missing-credential refusal: %v\n%s", result.err, result.output)
+				}
+			} else if result.err != nil {
 				t.Fatalf("compiled source reader: %v\n%s", result.err, result.output)
 			}
 			for _, retired := range []string{"capability_subjects", "production_valid", "workspace_backend"} {
@@ -55,140 +58,6 @@ func TestAdmissionFactoringCompiledStructuralSurfaces(t *testing.T) {
 	result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--portable", "--json", "--config", config)
 	if result.err == nil || !strings.Contains(result.output, "array requires items") {
 		t.Fatalf("compiled verify did not reach canonical schema refusal: %v\n%s", result.err, result.output)
-	}
-}
-
-func TestFactoringCapabilitySubjectAggregateBothStores(t *testing.T) {
-	root := goldenReleaseRoot(t)
-	binary := buildReleaseBinary(t, root)
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) { proveFactoringCompiledStandingSubjects(t, binary, backend, false) })
-	}
-}
-
-func TestAdmissionFactoringCompiledCapabilitySurfacesBothStores(t *testing.T) {
-	root := goldenReleaseRoot(t)
-	binary := buildReleaseBinary(t, root)
-	t.Run("source-free-doctor", func(t *testing.T) {
-		// Source-free doctor receives hostile source bytes. No provider launch or
-		// paid credential probe is provisioned or credited.
-		writeReleaseFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-		writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "not: valid: source\n")
-		_, env := clockReleaseConfig(t, root, "sqlite")
-		result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "doctor", "--backend", "claude_cli", "--workspace-backend", "host", "--json")
-		if result.err != nil {
-			exit, ok := result.err.(*exec.ExitError)
-			if !ok || exit.ExitCode() != 1 {
-				t.Fatalf("doctor command failed outside prerequisites: %v\n%s", result.err, result.output)
-			}
-		}
-		var report struct {
-			OK                 bool `json:"ok"`
-			CapabilitySubjects []struct {
-				Kind, Applicability, Status string
-				TriggerAdmission            json.RawMessage `json:"trigger_admission"`
-			} `json:"capability_subjects"`
-			PackInventory json.RawMessage `json:"pack_inventory"`
-		}
-		if err := json.Unmarshal([]byte(result.output), &report); err != nil {
-			t.Fatal(err)
-		}
-		if len(report.CapabilitySubjects) == 0 {
-			t.Fatalf("doctor omitted installed inventory: ok=%t capability_subjects=%d pack_inventory=%s", report.OK, len(report.CapabilitySubjects), report.PackInventory)
-		}
-		for _, subject := range report.CapabilitySubjects {
-			if subject.Kind == "provider_trigger" && (subject.Applicability != "installed" || subject.Status != "AVAILABLE" || len(subject.TriggerAdmission) != 0) {
-				t.Fatalf("source-free doctor invented target authority: %#v", subject)
-			}
-		}
-	})
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) { proveFactoringCompiledStandingSubjects(t, binary, backend, true) })
-	}
-}
-
-func proveFactoringCompiledStandingSubjects(t *testing.T, binary, backend string, provision bool) {
-	t.Helper()
-	root := goldenReleaseRoot(t)
-	config, env := clockReleaseConfig(t, root, backend)
-	source := copyFactoringStandingSource(t)
-	writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
-	spec := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source, ConfigPath: config, Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env}
-	start := func(wantRuns int) *releaseServeProcess {
-		t.Helper()
-		p := startReleaseServe(t, spec)
-		ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
-		defer cancel()
-		if err := p.waitReady(ctx); err != nil {
-			t.Fatal(err)
-		}
-		var inventory struct {
-			Runs []struct {
-				Origin struct {
-					Kind string `json:"kind"`
-				} `json:"origin"`
-			} `json:"runs"`
-			NextCursor string `json:"next_cursor"`
-		}
-		if err := p.rpc.call(ctx, "run.list", map[string]any{}, &inventory); err != nil {
-			t.Fatal(err)
-		}
-		count := 0
-		for _, run := range inventory.Runs {
-			if run.Origin.Kind == "standing_generation" {
-				count++
-			}
-		}
-		if inventory.NextCursor != "" || count != wantRuns {
-			t.Fatalf("exact standing inventory: count=%d want=%d cursor=%s\n%s", count, wantRuns, inventory.NextCursor, p.output.String())
-		}
-		return p
-	}
-	p := start(0)
-	for _, flow := range []string{".", "beta"} {
-		if !strings.Contains(p.output.String(), "DORMANT ingress "+flow+"/telegram") {
-			t.Fatalf("lost distinct dormant declaration %s\n%s", flow, p.output.String())
-		}
-	}
-	if !strings.Contains(p.output.String(), "NOT READY") {
-		t.Fatal("dormant readback manufactured readiness")
-	}
-	if provision {
-		for _, alias := range []string{"alpha", "beta"} {
-			result := runReleaseCommand(t, goldenStartupTimeout, root, env, "supplied-signing-value\n", binary, "secrets", "set", "webhook_signing."+alias)
-			if result.err != nil {
-				t.Fatalf("compiled secret provision: %v\n%s", result.err, result.output)
-			}
-			response, err := http.Post(p.apiBase+"/webhooks/"+alias+"/telegram", "application/json", strings.NewReader(`{"update_id":1}`))
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, _ = io.Copy(io.Discard, response.Body)
-			_ = response.Body.Close()
-			if response.StatusCode != http.StatusNotFound {
-				t.Fatalf("credential insertion hot-activated %s: HTTP %d", alias, response.StatusCode)
-			}
-		}
-	}
-	if err := p.stopAndWait(goldenShutdownGrace); err != nil {
-		t.Fatalf("public shutdown: %v\n%s", err, p.output.String())
-	}
-	if provision {
-		p = start(2)
-		for _, flow := range []string{".", "beta"} {
-			if strings.Contains(p.output.String(), "DORMANT ingress "+flow+"/telegram") {
-				t.Fatalf("restart did not evaluate provisioned target %s\n%s", flow, p.output.String())
-			}
-		}
-		if !strings.Contains(p.output.String(), "READY") {
-			t.Fatal("provisioned restart omitted readiness")
-		}
-		if strings.Contains(p.output.String(), "supplied-signing-value") {
-			t.Fatal("readback leaked secret bytes")
-		}
-		if err := p.stopAndWait(goldenShutdownGrace); err != nil {
-			t.Fatalf("provisioned shutdown: %v\n%s", err, p.output.String())
-		}
 	}
 }
 

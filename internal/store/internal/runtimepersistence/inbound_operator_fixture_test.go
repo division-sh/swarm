@@ -17,7 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func inboundOperatorProofPlan(t *testing.T) packs.SatisfactionPlan {
+func inboundOperatorProofPlan(t *testing.T) (packs.SatisfactionPlan, *providertriggers.CatalogSnapshot) {
 	t.Helper()
 	snapshot, err := yamlsource.LoadFile(filepath.Join("..", "..", "..", "..", "platform-spec.yaml"))
 	if err != nil {
@@ -27,19 +27,31 @@ func inboundOperatorProofPlan(t *testing.T) packs.SatisfactionPlan {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
+	entry, found := packfixture.EmbeddedInventory(t).Lookup("telegram")
+	if !found {
+		t.Fatal("operator fixture requires its captured Telegram provider")
+	}
+	provider, err := packadmission.AdmitProviderDirectory(entry.Provider(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return packfixture.ChannelPlanByID(t, projection.ChannelPlans, "telegram")
+	channel, found := provider.ChannelPlan()
+	if !found {
+		t.Fatal("operator fixture requires its admitted channel plan")
+	}
+	catalog, found := provider.TriggerCatalog()
+	if !found {
+		t.Fatal("operator fixture requires its matching trigger catalog")
+	}
+	return channel, catalog
 }
 
 // Persistence tests supply only external Telegram bytes. Compiled trigger and
 // channel owners issue the projection; this helper cannot seal arbitrary facts.
 func inboundOperatorProofCommand(t *testing.T, ctx context.Context, request inbound.Request, payload map[string]any) inbound.CommitCommand {
 	t.Helper()
-	channel := inboundOperatorProofPlan(t)
-	trigger, err := packfixture.TriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "telegram", Provider: "telegram", SigningSecret: "operator_fixture_signing"})
+	channel, catalog := inboundOperatorProofPlan(t)
+	trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "telegram", Provider: "telegram", SigningSecret: "operator_fixture_signing"})
 	if err != nil {
 		t.Fatal(err)
 	}

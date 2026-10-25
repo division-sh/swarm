@@ -17,9 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -42,14 +40,12 @@ func humanTaskConstructedRequester(t *testing.T, ctx context.Context, selected h
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := selected.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, rooted); err != nil {
-		t.Fatal(err)
+	retained, err := selected.LoadRunRootedSource(ctx, runID)
+	if err != nil || !retained.Admission().Equal(rooted.Admission()) {
+		t.Fatalf("requester fixture lost its original captured source: %v", err)
 	}
 	fact := sourceartifactfixture.FactFor(rooted.Artifact())
 	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
-	if _, err := storetest.ReviseRunSource(ctx, selected.(storetest.RunFixtureStore), runlifecycle.SourceRevisionRequest{RunID: runID, Source: fact, RootAdmission: rooted.Admission()}); err != nil {
-		t.Fatalf("admit requester run source: %v", err)
-	}
 	ctx = correlation.WithSourceArtifactFact(ctx, fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	ctx = effects.WithExecutionMode(ctx, executionmode.Live)

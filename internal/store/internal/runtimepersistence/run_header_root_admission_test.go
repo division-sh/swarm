@@ -31,7 +31,7 @@ func TestS1RunHeaderHistoricalRootReadbackBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedRunHeaderStore)
 			source, path := admittedRootForStorage(t, "shop-a")
-			ctx := testAuthorActivityContextForBundle(source.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.Artifact().BundleHash()), selected)
 			if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 				t.Fatal(err)
 			}
@@ -89,7 +89,7 @@ func TestS1RunHeadersRefuseMalformedPersistedRootBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedRunHeaderStore)
 			source, _ := admittedRootForStorage(t, "shop-a")
-			ctx := testAuthorActivityContextForBundle(source.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.Artifact().BundleHash()), selected)
 			if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 				t.Fatal(err)
 			}

@@ -29,6 +29,7 @@ func TestS1DirectoryTriggerSchemasUseCapturedInputEvidence(t *testing.T) {
 	membersFor := func(event string) map[string][]byte {
 		members := s1EffectiveTriggerMembers()
 		members["team-bot/trigger.yaml"] = bytes.Replace(members["team-bot/trigger.yaml"], []byte("event_name: {literal: raw}"), []byte("event_name: {template: 'raw.{event_type}'}"), 1)
+		members["team-bot/manifest.yaml"] = bytes.Replace(members["team-bot/manifest.yaml"], []byte("emit_events: [raw, text_message]"), []byte("emit_events: ['raw.{event_type}', text_message]"), 1)
 		if event != "" {
 			members["schema.yaml"] = []byte(fmt.Sprintf("stages: []\npins:\n  inputs: [%s]\n  outputs: [%s]\n", event, event))
 		}

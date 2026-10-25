@@ -160,6 +160,7 @@ type serveRuntimeBundleContextRequest struct {
 	RepoRoot            string
 	PlatformPackBases   *packartifact.PlatformPackBaseGenerationOwner
 	ExecutionPosture    executionposture.Posture
+	PublicIngressAbsent bool
 	Ctx                 context.Context
 	Stores              serveRuntimePersistence
 	Config              *config.Config
@@ -543,6 +544,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		return serveRuntimeBundleContext{}, fmt.Errorf("command execution purpose is required")
 	}
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials, posture)
+	validationOpts.PublicIngressAbsent = req.PublicIngressAbsent
 	validationOpts.ModelAliases = req.Config.LLM.Models
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderCredentials = req.ProviderCredentials
@@ -580,6 +582,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	}
 	runtimeDeps.Options = runtime.RuntimeOptions{
 		ExecutionPosture:                 posture,
+		PublicIngressAbsent:              req.PublicIngressAbsent,
 		EnableDeclaredClockBinding:       !req.Options.LocalRun,
 		SelfCheck:                        req.Options.SelfCheck,
 		WorkflowModule:                   loaded.module,
@@ -1318,6 +1321,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			RepoRoot:            repo,
 			PlatformPackBases:   platformPackBases,
 			ExecutionPosture:    req.Purpose,
+			PublicIngressAbsent: !publicIngressEnabled,
 			DataProjectionRoot:  req.DataProjectionRoot,
 			Ctx:                 ctx,
 			Stores:              runtimePersistence,

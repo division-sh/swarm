@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -536,13 +537,6 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	if _, acknowledged, err := journal.CompleteActivityAttempt(ctx, record); err != nil || !acknowledged {
 		t.Fatalf("settle original activity projection journal: acknowledged=%t err=%v", acknowledged, err)
 	}
-	// The terminal source journal no longer needs possession; preparation owns
-	// the next retained process rather than competing for the same SQLite file.
-	if err := sourceProcess.Release(ctx); err != nil {
-		t.Fatal(err)
-	}
-	sourceFact, _ := correlation.SourceArtifactFactFromContext(ctx)
-	ctx = originalStoreFixtureContext(t, correlation.WithRunID(testAuthorActivityContextForBundle(sourceFact.BundleHash()), runID), fixture.store)
 	if postEvent != nil {
 		postEvent(ctx, runID)
 	}
@@ -553,6 +547,19 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	if child.MaterializedEntityCount != wantEntities {
 		t.Fatalf("activity fixture did not materialize its complete constructed topology: count=%d want=%d", child.MaterializedEntityCount, wantEntities)
 	}
+	rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, child.ForkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.SelectedContractBinding == nil || rooted.Admission().Reference() != child.SelectedContractBinding.TargetRootReference {
+		t.Fatal("activity fixture child differs from its selected root binding")
+	}
+	scope, err := authoractivity.BundleScopeForTarget(ctx, rooted.Admission().BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())), rooted.Admission())
+	ctx = authoractivity.WithScope(ctx, scope)
 	return ctx, runID, child, event
 }
 
@@ -786,7 +793,7 @@ func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFi
 	})
 	if fixture.activityJournal != nil {
 		fixture.activityJournal.once.Do(func() {
-			fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, ctx, fixture.store)
+			fixture.activityJournal.owner, fixture.activityJournal.binding, fixture.activityJournal.original = captureActivityFixtureJournalWithBinding(fixture.activityOwner, ctx, fixture.store)
 		})
 		retainActivityFixtureProcessForMaterialization(t, ctx, fixture.store, fixture.activityOwner)
 	}
@@ -886,6 +893,8 @@ func materializeSelectedActivityFixture(t *testing.T, ctx context.Context, store
 	t.Helper()
 	source := selectedActivityProducerSource(t)
 	request := selectedSourceMaterializationRequest(t, ctx, store, sourceRunID, eventID, source)
+	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), request.RootAdmission)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, request.SourceArtifactFact.BundleHash()))
 	materialized, err := store.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatal(err)

@@ -208,17 +208,25 @@ func TestSelectedCanceledOriginStartupReactionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
-			source := selectedProviderCompletionSourceForTest(t)
-			bundle, _ := semanticview.Bundle(source)
+			base := selectedProviderCompletionSourceForTest(t)
+			baseBundle, _ := semanticview.Bundle(base)
+			files := make(map[string]string)
+			for _, entry := range baseBundle.SourceArtifact.Entries() {
+				files[entry.Label()] = string(entry.Bytes())
+			}
+			files["global/events.yaml"] = "test.grant_receiver:\n"
+			bundle := loadLifecyclePersistenceFixtureForTest(t, files)
+			source := semanticview.Wrap(bundle)
 			rooted, err := bundle.RootedSource()
 			if err != nil {
 				t.Fatal(err)
 			}
 			sourceRun := uuid.NewString()
 			ctx := testAuthorActivityContextForBundle(rooted.Admission().BundleHash())
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			registerTestAuthorActivityCatalog(t, selected.(testAuthorActivityCatalogRegistrar))
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: rooted.Artifact(), StartedAt: time.Now().UTC()})
-			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 			point := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, sourceRun, events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticEventFixture(ctx, selected.(semanticEventFixtureStore), point); err != nil {
 				t.Fatal(err)

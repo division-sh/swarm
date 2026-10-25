@@ -10,6 +10,7 @@ import (
 func TestServedCompiledGateAdvanceOnlyOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleGateAdvanceOnly(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "advance-only"})
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")

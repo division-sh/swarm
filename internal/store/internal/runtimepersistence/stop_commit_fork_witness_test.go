@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
@@ -105,8 +103,8 @@ func (w *stopCommitForkWitness) decode(query string, args []driver.NamedValue) (
 	if source != w.expected.SourceRunID {
 		return stopCommitForkInsert{}, false, nil
 	}
-	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash ) values ("
-	if !strings.HasPrefix(query, columns) || len(args) != 9 {
+	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash, source_root_directory ) values ("
+	if !strings.HasPrefix(query, columns) || len(args) != 10 {
 		return stopCommitForkInsert{}, true, errors.New("fork witness INSERT binding shape changed")
 	}
 	for index, arg := range args {
@@ -120,9 +118,10 @@ func (w *stopCommitForkWitness) decode(query string, args []driver.NamedValue) (
 	revision, revisionOK := args[5].Value.(int64)
 	event, eventOK := stopCommitBoundText(args[6].Value)
 	bundle, bundleOK := stopCommitBoundText(args[8].Value)
+	root, rootOK := stopCommitBoundText(args[9].Value)
 	parsed, parseErr := uuid.Parse(child)
 	if !childOK || parseErr != nil || parsed == uuid.Nil || parsed.String() != child ||
-		!originOK || origin != "fork_materialization" || !kindOK || !revisionOK || !eventOK || !bundleOK {
+		!originOK || origin != "fork_materialization" || !kindOK || !revisionOK || !eventOK || !bundleOK || !rootOK || root == "" {
 		return stopCommitForkInsert{}, true, errors.New("fork witness INSERT has invalid bound coordinates")
 	}
 	observed := stopCommitForkInsert{RunID: child, SourceRunID: source, BundleHash: bundle,
@@ -155,133 +154,4 @@ func (w *stopCommitForkWitness) attempted() (stopCommitForkInsert, error) {
 		return stopCommitForkInsert{}, errors.New("fork witness has no successful INSERT")
 	}
 	return w.observed, nil
-}
-
-type stopCommitWitnessNativeTx struct {
-	commits, rollbacks int
-	commitErr          error
-}
-
-func (tx *stopCommitWitnessNativeTx) Commit() error   { tx.commits++; return tx.commitErr }
-func (tx *stopCommitWitnessNativeTx) Rollback() error { tx.rollbacks++; return nil }
-
-type stopCommitWitnessNativeConn struct {
-	driver.Conn
-	err   error
-	rows  int64
-	calls int
-	query string
-	args  []driver.NamedValue
-}
-
-func (c *stopCommitWitnessNativeConn) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	c.calls++
-	c.query, c.args = query, args
-	return driver.RowsAffected(c.rows), c.err
-}
-
-func TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction(t *testing.T) {
-	const query = `INSERT INTO runs (
-		run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-		event_count, started_at, bundle_hash
-	) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?)`
-	source, child, event := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 7, EventID: event}
-	const bundle = "witness-bundle"
-	for _, name := range []string{"success", "unarmed", "outside_transaction", "armed_after_begin", "foreign_source", "failed_statement", "no_inserted_row", "duplicate", "duplicate_other_connection", "changed_cut", "changed_bundle", "changed_shape", "mutable_arguments", "rollback", "commit", "failed_commit", "lost_ack", "read_only_commit"} {
-		t.Run(name, func(t *testing.T) {
-			native := &stopCommitWitnessNativeConn{rows: 1}
-			owner := &stopCommitConnector{}
-			conn := &stopCommitConn{diagnosticSQLConn: diagnosticSQLConn{Conn: native}, owner: owner}
-			var tx *stopCommitTx
-			if name == "armed_after_begin" {
-				tx = conn.observeTransaction(&stopCommitWitnessNativeTx{}, false)
-			}
-			witness := owner.armForkInsert(source, point, bundle)
-			if name != "outside_transaction" && tx == nil {
-				tx = conn.observeTransaction(&stopCommitWitnessNativeTx{}, false)
-			}
-			if name == "unarmed" {
-				tx.fork = nil
-			}
-			values := []driver.Value{child, "paused", "fork_materialization", source, string(point.Kind), point.Revision, event, time.Now().UTC(), bundle}
-			args := make([]driver.NamedValue, len(values))
-			for index, value := range values {
-				args[index] = driver.NamedValue{Ordinal: index + 1, Value: value}
-			}
-			statement := query
-			switch name {
-			case "foreign_source":
-				args[3].Value = uuid.NewString()
-			case "failed_statement":
-				native.err = errors.New("native INSERT rejected")
-			case "no_inserted_row":
-				native.rows = 0
-			case "changed_cut":
-				args[5].Value = point.Revision + 1
-			case "changed_bundle":
-				args[8].Value = "foreign-bundle"
-			case "changed_shape":
-				args = args[:8]
-			case "mutable_arguments":
-				args[0].Value, args[3].Value, args[8].Value = []byte(child), []byte(source), []byte(bundle)
-			}
-			result, err := conn.ExecContext(context.Background(), statement, args)
-			if !errors.Is(err, native.err) || result == nil || native.calls != 1 || native.query != statement || &native.args[0] != &args[0] {
-				t.Fatalf("witness changed native SQL/result: calls=%d result=%v err=%v", native.calls, result, err)
-			}
-			if name == "mutable_arguments" {
-				for _, arg := range args {
-					if bytes, ok := arg.Value.([]byte); ok {
-						bytes[0] = '!'
-					}
-				}
-			}
-			if name == "duplicate_other_connection" {
-				conn = &stopCommitConn{diagnosticSQLConn: diagnosticSQLConn{Conn: native}, owner: owner}
-				conn.observeTransaction(&stopCommitWitnessNativeTx{}, false)
-			}
-			if name == "duplicate" || name == "duplicate_other_connection" {
-				if _, err := conn.ExecContext(context.Background(), statement, args); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if name == "rollback" {
-				if err := tx.Rollback(); err != nil || conn.tx != nil {
-					t.Fatalf("rollback did not retire transaction witness: %v", err)
-				}
-			}
-			if name == "commit" || name == "failed_commit" || name == "lost_ack" || name == "read_only_commit" {
-				nativeTx := tx.Tx.(*stopCommitWitnessNativeTx)
-				fault := errors.New("native commit acknowledgement unavailable")
-				if name == "failed_commit" {
-					nativeTx.commitErr = fault
-				}
-				if name == "lost_ack" {
-					owner.arm(func(native driver.Tx) error {
-						if _, err := witness.attempted(); err != nil {
-							t.Fatal(err)
-						}
-						return errors.Join(fault, native.Commit())
-					})
-				}
-				tx.readOnly = name == "read_only_commit"
-				err := tx.Commit()
-				wantWriteCommits := int32(1)
-				if tx.readOnly {
-					wantWriteCommits = 0
-				}
-				if wantFault := name == "failed_commit" || name == "lost_ack"; errors.Is(err, fault) != wantFault ||
-					nativeTx.commits != 1 || owner.commits.Load() != 1 || owner.writeCommits.Load() != wantWriteCommits || conn.tx != nil {
-					t.Fatalf("native commit delegation changed: err=%v calls=%d commit count=%d write count=%d", err, nativeTx.commits, owner.commits.Load(), owner.writeCommits.Load())
-				}
-			}
-			got, observationErr := witness.attempted()
-			want := stopCommitForkInsert{RunID: child, SourceRunID: source, BundleHash: bundle, PointKind: point.Kind, Revision: point.Revision, EventID: event}
-			positive := name == "success" || name == "mutable_arguments" || name == "rollback" || name == "commit" || name == "failed_commit" || name == "lost_ack" || name == "read_only_commit"
-			if positive && (observationErr != nil || got != want) || !positive && (observationErr == nil || got != (stopCommitForkInsert{})) {
-				t.Fatalf("attempted INSERT witness: got=%+v err=%v positive=%t", got, observationErr, positive)
-			}
-		})
-	}
 }

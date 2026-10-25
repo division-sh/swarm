@@ -24,7 +24,7 @@ func compileSessionTriggerTransportFixture(t *testing.T) providertriggers.Inboun
 	t.Helper()
 	body := []byte("transport: session\nevent_name: {literal: raw}\ndelivery_id: {json_path: '$.id', required: true}\nevent_type: {json_path: '$.kind', required: true}\nack: {mode: durable_before_dispatch}\n")
 	provider, err := packartifact.LoadProviderFS(fstest.MapFS{
-		"acme/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n")},
+		"acme/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n")},
 		"acme/trigger.yaml":  {Data: body},
 	}, "acme", "0.7.0")
 	if err != nil {

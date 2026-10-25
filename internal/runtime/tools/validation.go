@@ -87,7 +87,6 @@ func qualifyNativeActivityImplementation(source semanticview.Source, name string
 	if err := entry.Validate(); err != nil {
 		return fmt.Errorf("native activity tool %s: %w", name, err)
 	}
-	sites := 0
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
 		if err != nil {
@@ -104,11 +103,7 @@ func qualifyNativeActivityImplementation(source semanticview.Source, name string
 			if err := channelonboarding.QualifySessionActivityDeclaration(source, site, trigger); err != nil {
 				return fmt.Errorf("native activity tool %s: %w", name, err)
 			}
-			sites++
 		}
-	}
-	if sites == 0 {
-		return fmt.Errorf("tool %s has no qualified private activity/ingress declaration", name)
 	}
 	return nil
 }

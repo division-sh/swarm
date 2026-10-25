@@ -763,6 +763,10 @@ func logInboundPublicationFailure(logger *RuntimeLogger, requestCtx context.Cont
 		logInboundPayloadRejection(logger, requestCtx, provider, serviceID, providerEventID, path)
 		return
 	}
+	if path, rejected := providertriggers.NormalizedInputValidationPath(err); rejected {
+		logInboundPayloadRejection(logger, requestCtx, provider, serviceID, providerEventID, path)
+		return
+	}
 	// Durable failure envelopes normalize unknown errors; retain joined causes in
 	// the existing process diagnostic channel without exposing them over HTTP.
 	diaglog.ProcessLog(diaglog.LevelError, "inbound-gateway", "inbound publication failed",

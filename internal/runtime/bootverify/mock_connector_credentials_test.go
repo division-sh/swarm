@@ -161,7 +161,7 @@ func TestMockOnlyPostureRequiresMockAgentsAndExactActivityResponses(t *testing.T
 		t.Fatal(err)
 	}
 	liveSource, livePlan := mockConnectorCredentialFixture(t, "static", false, true)
-	if _, err := ResolveSourceBootEffectReachability(liveSource, profile, livePlan, executionposture.MockOnly); err == nil || !strings.Contains(err.Error(), "exact mock performance artifact") {
+	if _, err := ResolveSourceBootEffectReachability(liveSource, profile, livePlan, executionposture.MockOnly, false); err == nil || !strings.Contains(err.Error(), "exact mock performance artifact") {
 		t.Fatalf("live-agent reachability error = %v, want mock-only actor rejection", err)
 	}
 
@@ -179,15 +179,44 @@ func TestMockOnlyPostureRequiresMockAgentsAndExactActivityResponses(t *testing.T
 	}
 	bundle.FlowTree.Root.Nodes = bundle.Nodes
 	mockSource = semanticview.Wrap(bundle)
-	reachability, err := ResolveSourceBootEffectReachability(mockSource, profile, exactPlan, executionposture.MockOnly)
+	reachability, err := ResolveSourceBootEffectReachability(mockSource, profile, exactPlan, executionposture.MockOnly, false)
 	if err != nil {
 		t.Fatalf("mock-only exact response reachability: %v", err)
 	}
 	if reachability.ToolCredentialRequired("provider.send") {
 		t.Fatal("mock-only exact provider activity retained a live credential requirement")
 	}
-	if _, err := ResolveSourceBootEffectReachability(mockSource, profile, nil, executionposture.MockOnly); err == nil || !strings.Contains(err.Error(), "exact mock response") {
+	if _, err := ResolveSourceBootEffectReachability(mockSource, profile, nil, executionposture.MockOnly, false); err == nil || !strings.Contains(err.Error(), "exact mock response") {
 		t.Fatalf("missing-response reachability error = %v, want exact responder rejection", err)
+	}
+	object := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+	bundle.Tools["provider.register"] = runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolCategory("provider_registration"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(object, object), runtimecontracts.WithToolCredentials("registration_secret"),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.example/register"}),
+	)
+	mockSource = semanticview.Wrap(bundle)
+	for _, tc := range []struct {
+		posture executionposture.Posture
+		absent  bool
+		want    bool
+	}{{executionposture.MockOnly, true, false}, {executionposture.MockOnly, false, true}, {executionposture.Live, true, true}} {
+		reachability, err := ResolveSourceBootEffectReachability(mockSource, profile, exactPlan, tc.posture, tc.absent)
+		if err != nil || reachability.ToolCredentialRequired("provider.register") != tc.want {
+			t.Fatalf("registration reachability posture=%s absent=%t: %+v err=%v", tc.posture, tc.absent, reachability, err)
+		}
+		if _, found := mockSource.ToolEntries()["provider.register"]; !found {
+			t.Fatal("reachability removed the registration declaration")
+		}
+	}
+	node := bundle.Nodes["provider-sender"]
+	node.EventHandlers["provider.register_requested"] = runtimecontracts.SystemNodeEventHandler{
+		Activity: runtimecontracts.ActivitySpec{ID: "provider_register", Tool: "provider.register"},
+	}
+	bundle.Nodes["provider-sender"] = node
+	if _, err := ResolveSourceBootEffectReachability(semanticview.Wrap(bundle), profile, exactPlan, executionposture.MockOnly, true); err == nil ||
+		!strings.Contains(err.Error(), `exact mock response for provider activity tool "provider.register"`) {
+		t.Fatalf("registration activity bypassed exact responder refusal: %v", err)
 	}
 }
 
@@ -506,7 +535,7 @@ func commandConnectorEffectReachability(t *testing.T, source semanticview.Source
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
-	reachability, err := ResolveSourceBootEffectReachability(source, profile, plan, posture)
+	reachability, err := ResolveSourceBootEffectReachability(source, profile, plan, posture, false)
 	if err != nil {
 		t.Fatalf("ResolveSourceBootEffectReachability: %v", err)
 	}

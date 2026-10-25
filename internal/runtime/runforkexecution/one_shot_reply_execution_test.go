@@ -79,7 +79,7 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(),
 				Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
-			rt, closeServing := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+			rt, closeServing := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, nil)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
 				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", runID, runID, "", ""), OccurredAt: at})

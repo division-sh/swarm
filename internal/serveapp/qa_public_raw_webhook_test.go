@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"gopkg.in/yaml.v3"
 )
 
 func TestQAPublicRawWebhookReadyRouteBothStores(t *testing.T) {
@@ -34,6 +36,38 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
+			path := filepath.Join(root, "schema.yaml")
+			sourceBody, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var schema map[string]any
+			if err := yaml.Unmarshal(sourceBody, &schema); err != nil {
+				t.Fatal(err)
+			}
+			delete(schema, "ingress")
+			schema["pins"] = map[string]any{"inputs": []string{"inbound.partner.raw"}}
+			sourceBody, err = yaml.Marshal(schema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeStandingCandidateFile(t, path, string(sourceBody))
+			path = filepath.Join(root, "nodes.yaml")
+			sourceBody, err = os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeStandingCandidateFile(t, path, strings.ReplaceAll(string(sourceBody), "account.opened", "inbound.partner.raw"))
+			if err := os.Remove(filepath.Join(root, "events.yaml")); err != nil {
+				t.Fatal(err)
+			}
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [raw]\n    verify_secret: webhook_signing_secret\n  cannot: [execute code]\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), "transport: webhook\npayload_object_required: true\nsecret: {required: true}\nsignature: {type: hmac_sha256, header: X-Signature, prefix: 'sha256=', signed_payload: raw_body}\ndelivery_id: {json_path: $.delivery_id, required: true}\nevent_type: {literal: update, required: true}\nevent_name: {literal: raw}\n")
+			selected := filepath.Join(filepath.Dir(root), "keyed-shop")
+			if err := os.Rename(root, selected); err != nil {
+				t.Fatal(err)
+			}
+			root = selected
 			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			file, err := credentials.NewFileStore(credentialPath)
@@ -41,7 +75,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 				t.Fatal(err)
 			}
 			const secret = "public-raw-loopback-no-spend"
-			if err := file.Set(t.Context(), "webhook_signing.partner", secret); err != nil {
+			if err := file.Set(t.Context(), "partner.webhook_signing_secret", secret); err != nil {
 				t.Fatal(err)
 			}
 			publicListener := reserveChannelOnboardingListener(t)

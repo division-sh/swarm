@@ -8,8 +8,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +23,9 @@ func TestRunStartOriginalPointPreservesCreatingInputBothStores(t *testing.T) {
 				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 			})
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash), fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact())), rooted.Admission())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, rooted.Artifact())
 			runID := uuid.NewString()
 			at := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 			initial := eventtest.RunCreatingRootIngress(uuid.NewString(), "origin.trigger", "ingress", "", json.RawMessage(`{}`), 0,

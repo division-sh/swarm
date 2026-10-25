@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 type nestedSeedReadinessBarrier struct {
@@ -45,13 +47,18 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 	} {
 		backend, mode := variant.backend, variant.mode
 		t.Run(string(backend)+"/"+mode, func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			probe := lifecycletest.New(t)
 			readiness := &nestedSeedReadinessBarrier{observer: probe, release: make(chan struct{})}
 			releaseReadiness := sync.OnceFunc(func() { close(readiness.release) })
 			t.Cleanup(releaseReadiness)
 			defer releaseReadiness()
 			configureOwnedMockLifecycleProbe(t, readiness)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleNestedCascade(t))
+			root := canonicalrouting.CopyLifecycleNestedCascade(t)
+			if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+				t.Fatal(err)
+			}
+			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			var entered chan string
 			var unblock func()
 			if mode == "held_diagnostic" {

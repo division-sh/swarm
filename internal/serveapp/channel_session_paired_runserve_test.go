@@ -609,7 +609,7 @@ func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNat
 	if err != nil {
 		t.Fatal(err)
 	}
-	bounds, err := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "provider.whatsapp.hitl_channel").PresentationBounds()
+	bounds, err := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "whatsapp").PresentationBounds()
 	if err != nil {
 		t.Fatal(err)
 	}

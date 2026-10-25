@@ -21,11 +21,18 @@ func TestS1RootContextCarriesOnlyMatchingExistingEvidence(t *testing.T) {
 	if err != nil || !ok || !got.Equal(rooted.Admission()) {
 		t.Fatal("exact root context lost its existing admission")
 	}
+	other, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"nodes.yaml":    []byte("other: {type: procedure}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, invalid := range map[string]context.Context{
 		"nil":             nil,
 		"no_content":      correlation.WithRootAdmission(nil, rooted.Admission()),
 		"cleared_root":    correlation.WithRootAdmission(ctx, sourceartifact.RootAdmission{}),
-		"changed_content": correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(sourceartifactfixture.New("nodes.yaml", []byte("other: {type: procedure}\n")))),
+		"changed_content": correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(other)),
 	} {
 		t.Run(name, func(t *testing.T) {
 			root, ok, err := correlation.RootAdmissionFromContext(invalid)

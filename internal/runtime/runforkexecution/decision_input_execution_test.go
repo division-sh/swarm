@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -68,7 +69,7 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: source,
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at})
-			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
+			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live, nil)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
 				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", source, source, "", ""), OccurredAt: at})
@@ -85,7 +86,7 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			}
 			// Advance the ordinary source so the earlier fork cut cannot freeze it.
 			publishPendingReplyInput(t, ctx, rt.Bus, source, "request.note", []byte(`{"note":"source-still-owns-its-card"}`))
-			result := activatePendingDecisionFork(t, ctx, owner, source, page.Events[0].EventID, loader, loaded)
+			result := activatePendingDecisionFork(t, ctx, owner, source, page.Events[0].EventID, loader, loaded, nil)
 			child := result.Materialization.ForkRunID
 			card := requirePendingReplyCard(t, ctx, store, child)
 			principal, err := store.EnsureOperatorPrincipal(ctx, at)
@@ -239,12 +240,13 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 // This is the same supported staged/start-cut source surface as the original
 // pending-effect positive test. It does not widen event-point execution policy.
 func activatePendingDecisionFork(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, sourceRun, cut string,
-	loader admittedFixtureSelectedContractSourceLoader, loaded LoadedSelectedContractSource) SelectedContractExecutionResult {
+	loader admittedFixtureSelectedContractSourceLoader, loaded LoadedSelectedContractSource, credentials runtimecredentials.Store) SelectedContractExecutionResult {
 	t.Helper()
-	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability}
+	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability, Credentials: credentials}
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: cut, AllowSourceFreeze: true,
-		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		ForkOperation: selectedForkFixtureOperation(t, loaded, sourceRun, cut)})
 	if err != nil {
 		t.Fatal(err)
 	}

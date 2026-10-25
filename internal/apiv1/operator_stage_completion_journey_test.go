@@ -84,7 +84,7 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			catalog := stageCompletionCatalog(t, recoveredSource)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			ctx = originalAPIFixtureContext(t, ctx, selected)
-			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
+			if _, err := selected.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
 				t.Fatalf("request nonterminal completion: %v", err)
 			}
 			outcome, err := storetest.ExecuteRunCompletionCandidate(ctx, selected, fact.BundleHash(), runID, catalog)

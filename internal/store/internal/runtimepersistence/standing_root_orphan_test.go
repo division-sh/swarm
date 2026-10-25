@@ -23,12 +23,19 @@ func TestS1DormantDifferentContentRemovalUsesPredecessorBothStores(t *testing.T)
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedStandingCleanupStore)
 			sourceA, _ := admittedRootForStorage(t, "orphan-a")
-			sourceB, _ := sourceartifactfixture.Rooted(t, "orphan-b", sourceartifactfixture.New("nodes.yaml", []byte("worker: {type: procedure}\n# replacement declaration\n")))
+			artifactB, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"nodes.yaml":    []byte("worker: {execution_type: system_node}\n# replacement declaration\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceB, _ := sourceartifactfixture.Rooted(t, "orphan-b", artifactB)
 			if sourceA.Artifact().BundleHash() == sourceB.Artifact().BundleHash() {
 				t.Fatal("fixture requires distinct content as well as distinct roots")
 			}
-			ctxA := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), sourceA.Admission())
-			ctxB := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(sourceB.Artifact().BundleHash()), sourceB.Admission())
+			ctxA := originalStoreFixtureContext(t, runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), sourceA.Admission()), selected)
+			ctxB := originalStoreFixtureContext(t, runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(sourceB.Artifact().BundleHash()), sourceB.Admission()), selected)
 			for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
 				if _, err := selected.EnsureRootedSource(ctxA, source); err != nil {
 					t.Fatal(err)

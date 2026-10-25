@@ -11,13 +11,21 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestS1ZeroAgentStartupRefusesOtherRootBothStores(t *testing.T) {
-	first, _ := sourceartifactfixture.Rooted(t, "first", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := sourceartifactfixture.Rooted(t, "first", artifact)
 	second, _ := sourceartifactfixture.Rooted(t, "second", first.Artifact())
 	options := runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory}
 	compiled, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), first, "", options)
@@ -28,7 +36,14 @@ func TestS1ZeroAgentStartupRefusesOtherRootBothStores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spare, _ := sourceartifactfixture.Rooted(t, "spare", sourceartifactfixture.New("schema.yaml", []byte("required_agents: []\n")))
+	spareArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\nrequired_agents: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spare, _ := sourceartifactfixture.Rooted(t, "spare", spareArtifact)
 	spareCompiled, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), spare, "", options)
 	if err != nil {
 		t.Fatal(err)
@@ -54,10 +69,14 @@ func TestS1ZeroAgentStartupRefusesOtherRootBothStores(t *testing.T) {
 			if err != nil || !present || len(before.Sources) != 1 || before.Sources[0].RootReference() != first.Admission().Reference() || len(before.Agents) != 0 {
 				t.Fatalf("exact zero-agent native source set: %+v, %v", before, err)
 			}
-			if err := rt.Manager.PrepareStaticTopologyForStartup(ctx, module.source); err != nil {
+			startupCtx, err := rt.Bus.AdmitSourceArtifactFact(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Manager.PrepareStaticTopologyForStartup(startupCtx, module.source); err != nil {
 				t.Fatalf("exact-root zero-agent startup refused: %v", err)
 			}
-			if err := rt.Manager.PrepareStaticTopologyForStartup(ctx, semanticview.Wrap(other)); err == nil {
+			if err := rt.Manager.PrepareStaticTopologyForStartup(startupCtx, semanticview.Wrap(other)); err == nil {
 				t.Fatal("native zero-agent startup accepted another admitted root under the first plan")
 			}
 			after, present, err := capability.CurrentSourceSet(ctx)
@@ -65,18 +84,26 @@ func TestS1ZeroAgentStartupRefusesOtherRootBothStores(t *testing.T) {
 				t.Fatalf("foreign-root startup changed native authority: %+v, %v", after, err)
 			}
 			startStageLifecycleIdentityRuntime(t, rt)
-			projection, err := packadmission.FromBundle(compiled)
+			providers, err := packadmission.AdmitProviderSource(first, compiled.Platform)
 			if err != nil {
 				t.Fatal(err)
 			}
-			subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+			scope, err := providers.Scope(".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog, err := scope.TriggerCatalog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			subjects, err := catalog.InstalledCapabilitySubjects()
 			if err != nil {
 				t.Fatal(err)
 			}
 			contexts, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 				SourceArtifactFact: sourceartifactfixture.FactFor(first.Artifact()), RootAdmission: first.Admission(),
 				Source: module.source, Runtime: rt, WorkOwner: rt.WorkOccurrence(),
-				PackInventoryDigest: compiled.PackInventory.Digest(), ProviderTriggerGeneration: projection.ProviderTriggers.Generation(), InstalledTriggerSubjects: subjects,
+				PackInventoryDigest: compiled.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), ProviderTriggerCatalog: catalog, InstalledTriggerSubjects: subjects,
 			})
 			if err != nil {
 				t.Fatal(err)

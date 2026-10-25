@@ -67,6 +67,8 @@ func TestDynamicFlowPostCASSourceHandoffSettlesManagerBeforeReplacementBothStore
 			runID := correlation.RunIDFromContext(base.ctx)
 			ctxB := correlation.WithRootAdmission(correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(factB.BundleHash())), runID), rootB.Admission())
 			ctxC := correlation.WithRootAdmission(correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(factC.BundleHash())), runID), rootC.Admission())
+			ctxB = originalStoreFixtureContext(t, ctxB, base.store)
+			ctxC = originalStoreFixtureContext(t, ctxC, base.store)
 			owner, err := flowidentity.NewRunScopedFlowInstance(runID, plan.Identity.Route())
 			if err != nil {
 				t.Fatal(err)

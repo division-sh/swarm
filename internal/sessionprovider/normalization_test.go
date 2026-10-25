@@ -22,7 +22,8 @@ import (
 // webhook policy deliberately remains authenticated: projection cannot admit it.
 func incomingNormalizationFixture(t *testing.T) providertriggers.Manifest {
 	t.Helper()
-	source := `payload_object_required: true
+	source := `transport: webhook
+payload_object_required: true
 secret: {required: true}
 signature: {type: token_equality, header: X-Fixture-Signature}
 delivery_id: {json_path: $.provider_message_reference, required: true}
@@ -77,7 +78,7 @@ normalized_events:
 		}
 	}
 	provider, err := packartifact.LoadProviderFS(fstest.MapFS{
-		"whatsapp/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n")},
+		"whatsapp/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, message, edit, revoke], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n")},
 		"whatsapp/trigger.yaml":  {Data: []byte(source)},
 	}, "whatsapp", "0.7.0")
 	if err != nil {

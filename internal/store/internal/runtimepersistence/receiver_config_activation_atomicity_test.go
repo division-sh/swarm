@@ -126,6 +126,7 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 	}
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
 	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash(), RootAdmission: rooted.Admission()})
 	bus := &sqliteFlowActivationBus{}
 	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle, configureLifecycle)

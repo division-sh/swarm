@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -31,7 +32,7 @@ func TestR7ReadinessDiagnosticsPreserveOlderPlanClassesBothStores(t *testing.T) 
 				t.Run(row.name, func(t *testing.T) {
 					files := currentFiles
 					if row.old {
-						files = map[string]string{"schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
+						files = map[string]string{"schema.yaml": "# retained predecessor\nstages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 					runID := correlation.RunIDFromContext(f.ctx)
@@ -87,7 +88,17 @@ func TestR7ReadinessDiagnosticsPreserveOlderPlanClassesBothStores(t *testing.T) 
 					if err != nil || len(items) != 1 || items[0].Plan.RunID != runID {
 						t.Fatalf("exact run diagnostic: %+v %v", items, err)
 					}
-					foreign := sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("name: unrelated-readiness-source\n")))
+					foreignArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+						"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+						"schema.yaml":   []byte("# unrelated readiness source\nstages: []\n"),
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					foreign := sourceartifactfixture.FactFor(foreignArtifact)
+					if foreign.Matches(current) {
+						t.Fatal("foreign readiness source must have distinct admitted content")
+					}
 					if items, err := reader.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, foreign); err != nil || len(items) != 0 {
 						t.Fatalf("foreign source crossed run diagnostic: %+v %v", items, err)
 					}

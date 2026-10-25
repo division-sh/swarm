@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -105,11 +104,7 @@ func TestIssue642FanOutCapacityIncludesExactSelectedExecution(t *testing.T) {
 func testSelectedFanOutCapacity(t *testing.T, workers int) {
 	t.Helper()
 	ctx := context.Background()
-	probe, _ := testRetainedSession(t)
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: startupBundleHashA}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	probe, plan := testRetainedSession(t)
 	probe.plan = plan
 	binding := SelectedForkGrantBinding{
 		BindingID: uuid.NewString(), ForkRunID: uuid.NewString(), ExecutionID: uuid.NewString(),
@@ -119,6 +114,7 @@ func testSelectedFanOutCapacity(t *testing.T, workers int) {
 		DeclarationPlanFingerprint: "sha256:" + strings.Repeat("5", 64), PreparationFingerprint: "sha256:" + strings.Repeat("6", 64),
 	}
 	capacity := SQLiteFanOutCapacity()
+	var err error
 	if workers > 1 {
 		capacity, err = PostgreSQLFanOutCapacity(6, 1)
 		if err != nil {

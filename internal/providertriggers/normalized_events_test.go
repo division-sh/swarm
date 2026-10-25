@@ -2,6 +2,8 @@ package providertriggers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -276,9 +278,10 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 		schema   runtimecontracts.ToolInputSchema
 		value    any
 		wantPart string
+		wantPath string
 	}{
-		{name: "array", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("array"), runtimecontracts.ToolSchemaItems(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")))), value: []any{"ok", json.Number("2")}, wantPart: "$[1] must be string"},
-		{name: "object", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}), runtimecontracts.ToolSchemaRequired("id")), value: map[string]any{"id": "not-an-integer"}, wantPart: "$.id must be integer"},
+		{name: "array", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("array"), runtimecontracts.ToolSchemaItems(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")))), value: []any{"ok", json.Number("2")}, wantPart: "$[1] must be string", wantPath: "$.raw[1]"},
+		{name: "object", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}), runtimecontracts.ToolSchemaRequired("id")), value: map[string]any{"id": "not-an-integer"}, wantPart: "$.id must be integer", wantPath: "$.raw.id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manifest := normalizedEventTestManifest()
@@ -317,9 +320,31 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 					},
 				},
 			})
-			for _, want := range []string{"pack telegram", "version=1.0.0", "manifest_hash=sha256:", "inbound.telegram.text_message", "path \"message.raw\"", tc.wantPart} {
+			for _, want := range []string{"pack telegram", "version=1.0.0", "manifest_hash=sha256:", "inbound.telegram.text_message", "path " + fmt.Sprintf("%q", tc.wantPath), tc.wantPart} {
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("Accept error = %v, want %q", err, want)
+				}
+			}
+			var violation *eventschema.Violation
+			if !errors.As(err, &violation) {
+				t.Fatalf("projection lost its typed schema cause: %v", err)
+			}
+			for _, wrapped := range []error{err, fmt.Errorf("outer: %w", err), errors.Join(err, err)} {
+				if path, valid := NormalizedInputValidationPath(wrapped); !valid || path != tc.wantPath {
+					t.Fatalf("normalized validation path=%q valid=%t error=%v", path, valid, wrapped)
+				}
+			}
+			independent := errors.New("independent cleanup/store failure")
+			var internal Error
+			if !errors.As(err, &internal) {
+				t.Fatal("projection lost its provider error")
+			}
+			internal.Status = 503
+			for _, other := range []error{badRequest("invalid request"), NormalizationError{Path: tc.wantPath, Cause: violation.Error()},
+				Error{Status: 400, cause: &NormalizationError{Path: tc.wantPath, Cause: "conversion failed"}},
+				internal, errors.Join(err, independent), errors.Join(independent, err), fmt.Errorf("outer: %w", errors.Join(err, independent))} {
+				if path, valid := NormalizedInputValidationPath(other); valid {
+					t.Fatalf("non-validation failure acquired schema classification: path=%q error=%v", path, other)
 				}
 			}
 		})

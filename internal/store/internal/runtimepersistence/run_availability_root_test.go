@@ -21,7 +21,7 @@ func TestS1RunAvailabilityCarriesExactRootBothStores(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedRunAvailabilityStore)
 			first, _ := admittedRootForStorage(t, "first")
 			second, _ := admittedRootForStorage(t, "second")
-			ctx := testAuthorActivityContextForBundle(first.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(first.Artifact().BundleHash()), selected)
 			for _, source := range []sourceartifact.RootedSource{first, second} {
 				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 					t.Fatal(err)

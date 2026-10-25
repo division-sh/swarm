@@ -49,8 +49,13 @@ func newRecoveryActivityCell(t *testing.T, ctx context.Context, selected gateRec
 	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
 	ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(ctx, runID), fact))
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
 	})
 	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID,

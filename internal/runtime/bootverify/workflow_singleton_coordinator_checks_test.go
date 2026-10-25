@@ -479,7 +479,7 @@ coordinator-node:
 }
 
 func TestRun_CountArrivalJoinDoesNotRequireContainedCoordinatorState(t *testing.T) {
-	const schema = `name: coordinator
+	const schema = `
 stages:
   active: {}
   done: {final: true}

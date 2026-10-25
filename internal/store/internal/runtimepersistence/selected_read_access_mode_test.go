@@ -36,14 +36,14 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 				selected := admitTestPostgresStore(t, db)
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				store = selected
-				requireDefaultSourceArtifactForTest(t, ctx, selected)
+				ctx = requireDefaultSourceArtifactForTest(t, ctx, selected)
 				createSelectedReadProofRun(t, ctx, selected, runID, source)
 			} else {
 				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				store = selected
 				db = selected.backend.ConstructionHandle()
-				requireDefaultSourceArtifactForTest(t, ctx, selected)
+				ctx = requireDefaultSourceArtifactForTest(t, ctx, selected)
 				createSelectedReadProofRun(t, ctx, selected, runID, source)
 			}
 			authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "reader-side-effect-proof", 1)
@@ -119,8 +119,12 @@ func createSelectedReadProofRun(t *testing.T, ctx context.Context, store interfa
 	CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
 }, runID string, source runtimecorrelation.SourceArtifactFact) {
 	t.Helper()
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil || !present {
+		t.Fatalf("selected-read fixture requires its captured root: present=%t err=%v", present, err)
+	}
 	if _, err := store.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: source,
+		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: source, RootAdmission: root,
 		StartedAt: time.Date(2026, 8, 27, 2, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("create selected-read proof run: %v", err)

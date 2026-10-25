@@ -2,6 +2,7 @@ package providertriggers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -78,10 +79,19 @@ type NormalizationError struct {
 	Event string
 	Path  string
 	Cause string
+
+	schemaViolation *eventschema.Violation
 }
 
 func (e NormalizationError) Error() string {
 	return fmt.Sprintf("normalized event %q field path %q failed: %s", e.Event, e.Path, e.Cause)
+}
+
+func (e NormalizationError) Unwrap() error {
+	if e.schemaViolation == nil {
+		return nil
+	}
+	return e.schemaViolation
 }
 
 var normalizedFieldNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -384,7 +394,12 @@ func (m manifestDefinition) normalizedDeliveryEvents(payload any) ([]DeliveryEve
 		}
 		converted, err := normalizeProjectedValue(value, field)
 		if err != nil {
-			return nil, NormalizationError{Event: output.Event, Path: field.From, Cause: err.Error()}
+			failure := NormalizationError{Event: output.Event, Path: field.From, Cause: err.Error()}
+			if errors.As(err, &failure.schemaViolation) {
+				failure.Path = "$." + name + strings.TrimPrefix(failure.schemaViolation.Path, "$")
+				failure.Cause = fmt.Sprintf("source path %q: %s", field.From, failure.Cause)
+			}
+			return nil, failure
 		}
 		if field.Optional && field.Convert == normalizedFieldConvertPattern && converted == nil {
 			continue

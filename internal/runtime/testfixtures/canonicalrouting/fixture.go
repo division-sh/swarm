@@ -370,6 +370,7 @@ connect:
   - {event: legacy.seen, from: ., to: legacy_static}
 `)
 	writeClosedNegativeFile(t, root, "events.yaml", "account.requested:\n  account_id: text\nlegacy.seen:\n  entity_id: uuid\n  legacy_id: text\n  amount: number\n")
+	writeClosedNegativeFile(t, root, "legacy_static/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedNegativeFile(t, root, "legacy_static/schema.yaml", `# fixture: legacy_static
 stages:
   active: {}

@@ -63,6 +63,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -299,6 +300,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx = originalConformanceFixtureContext(t, ctx, pg)
+	ctx, source := persistedSurfaceRootedSource(t, ctx, pg)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -341,7 +343,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	defer func() {
 		http.DefaultTransport = previousTransport
 	}()
-	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{}), "review.requested")
+	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{ContractBundle: source}), "review.requested")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -485,6 +487,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx = originalConformanceFixtureContext(t, ctx, pg)
+	ctx, source := persistedSurfaceRootedSource(t, ctx, pg)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -527,7 +530,7 @@ printf '{"result":"ok"}'
 
 	pg.SetSessionLockTTL(30 * time.Second)
 	registry := runtimesessions.Registry(pg)
-	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{}), "review.requested")
+	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{ContractBundle: source}), "review.requested")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1018,6 +1021,17 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	}); err != nil {
 		t.Fatalf("AdmitGenericSchedule: %v", err)
 	}
+	module := loadConformanceRuntimeWorkflowModule(t)
+	fact := conformanceSourceArtifactFact(t, module.SemanticSource())
+	bundle, _ := runtimesemanticview.Bundle(module.SemanticSource())
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(ctx, fact), rooted.Admission())
+	if _, err := pg.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
@@ -1042,10 +1056,10 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
-			WorkflowModule:     loadConformanceRuntimeWorkflowModule(t),
+			WorkflowModule:     module,
 			LLMRuntime:         conformanceNoopLLMRuntime{},
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
-			SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			SourceArtifactFact: fact,
 		})}))
 
 	if err != nil {
@@ -1221,6 +1235,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	defer cleanup()
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx = originalConformanceFixtureContext(t, ctx, pg)
+	ctx, source := persistedSurfaceRootedSource(t, ctx, pg)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -1230,8 +1245,9 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, conformanceRuntimeLogPayloadAdmitter)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
-		Logger:    conformanceRuntimeLoggerHook{logger: logger},
-		WorkOwner: workOwner,
+		Logger:         conformanceRuntimeLoggerHook{logger: logger},
+		WorkOwner:      workOwner,
+		ContractBundle: source,
 	}))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1356,9 +1372,13 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	module := loadConformanceWorkflowFixtureModule(t, filepath.Join("..", "..", "..", "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
 	fact := conformanceSourceArtifactFact(t, module.SemanticSource())
 	bundle, _ := runtimesemanticview.Bundle(module.SemanticSource())
-	ctx = testAuthorActivityContextForBundle(ctx, fact)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(ctx, fact), rooted.Admission())
 	runID := uuid.NewString()
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission()})
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
@@ -1393,10 +1413,11 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	bundleHash := fact.BundleHash()
-	desiredAgents, err := rt.Manager.CompileStaticTopologyDesiredAgents(module.SemanticSource(), runtimeagenttopology.SourceCoordinate{
-		BundleHash: bundleHash,
-	})
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	desiredAgents, err := rt.Manager.CompileStaticTopologyDesiredAgents(module.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatalf("compile manager replay agent identity: %v", err)
 	}
@@ -1489,6 +1510,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	defer cleanup()
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx = originalConformanceFixtureContext(t, ctx, pg)
+	ctx, source := persistedSurfaceRootedSource(t, ctx, pg)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "system.parent", "system.recover.replay", "system.recover.skip")
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -1496,8 +1518,9 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, conformanceRuntimeLogPayloadAdmitter)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
-		Logger:    conformanceRuntimeLoggerHook{logger: logger},
-		WorkOwner: workOwner,
+		Logger:         conformanceRuntimeLoggerHook{logger: logger},
+		WorkOwner:      workOwner,
+		ContractBundle: source,
 	}), "system.parent", "system.recover.replay", "system.recover.skip")
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1767,7 +1790,9 @@ func constructTrackedWorkflowMutationFixture(t *testing.T, selected fanInBarrier
 	t.Helper()
 	requireMutationSurface(t, selected)
 	fixtureRoot := t.TempDir()
-	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: mutation-proof\nstages: []\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "# fixture: mutation-proof\nstages: []\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/schema.yaml", "stages:\n  done: {final: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/entities.yaml", "test_entity:\n  status: text\n")
 	module := loadConformanceWorkflowFixtureModule(t, fixtureRoot)
@@ -1779,8 +1804,13 @@ func constructTrackedWorkflowMutationFixture(t *testing.T, selected fanInBarrier
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), fact), runID)
 	ctx = originalConformanceFixtureContext(t, ctx, selected)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact,
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(),
 	})
 	runtime := newFanInBarrierRuntimeForSource(t, selected, module.source, fact, 1)
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
@@ -1948,6 +1978,21 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 	`, runID, entityID); err == nil {
 		t.Fatal("malformed gate mutation with an empty path was accepted")
 	}
+}
+
+func persistedSurfaceRootedSource(t *testing.T, ctx context.Context, pg *store.PostgresStore) (context.Context, runtimesemanticview.Source) {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "persisted-surfaces", sourceartifactfixture.Artifact())
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(
+		canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	return runtimecorrelation.WithRootAdmission(ctx, rooted.Admission()), runtimesemanticview.Wrap(bundle)
 }
 
 func requireCanonicalConversationSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
@@ -2190,12 +2235,14 @@ func newEntityToolConformanceHarness(t *testing.T, backend, flowID string) (cont
 	}
 	repoRoot := canonicalrouting.RepoRoot(t)
 	fixtureRoot := t.TempDir()
-	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nstages:\n  queued: {}\n  done: {final: true}\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "# fixture: review\nstages:\n  queued: {}\n  done: {final: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "events.yaml", "accounts.updated:\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
 	if flowID == "accounts" {
-		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/schema.yaml", "name: accounts\nstages:\n  queued: {}\n  done: {final: true}\n")
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/schema.yaml", "# fixture: accounts\nstages:\n  queued: {}\n  done: {final: true}\n")
 		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
 		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/events.yaml", "accounts.updated:\n")
 		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
@@ -2209,9 +2256,14 @@ func newEntityToolConformanceHarness(t *testing.T, backend, flowID string) (cont
 	ctx := testAuthorActivityContextForBundle(context.Background(), fact)
 	selected := newMutationSurfaceConformanceStore(t, backend)
 	ctx = originalConformanceFixtureContext(t, ctx, selected)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	runID := uuid.NewString()
 
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission()})
 	construction := newFanInBarrierRuntimeForSource(t, selected, source, fact, 1)
 	constructionCtx := runtimecorrelation.WithRunID(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runID)
 	at := time.Now().UTC()

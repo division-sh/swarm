@@ -111,10 +111,26 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
           fraction: {type: number, enum: [7.5]}
   response_success: {kind: http_status_2xx}
 `, provider.URL)
+			toolPath := "tools.yaml"
 			if mock {
-				tool = strings.Replace(tool, "numeric_provider:", "numeric.fetch:\n  category: provider_connector\n  credentials: [numeric_mock_secret]", 1)
+				toolPath = "numeric/connector.yaml"
+				tool = strings.Replace(tool, "numeric_provider:", "fetch:\n  category: provider_connector\n  credentials: [numeric_mock_secret]", 1)
+				var body strings.Builder
+				body.WriteString("tools:\n")
+				for _, line := range strings.SplitAfter(tool, "\n") {
+					if line != "" {
+						body.WriteString("  " + line)
+					}
+				}
+				tool = body.String()
+				if err := os.Mkdir(filepath.Join(root, "numeric"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "numeric/manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [fetch]}, cannot: [bypass journal]}\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if err := os.WriteFile(filepath.Join(root, "tools.yaml"), []byte(tool), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, toolPath), []byte(tool), 0600); err != nil {
 				t.Fatal(err)
 			}
 			rt, restart := startSemanticNumericRuntime(t, backend, root, mock)
@@ -160,7 +176,7 @@ collector:
           - target_field: score
             value: payload.result.value + payload.result.nested.numbers[?0].value() + 2
 `
-				for name, raw := range map[string]string{"nodes.yaml": targetNodes, "tools.yaml": targetTool} {
+				for name, raw := range map[string]string{"nodes.yaml": targetNodes, toolPath: targetTool} {
 					if err := os.WriteFile(filepath.Join(targetRoot, name), []byte(raw), 0600); err != nil {
 						t.Fatal(err)
 					}
@@ -173,7 +189,7 @@ collector:
 				params := map[string]any{"source_run_id": run, "fork_event_id": frontier, "bundle_hash": fact.BundleHash(), "allow_source_freeze": true, "idempotency_key": "numeric-mock-fork"}
 				// Selected execution must compile the retained artifact, not reread
 				// this distinguishable current-directory responder declaration.
-				if err := os.WriteFile(filepath.Join(targetRoot, "tools.yaml"), []byte(strings.ReplaceAll(targetTool, "enum: [11]", "enum: [99]")), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(targetRoot, toolPath), []byte(strings.ReplaceAll(targetTool, "enum: [11]", "enum: [99]")), 0600); err != nil {
 					t.Fatal(err)
 				}
 				var child, replay apiv1.RunForkExecutionResult

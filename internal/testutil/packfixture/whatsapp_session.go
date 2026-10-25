@@ -12,19 +12,31 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"gopkg.in/yaml.v3"
 )
 
 // WhatsAppSessionProvider captures the authored fixture roles together. It
 // grants no account, connection, runtime root or executable authority.
-func WhatsAppSessionProvider(t testing.TB, platformSpecPath string, trigger []byte) (*providertriggers.CatalogSnapshot, packs.SatisfactionPlan) {
+func WhatsAppSessionProvider(t testing.TB, platformSpecPath string, trigger []byte, emittedEvents []string) (*providertriggers.CatalogSnapshot, packs.SatisfactionPlan) {
 	t.Helper()
+	manifest, err := yaml.Marshal(struct {
+		Version         string                 `yaml:"version"`
+		PlatformVersion string                 `yaml:"platform_version"`
+		Capabilities    packmodel.Capabilities `yaml:"capabilities"`
+	}{Version: "1.0.0", PlatformVersion: "*", Capabilities: packmodel.Capabilities{
+		Can:    packmodel.CanCapabilities{EmitEvents: emittedEvents, CallProviderActions: []string{"fixture_send"}},
+		Cannot: []string{"bypass activity_attempts"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := t.TempDir()
 	directory := filepath.Join(root, "whatsapp")
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for name, body := range map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [bypass activity_attempts]}\n"),
+		"manifest.yaml": manifest,
 		"trigger.yaml":  trigger,
 		"connector.yaml": []byte(`tools:
   fixture_send:
@@ -93,11 +105,11 @@ events:
 		t.Fatal(err)
 	}
 	triggerBody, _ := provider.Body(packmodel.BodyTrigger)
-	manifest, err := providertriggers.AdmitBody(triggerBody)
+	triggerManifest, err := providertriggers.AdmitBody(triggerBody)
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(triggerManifest)
 	if err != nil {
 		t.Fatal(err)
 	}

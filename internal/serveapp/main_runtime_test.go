@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagentmemory "github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -85,6 +86,7 @@ import (
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -374,13 +376,23 @@ func (terminalSourceSetCapability) TerminalResult() (runtimestartupownership.Ter
 }
 
 func TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability(t *testing.T) {
-	rt := &runtimepkg.Runtime{Bus: &runtimebus.EventBus{}}
-	hash := runtimeContextTestHash("a")
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
-		Runtime:            rt, WorkOwner: newSupervisorTestRuntimeOccurrence(t, hash),
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+	rooted, root := sourceartifactfixture.Rooted(t, "shutdown", sourceartifactfixture.Artifact())
+	source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))
+	hash := rooted.Artifact().BundleHash()
+	fact := mustServeTestEphemeralSourceArtifactFact(hash)
+	owner := newSupervisorTestRuntimeOccurrence(t, hash)
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source,
+		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := &runtimepkg.Runtime{Bus: eventBus}
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+		SourceArtifactFact: fact, RootAdmission: rooted.Admission(),
+		Runtime: rt, WorkOwner: owner, Source: source,
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,9 +433,10 @@ func TestProcessLifecycleTerminalEvidencePreservesJoinedProjectionDisposition(t 
 		{name: "release_persistent", releaseFails: true, persistent: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hash := runtimeContextTestHash("a")
+			rooted, root := sourceartifactfixture.Rooted(t, "terminal", sourceartifactfixture.Artifact())
+			hash := rooted.Artifact().BundleHash()
 			fact := mustServeTestEphemeralSourceArtifactFact(hash)
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+			source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))
 			owner := newSupervisorTestRuntimeOccurrence(t, hash)
 			eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
 				SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source,
@@ -433,9 +446,9 @@ func TestProcessLifecycleTerminalEvidencePreservesJoinedProjectionDisposition(t 
 				t.Fatal(err)
 			}
 			rt := &runtimepkg.Runtime{Bus: eventBus}
-			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-				SourceArtifactFact: fact, Runtime: rt, WorkOwner: owner, Source: source,
-			})
+			manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+				SourceArtifactFact: fact, RootAdmission: rooted.Admission(), Runtime: rt, WorkOwner: owner, Source: source,
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -614,27 +627,42 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
 	ctx = serveFixtureProcessContext(t, ctx, pg)
-	pinnedArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# pinned-source\n"))
-	otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# other-source\n"))
+	pinnedArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents: {}\n# pinned-source\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents: {}\n# other-source\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, _ := sourceartifactfixture.Rooted(t, "pinned-source", pinnedArtifact)
+	other, _ := sourceartifactfixture.Rooted(t, "other-source", otherArtifact)
 	pinnedHash := pinnedArtifact.BundleHash()
 	otherHash := otherArtifact.BundleHash()
 	otherRunID := uuid.NewString()
 
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: uuid.NewString(), Artifact: pinnedArtifact,
+		RunID: uuid.NewString(), Artifact: pinned.Artifact(), RootAdmission: pinned.Admission(),
 	})
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: otherRunID, State: storerunlifecycle.StatePaused,
-		Artifact: otherArtifact,
+		Artifact: other.Artifact(), RootAdmission: other.Admission(),
 	})
 	standingSource := mustServeTestPersistedSourceArtifactFact(otherHash)
-	standingCtx := runStatusAuthorActivityContext(standingSource)
+	standingCtx := runtimecorrelation.WithRootAdmission(runStatusAuthorActivityContext(standingSource), other.Admission())
 	standingCtx = serveFixtureProcessContext(t, standingCtx, pg)
 	standing, err := pg.ReconcileStandingService(standingCtx, runtimepipeline.StandingServiceCandidate{
 		BindingEnabled: true,
 		ServiceID:      runtimeflowidentity.StandingServiceID("bundle-admission-proof"),
 		FlowPath:       "bundle-admission-proof",
 		Source:         standingSource,
+		RootAdmission:  other.Admission(),
 	})
 	if err != nil {
 		t.Fatalf("reconcile current standing bundle admission run: %v", err)
@@ -648,7 +676,7 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 	}
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: uuid.NewString(), State: storerunlifecycle.StateCancelled,
-		Artifact: otherArtifact,
+		Artifact: other.Artifact(), RootAdmission: other.Admission(),
 	})
 
 	err = runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, []string{pinnedHash})
@@ -1566,8 +1594,15 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 
 func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
-		return canonicalrouting.CopyRootIngressServedDecisionControl(t)
+		root := canonicalrouting.CopyRootIngressServedDecisionControl(t)
+		if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+			t.Fatal(err)
+		}
+		return root
 	})
 	runServedRunControlLifecycleProof(t, rt)
 }
@@ -1739,8 +1774,15 @@ func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedpari
 
 func runServedMailboxDecisionBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
-		return canonicalrouting.CopyRootIngressServedDecisionControl(t)
+		root := canonicalrouting.CopyRootIngressServedDecisionControl(t)
+		if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+			t.Fatal(err)
+		}
+		return root
 	})
 	runServedMailboxDecisionLifecycleProof(t, rt)
 }
@@ -7118,10 +7160,17 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	})
 	ctx := context.Background()
 	persistedMissingRunID := uuid.NewString()
-	missingHash := "bundle-v2:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	missingArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("# unavailable source " + persistedMissingRunID + "\nstages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingRoot, _ := sourceartifactfixture.Rooted(t, "unavailable-source", missingArtifact)
 	storetest.RequireCorruptRunSnapshot(t, ctx, pg, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: persistedMissingRunID, State: "running",
-		BundleHash: missingHash,
+		BundleHash: missingRoot.Admission().BundleHash(), RootDirectory: missingRoot.Admission().RootDirectory(),
 	})
 
 	var out lockedBuffer

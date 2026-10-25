@@ -61,6 +61,7 @@ type serveBootstrapTestFixture struct {
 	principal  operatorchannel.Principal
 	selections atomic.Int64
 	binding    processbinding.Binding
+	rooted     sourceartifact.RootedSource
 }
 
 // Fixtures needing a completed SDK occurrence use the startup wait, while
@@ -167,7 +168,7 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	if err := os.Chmod(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal}
+	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal, rooted: rooted}
 	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), op.Coordinate.RuntimeInstanceID, rooted.Admission())
 	f.ctx, err = startupownership.WithRuntimeMutationAuthority(f.ctx, grant)
 	if err != nil {
@@ -421,14 +422,21 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 		for _, mode := range []string{"installed", "missing_bus", "foreign_bus"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				f := newServeBootstrapTestFixture(t, backend)
-				bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repoRootForTest(), canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), runtimePlatformSpecPath(t))
+				bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repoRootForTest(), f.rooted, runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}
 				fact, _ := correlation.SourceArtifactFactFromContext(f.owned)
 				owner := f.owner
 				if mode == "foreign_bus" {
-					fact = mustServeTestEphemeralSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+					bundle, err = contracts.LoadWorkflowContractBundleWithOverrides(repoRootForTest(), canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), runtimePlatformSpecPath(t))
+					if err != nil {
+						t.Fatal(err)
+					}
+					fact = sourceartifactfixture.FactFor(bundle.SourceArtifact)
+					if fact.BundleHash() == f.rooted.Artifact().BundleHash() {
+						t.Fatal("foreign incoming bus fixture requires distinct source content")
+					}
 					owner = newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
 				}
 				bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{

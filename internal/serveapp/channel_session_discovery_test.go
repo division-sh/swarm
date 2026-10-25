@@ -93,5 +93,5 @@ normalized_events:
           properties:
             reference: {type: string, minLength: 1, maxLength: 32}
             address: {type: string, minLength: 5, maxLength: 32}
-`))
+`), []string{"raw", "message"})
 }

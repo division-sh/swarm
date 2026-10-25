@@ -41,17 +41,20 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 			credentialEnv := goldenProcessEnv(t, root, "", 0)
 			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--portable", "--json")
 			assertFullLifecycleVerifySuccess(t, verify)
-			for _, alias := range []string{"alpha", "beta"} {
-				secret := runReleaseCommand(t, 30*time.Second, root, credentialEnv, alias+"-secret\n", binary, "secrets", "set", "webhook_signing."+alias, "--stdin")
+			for key, value := range map[string]string{
+				"telegram.webhook_signing_secret": fullLifecycleSigningSecret,
+				"telegram.telegram_bot_token":     fullLifecycleBotToken,
+			} {
+				secret := runReleaseCommand(t, 30*time.Second, root, credentialEnv, value+"\n", binary, "secrets", "set", key, "--stdin")
 				if secret.err != nil {
-					t.Fatalf("signing secret %s: %v\n%s", alias, secret.err, secret.output)
+					t.Fatalf("required credential %s: %v\n%s", key, secret.err, secret.output)
 				}
 			}
 			start := func(source, storedHash string) *releaseServeProcess {
 				t.Helper()
 				spec := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
 					ConfigPath: config, Store: backend, TokenFile: token, Token: goldenAPIToken, Env: env,
-					RedactValues: []string{"alpha-secret", "beta-secret"}}
+					RedactValues: []string{fullLifecycleSigningSecret, fullLifecycleBotToken}}
 				if storedHash != "" {
 					spec.InternalMockLifecycleBinary, spec.RetainedBundleHash = retainedBinary, storedHash
 					spec.RetainedLiveExecution = true
@@ -216,12 +219,16 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, sto
 			if shape == "callback" {
 				body = fmt.Sprintf(`{"update_id":%d,"callback_query":{"id":"query-%d","from":{"id":41},"message":{"message_id":7,"chat":{"id":42,"type":"private"}},"data":"opaque-action-token"}}`, id, id)
 			}
-			req, err := http.NewRequest(http.MethodPost, p.apiBase+"/webhooks/"+alias+"/telegram", bytes.NewBufferString(body))
+			path := "contracts"
+			if alias == "beta" {
+				path += ".beta"
+			}
+			req, err := http.NewRequest(http.MethodPost, p.apiBase+"/webhooks/"+path+"/telegram", bytes.NewBufferString(body))
 			if err != nil {
 				t.Fatal(err)
 			}
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Telegram-Bot-Api-Secret-Token", alias+"-secret")
+			req.Header.Set("X-Telegram-Bot-Api-Secret-Token", fullLifecycleSigningSecret)
 			response, err := p.rpc.client.Do(req)
 			if err != nil {
 				t.Fatal(err)

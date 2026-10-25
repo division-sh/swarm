@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 type operatorChannelInboundSelectedStore interface {
@@ -292,9 +291,38 @@ func compileCapturedTelegramOperatorChannelPlan(t *testing.T, source semanticvie
 	if !ok {
 		t.Fatal("operator channel requires its captured source")
 	}
-	projection, err := packadmission.FromBundle(bundle)
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return packfixture.ChannelPlanByID(t, projection.ChannelPlans, "telegram")
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(boundedProviderFlowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, present := scope.Provider("telegram")
+	if !present {
+		t.Fatal("operator channel requires its exact scoped Telegram definition")
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, hasTrigger := catalog.PackDescriptorForProvider("telegram")
+	connector, hasConnector := definition.ConnectorDescriptor()
+	if !hasTrigger || !hasConnector {
+		t.Fatal("operator channel requires its exact scoped trigger and connector")
+	}
+	registry, err := packs.NewInterfaceRegistry(bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := packs.CompileProviderChannel(registry, definition.Provider(), trigger, connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
 }

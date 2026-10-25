@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ import (
 
 type logoutProcessFixture struct {
 	Backend, Location, Directory, OperationID, Phase string
+	RootReference                                    sourceartifact.RootAdmissionReference
 }
 
 type logoutProcessDeathStore struct {
@@ -92,7 +94,7 @@ func TestWhatsAppLogoutJournalProcessDeathBothStores(t *testing.T) {
 					t.Fatal("release parent native process before child startup", err)
 				}
 				id := killNativeLogoutAtBoundary(t, logoutProcessFixture{Backend: backend, Location: f.location,
-					Directory: f.basePath, OperationID: f.operation.OperationID, Phase: phase})
+					Directory: f.basePath, OperationID: f.operation.OperationID, Phase: phase, RootReference: f.rooted.Admission().Reference()})
 				acquireLogoutProcessFixture(t, f, uuid.NewString())
 				ctx := f.ctx
 				original, err := f.selected.GetChannelTeardown(ctx, id)
@@ -180,8 +182,12 @@ func runNativeLogoutDeathChild(t *testing.T, config logoutProcessFixture) {
 		t.Fatal(err)
 	}
 	f.channel = activeInputChannelFixture(t, f.catalog)
-	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
-	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source),
+	f.rooted, err = f.selected.GetRootedSource(context.Background(), config.RootReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := sourceartifactfixture.FactFor(f.rooted.Artifact())
+	f.ctx = authoractivity.WithScope(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.rooted.Admission()),
 		authoractivity.BundleScope(f.operation.Coordinate.RuntimeInstanceID, f.operation.Coordinate.BundleHash))
 	process := worklifetime.NewProcess()
 	f.workOwner, err = process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{

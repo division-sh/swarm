@@ -36,6 +36,10 @@ func (p PayloadProducer) IsPlatform() bool { return p.kind == "platform" }
 func (p PayloadProducer) IsAuthored() bool { return p.kind == "flow" }
 
 func (p PayloadProducer) ValidateForEvent(event Event) error {
+	if event.ProducerType() == EventProducerPlatform && event.Producer().ID() == "agent-turn-timeout" &&
+		!authoredTurnTimeoutPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
+		return fmt.Errorf("turn timeout payload contradicts its runtime control producer identity")
+	}
 	switch p.kind {
 	case "flow":
 		if p.producer != (ProducerIdentity{}) || p.class != "" || p.event != "" {
@@ -43,6 +47,13 @@ func (p PayloadProducer) ValidateForEvent(event Event) error {
 		}
 		if platformPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
 			return fmt.Errorf("platform event requires explicit platform payload producer")
+		}
+		if authoredTurnTimeoutPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
+			source := event.RoutingSource()
+			if source.Kind() != RoutingSourceFlowOwnedControl || p.flowID == "" || p.flowID != source.Route().FlowID {
+				return fmt.Errorf("turn timeout payload requires its exact authored actor flow routing source")
+			}
+			return ValidateEventContract(event)
 		}
 		if authoredSchedulePayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
 			source := event.RoutingSource()
@@ -77,9 +88,14 @@ func EventPayloadProducer(event Event, authoredFlowID string) PayloadProducer {
 }
 
 func platformPayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
-	return (class == EventAdmissionRuntimeControl && !authoredSchedulePayloadIdentity(class, event, producer)) || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect ||
+	return (class == EventAdmissionRuntimeControl && !authoredSchedulePayloadIdentity(class, event, producer) && !authoredTurnTimeoutPayloadIdentity(class, event, producer)) || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect ||
 		joinOccurrencePayloadIdentity(PayloadProducer{kind: "platform", producer: producer, class: class, event: event}) ||
 		(class == EventAdmissionReplay && event == "event.replayed" && producer.Type() == EventProducerPlatform)
+}
+
+func authoredTurnTimeoutPayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
+	return class == EventAdmissionRuntimeControl && producer.Type() == EventProducerPlatform && producer.ID() == "agent-turn-timeout" &&
+		event != "" && !strings.HasPrefix(string(event), "platform.") && !joinOccurrenceEventType(event)
 }
 
 func authoredSchedulePayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {

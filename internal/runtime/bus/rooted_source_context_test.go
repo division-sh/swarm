@@ -72,13 +72,13 @@ func TestS1AcceptedWorkKeepsRootAndExplicitClear(t *testing.T) {
 	})
 	ctx := correlation.WithSourceArtifactFact(context.Background(), sourceartifactfixture.FactFor(rooted.Artifact()))
 	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
-	work := bindWorkContext(ctx, lease, owner)
+	work := bindWorkContext(ctx, lease, owner, nil)
 	root, present, err := correlation.RootAdmissionFromContext(work)
 	if err != nil || !present || !root.Equal(rooted.Admission()) {
 		t.Fatalf("accepted-work handoff lost root: %+v err=%v", root.Reference(), err)
 	}
 	cleared := correlation.WithRootAdmission(ctx, sourceartifact.RootAdmission{})
-	work = bindWorkContext(cleared, lease, owner)
+	work = bindWorkContext(cleared, lease, owner, nil)
 	if _, present, err := correlation.RootAdmissionFromContext(work); err == nil || present {
 		t.Fatal("accepted-work handoff repaired an explicit root clear")
 	}

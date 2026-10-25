@@ -73,7 +73,7 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRun,
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at})
-			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
+			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live, nil)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
 				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", sourceRun, sourceRun, "", ""), OccurredAt: at})
@@ -94,7 +94,7 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 			}
 			// A is an actually activated pending-effect start fork. Its own start
 			// cut is the supported source for B, not an empty event frontier.
-			sourceActivation := activatePendingDecisionFork(t, ctx, owner, sourceRun, page.Events[0].EventID, loader, loaded)
+			sourceActivation := activatePendingDecisionFork(t, ctx, owner, sourceRun, page.Events[0].EventID, loader, loaded, nil)
 			sourceRun = sourceActivation.Materialization.ForkRunID
 			sourceCard = requirePendingReplyCard(t, ctx, store, sourceRun)
 			request, mutation := branchCardDecision(sourceCard, principal.ID, "reject")

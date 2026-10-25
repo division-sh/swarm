@@ -8,10 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -61,13 +63,14 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 					sqlite := !postgres
 					ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 					defer cancel()
+					ctx = originalStoreFixtureContext(t, ctx, store)
 					var grant startupownership.GenerationGrant
 					var runID string
 					if kind == "normal" {
 						runID = uuid.NewString()
 						selected := store.(agentFixtureFlowStore)
 						identity := mustTestAgentIdentityForRun(runID, "fence-owner", "global")
-						requireRunningRunForTest(t, ctx, store, runID, time.Now().UTC())
+						ctx = requireRunningRunForTest(t, ctx, store, runID, time.Now().UTC())
 						if err := agentfixture.UpsertStatic(t, ctx, selected, agentFixtureStaticRecord(t, identity)); err != nil {
 							t.Fatal(err)
 						}
@@ -85,6 +88,14 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 						}
 					} else {
 						fixture := newSelectedCompletionFixture(t, store, db, sqlite)
+						rooted, err := selected.(interface {
+							LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+						}).LoadRunRootedSource(ctx, fixture.forkRun)
+						if err != nil {
+							t.Fatal(err)
+						}
+						ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx,
+							mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())), rooted.Admission())
 						grant = selectedMutationFenceGrant(t, ctx, fixture)
 						runID = fixture.forkRun
 					}
@@ -128,30 +139,20 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 					if state != string(evidence.State) || version != evidence.StateVersion {
 						t.Fatalf("cancelled retirement changed head: %s/%d", state, version)
 					}
-					// A transaction that observed the old head must reread after taking
-					// the fence, not authorize its stale append-only predecessor.
-					retiredGrant := false
+					if err := grant.Retire(ctx); err != nil {
+						t.Fatalf("retire after mutation releases dependency: %v", err)
+					}
+					// Native admission acquires the mutation fence before this
+					// callback; the retained binding must still reject the new head.
 					err = runUnrevisionedEventFixtureTransactionForTest(ctx, mutationStore, func(txctx context.Context, late *sql.Tx) error {
-						if err := late.QueryRowContext(txctx, `SELECT state FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&state); err != nil {
-							return err
-						}
-						if !retiredGrant {
-							if state != string(evidence.State) {
-								t.Fatalf("stale-head setup did not observe the admitted grant: %s", state)
-							}
-							if err := grant.Retire(ctx); err != nil {
-								t.Fatalf("retire after mutation releases dependency: %v", err)
-							}
-							retiredGrant = true
-						}
 						if err := agentpersistence.AuthorizeGenerationMutationTx(txctx, late, req, sqlite); err != nil {
 							return err
 						}
-						t.Fatal("stale-head transaction authorized retired grant")
+						t.Fatal("retained binding authorized retired grant")
 						return nil
 					})
 					if err == nil || !strings.Contains(err.Error(), "lifecycle generation grant is retired") {
-						t.Fatalf("stale-head refusal must use current grant, not a missing ordering scope: %v", err)
+						t.Fatalf("retained-binding refusal must use current grant, not a missing ordering scope: %v", err)
 					}
 				})
 			}

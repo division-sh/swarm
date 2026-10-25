@@ -17,6 +17,9 @@ import (
 
 func Test2376SourceArtifactCommitUncertaintyBothStores(t *testing.T) {
 	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("description: commit evidence\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

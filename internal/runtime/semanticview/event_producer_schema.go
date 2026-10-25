@@ -26,9 +26,9 @@ func ResolveProducerEventSchema(source Source, producer events.PayloadProducer, 
 			return EventSchemaResolution{}, fmt.Errorf("event producer flow %q is not declared in the semantic source", flowID)
 		}
 		if event.AdmissionClass() == events.EventAdmissionRuntimeControl {
-			if event.Producer().ID() == "runtime.generic_schedule" {
+			if event.Producer().ID() == "runtime.generic_schedule" || event.Producer().ID() == "agent-turn-timeout" {
 				if _, _, found := source.ResolveFlowEventCatalogEntry(flowID, string(event.Type())); !found {
-					return EventSchemaResolution{}, fmt.Errorf("scheduled event %q is not declared by flow %q", event.Type(), flowID)
+					return EventSchemaResolution{}, fmt.Errorf("authored control event %q is not declared by flow %q", event.Type(), flowID)
 				}
 				return ResolveEventSchema(source, flowID, string(event.Type())), nil
 			}

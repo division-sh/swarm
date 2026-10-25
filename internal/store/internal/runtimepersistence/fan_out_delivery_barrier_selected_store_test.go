@@ -597,14 +597,11 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 				name = "no_route"
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
-				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
-				ctx = originalStoreFixtureContext(t, ctx, owner)
+				owner, _, db, _ := newFanOutOwnerPairForTest(t, backend)
 				selected := owner.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
-				entityID := uuid.NewString()
-				handle := seedFanOutDeliveryBarrierRecord(t, ctx, db, fixture, entityID, attemptgeneration.Generation{}, base)
+				ctx, fixture, handle := seedDeclaredForkFanOutFixtureWithBarrier(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 0, base, true)
+				entityID := fixture.runID
 				advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(time.Second))
 				activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 				activation, found, err := owner.(runtimegenericschedule.Store).LoadGenericScheduleActivation(ctx, activationID)
@@ -617,10 +614,23 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 				}
 				event := eventtest.RuntimeControlWithRoutingSource(runtimegenericschedule.OccurrenceEventID(activationID, activation.CurrentDueAt), events.EventType(activation.Command.EventType), runtimegenericschedule.OccurrenceProducerID(), handle.TaskID(), payload, 0, fixture.runID, "",
 					events.EventEnvelope{EntityID: entityID}, activation.Command.RoutingSource, activation.CurrentDueAt)
+				repo := runtimepipeline.WorkflowRepoRoot()
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, fixture.artifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				admission, found, err := runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(semanticview.Wrap(bundle), event, fixture.bundleHash)
+				if err != nil || !found {
+					t.Fatalf("admit exact barrier outcome payload: found=%t err=%v", found, err)
+				}
+				event, err = events.ApplyPayloadAdmission(event, admission)
+				if err != nil {
+					t.Fatal(err)
+				}
 				var routes []events.DeliveryRoute
 				if !noRoute {
 					ref, _ := handle.JoinRef()
-					routes = []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ref.FlowPath(), FlowInstance: "root", EntityID: entityID})}}
+					routes = []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ref.FlowPath(), FlowInstance: fixture.runID, EntityID: entityID})}}
 				}
 				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, routes); err != nil {
 					t.Fatal(err)

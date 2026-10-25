@@ -272,7 +272,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 			} else if err != sql.ErrNoRows {
 				return fmt.Errorf("load selected contract binding: %w", err)
 			}
-			plan, err := planRunForkSnapshot(txctx, tx, runfork.RunForkPlanRequest{SourceRunID: lineage.SourceRunID, At: lineage.ForkEventID}, privaterunforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+			plan, err := planRunForkSnapshot(txctx, tx, runfork.RunForkPlanRequest{SourceRunID: lineage.SourceRunID, At: lineage.ForkEventID}, privaterunforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
 			if err != nil {
 				return err
 			}

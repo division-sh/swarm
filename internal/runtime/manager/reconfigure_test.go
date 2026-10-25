@@ -230,7 +230,7 @@ func newReconfigureMemoryNativeManager(t *testing.T, ctx context.Context, persis
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := correlation.WithRootAdmission(testAuthorActivityContext(context.Background()), rooted.Admission())
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{

@@ -185,7 +185,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	report.add(localPreflightWorkspacePrerequisite, code, severity, status, workspaceBackendDecisionDetail(workspaceBackend), remediation)
 	if req.CheckContractSecrets {
-		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, executionposture.Live)
+		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, executionposture.Live, false)
 		if err != nil {
 			report.add(localPreflightContractSecretPrerequisite, "contract_secret_reachability_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the effective connector declarations or agent LLM selection")
 			return report.finalize()

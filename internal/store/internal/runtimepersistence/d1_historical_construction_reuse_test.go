@@ -94,7 +94,11 @@ func TestD1HistoricalReforkExactRequireSurvivesReopenBothStores(t *testing.T) {
 			f := newOrdinaryForkPredecessorFixtureForReceiver(t, backend, component)
 			component.ctx = f.ctx
 			fork := materializeReceiverConstructionProofFork(t, component, f.owner.RunID)
-			request := runfork.RunForkMaterializeRequest{SourceRunID: f.owner.RunID, At: fork.ForkPoint.Input}
+			rooted, err := f.bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: f.owner.RunID, At: fork.ForkPoint.Input, RootAdmission: rooted.Admission()}
 			owner := flowidentity.RunScopedFlowInstance{RunID: fork.ForkRunID, Route: f.owner.Route}
 			lookup, err := pipeline.NewExactFlowInstanceLookup(semanticview.Wrap(f.bundle), mustStoreTestSourceArtifactFact(f.bundle.SourceArtifact.BundleHash()), owner)
 			if err != nil {
@@ -167,7 +171,11 @@ func TestD1HistoricalReforkExactRequireKeepsFixedCutBothStores(t *testing.T) {
 			component := f.receiverConfigActivationFixture
 			component.ctx = f.ctx
 			fork := materializeReceiverConstructionProofFork(t, component, f.owner.RunID)
-			request := runfork.RunForkMaterializeRequest{SourceRunID: f.owner.RunID, At: fork.ForkPoint.Input}
+			rooted, err := f.bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: f.owner.RunID, At: fork.ForkPoint.Input, RootAdmission: rooted.Admission()}
 			if request.At == "" || request.At != fork.ForkPoint.EventID || fork.SourceRunID != request.SourceRunID || fork.ForkRunID == request.SourceRunID {
 				t.Fatalf("refork did not retain its explicit source event: %+v", fork)
 			}

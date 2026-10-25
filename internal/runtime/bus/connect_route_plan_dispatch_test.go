@@ -4102,7 +4102,7 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 		t.Fatal(err)
 	}
 	keylessEvent := eventtest.RunCreatingRootIngressWithRoutingSource(
-		uuid.NewString(), "inbound.telegram", "provider", "", json.RawMessage(`{}`),
+		uuid.NewString(), "inbound.telegram.raw", "provider", "", json.RawMessage(`{}`),
 		0, uuid.NewString(), "", events.EventEnvelope{}, keylessRouting, time.Now().UTC(),
 	)
 	keylessContext := constructionIndexContext(t, keylessSource)

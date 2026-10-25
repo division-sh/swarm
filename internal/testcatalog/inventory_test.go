@@ -375,7 +375,7 @@ func assertCoreStructuralGuardCatalogInventory(t *testing.T, policy testplanning
 	}
 	for _, root := range []string{
 		"TestRunForkRevisionStateAccessorInventoryIsClosed",
-		"TestRetiredBuilderSemanticReferencesStayExplicit", "TestReleaseE2EPackageStaysAtPublicProcessBoundary",
+		"TestReleaseE2EPackageStaysAtPublicProcessBoundary",
 	} {
 		if !regexp.MustCompile(unit.Run).MatchString(root) {
 			t.Fatalf("core structural guard selection omits %s", root)

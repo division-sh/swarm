@@ -45,6 +45,7 @@ type activeInputStore interface {
 	sessionInputSelectedStore
 	pipeline.StandingServicePersistence
 	sourceartifactfixture.RootedWriter
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }
 
@@ -661,6 +662,6 @@ func activeInputChannelFixture(t *testing.T, catalog *providertriggers.CatalogSn
 	if !present {
 		t.Fatal("native input catalog has no WhatsApp trigger")
 	}
-	_, plan := packfixture.WhatsAppSessionProvider(t, "../../platform-spec.yaml", entry.Manifest.SourceBytes())
+	_, plan := packfixture.WhatsAppSessionProvider(t, "../../platform-spec.yaml", entry.Manifest.SourceBytes(), []string{"raw", "edit", "message", "revoke"})
 	return plan
 }

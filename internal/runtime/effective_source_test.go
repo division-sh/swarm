@@ -87,7 +87,7 @@ func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtimebootverify.PrepareSourceBootEffectContext(projection.Source(), profile, executionposture.MockOnly); err != nil {
+	if _, err := runtimebootverify.PrepareSourceBootEffectContext(projection.Source(), profile, executionposture.MockOnly, false); err != nil {
 		t.Fatalf("projected source failed boot effect admission: %v", err)
 	}
 }

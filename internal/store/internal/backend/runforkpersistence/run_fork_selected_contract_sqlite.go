@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -122,7 +121,12 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				return err
 			}
 			stateAdmission.carriage = original
-			stateAdmission.sourceAt = s.RequirePresentSourceTx
+			stateAdmission.sourceAt = func(readctx context.Context, readtx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+				if runID == sourceRunID {
+					readctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(readctx, originalFact), originalRoot)
+				}
+				return s.RequirePresentSourceTx(readctx, readtx, runID)
+			}
 			physicalIDs, pendingInputs, err := loadRunForkPendingJoinInputs(txctx, tx, stateAdmission, ids)
 			if err != nil {
 				return err

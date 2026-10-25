@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -1015,7 +1016,9 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					t.Fatal("selected declaration replaced the exact retained original approval")
 				}
 				materializationRequest := selectedSourceMaterializationRequest(t, ctx, cards, sourceRunID, request.ID(), semanticview.Wrap(targetBundle))
-				child, err := cards.MaterializeRunForkForSelectedContractExecution(ctx, materializationRequest)
+				targetCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, materializationRequest.SourceArtifactFact), materializationRequest.RootAdmission)
+				targetCtx = authoractivity.WithScope(targetCtx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, materializationRequest.SourceArtifactFact.BundleHash()))
+				child, err := cards.MaterializeRunForkForSelectedContractExecution(targetCtx, materializationRequest)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1051,7 +1054,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					before := historicalContextDatabaseRows(t, db, backend.name == "postgres")
 					// The loader processes these by committed time: the reusable
 					// first attempt is inserted before the later input refuses.
-					loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{request.ID(), late.ID()}, materializationRequest.OriginalLoopCarriage, originalRootAdmissionForRun(t, cards, sourceRunID))
+					loaded, err := cards.LoadRunForkSelectedContractSourceEvents(targetCtx, sourceRunID, forkRunID, []string{request.ID(), late.ID()}, materializationRequest.OriginalLoopCarriage, originalRootAdmissionForRun(t, cards, sourceRunID))
 					if err == nil || !strings.Contains(err.Error(), "outside the bound fork revision") || len(loaded) != 0 {
 						t.Fatalf("late input did not roll back the earlier approved copy: loaded=%d error=%v", len(loaded), err)
 					}
@@ -1065,7 +1068,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				}
 				beforePrepare := historicalContextDatabaseRows(t, db, backend.name == "postgres")
 				// An unrelated caller reply must not fill an empty original binding.
-				loadCtx := events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "foreign-caller-reply"}})
+				loadCtx := events.WithDeliveryContext(targetCtx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "foreign-caller-reply"}})
 				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(loadCtx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, materializationRequest.OriginalLoopCarriage, originalRootAdmissionForRun(t, cards, sourceRunID))
 				if err == nil {
 					if len(loaded) != 1 {

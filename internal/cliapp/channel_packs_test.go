@@ -2,6 +2,8 @@ package cliapp
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +11,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
@@ -73,6 +77,94 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 	if got := loaded.Bindings[0].CredentialStoreKeys()["telegram.telegram_bot_token"]; got != "telegram_hitl_bot" {
 		t.Fatalf("credential mapping = %q", got)
 	}
+	for _, plan := range loaded.Plans {
+		if subject, err := plan.CapabilitySubject(); err != nil || subject.ID != plan.ChannelIdentity().ID() {
+			t.Fatalf("standalone installed channel identity changed: %+v error=%v", subject, err)
+		}
+		if plan.MatchesCapturedHolder(".") {
+			t.Fatal("standalone channel acquired a captured holder")
+		}
+	}
+	t.Run("captured_projection_retains_scope_and_configured_binding", func(t *testing.T) {
+		root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+		if err := os.MkdirAll(filepath.Join(root, "other"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeRuntimeConfigText(t, filepath.Join(root, "other/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [raw]\n  cannot: [execute code]\n")
+		writeRuntimeConfigText(t, filepath.Join(root, "other/trigger.yaml"), "transport: webhook\ndelivery_id: {json_path: $.id, required: true}\nevent_name: {literal: raw}\nack: {mode: durable_before_dispatch}\n")
+		_, bundle, err := NewSwarmWorkflowModule(repo, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		captured, err := LoadBundlePackRuntime(t.Context(), RuntimeConfigLoadResult{Config: base}, bundle, credentials, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(captured.Channels.Plans) != 1 || len(captured.Channels.Bindings) != 1 {
+			t.Fatalf("captured projection/configured binding multiplicity: %+v", captured.Channels)
+		}
+		if subject, err := captured.Channels.Plans[0].CapabilitySubject(); err != nil || subject.ID != "telegram/channel.yaml" || subject.Provider != "telegram" || captured.Channels.Plans[0].ChannelIdentity().ID() != "telegram" {
+			t.Fatalf("captured channel lost its exact BODY member/provider distinction: %+v error=%v", subject, err)
+		}
+		if !captured.Channels.Plans[0].MatchesCapturedHolder(".") {
+			t.Fatal("captured channel lost its exact holding flow")
+		}
+		for _, foreign := range []string{"", " .", "./", "child", "telegram-agent"} {
+			if captured.Channels.Plans[0].MatchesCapturedHolder(foreign) {
+				t.Fatalf("captured holder normalized foreign flow %q", foreign)
+			}
+		}
+		before, err := loaded.Bindings[0].Generation()
+		if err != nil {
+			t.Fatal(err)
+		}
+		after, err := captured.Channels.Bindings[0].Generation()
+		if err != nil || !before.Equal(after) {
+			t.Fatalf("captured projection replaced configured outbound binding: %v", err)
+		}
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: filepath.Base(root), Provider: "telegram", SigningSecret: "telegram.webhook_signing_secret"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := []byte(`{"update_id":101,"callback_query":{"id":"query-101","from":{"id":41},"message":{"message_id":7,"chat":{"id":42,"type":"private"}},"data":"opaque-action-token"}}`)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		delivery, err := plan.Accept(providertriggers.Request{Target: providertriggers.Target{WebhookSecret: "secret"}, Headers: http.Header{"X-Telegram-Bot-Api-Secret-Token": {"secret"}}, Body: body, Payload: payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+		matches := 0
+		for _, output := range delivery.Events {
+			for _, projection := range captured.Channels.Plans {
+				if _, matched, err := projection.ProjectActionFact(string(output.Name), output.Authorization, output.Payload); err != nil {
+					t.Fatal(err)
+				} else if matched {
+					matches++
+				}
+			}
+		}
+		if matches != 1 {
+			t.Fatalf("exact captured multi-provider authorization matches=%d, want 1", matches)
+		}
+	})
 	t.Run("source_projects_the_mapped_native_observation", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "channel-credentials.json")
 		file, err := runtimecredentials.NewFileStore(path)

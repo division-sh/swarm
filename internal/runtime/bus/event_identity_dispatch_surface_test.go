@@ -305,7 +305,6 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	bundle, present := semanticview.Bundle(source)
 	if !present || bundle == nil {
 		t.Fatal("complete dispatch fixture requires its captured source")

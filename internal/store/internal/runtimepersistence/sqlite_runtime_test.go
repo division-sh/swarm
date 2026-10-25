@@ -410,6 +410,7 @@ func assertParentTerminalizationFailure(t *testing.T, raw []byte, reason string)
 func TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), uuid.NewString())
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = requireDefaultSourceArtifactForTest(t, ctx, store)
 
 	tx, err := store.backend.ConstructionHandle().BeginTx(ctx, nil)
 	if err != nil {
@@ -1521,8 +1522,10 @@ func assertSQLiteRuntimeCount(t *testing.T, store *SQLiteRuntimeStore, query str
 
 func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	f := newReceiverConfigActivationFixtureWithDocuments(t, "sqlite", false, map[string]string{
-		"schema.yaml":        "name: persistence-proof\n",
-		"root/schema.yaml":   "name: root\ninstance: company_id\nstages:\n  qualified: {}\npins:\n  inputs:\n    - company.opened\n",
+		"manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+		"root/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":        "stages: []\n# fixture: persistence-proof\n",
+		"root/schema.yaml":   "instance: company_id\nstages:\n  qualified: {}\npins:\n  inputs:\n    - company.opened\n",
 		"root/entities.yaml": "company:\n  company_id: text\n  score: {type: numeric, initial: 9}\n",
 		"root/events.yaml":   "company.opened:\n",
 	}, nil)

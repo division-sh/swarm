@@ -98,6 +98,10 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 	return s.runForkPostgresOwner.ActivateRunFork(ctx, req)
 }
 
+func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	return s.runForkPostgresOwner.ActivateRunForkForSelectedContractExecution(ctx, req)
+}
+
 func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error) {
 	return s.runLifecyclePostgresOwner.ActiveRunDeliveryQuiesced(ctx, eventID, route)
 }
@@ -1360,6 +1364,10 @@ func (s *SQLiteRuntimeStore) ActivateDeliveryAuthority(ctx context.Context, auth
 
 func (s *SQLiteRuntimeStore) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (runfork.RunForkActivation, error) {
 	return s.runForkSQLiteOwner.ActivateRunFork(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	return s.runForkSQLiteOwner.ActivateRunForkForSelectedContractExecution(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error) {

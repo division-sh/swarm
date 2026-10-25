@@ -11,8 +11,10 @@ import (
 func CopyPublicationStateResult(t testing.TB, mode string) string {
 	t.Helper()
 	root, prefix, flow := t.TempDir(), "", "."
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	if mode == "static" {
 		prefix, flow = "source/", "source"
+		writeClosedVariantFile(t, root, "source/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	} else if mode != "root" {
 		t.Fatalf("unsupported state-result publication topology %q", mode)
 	}
@@ -21,7 +23,6 @@ func CopyPublicationStateResult(t testing.TB, mode string) string {
 	if flow == "." {
 		schema += connect
 	} else {
-		writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: result-root\npins:\n  inputs: [document.requested]\n  outputs: [document.requested]\n"+connect+"  - {event: document.requested, from: ., to: source}\n")
 		writeClosedVariantFile(t, root, "events.yaml", "document.requested:\n  request_id: text\n  content: text\n  result_kind: text\n")
 	}

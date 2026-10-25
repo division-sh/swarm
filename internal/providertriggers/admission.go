@@ -661,7 +661,9 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 		if err != nil {
 			var normalizationErr NormalizationError
 			if errors.As(err, &normalizationErr) && p.packIdentity != nil {
-				return Delivery{}, badRequest(fmt.Sprintf("pack %s version=%s manifest_hash=%s normalized event %q path %q failed: %s", p.packIdentity.ID(), p.packIdentity.Version(), p.packIdentity.ManifestHash(), normalizationErr.Event, normalizationErr.Path, normalizationErr.Cause))
+				failure := badRequest(fmt.Sprintf("pack %s version=%s manifest_hash=%s normalized event %q path %q failed: %s", p.packIdentity.ID(), p.packIdentity.Version(), p.packIdentity.ManifestHash(), normalizationErr.Event, normalizationErr.Path, normalizationErr.Cause))
+				failure.cause = &normalizationErr
+				return Delivery{}, failure
 			}
 			return Delivery{}, err
 		}

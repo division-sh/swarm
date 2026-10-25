@@ -15,12 +15,14 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 type gateCompletionDomain struct {
@@ -190,6 +192,12 @@ func gateCompletionAssertResponse(t *testing.T, result gateCompletionHTTPResult,
 
 func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
+	if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+		t.Fatal(err)
+	}
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	unsetStoreSelectorEnv(t)

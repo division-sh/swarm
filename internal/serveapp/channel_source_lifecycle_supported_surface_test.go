@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -34,7 +34,18 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, ".")
+				originalStanding, err := servedTestProcessRuntime(t, h.process).Pipeline.ListStandingServiceStatuses(t.Context())
+				if err != nil || len(originalStanding) != 1 || originalStanding[0].RunID != standingRun || originalStanding[0].BundleHash != hash {
+					t.Fatalf("source lifecycle requires its exact standing owner: statuses=%+v err=%v", originalStanding, err)
+				}
+				var originalHeader struct {
+					Run operatorread.RunHeader `json:"run"`
+				}
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": standingRun}, &originalHeader)
+				if originalHeader.Run.RunID != standingRun || originalHeader.Run.StartedAt.IsZero() {
+					t.Fatalf("source lifecycle lost its original run incarnation: %+v", originalHeader.Run)
+				}
+				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, standingRun)
 				waitChannelAnchorReceipt(t, db, standingCard)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
@@ -161,27 +172,22 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					successorPlan := ""
 					if !clear {
-						var freshGenerations int
-						if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_generations`).Scan(&freshGenerations); err != nil || freshGenerations != 0 {
-							t.Fatalf("reset created a standing generation without admitted ingress credentials: count=%d err=%v", freshGenerations, err)
+						current, err := servedTestProcessRuntime(t, h.process).Pipeline.ListStandingServiceStatuses(t.Context())
+						if err != nil || len(current) != 1 || current[0].ServiceID != originalStanding[0].ServiceID ||
+							current[0].FlowPath != originalStanding[0].FlowPath || current[0].BundleHash != hash ||
+							current[0].RootReference != originalStanding[0].RootReference || current[0].Generation <= 0 ||
+							current[0].RunID == "" || !current[0].RestartDisposition.Executable() {
+							t.Fatalf("retained reset did not reconstruct the exact current service/source: before=%+v current=%+v err=%v", originalStanding, current, err)
 						}
-						stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-						restore := installChannelOnboardingCLIInput(t, "source-reset-signing-secret\n")
-						t.Cleanup(restore)
-						code := executeCLI(context.Background(), []string{
-							"--config", h.opts.ConfigPath, "secrets", "set", "telegram.webhook_signing_secret", "--stdin",
-						}, stdout, stderr, nil)
-						restore()
-						if code != 0 {
-							t.Fatalf("provision retained-source ingress credential: code=%d %s", code, stderr.String())
+						successorRun := current[0].RunID
+						var successorHeader struct {
+							Run operatorread.RunHeader `json:"run"`
 						}
-						h.stop(t)
-						h.start(t)
-						var successorRun string
-						if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&successorRun); err != nil {
-							t.Fatal(err)
+						requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": successorRun}, &successorHeader)
+						if successorHeader.Run.RunID != successorRun || successorHeader.Run.BundleHash != hash || !successorHeader.Run.StartedAt.After(originalHeader.Run.StartedAt) {
+							t.Fatalf("retained reset generation lost its exact new run incarnation: status=%+v before=%+v after=%+v", current[0], originalHeader.Run, successorHeader.Run)
 						}
-						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, ".")
+						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, successorRun)
 						if freshCard == standingCard {
 							t.Fatal("retained reset reused predecessor standing card")
 						}

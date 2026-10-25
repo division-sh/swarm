@@ -19,12 +19,26 @@ func TestS1EventRunFixturesRetainExplicitRootBothStores(t *testing.T) {
 	for _, backend := range runFixtureProofBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
-			rooted, _ := sourceartifactfixture.Rooted(t, "event-source", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+			artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":   []byte("stages: []\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rooted, _ := sourceartifactfixture.Rooted(t, "event-source", artifact)
 			fact := sourceartifactfixture.FactFor(rooted.Artifact())
 			base := semanticFixtureContext(context.Background(), fact)
 			ctx := correlation.WithRootAdmission(base, rooted.Admission())
 			sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
-			foreign, _ := sourceartifactfixture.Rooted(t, "foreign", sourceartifactfixture.New("schema.yaml", []byte("required_agents: []\n")))
+			foreignArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":   []byte("required_agents: []\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign, _ := sourceartifactfixture.Rooted(t, "foreign", foreignArtifact)
 			reader := selected.(interface {
 				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 			})

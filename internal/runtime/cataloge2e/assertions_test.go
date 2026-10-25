@@ -260,7 +260,7 @@ func newCatalogAssertionHarness(t *testing.T, initial string) *runtimeHarness {
 	h := newRuntimeHarnessForBackend(t, root, catalogBackendPostgres, false)
 	ctx := runtimeeffects.WithExecutionMode(h.ctx, executionmode.Live)
 	plan, err := h.rt.Manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
+		ContractBundle: h.rt.Options.WorkflowModule.SemanticSource(),
 		Instance:       flowidentity.Stored(semanticview.Wrap(h.bundle), ".", catalogRuntimeRunID, catalogRuntimeRunID, catalogRuntimeRunID, ""),
 		OccurredAt:     h.startedAt,
 	})

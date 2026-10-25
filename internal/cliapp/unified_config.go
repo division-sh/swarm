@@ -460,6 +460,12 @@ func unifiedConfigRule(pathParts []string) (unifiedConfigKeyRule, bool) {
 	if rule, ok := rules[path]; ok {
 		return rule, true
 	}
+	if len(pathParts) == 2 && pathParts[0] == "triggers" {
+		return unifiedConfigKeyRule{Container: true}, true
+	}
+	if len(pathParts) == 3 && pathParts[0] == "triggers" && pathParts[2] == "acknowledge" {
+		return unifiedConfigKeyRule{}, true
+	}
 	if len(pathParts) > 2 && pathParts[0] == "llm" && pathParts[1] == "models" {
 		return unifiedConfigKeyRule{}, true
 	}

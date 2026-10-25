@@ -42,7 +42,11 @@ func TestRunForkFreshInvocationsAtSameCutHaveIndependentChildrenBothStores(t *te
 			if err := tx.Commit(); err != nil {
 				t.Fatal(err)
 			}
-			request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID}
+			rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID, RootAdmission: rooted.Admission()}
 			first, err := owner.MaterializeRunFork(ctx, request)
 			if err != nil {
 				t.Fatalf("first invocation: %v", err)
@@ -136,7 +140,7 @@ func TestSelectedForkLatestPreparationRetainsCapturedSelectorBothStores(t *testi
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx, seeded := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
-			request := prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, seeded.SourceRunID, "", seeded.ContractSelection)
+			request := prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, seeded.SourceRunID, "", seeded.ContractSelection, seeded.SourceArtifactFact.BundleHash())
 			point := request.Preparation.ForkPoint
 			if point.EventID == "" || request.At != point.Input || point.EventID == point.Input {
 				t.Fatalf("fixture did not distinguish captured latest from concrete event: point=%+v at=%q", point, request.At)

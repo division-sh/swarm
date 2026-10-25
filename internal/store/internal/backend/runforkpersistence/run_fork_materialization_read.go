@@ -156,7 +156,7 @@ func loadRequiredRunForkPlan(ctx context.Context, tx *sql.Tx, postgres bool, for
 	}
 	// The retained child selects its original cut. An omitted selector never
 	// resolves today's latest source event or discovers a same-cut sibling.
-	plan, err := planRunForkSnapshot(ctx, tx, runfork.RunForkPlanRequest{SourceRunID: origin.SourceRunID(), At: origin.SourceEventID()}, validate, resolve)
+	plan, err := planRunForkSnapshot(ctx, tx, runfork.RunForkPlanRequest{SourceRunID: origin.SourceRunID(), At: origin.SourceEventID()}, validate, resolve, postgres)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}

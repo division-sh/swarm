@@ -714,7 +714,12 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 				return err
 			}
 			stateAdmission.carriage = original
-			stateAdmission.sourceAt = s.RequirePresentSourceTx
+			stateAdmission.sourceAt = func(readctx context.Context, readtx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+				if runID == sourceRunID {
+					readctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(readctx, originalFact), originalRoot)
+				}
+				return s.RequirePresentSourceTx(readctx, readtx, runID)
+			}
 			physicalIDs, pendingInputs, err := loadRunForkPendingJoinInputs(ctx, tx, stateAdmission, ids)
 			if err != nil {
 				return err

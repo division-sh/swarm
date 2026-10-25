@@ -57,7 +57,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			} else {
 				surface = fixture.sqlite
 			}
-			ctx = originalStoreFixtureContext(t, ctx, surface)
+			priorCtx = originalStoreFixtureContext(t, priorCtx, surface)
 			owner, ok := surface.(interface {
 				runtimerunlifecycle.OperationOwner
 				sourceartifactfixture.Writer
@@ -77,6 +77,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			}
 			fixture.sourceBundleHash = fact.BundleHash()
 			ctx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), fixture.sourceRun), rooted.Admission())
+			ctx = originalStoreFixtureContext(t, ctx, surface)
 
 			entityID := uuid.NewString()
 			entity := pipeline.ScenarioSetupEntityRequest{

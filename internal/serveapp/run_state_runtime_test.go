@@ -33,6 +33,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -240,9 +241,22 @@ func startRunStatusReceiverDeliveries(t *testing.T, pg interface {
 	agentfixture.Store
 	runtimedelivery.Store
 	runtimerunlifecycle.StandingRestartDispositionReader
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, source runtimecorrelation.SourceArtifactFact, identity agentidentity.Identity) {
 	t.Helper()
 	ctx := runStatusAuthorActivityContext(source)
+	rooted, err := pg.LoadRunRootedSource(ctx, identity.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rooted.Admission().BundleHash() != source.BundleHash() {
+		t.Fatal("run-status receiver source differs from its retained run root")
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = serveFixtureProcessContext(t, ctx, pg)
 	state, found, err := pg.LoadAgentLifecycleState(ctx, identity)
 	if err != nil || !found || state.Identity != identity || state.Phase != runtimemanager.AgentLifecycleRunning ||
@@ -257,7 +271,7 @@ func startRunStatusReceiverDeliveries(t *testing.T, pg interface {
 	if err != nil || !found {
 		t.Fatalf("run-status receiver lost its complete source plan: found=%t err=%v", found, err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, pg, plan, agenttopology.SourceCoordinate{BundleHash: source.BundleHash()})
+	grant, err := agentfixture.AdmitGeneration(t, ctx, pg, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}

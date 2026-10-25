@@ -224,6 +224,12 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						if err != nil {
 							t.Fatal(err)
 						}
+						request.ForkOperation = &runfork.ForkOperationRequest{
+							OperationID: uuid.NewString(), Actor: "bearer:fan-out-generation-proof", IdempotencyKey: uuid.NewString(),
+							TransportHash: "sha256:fan-out-generation-proof", SourceRunID: runID, ForkEventID: point.ID(),
+							TargetBundleHash: request.SourceArtifactFact.BundleHash(), TargetRootReference: request.RootAdmission.Reference(),
+							ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
+						}
 						selectedRequest = request
 						materialize = func() (runfork.RunForkMaterialization, error) {
 							return forkOwner.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -292,7 +298,9 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					var repeated runfork.RunForkMaterialization
 					if selectedExecution {
-						repeated, err = forkOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, child.ForkRunID, selectedRequest)
+						readbackRequest := selectedRequest
+						readbackRequest.ForkOperation = nil
+						repeated, err = forkOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, child.ForkRunID, readbackRequest)
 					} else {
 						repeated, err = fixture.store.(runForkSelectedLifecycleStore).RequireMaterializedRunFork(ctx, child.ForkRunID, materializeRequest)
 					}

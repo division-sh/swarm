@@ -280,9 +280,9 @@ func TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores(t *tes
 				name = "staged"
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
-				declaration := "name: review\n"
+				declaration := "stages: []\n"
 				if staged {
-					declaration += "stages:\n  pending: {}\n"
+					declaration = "stages:\n  pending: {}\n"
 				}
 				receipts := &flowConstructorFaultOwner{}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{

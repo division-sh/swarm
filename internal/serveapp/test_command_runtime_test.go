@@ -308,6 +308,9 @@ func TestServeRuntimeConfiguredChannelBindingProjectsOnce(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+	if err := os.CopyFS(filepath.Join(sourceRoot, "telegram"), os.DirFS(filepath.Join(repoRootForTest(), "packs/providers/telegram"))); err != nil {
+		t.Fatal(err)
+	}
 	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "channel-projection.sqlite"))
 	rawConfig, err := os.ReadFile(configPath)
 	if err != nil {
@@ -317,12 +320,15 @@ func TestServeRuntimeConfiguredChannelBindingProjectsOnce(t *testing.T) {
 channels:
   bindings:
     ops:
-      pack: provider.telegram.hitl_channel
+      pack: telegram
       destination: "42"
 `
 	if err := os.WriteFile(configPath, []byte(configured), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath: configPath, SourceRoot: sourceRoot,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
@@ -377,7 +383,7 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 			idempotencyKey := "public-input-rollback-" + string(backend)
 			response := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
 				"bundle_hash": bundleHash,
-				"event_name":  "inbound.telegram.text_message",
+				"event_name":  publicTelegramMockApprovalInput,
 				"payload": map[string]any{
 					"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42",
 					"provider_message_reference": 1, "text": "rollback proof",
@@ -434,7 +440,7 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 				stage.install(t, context.Background(), db, claim, "telegram-chat", backend)
 				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
 				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-					"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
+					"bundle_hash": bundleHash, "event_name": publicTelegramMockApprovalInput,
 					"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "late rollback proof"},
 					"idempotency_key": idempotencyKey,
 				})
@@ -1284,10 +1290,32 @@ steps:
 // The generated fixture uses conversation_reference="0". Keep its independent
 // concrete-instance vector in the ordered scenario and public target oracle.
 const publicTelegramMockApprovalInstance = "telegram-chat/ti-62b4c69a288fa3253aa5a034"
+const publicTelegramMockApprovalInput = "message.received"
 
 func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 	t.Helper()
 	root := canonicalrouting.CopyTelegramChatWithoutIngress(t)
+	for _, label := range []string{"schema.yaml", "telegram-chat/schema.yaml", "telegram-chat/agents.yaml"} {
+		path := filepath.Join(root, filepath.FromSlash(label))
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated := strings.ReplaceAll(string(body), "inbound.telegram.text_message", publicTelegramMockApprovalInput)
+		if updated == string(body) {
+			t.Fatalf("public mock approval fixture lost its input declaration at %s", label)
+		}
+		writeWorkflowValidationFixtureFile(t, path, updated)
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "enums:\n  PublicConversationScope: {values: [direct, shared], default: direct}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `message.received:
+  key: conversation_reference
+  conversation_reference: {type: text, pattern: '^-?[0-9]+$', length: {min: 1, max: 32}}
+  conversation_scope: PublicConversationScope
+  external_account_reference: {type: text, pattern: '^[0-9]+$', length: {min: 1, max: 17}}
+  provider_message_reference: {type: integer, range: {min: 1, max: 2147483647}}
+  text: {type: text, length: {min: 1, max: 4096}}
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-responder:
   execution_type: system_node
@@ -1310,7 +1338,7 @@ telegram-revision:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests", "public-mock-approval.yaml"), fmt.Sprintf(`
 name: public generated Telegram mock approval
 steps:
-  - publish: inbound.telegram.text_message
+  - publish: %s
     payload: generate
   - mailbox.decide:
       match:
@@ -1322,11 +1350,11 @@ steps:
 expect:
   events:
     ordered:
-      - inbound.telegram.text_message
+      - %s
       - platform.activity_requested
       - %s/telegram_send_message.succeeded
   no_dead_letters: true
-`, publicTelegramMockApprovalInstance))
+`, publicTelegramMockApprovalInput, publicTelegramMockApprovalInput, publicTelegramMockApprovalInstance))
 	return root
 }
 
@@ -1338,7 +1366,7 @@ func requireSingleServedBundleRun(t *testing.T, endpoint, bundleHash string) str
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &result)
 	var matches []operatorread.RunHeader
 	for _, run := range result.Runs {
-		if run.Origin.EventType() == "inbound.telegram.text_message" {
+		if run.Origin.EventType() == publicTelegramMockApprovalInput {
 			matches = append(matches, run)
 		}
 	}
@@ -1356,7 +1384,7 @@ func requirePublicMockApprovalEvents(t *testing.T, endpoint, runID string) {
 		"limit":  500,
 	}, &result)
 	wantCounts := map[string]int{
-		"inbound.telegram.text_message":                                         1,
+		publicTelegramMockApprovalInput:                                         1,
 		"platform.activity_requested":                                           1,
 		publicTelegramMockApprovalInstance + "/telegram_send_message.succeeded": 1,
 	}
@@ -1396,7 +1424,7 @@ func requirePublicMockApprovalEvents(t *testing.T, endpoint, runID string) {
 		}
 	}
 	for _, event := range result.Events {
-		if event.EventName != "inbound.telegram.text_message" {
+		if event.EventName != publicTelegramMockApprovalInput {
 			continue
 		}
 		if event.Payload["conversation_reference"] != "0" || event.Payload["conversation_scope"] != "direct" {

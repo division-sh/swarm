@@ -11,9 +11,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -25,6 +27,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				var db *sql.DB
 				var artifacts interface {
 					EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+					EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
 					BootstrapSchema(context.Context, store.SchemaBootstrapRequest) error
 				}
 				var sqliteStore *store.SQLiteRuntimeStore
@@ -70,12 +73,17 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := artifacts.EnsureSourceArtifact(ctx, artifact); err != nil {
+				rooted, err := artifact.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := artifacts.EnsureRootedSource(ctx, rooted); err != nil {
 					t.Fatal(err)
 				}
 				runID := uuid.NewString()
-				setupCtx := serveFixtureProcessContext(t, ctx, artifacts)
-				storetest.RequireRun(t, setupCtx, artifacts.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: artifact.BundleHash()})
+				setupCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(artifact)), rooted.Admission())
+				setupCtx = serveFixtureProcessContext(t, setupCtx, artifacts)
+				storetest.RequireRun(t, setupCtx, artifacts.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: artifact.BundleHash(), RootAdmission: rooted.Admission()})
 				releaseServeTestAgentFixtureCapability(t, artifacts.(storetest.AgentFixtureStore))
 				placeholder := "?"
 				if backend != "sqlite" {
@@ -88,12 +96,15 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				} else {
 					blob := []byte{0}
 					if condition == "hash mismatch" {
-						if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o600); err != nil {
+						if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("# distinct retained bytes\nstages: []\n"), 0o600); err != nil {
 							t.Fatal(err)
 						}
 						other, err := sourceartifact.AdmitDirectory(root)
 						if err != nil {
 							t.Fatal(err)
+						}
+						if other.BundleHash() == artifact.BundleHash() {
+							t.Fatal("hash-mismatch fixture must have distinct admitted bytes")
 						}
 						blob = other.LogicalBlob()
 					}

@@ -20,6 +20,7 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -381,7 +382,12 @@ func TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin(t *testing
 		}
 	})
 	t.Cleanup(control.unblock)
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64)}}, nil)
+	rooted, _ := sourceartifactfixture.Rooted(t, "generation-monitor", sourceartifactfixture.Artifact())
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

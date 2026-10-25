@@ -31,7 +31,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -77,8 +76,11 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 			}
 			facts := make([]runtimecorrelation.SourceArtifactFact, len(loaded))
 			for index, source := range loaded {
-				facts[index] = sourceartifactfixture.RequireArtifact(t, context.Background(),
-					selected.RuntimeDeps().EventStore.(sourceartifactfixture.Writer), source.bundle.SourceArtifact)
+				fact, err := prepareServeSourceArtifact(context.Background(), selected.SourceArtifactWriter(), source.bundle)
+				if err != nil {
+					t.Fatal(err)
+				}
+				facts[index] = fact
 			}
 			paths := []string{"worker/context-a", "worker/context-b"}
 			runIDs := []string{uuid.NewString(), uuid.NewString()}
@@ -141,9 +143,20 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 					facts[captured], runIDs[index], paths[index])
 				if captured != index {
 					ctx := serveDynamicTopologySetupContext(original, facts[index], runIDs[index], runtimeInstanceID)
-					disposition, err := storetest.ReviseRunSource(ctx,
+					rooted, err := loaded[index].bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+					previous, err := loaded[captured].bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					revisionCtx := runtimecorrelation.WithRootAdmission(
+						serveDynamicTopologySetupContext(original, facts[captured], runIDs[index], runtimeInstanceID), previous.Admission())
+					disposition, err := storetest.ReviseRunSource(revisionCtx,
 						selected.RuntimeDeps().EventBusDurable.RunLifecycle.(storetest.RunFixtureStore),
-						runlifecycle.SourceRevisionRequest{RunID: runIDs[index], Source: facts[index]})
+						runlifecycle.SourceRevisionRequest{RunID: runIDs[index], Source: facts[index], RootAdmission: rooted.Admission()})
 					if err != nil || disposition != runlifecycle.MutationApplied {
 						t.Fatalf("revise captured source to current context: disposition=%s err=%v", disposition, err)
 					}
@@ -279,7 +292,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 
 func loadServeDynamicTopologySource(t *testing.T, selected *selectedStoreOwner, label string) serveRuntimeBundle {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), label)
 	for path, contents := range canonicalrouting.DynamicTopologyStartupDocuments(t, label) {
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), contents)
 	}

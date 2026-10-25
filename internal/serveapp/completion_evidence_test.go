@@ -648,7 +648,7 @@ func TestServedCompletion2270EvidenceBothStores(t *testing.T) {
 					return completion2270ObservedAgent{Agent: &claudeAttemptProofAgent{runtime: provider, config: actor, calls: &callbacks}, t: t}, nil
 				}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live, BaseContext: backend.context(),
 					LifecycleStore: storetest.AgentLifecycleFixture(t, backend.store), DeliveryStore: backend.store,
-					SemanticSource: claudeAttemptProofSemanticSource(), Sessions: backend.sessions, SessionResetter: backend.store,
+					SemanticSource: backend.semantic, Sessions: backend.sessions, SessionResetter: backend.store,
 					PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, bus), LLMBackend: profileID, ModelAliases: cfg.LLM.Models,
 					WorkOwner: work, ReceiverExecution: eventreceiver.NormalExecution()}, backend.store)
 				actor := claudeAttemptProofAgentConfig()

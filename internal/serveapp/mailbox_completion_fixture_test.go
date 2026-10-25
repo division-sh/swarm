@@ -83,6 +83,9 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 			t.Fatal(err)
 		}
 	}
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	var db *sql.DB
 	var pg *store.PostgresStore
 	var sq *store.SQLiteRuntimeStore

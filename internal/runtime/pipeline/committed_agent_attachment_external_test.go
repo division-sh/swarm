@@ -475,10 +475,10 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 		t.Fatal(err)
 	}
 	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
-	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "partial-attachment", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
-	if err != nil {
+	if process == nil {
+		t.Fatal("partial attachment requires its original native process")
+	}
+	if err := process.ProveCurrent(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var releaseOnce sync.Once

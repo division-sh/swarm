@@ -82,20 +82,20 @@ func runStandingOrphanRestorationPublic(t *testing.T, binary, lifecycle, root st
 		}
 		return
 	}
-	schemaPath := filepath.Join(spec.WorkingDir, spec.Source, "schema.yaml")
-	original, err := os.ReadFile(schemaPath)
+	sourceRoot := filepath.Join(spec.WorkingDir, spec.Source)
+	manifest, err := os.ReadFile(filepath.Join(sourceRoot, "manifest.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Cold declaration removal must remove its dependent producer/consumer
 	// graph as well. Keep the authored bytes outside the admitted source root
 	// for exact restoration; never fake a raw-provider consumer or input source.
-	for _, flow := range []string{".", "telegram-chat"} {
-		if err := os.Rename(filepath.Join(spec.WorkingDir, spec.Source, flow), filepath.Join(root, "removed-"+flow)); err != nil {
-			t.Fatal(err)
-		}
+	removedRoot := filepath.Join(root, "removed-contracts")
+	if err := os.Rename(sourceRoot, removedRoot); err != nil {
+		t.Fatal(err)
 	}
-	writeReleaseFile(t, schemaPath, "name: telegram-lifecycle\n")
+	writeReleaseFile(t, filepath.Join(sourceRoot, "manifest.yaml"), string(manifest))
+	writeReleaseFile(t, filepath.Join(sourceRoot, "schema.yaml"), "stages: []\n")
 	verified := runReleaseCommand(t, fullLifecycleStartupLimit, spec.WorkingDir, spec.Env, "", binary, "verify", spec.Source, "--config", spec.ConfigPath, "--portable", "--json")
 	if verified.err != nil {
 		t.Fatalf("removed-declaration source is not admitted: %v\n%s", verified.err, verified.output)
@@ -121,11 +121,11 @@ func runStandingOrphanRestorationPublic(t *testing.T, binary, lifecycle, root st
 	if err := p.stopAndWait(15 * time.Second); err != nil {
 		t.Fatalf("orphan stop: %v\n%s", err, p.output.String())
 	}
-	writeReleaseFile(t, schemaPath, string(original))
-	for _, flow := range []string{".", "telegram-chat"} {
-		if err := os.Rename(filepath.Join(root, "removed-"+flow), filepath.Join(spec.WorkingDir, spec.Source, flow)); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.RemoveAll(sourceRoot); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(removedRoot, sourceRoot); err != nil {
+		t.Fatal(err)
 	}
 	p = start()
 	bundle := requireFullLifecycleHealth(t, p.rpc)

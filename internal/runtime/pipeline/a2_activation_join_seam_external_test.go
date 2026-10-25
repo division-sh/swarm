@@ -436,9 +436,7 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 		t.Fatal(err)
 	}
 	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
-	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "a2-activation-join", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}

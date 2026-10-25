@@ -128,7 +128,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 			writeClosedVariantFile(t, root, name, string(child))
 		}
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
-		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
+		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers/manifest.yaml", "observers")
 	case "template":
 		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "# fixture: observers\n", "# fixture: observers\ninstance: case_id\n")
@@ -136,8 +136,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - observer.seed\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  case_id: text\n  seed: boolean\n")
 		for name, suffix := range map[string]string{
-			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-			"events.yaml":   "observer.seed:\n  case_id: text\n",
+			"events.yaml": "observer.seed:\n  case_id: text\n",
 			"nodes.yaml": `human-template-launcher:
   execution_type: system_node
   subscribes_to: [observer.seed]

@@ -9,11 +9,14 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -24,6 +27,7 @@ type standingDispositionParityFixture struct {
 	selected workflowTestSelectedStore
 	workflow *runtimepipeline.PipelineCoordinator
 	hash     string
+	root     sourceartifact.RootAdmission
 }
 
 func TestStandingRestartDispositionSelectedStoreParity(t *testing.T) {
@@ -523,7 +527,8 @@ func standingResultsByService(results []runtimepipeline.StandingServiceReconcili
 func openStandingDispositionParityFixture(t *testing.T, backend string) standingDispositionParityFixture {
 	t.Helper()
 	artifact := storeTestSourceArtifact("standing-restart-disposition-" + backend)
-	fixture := standingDispositionParityFixture{backend: backend, hash: artifact.BundleHash()}
+	rooted, _ := sourceartifactfixture.Rooted(t, "standing", artifact)
+	fixture := standingDispositionParityFixture{backend: backend, hash: artifact.BundleHash(), root: rooted.Admission()}
 	if backend == "sqlite" {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		fixture.db, fixture.selected = store.backend.ConstructionHandle(), store
@@ -535,7 +540,9 @@ func openStandingDispositionParityFixture(t *testing.T, backend string) standing
 		fixture.db, fixture.selected = db, store
 		fixture.workflow = newPostgresWorkflowTestCoordinator(t, db, store)
 	}
-	seedStoreTestPersistedArtifact(t, fixture.db, artifact)
+	if _, err := fixture.selected.EnsureRootedSource(context.Background(), rooted); err != nil {
+		t.Fatal(err)
+	}
 	return fixture
 }
 
@@ -554,15 +561,19 @@ func (f standingDispositionParityFixture) candidate(name string) runtimepipeline
 	return runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
 
-		Source: mustStoreTestSourceArtifactFact(f.hash),
+		Source: mustStoreTestSourceArtifactFact(f.hash), RootAdmission: f.root,
 	}
 }
 
 func (f standingDispositionParityFixture) reviseCandidateSource(t *testing.T, candidate runtimepipeline.StandingServiceCandidate, digit string) runtimepipeline.StandingServiceCandidate {
 	t.Helper()
 	artifact := storeTestSourceArtifact("standing-restart-revision-" + f.backend + "-" + digit)
-	seedStoreTestPersistedArtifact(t, f.db, artifact)
+	rooted, _ := sourceartifactfixture.Rooted(t, "standing", artifact)
+	if _, err := f.selected.EnsureRootedSource(context.Background(), rooted); err != nil {
+		t.Fatal(err)
+	}
 	candidate.Source = mustStoreTestSourceArtifactFact(artifact.BundleHash())
+	candidate.RootAdmission = rooted.Admission()
 	return candidate
 }
 
@@ -701,6 +712,7 @@ func (f standingDispositionParityFixture) setDesiredState(t *testing.T, serviceI
 
 func (f standingDispositionParityFixture) terminalize(t *testing.T, ctx context.Context, runID string, state runtimerunlifecycle.State) {
 	t.Helper()
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(f.hash)), f.root)
 	if state == runtimerunlifecycle.StateForked {
 		childRunID := uuid.NewString()
 		if err := ensureEphemeralRunForTest(ctx, f.selected, childRunID, time.Now().UTC()); err != nil {

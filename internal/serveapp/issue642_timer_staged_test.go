@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 type issue642TimerStagedOwners struct {
@@ -139,9 +140,19 @@ func issue642StagedOrdinaryTimerFork(t *testing.T, backend string) {
 
 func issue642MaterializePausedTimer(t *testing.T, ctx context.Context, owners issue642TimerStagedOwners, rt issue2564ServedFixture, reader issue642TimerContinuationReaders, plan runfork.RunForkPlan, source pipeline.WorkflowTimerActivation) runfork.RunForkMaterialization {
 	t.Helper()
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !present || root.BundleHash() != rt.BundleHash {
+		t.Fatalf("staged timer target root: present=%t error=%v", present, err)
+	}
+	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	prepared, err := owners.family.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ExpectedBundleHash: rt.BundleHash,
-		AllowSourceFreeze: true, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		AllowSourceFreeze: true, ContractSelection: selection,
+		ForkOperation: &runfork.ForkOperationRequest{
+			OperationID: uuid.NewString(), Actor: "staged-timer-proof", IdempotencyKey: uuid.NewString(), TransportHash: "staged-timer-proof",
+			SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID, TargetBundleHash: rt.BundleHash,
+			TargetRootReference: root.Reference(), AllowSourceFreeze: true, ContractSelection: selection,
+		},
 		SourceLoader: owners.executor.SourceLoader, AgentRuntime: owners.executor.AgentRuntime,
 	})
 	if err != nil {

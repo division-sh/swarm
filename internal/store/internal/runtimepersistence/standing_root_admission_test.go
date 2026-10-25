@@ -17,6 +17,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -33,7 +34,7 @@ func TestS1StandingRootedContextAndPublicationFencesBothStores(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedStandingStore)
 			sourceA, _ := admittedRootForStorage(t, "shop-a")
 			sourceB, _ := admittedRootForStorage(t, "shop-b")
-			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			ctxA := runtimecorrelation.WithRootAdmission(ctx, sourceA.Admission())
 			ctxB := runtimecorrelation.WithRootAdmission(ctx, sourceB.Admission())
 			if _, err := selected.EnsureRootedSource(ctx, sourceA); err != nil {
@@ -95,7 +96,7 @@ func TestS1StandingDormantDeclarationKeepsIndependentRunRootBothStores(t *testin
 			selected := selectedRootAdmissionStore(t, backend).(rootedStandingStore)
 			sourceA, _ := admittedRootForStorage(t, "shop-a")
 			sourceB, _ := admittedRootForStorage(t, "shop-b")
-			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
 				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 					t.Fatal(err)
@@ -136,7 +137,7 @@ func TestS1StandingResetAfterReopenUsesDeclarationRootBothStores(t *testing.T) {
 			selected, reopen := openRootedStandingRestartFixture(t, backend)
 			sourceA, pathA := admittedRootForStorage(t, "shop-a")
 			sourceB, pathB := admittedRootForStorage(t, "shop-b")
-			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
 				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 					t.Fatal(err)
@@ -161,7 +162,15 @@ func TestS1StandingResetAfterReopenUsesDeclarationRootBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := process.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 			selected = reopen()
+			ctx = originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			statuses, err := selected.ListStandingServiceStatuses(ctx)
 			if err != nil || len(statuses) != 1 || statuses[0].RootReference != sourceB.Admission().Reference() {
 				t.Fatalf("restart lost declaration evidence: %+v, %v", statuses, err)
@@ -204,7 +213,7 @@ func TestS1StandingRootRevisionCommitUncertaintyBothStores(t *testing.T) {
 				selected := owner.(rootedStandingStore)
 				sourceA, _ := admittedRootForStorage(t, "shop-a")
 				sourceB, _ := admittedRootForStorage(t, "shop-b")
-				ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 				for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
 					if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 						t.Fatal(err)
@@ -286,7 +295,7 @@ func TestS1StandingSameContentRootRevisionBothStores(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedStandingStore)
 			sourceA, _ := admittedRootForStorage(t, "shop-a")
 			sourceB, _ := admittedRootForStorage(t, "shop-b")
-			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
 				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 					t.Fatal(err)

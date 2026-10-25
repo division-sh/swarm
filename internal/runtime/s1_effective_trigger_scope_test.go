@@ -24,6 +24,7 @@ func s1EffectiveTriggerMembers() map[string][]byte {
 		"sibling/team-bot": "sibling_marker", "child/child-bot": "child_marker",
 	} {
 		members[directory+"/manifest.yaml"] = provider["manifest.yaml"]
+		members[directory+"/connector.yaml"] = provider["connector.yaml"]
 		body := append([]byte(nil), provider["trigger.yaml"]...)
 		members[directory+"/trigger.yaml"] = append(body, []byte(fmt.Sprintf("      %s: {from: %s, schema: {type: string}}\n", marker, marker))...)
 	}
@@ -133,6 +134,21 @@ func TestS1EffectiveProviderTriggerSchemasUseWholeScopedDirectory(t *testing.T) 
 	if inputs := source.SemanticCapabilities().ProviderIngressEvents(); len(inputs) != 0 {
 		t.Fatalf("unused provider declarations created ingress: %+v", inputs)
 	}
+	descriptors, err := AuthorActivityEventDescriptors(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []string{"inbound.team-bot.raw", "inbound.team-bot.text_message", "inbound.team_bot.raw", "inbound.child-bot.raw"} {
+		found := false
+		for _, descriptor := range descriptors {
+			if descriptor.EventType == event && descriptor.Disposition == "different" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("scoped provider metadata lost descriptor %q: %+v", event, descriptors)
+		}
+	}
 }
 
 func TestS1EffectiveProviderTriggerSchemasRetainCapturedAndRestoredSelection(t *testing.T) {
@@ -185,15 +201,15 @@ func TestS1EffectiveProviderTriggerSchemasRetainCapturedAndRestoredSelection(t *
 
 func TestS1EffectiveProviderTriggerSchemasBindRawAndTemplatePinsWithoutIngress(t *testing.T) {
 	for _, cell := range []struct {
-		name, body, event string
+		name, body, event, capabilities string
 	}{
-		{"normalized-and-raw", string(packfixture.NeutralProviderMembers()["trigger.yaml"]), "raw"},
-		{"raw-only", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\nevent_name: {literal: raw}\n", "raw"},
-		{"template", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\nevent_name: {template: 'raw.{event_type}'}\nevent_type: {literal: message}\n", "raw.message"},
+		{"normalized-and-raw", string(packfixture.NeutralProviderMembers()["trigger.yaml"]), "raw", "emit_events: [raw, text_message]"},
+		{"raw-only", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\nevent_name: {literal: raw}\n", "raw", "emit_events: [raw], verify_secret: webhook_signing_secret"},
+		{"template", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\nevent_name: {template: 'raw.{event_type}'}\nevent_type: {literal: message}\n", "raw.message", "emit_events: ['raw.{event_type}'], verify_secret: webhook_signing_secret"},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			members := s1EffectiveProviderScopeMembers()
-			members["team-bot/manifest.yaml"] = packfixture.NeutralProviderMembers()["manifest.yaml"]
+			members["team-bot/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {" + cell.capabilities + ", call_provider_actions: [send_message]}, cannot: [bypass journal]}\n")
 			members["team-bot/trigger.yaml"] = []byte(cell.body)
 			event := "inbound.team-bot." + cell.event
 			for _, flow := range []string{"", "child/"} {

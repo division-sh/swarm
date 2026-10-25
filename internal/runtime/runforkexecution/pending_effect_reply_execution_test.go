@@ -93,7 +93,7 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at})
 			contexts := make(chan context.Context, 1)
 			owner.ports.busDurable.RunLifecycle = nestedDeadlineServingContext{OperationOwner: owner.ports.busDurable.RunLifecycle, sourceRun: runID, contexts: contexts}
-			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
+			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live, nil)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
 				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", runID, runID, "", ""), OccurredAt: at})

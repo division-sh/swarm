@@ -75,6 +75,7 @@ func CopyRetiredFanInGrammar(t testing.TB, variant RetiredFanInGrammar) string {
 	for _, specimen := range ConnectionAdmissionCases() {
 		if specimen.Name == name {
 			root := t.TempDir()
+			writeClosedNegativeFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 			writeClosedNegativeFile(t, root, "schema.yaml", "stages: []\n# fixture: retired-fan-in\n"+specimen.Source)
 			return root
 		}

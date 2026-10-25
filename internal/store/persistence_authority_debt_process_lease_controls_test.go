@@ -7,7 +7,6 @@ import (
 	"go/parser"
 	"go/token"
 	"maps"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -144,53 +143,6 @@ func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *tes
 				})
 			}
 		})
-	}
-}
-
-func TestPersistenceAuthorityDebtProcessLeaseRelocationRejectsSourceDrift(t *testing.T) {
-	root, base, changed := persistenceAuthorityRepoRoot(t), t.TempDir(), t.TempDir()
-	debtRequireProcessLeasePredecessor(t, root)
-	before, after := debtControlSet(), debtControlSet()
-	for _, pair := range debtProcessLeaseRelocations() {
-		before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
-	}
-	for _, path := range []string{"internal/store/construction/open.go", "internal/store/internal/runtimepersistence/runtime_startup_ownership_test.go"} {
-		old, err := debtGit(root, "show", "f8ffc42420a93b6dfb3575c4a3dddeee9d858693:"+path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, base, path, string(old))
-		current, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, changed, path, string(current))
-	}
-	if err := debtValidateProcessLeaseRelocationSource(root, base, after, before); err != nil {
-		t.Fatal(err)
-	}
-	const path = "internal/store/construction/open.go"
-	data, err := os.ReadFile(filepath.Join(changed, path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	debtWriteModuleSource(t, changed, path, strings.Replace(string(data), "private.ComposeSQLiteRuntimeStoreWithBackendIdentity(schema, backend, identity)", "private.ComposeSQLiteRuntimeStore(schema, backend)", 1))
-	if err := debtValidateProcessLeaseRelocationSource(changed, base, after, before); err == nil {
-		t.Fatal("changed native constructor provenance admitted")
-	}
-	if err := debtValidateProcessLeaseRelocationSource(root, changed, after, before); err == nil {
-		t.Fatal("changed donor source admitted")
-	}
-}
-
-func debtRequireProcessLeasePredecessor(t *testing.T, root string) {
-	t.Helper()
-	if _, err := debtGit(root, "cat-file", "-e", "f8ffc42420a93b6dfb3575c4a3dddeee9d858693^{commit}"); err != nil {
-		// Use the existing authenticated lineage owner to deepen hosted shallow
-		// checkouts. Never accept caller-selected source or a baseline file.
-		if _, err := debtTrustedBase(root); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 

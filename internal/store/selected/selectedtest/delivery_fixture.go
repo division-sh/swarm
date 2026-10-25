@@ -67,8 +67,6 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 		t.Fatal(err)
 	}
 	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
-	source := sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
-	ctx = correlation.WithSourceArtifactFact(ctx, source)
 	runtimeID := uuid.NewString()
 	process := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, process)

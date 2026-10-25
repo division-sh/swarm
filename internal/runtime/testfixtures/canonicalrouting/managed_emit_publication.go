@@ -13,7 +13,6 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	scope := "."
 	switch mode {
 	case "root":
@@ -28,6 +27,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: managed-publication\n")
 	if mode == "nested" {
+		writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, "outer/schema.yaml", "stages: []\n# fixture: outer\n")
 	}
 	for _, flow := range []string{scope, "sibling"} {

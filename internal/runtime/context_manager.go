@@ -997,7 +997,7 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 	return nil
 }
 
-func validateStandingTargetDeclarationOwner(contextDef *BundleContext, target StandingTarget) error {
+func validateStandingTargetDeclarationOwner(contextDef *BundleContext, runtimeOwner *Runtime, target StandingTarget) error {
 	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog, contextDef.triggerEntries())
 	if err != nil {
 		return err
@@ -1012,8 +1012,8 @@ func validateStandingTargetDeclarationOwner(contextDef *BundleContext, target St
 				continue
 			}
 			signingSecret := binding.SigningSecret
-			if contextDef.Runtime != nil {
-				_, _, _, err := contextDef.Runtime.standingIngressCredentialScope(InboundTarget{
+			if runtimeOwner != nil {
+				_, _, _, err := runtimeOwner.standingIngressCredentialScope(InboundTarget{
 					BundleHash: target.BundleHash, FlowPath: target.FlowPath, Alias: target.Alias,
 					Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
 				})
@@ -2386,7 +2386,7 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 			if target.BundleHash != bundleHash {
 				continue
 			}
-			if err := validateStandingTargetDeclarationOwner(&copied, target); err != nil {
+			if err := validateStandingTargetDeclarationOwner(&copied, entry.runtime, target); err != nil {
 				return err
 			}
 			copied.StandingTargets = append(copied.StandingTargets, target)
@@ -2495,7 +2495,7 @@ func validateTargetsGeneration(contextDef BundleContext, generation triggergener
 		return fmt.Errorf("runtime context %s provider-trigger catalog generation is required", contextDef.BundleHash())
 	}
 	for _, target := range contextDef.StandingTargets {
-		if err := validateStandingTargetDeclarationOwner(&contextDef, target); err != nil {
+		if err := validateStandingTargetDeclarationOwner(&contextDef, contextDef.Runtime, target); err != nil {
 			return err
 		}
 	}

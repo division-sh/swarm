@@ -164,6 +164,7 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 						t.Fatal(err)
 					}
 					ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 						RunID: runID, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
 					})
@@ -412,7 +413,8 @@ func grantReceiverEntitySource(t *testing.T) semanticview.Source {
 	root := t.TempDir()
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nstages:\n  active: {}\n  done: {final: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/entities.yaml"), "receiver: {}\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
 	if err != nil {

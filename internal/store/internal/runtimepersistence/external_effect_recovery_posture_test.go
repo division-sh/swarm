@@ -20,6 +20,7 @@ import (
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -103,7 +104,10 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 				if !ok {
 					t.Fatalf("selected store %T does not expose standing persistence", fixture.store)
 				}
-				requireStoreTestPersistedBundle(t, fixture.db, runLifecycleCandidateParityBundleHash)
+				rooted, _ := sourceartifactfixture.Rooted(t, "standing", sourceartifactfixture.Artifact())
+				if _, err := selected.EnsureRootedSource(context.Background(), rooted); err != nil {
+					t.Fatal(err)
+				}
 				workflow := newPostgresWorkflowTestCoordinator(t, fixture.db, selected)
 				if fixture.sqlite {
 					workflow = newSQLiteWorkflowTestCoordinator(t, fixture.db, selected)
@@ -112,7 +116,7 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 				candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 					ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
 
-					Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
+					Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash), RootAdmission: rooted.Admission(),
 				}
 				standing, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate)
 				if err != nil {

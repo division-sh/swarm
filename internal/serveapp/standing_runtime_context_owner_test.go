@@ -119,7 +119,14 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			selectedFact := mustServeTestPersistedSourceArtifactFact(selectedHash)
 			seedStandingRuntimeContextBundle(t, selectedStores.SourceArtifactWriter(), selectedBundle)
 			runtimeInstanceID := uuid.NewString()
-			primaryRoot, _ := sourceartifactfixture.Rooted(t, "primary", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+			primaryArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":   []byte("stages: []\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			primaryRoot, _ := sourceartifactfixture.Rooted(t, "primary", primaryArtifact)
 			primaryBundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot, primaryRoot, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 			if err != nil {
 				t.Fatalf("compile primary control root: %v", err)
@@ -132,6 +139,22 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			seedStandingRuntimeContextBundle(t, primaryStores.SourceArtifactWriter(), primaryBundle)
 			primaryModule := stubWorkflowModule{source: semanticview.Wrap(primaryBundle)}
 			primary := newStandingRuntimeContextRuntime(t, process, primaryStores, primaryModule, primaryFact, runtimeInstanceID, catalog)
+			primaryCapability, _, primaryGrant := installSelectedStoreTestProcessTopology(t, primaryStores, primary, primaryModule.SemanticSource(), primaryFact, runtimeInstanceID)
+			t.Cleanup(func() {
+				if err := primary.Shutdown(); err != nil {
+					t.Error(err)
+					return
+				}
+				if err := primaryCapability.Release(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
+			if _, err := primaryGrant.MarkProbesSettled(context.Background(), nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := primaryGrant.AdmitExecution(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 			faults := &standingRuntimeContextFaultOwner{}
 			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog, faults)
 			selected.InboundGateway = runtimepkg.NewInboundGateway(nil, nil, nil, executionposture.Live)

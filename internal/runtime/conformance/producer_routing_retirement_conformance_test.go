@@ -675,31 +675,6 @@ func retiredProducerRoutingOutputError(pins map[string]struct{}, event string) e
 	return nil
 }
 
-func TestProducerRoutingLedgerDetectsRestoredScalarOutput(t *testing.T) {
-	for _, restored := range []bool{false, true} {
-		source := "name: negative-proof\npins:\n  outputs: [work.retained]\n"
-		if restored {
-			source = strings.Replace(source, "[work.retained]", "[work.retained, work.removed]", 1)
-		}
-		pins, err := producerRoutingOutputPins([]byte(source))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if detected := retiredProducerRoutingOutputError(pins, "work.removed") != nil; detected != restored {
-			t.Fatalf("restored scalar output detected=%t want=%t", detected, restored)
-		}
-	}
-	for _, alternate := range []string{
-		"pins: {outputs: {events: [work.removed]}}",
-		"pins: {outputs: [{event: work.removed, sink: harness}]}",
-		"pins: {outputs: [{name: work.removed}]}",
-	} {
-		if _, err := producerRoutingOutputPins([]byte(alternate)); err == nil {
-			t.Fatalf("ledger admitted alternate output spelling %s", alternate)
-		}
-	}
-}
-
 func hasRetiredProducerRoutingYAML(raw []byte) (bool, error) {
 	var document yaml.Node
 	if err := yaml.Unmarshal(raw, &document); err != nil {

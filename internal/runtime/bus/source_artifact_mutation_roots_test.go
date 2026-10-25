@@ -858,7 +858,11 @@ func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnershi
 func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *testing.T) {
 	source := sourceMutationPublicationSource(t, "claim-cleanup")
 	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
-	foreign := sourceMutationFact(t, "8")
+	foreignSource := sourceMutationPublicationSource(t, "claim-cleanup-foreign")
+	foreign, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, foreignSource))
+	if owned.Matches(foreign) {
+		t.Fatal("claim cleanup requires genuinely distinct source captures")
+	}
 	for _, action := range []string{"release", "settle", "decision"} {
 		t.Run(action, func(t *testing.T) {
 			owner := newSourceMutationProbeOwner()
@@ -909,8 +913,8 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 	}
 	t.Run("reset_foreign_source", func(t *testing.T) {
 		owner := newSourceMutationProbeOwner()
-		foreignBus := newSourceMutationProbeBus(t, foreign, owner)
-		bus := newSourceMutationProbeBus(t, owned, owner)
+		foreignBus := newSourceMutationProbeBus(t, foreignSource, owner)
+		bus := newSourceMutationProbeBus(t, source, owner)
 		foreignBus.runtimeInstanceID = bus.runtimeInstanceID
 		event := sourceMutationEvent()
 		claim, err := foreignBus.claimPipelinePublication(context.Background(), event.ID())

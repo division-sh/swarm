@@ -1862,9 +1862,12 @@ func TestProcessCapabilityOperationCancellationPreservesPossessionParity(t *test
 				t.Fatalf("establish backend I/O barrier: %v", err)
 			}
 
-			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
-				BundleHash: testCanonicalBundleHash,
-			}}, nil)
+			rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatalf("construct cancellation source set: %v", err)
 			}

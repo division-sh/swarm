@@ -194,14 +194,18 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			flowPath := "origin-parity/" + backend
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
-			firstArtifact := storeTestSourceArtifact("standing-origin-first-" + backend)
+			rooted, _ := sourceartifactfixture.Rooted(t, "standing-origin", storeTestSourceArtifact("standing-origin-first-"+backend))
+			firstArtifact := rooted.Artifact()
 			firstHash := firstArtifact.BundleHash()
 			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: serviceID, FlowPath: flowPath,
 
-				Source: mustStoreTestSourceArtifactFact(firstHash),
+				Source: mustStoreTestSourceArtifactFact(firstHash), RootAdmission: rooted.Admission(),
 			}
-			seedStoreTestPersistedArtifact(t, db, firstArtifact)
+			ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rooted.Admission())
+			if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 
 			fresh, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -282,16 +286,20 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			flowPath := "repair-candidate/standing"
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
-			firstArtifact := storeTestSourceArtifact("standing-repair-first-" + backend)
-			secondArtifact := storeTestSourceArtifact("standing-repair-second-" + backend)
+			rootA, _ := sourceartifactfixture.Rooted(t, "standing-repair", storeTestSourceArtifact("standing-repair-first-"+backend))
+			rootB, _ := sourceartifactfixture.Rooted(t, "standing-repair", storeTestSourceArtifact("standing-repair-second-"+backend))
+			firstArtifact, secondArtifact := rootA.Artifact(), rootB.Artifact()
 			firstHash := firstArtifact.BundleHash()
 			secondHash := secondArtifact.BundleHash()
 			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: serviceID, FlowPath: flowPath,
 
-				Source: mustStoreTestSourceArtifactFact(firstHash),
+				Source: mustStoreTestSourceArtifactFact(firstHash), RootAdmission: rootA.Admission(),
 			}
-			seedStoreTestPersistedArtifact(t, db, firstArtifact)
+			ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rootA.Admission())
+			if _, err := selected.EnsureRootedSource(ctx, rootA); err != nil {
+				t.Fatal(err)
+			}
 			fresh, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatalf("create standing generation: %v", err)
@@ -315,10 +323,14 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			insertStandingRestartAbandonControl(t, ctx, db, backend, fresh.RunID)
 
 			candidate.Source = mustStoreTestSourceArtifactFact(secondHash)
-			seedStoreTestPersistedArtifact(t, db, secondArtifact)
+			candidate.RootAdmission = rootB.Admission()
+			ctxB := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rootB.Admission())
+			if _, err := selected.EnsureRootedSource(ctxB, rootB); err != nil {
+				t.Fatal(err)
+			}
 			process := worklifetime.NewProcess()
 			occurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, secondHash)
-			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctxB, occurrence)
 			countingStore := &standingExecutionCountingStore{delegate: candidateStore}
 			executor := newRunLifecycleParityExecutorForScope(
 				t,
@@ -361,7 +373,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			suspendedCandidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: suspendedServiceID, FlowPath: suspendedFlowPath,
 
-				Source: mustStoreTestSourceArtifactFact(firstHash),
+				Source: mustStoreTestSourceArtifactFact(firstHash), RootAdmission: rootA.Admission(),
 			}
 			suspendedFresh, err := workflow.ReconcileStandingService(ctx, suspendedCandidate)
 			if err != nil {
@@ -391,6 +403,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			insertStandingRestartAbandonControl(t, ctx, db, backend, suspendedFresh.RunID)
 
 			suspendedCandidate.Source = mustStoreTestSourceArtifactFact(secondHash)
+			suspendedCandidate.RootAdmission = rootB.Admission()
 			beforeSuspendedRepair := countingStore.executions.Load()
 			suspendedStopped, err := workflow.ReconcileStandingService(runtimeCtx, suspendedCandidate)
 			if err != nil {
@@ -617,6 +630,13 @@ func requireStandingGenerationOrigin(
 func commitStandingOriginIngress(t *testing.T, original context.Context, selected any, bundleHash, runID, suffix string) {
 	t.Helper()
 	ctx := startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(bundleHash), original)
+	rooted, err := selected.(interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	}).LoadRunRootedSource(ctx, runID)
+	if err != nil || rooted.Admission().BundleHash() != bundleHash {
+		t.Fatalf("load exact standing ingress source: %v", err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(), events.EventType("standing.origin."+suffix), "ingress", "", json.RawMessage(`{}`), 0,
 		runID, events.EventEnvelope{}, time.Now().UTC(),

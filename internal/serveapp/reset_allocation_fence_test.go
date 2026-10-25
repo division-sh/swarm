@@ -46,13 +46,21 @@ func TestResetProjectionCreationWaitsForDurableAllocationAdmission(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	private := t.TempDir()
 	t.Setenv("TMPDIR", private)
 	operation, err := destructivereset.NewOperation(destructivereset.Request{OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "allocation-fence", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: artifact.BundleHash()}}, nil)
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

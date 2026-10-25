@@ -1,4 +1,4 @@
-package runforkpersistence
+package runforkpersistence_test
 
 import (
 	"context"
@@ -15,14 +15,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	runstore "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
-	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
-	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	nativefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -138,16 +135,25 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 	}
 }
 
-// This fixture composes the native metadata owners on the real schema. It
-// neither creates an executable selected grant nor claims activation coverage.
+// Metadata fixtures use the original fully composed native store and process.
+// They do not create an executable selected grant or claim activation coverage.
+type selectedRootedSourceStore interface {
+	selectedRootedSourceReader
+	runlifecycle.OperationOwner
+	startupownership.Store
+	sourceartifactfixture.RootedWriter
+	LoadForkOperationByID(context.Context, string) (runfork.ForkOperationRecord, bool, error)
+}
+
 type selectedRootedSourceFixture struct {
 	connector                                 *selectedRootReadConnector
 	db                                        *sql.DB
-	owner                                     any
-	postgres                                  *postgresbackend.Backend
-	sqlite                                    *sqlitebackend.Backend
+	owner                                     selectedRootedSourceStore
+	ctx                                       context.Context
+	postgres                                  bool
 	parent, target                            sourceartifact.RootedSource
 	parentID, childID, bindingID, operationID string
+	association                               func(*testing.T, string)
 }
 
 func TestS1SelectedForkSourceRefusesUnacknowledgedReadBothStores(t *testing.T) {
@@ -237,7 +243,7 @@ func TestS1RetainedForkSourceReachesRootedCompilerBothStores(t *testing.T) {
 
 func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRootedSourceFixture {
 	t.Helper()
-	f := selectedRootedSourceFixture{parentID: uuid.NewString(), childID: uuid.NewString(), operationID: uuid.NewString()}
+	f := selectedRootedSourceFixture{parentID: uuid.NewString(), childID: uuid.NewString(), operationID: uuid.NewString(), postgres: backend == "postgres"}
 	var paths []string
 	for _, name := range []string{"original", "selected"} {
 		source, path := sourceartifactfixture.Rooted(t, name, sourceartifactfixture.Artifact())
@@ -248,138 +254,54 @@ func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRooted
 			f.target = source
 		}
 	}
-	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	plans, err := schemastore.GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), f.parent.Artifact().BundleHash()))
-	bootstrap := schemastore.SchemaBootstrapRequest{PlatformPlans: plans, Origin: schemastore.RuntimeStoreOrigin{SwarmVersion: "rooted-fork-source-proof", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()}}
-	parentRequest := runlifecycle.CreateRequest{RunID: f.parentID, Origin: runlifecycle.DeploymentRunOrigin(), Source: sourceartifactfixture.FactFor(f.parent.Artifact()), RootAdmission: f.parent.Admission(), StartedAt: time.Now().UTC()}
-	var write func(context.Context, func(context.Context, *mutationprotocol.Attempt) error) error
-	if backend == "postgres" {
+	if f.postgres {
 		dsn, _, cleanup := testutil.StartEmptyPostgres(t)
 		t.Cleanup(cleanup)
 		f.connector = &selectedRootReadConnector{driver: &pq.Driver{}, dsn: dsn}
-		db := sql.OpenDB(f.connector)
-		f.db = db
-		t.Cleanup(func() {
-			if err := db.Close(); err != nil {
-				t.Error(err)
-			}
-		})
-		f.postgres, err = postgresbackend.New(db)
-		if err != nil {
-			t.Fatal(err)
-		}
-		schema, err := schemastore.NewPostgres(f.postgres)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := schema.BootstrapSchema(ctx, bootstrap); err != nil {
-			t.Fatal(err)
-		}
-		runs, err := runstore.NewPostgres(f.postgres, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
-		if err != nil {
-			t.Fatal(err)
-		}
-		f.owner = &RunForkPostgresOwner{backend: f.postgres, requireCurrent: schema.RequireCurrent, RunLifecyclePostgresOwner: runs}
-		write = func(ctx context.Context, body func(context.Context, *mutationprotocol.Attempt) error) error {
-			result := mutationprotocol.RunPostgres(ctx, f.postgres, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-				return struct{}{}, body(ctx, attempt)
-			})
-			return result.Err()
-		}
 	} else {
 		path := filepath.Join(t.TempDir(), "source.sqlite")
 		f.connector = &selectedRootReadConnector{driver: &sqlite.Driver{}, dsn: "file:" + path + "?_pragma=" + url.QueryEscape("foreign_keys(ON)")}
-		db := sql.OpenDB(f.connector)
-		f.db = db
-		native, err := sqlitebackend.New(db)
-		if err != nil {
-			t.Fatal(err)
+	}
+	f.db = sql.OpenDB(f.connector)
+	t.Cleanup(func() {
+		if err := f.db.Close(); err != nil {
+			t.Error(err)
 		}
-		schema, err := schemastore.NewSQLiteWithBackend(native, path)
-		if err != nil {
-			t.Fatal(err)
+	})
+	if f.postgres {
+		f.owner = storetest.AdmitPostgresRuntimeStore(t, f.db)
+	} else {
+		f.owner = storetest.AdmitSQLiteRuntimeStore(t, f.db)
+	}
+	request := startupownership.AcquireRequest{OwnerID: "rooted-source-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+	capability, err := f.owner.AcquireProcessCapability(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := capability.Release(context.Background()); err != nil {
+			t.Error(err)
 		}
-		t.Cleanup(func() {
-			if err := schema.Close(); err != nil {
-				t.Error(err)
-			}
-		})
-		f.sqlite = native
-		if err := schema.BootstrapSchema(ctx, bootstrap); err != nil {
+	})
+	f.ctx, err = startupownership.WithProcessMutationAuthority(context.Background(), capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ctx = authoractivity.WithScope(f.ctx, authoractivity.BundleScope(request.RuntimeInstanceID, f.parent.Artifact().BundleHash()))
+	for _, source := range []sourceartifact.RootedSource{f.parent, f.target} {
+		if _, err := f.owner.EnsureRootedSource(f.ctx, source); err != nil {
 			t.Fatal(err)
-		}
-		runs, err := runstore.NewSQLite(native, schema.RequireCurrent, runhandoff.NewCandidateCoordinator(), time.Now)
-		if err != nil {
-			t.Fatal(err)
-		}
-		f.owner = &RunForkSQLiteOwner{backend: native, requireCurrent: schema.RequireCurrent, RunLifecycleSQLiteOwner: runs}
-		write = func(ctx context.Context, body func(context.Context, *mutationprotocol.Attempt) error) error {
-			result := mutationprotocol.RunSQLite(ctx, native, "rooted fork source fixture", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-				return struct{}{}, body(ctx, attempt)
-			})
-			return result.Err()
 		}
 	}
-	if err := write(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			for _, source := range []sourceartifact.RootedSource{f.parent, f.target} {
-				var err error
-				if f.postgres != nil {
-					_, err = artifactstore.EnsurePostgresRootedSourceTx(ctx, tx, source, time.Now())
-				} else {
-					_, err = artifactstore.EnsureSQLiteRootedSourceTx(ctx, tx, source, time.Now())
-				}
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	if _, err := f.owner.CreateRun(f.ctx, runlifecycle.CreateRequest{
+		RunID: f.parentID, Origin: runlifecycle.DeploymentRunOrigin(),
+		Source: sourceartifactfixture.FactFor(f.parent.Artifact()), RootAdmission: f.parent.Admission(), StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	switch owner := f.owner.(type) {
-	case *RunForkPostgresOwner:
-		if _, err := owner.RunLifecyclePostgresOwner.CreateRun(ctx, parentRequest); err != nil {
-			t.Fatal(err)
-		}
-	case *RunForkSQLiteOwner:
-		if _, err := owner.RunLifecycleSQLiteOwner.CreateRun(ctx, parentRequest); err != nil {
-			t.Fatal(err)
-		}
-	}
-	point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 7}
-	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: f.target.Artifact().BundleHash()}
-	if err := write(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-		var err error
-		switch owner := f.owner.(type) {
-		case *RunForkPostgresOwner:
-			err = owner.InsertRunForkRunTx(ctx, attempt, f.childID, f.parentID, point, time.Now(), parentRequest.Source, f.target.Admission())
-		case *RunForkSQLiteOwner:
-			err = owner.InsertRunForkRunTx(ctx, attempt, f.childID, f.parentID, point, time.Now(), parentRequest.Source, f.target.Admission())
-		}
-		if err != nil {
-			return err
-		}
-		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			binding, err := insertRunForkSelectedContractBinding(ctx, tx, runfork.RunForkSelectedContractBindingRequest{ForkRunID: f.childID, SourceRunID: f.parentID, ForkPoint: point, ContractSelection: selection, TargetRootAdmission: f.target.Admission()}, time.Now())
-			if err != nil {
-				return err
-			}
-			f.bindingID = binding.BindingID
-			_, _, err = bindForkOperationTx(ctx, tx, runfork.ForkOperationRequest{OperationID: f.operationID, Actor: "bearer:rooted-source-proof", TransportHash: "sha256:rooted-source-proof", SourceRunID: f.parentID, TargetBundleHash: f.target.Artifact().BundleHash(), TargetRootReference: f.target.Admission().Reference(), ContractSelection: selection, ResolvedPoint: &point}, f.childID, binding.BindingID, f.postgres != nil)
-			return err
-		})
-	}); err != nil {
-		t.Fatal(err)
-	}
+	f.createFork(t, f.childID, f.parentID, 7, f.target)
+	f.bindingID, f.association = nativefork.BindRetainedSourceAssociationForTest(t, f.ctx, f.db, f.postgres,
+		f.parent, f.target, f.parentID, f.childID, f.operationID, f.owner)
 	for _, path := range paths {
 		if err := os.RemoveAll(path); err != nil {
 			t.Fatal(err)
@@ -388,13 +310,26 @@ func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRooted
 	return f
 }
 
+func (f selectedRootedSourceFixture) createFork(t *testing.T, runID, parentID string, revision int64, source sourceartifact.RootedSource) {
+	t.Helper()
+	origin, err := runlifecycle.ForkMaterializationRunOrigin(parentID, runlifecycle.ForkOriginPointDeploymentRevision, revision, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.owner.CreateRun(f.ctx, runlifecycle.CreateRequest{
+		RunID: runID, Origin: origin, Source: sourceartifactfixture.FactFor(source.Artifact()),
+		RootAdmission: source.Admission(), StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.owner.TransitionActiveRun(f.ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: runlifecycle.StatePaused}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f selectedRootedSourceFixture) reviseChildRoot(t *testing.T, source sourceartifact.RootedSource) {
 	t.Helper()
-	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), source.Artifact().BundleHash()))
-	owner := f.owner.(interface {
-		ReviseRunSource(context.Context, runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error)
-	})
-	if _, err := owner.ReviseRunSource(ctx, runlifecycle.SourceRevisionRequest{RunID: f.childID, Source: sourceartifactfixture.FactFor(source.Artifact()), RootAdmission: source.Admission()}); err != nil {
+	if _, err := f.owner.ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: f.childID, Source: sourceartifactfixture.FactFor(source.Artifact()), RootAdmission: source.Admission()}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -405,7 +340,7 @@ func (f selectedRootedSourceFixture) corruptChildRevision(t *testing.T, revision
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.postgres != nil {
+	if f.postgres {
 		runlifecyclefixture.CorruptPostgresOrigin(t, context.Background(), f.db, f.childID, origin)
 	} else {
 		runlifecyclefixture.CorruptSQLiteOrigin(t, context.Background(), f.db, f.childID, origin)
@@ -414,13 +349,7 @@ func (f selectedRootedSourceFixture) corruptChildRevision(t *testing.T, revision
 
 func (f selectedRootedSourceFixture) changeEvidence(t *testing.T, statement string, args ...any) {
 	t.Helper()
-	var err error
-	var result sql.Result
-	if f.postgres != nil {
-		result, err = f.postgres.ExecContext(context.Background(), statement, args...)
-	} else {
-		result, err = f.sqlite.ExecContext(context.Background(), statement, args...)
-	}
+	result, err := f.db.ExecContext(context.Background(), statement, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,27 +360,11 @@ func (f selectedRootedSourceFixture) changeEvidence(t *testing.T, statement stri
 
 func (f selectedRootedSourceFixture) replaceOperationRoot(t *testing.T, reference sourceartifact.RootAdmissionReference) {
 	t.Helper()
-	var request runfork.ForkOperationRequest
-	read := func(ctx context.Context, tx *sql.Tx) error {
-		record, found, err := loadForkOperationByIDTx(ctx, tx, f.operationID, false)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return sql.ErrNoRows
-		}
-		request = record.Request
-		return nil
+	record, found, err := f.owner.LoadForkOperationByID(context.Background(), f.operationID)
+	if err != nil || !found {
+		t.Fatalf("load exact retained operation: found=%t err=%v", found, err)
 	}
-	var err error
-	if f.postgres != nil {
-		err = f.postgres.RunReadTransaction(context.Background(), read)
-	} else {
-		err = f.sqlite.RunReadTransaction(context.Background(), read)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
+	request := record.Request
 	request.TargetRootReference = reference
 	canonical, semanticHash, err := request.Canonical()
 	if err != nil {
@@ -466,20 +379,19 @@ func (f selectedRootedSourceFixture) replaceOperationRoot(t *testing.T, referenc
 
 func (f selectedRootedSourceFixture) removeSourceContent(t *testing.T) {
 	t.Helper()
-	remove := func(ctx context.Context, tx *sql.Tx) error {
-		dialect := "sqlite"
-		if f.postgres != nil {
-			dialect = "postgres"
-		}
-		return artifactstore.DeleteSourceArtifactForFixtureRefusalTx(ctx, tx, dialect, sourceartifactfixture.FactFor(f.target.Artifact()))
-	}
-	var err error
-	if f.postgres != nil {
-		err = f.postgres.RunTransaction(context.Background(), remove)
-	} else {
-		err = f.sqlite.RunTransaction(context.Background(), "remove rooted source fixture content", remove)
-	}
+	tx, err := f.db.BeginTx(context.Background(), nil)
 	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	dialect := "sqlite"
+	if f.postgres {
+		dialect = "postgres"
+	}
+	if err := artifactstore.DeleteSourceArtifactForFixtureRefusalTx(context.Background(), tx, dialect, sourceartifactfixture.FactFor(f.target.Artifact())); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 }

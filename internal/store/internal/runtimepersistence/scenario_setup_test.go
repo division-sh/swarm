@@ -18,7 +18,7 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
-	requireDefaultSourceArtifactForTest(t, ctx, sqliteStore)
+	ctx = requireDefaultSourceArtifactForTest(t, ctx, sqliteStore)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	req := pipeline.ScenarioSetupRequest{
@@ -68,7 +68,7 @@ func TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically(t *testing.T
 	}
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	requireDefaultSourceArtifactForTest(t, ctx, store)
+	ctx = requireDefaultSourceArtifactForTest(t, ctx, store)
 	runID := uuid.NewString()
 	req := pipeline.ScenarioSetupRequest{
 		RunID: runID, CreatedAt: time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC),

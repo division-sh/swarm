@@ -37,6 +37,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -1940,7 +1941,7 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 				t.Run(selectionMode, func(t *testing.T) {
 					opened := backend.open(t)
 					db := opened.db
-					owner := opened.store.(runForkSelectedLifecycleStore)
+					owner := opened.store.(runforkexecution.SelectedContractForkLifecycle)
 					createdAt := time.Now().UTC().Truncate(time.Microsecond)
 					ctx, fixture := seedDeclaredForkFanOutFixture(t, backend.name, opened, 2, createdAt)
 					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, backend.name == "postgres")
@@ -1987,22 +1988,42 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 					if (targetPlans[0].Ref.SemanticDigest != fixture.plan.Ref.SemanticDigest) != (selectionMode == "changed_emit") {
 						t.Fatal("selected fixture does not reflect its intended semantic change")
 					}
-					if _, err := opened.store.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, targetArtifact); err != nil {
+					targetRooted, err := targetBundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := opened.store.(selectedSourceArtifactStore).EnsureRootedSource(ctx, targetRooted); err != nil {
 						t.Fatal(err)
 					}
 					targetSource, err := runtimecorrelation.NewSourceArtifactFact(targetHash)
 					if err != nil {
 						t.Fatal(err)
 					}
-					base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource, OriginalLoopCarriage: originalCarriageForRun(t, opened.store, fixture.runID)}
-					if _, err := owner.MaterializeRunFork(ctx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
+					targetScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, targetHash)
+					if err != nil {
+						t.Fatal(err)
+					}
+					targetCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, targetSource), targetRooted.Admission())
+					targetCtx = runtimeauthoractivity.WithScope(targetCtx, targetScope)
+					selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: targetHash}
+					base := prepareSelectedStoreMaterializationForTest(t, targetCtx, opened.store, fixture.runID, forkPointEventID, selection, targetHash)
+					if !base.SourceArtifactFact.Matches(targetSource) || base.RootAdmission.Reference() != targetRooted.Admission().Reference() {
+						t.Fatal("selected fan-out preparation changed the exact captured target")
+					}
+					base.ForkOperation = &runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "selected-fan-out-proof", IdempotencyKey: uuid.NewString(),
+						TransportHash: "sha256:selected-fan-out-proof", SourceRunID: fixture.runID, ForkEventID: forkPointEventID,
+						TargetBundleHash: targetHash, TargetRootReference: targetRooted.Admission().Reference(), ContractSelection: selection,
+					}
+					base.SelectedFanOutPlans = semanticview.FanOutPlanCarriage{}
+					if _, err := owner.MaterializeRunForkForSelectedContractExecution(targetCtx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
 						t.Fatalf("missing selected fan-out proof error = %v", err)
 					}
 					forged := base
 					if err := json.Unmarshal([]byte(`{"bundle_hash":"`+targetHash+`","semantic_digest":"sha256:`+strings.Repeat("f", 64)+`"}`), &forged.SelectedFanOutPlans); err != nil {
 						t.Fatal(err)
 					}
-					if _, err := owner.MaterializeRunFork(ctx, forged); err == nil || !strings.Contains(err.Error(), "has no proof") {
+					if _, err := owner.MaterializeRunForkForSelectedContractExecution(targetCtx, forged); err == nil || !strings.Contains(err.Error(), "has no proof") {
 						t.Fatalf("fabricated selected fan-out proof error = %v", err)
 					}
 					var prematureForks int
@@ -2014,7 +2035,7 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 					if err != nil {
 						t.Fatal(err)
 					}
-					materialized, err := owner.MaterializeRunFork(ctx, matching)
+					materialized, err := owner.MaterializeRunForkForSelectedContractExecution(targetCtx, matching)
 					if err != nil {
 						t.Fatalf("materialize exact selected fan-out (%s): %v", selectionMode, err)
 					}
@@ -2037,7 +2058,8 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 					if childDigest != targetPlans[0].Ref.SemanticDigest || capsule.SourcePlanRef != fixture.plan.Ref || !reflect.DeepEqual(capsule.SourceProjection, fixture.plan.SemanticEvidence()) {
 						t.Fatal("selected materialization replaced the original source witness or lost the exact selected plan")
 					}
-					reused, err := owner.RequireMaterializedRunFork(ctx, materialized.ForkRunID, matching)
+					matching.ForkOperation = nil
+					reused, err := owner.RequireMaterializedRunForkForSelectedContractExecution(targetCtx, materialized.ForkRunID, matching)
 					if err != nil || reused.ForkRunID != materialized.ForkRunID {
 						t.Fatalf("exact counterfactual materialization readback failed: %+v %v", reused, err)
 					}

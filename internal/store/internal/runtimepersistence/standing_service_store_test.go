@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -82,14 +83,18 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 				workflowStore = newPostgresWorkflowTestCoordinator(t, db, selected)
 			}
 
-			artifact := storeTestSourceArtifact("standing-startup-order-" + backend)
+			rooted, _ := sourceartifactfixture.Rooted(t, "standing-startup", storeTestSourceArtifact("standing-startup-order-"+backend))
+			artifact := rooted.Artifact()
 			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: runtimeflowidentity.StandingServiceID("project/signal-startup-order"),
 				FlowPath:  "project/signal-startup-order",
 
-				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
+				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), RootAdmission: rooted.Admission(),
 			}
-			seedStoreTestPersistedArtifact(t, db, artifact)
+			ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rooted.Admission())
+			if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 			if err != nil || len(created) != 1 {
@@ -173,16 +178,18 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	instanceID := uuid.NewString()
 	entityID := uuid.NewString()
-	firstArtifact := storeTestSourceArtifact("sqlite-standing-first")
-	secondArtifact := storeTestSourceArtifact("sqlite-standing-second")
+	firstRoot, _ := sourceartifactfixture.Rooted(t, "standing-first", storeTestSourceArtifact("sqlite-standing-first"))
+	secondRoot, _ := sourceartifactfixture.Rooted(t, "standing-second", storeTestSourceArtifact("sqlite-standing-second"))
+	firstArtifact, secondArtifact := firstRoot.Artifact(), secondRoot.Artifact()
 	firstHash := firstArtifact.BundleHash()
 	secondHash := secondArtifact.BundleHash()
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: flowPath,
 
-		Source: mustStoreTestSourceArtifactFact(firstHash),
+		Source: mustStoreTestSourceArtifactFact(firstHash), RootAdmission: firstRoot.Admission(),
 	}
-	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), firstArtifact)
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), firstRoot.Admission())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, firstArtifact)
 
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
@@ -210,8 +217,10 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 		t.Fatalf("seed restart-abandon provenance: %v", err)
 	}
 	candidate.Source = mustStoreTestSourceArtifactFact(secondHash)
-	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), secondArtifact)
-	stopped, err := workflowStore.ReconcileStandingService(ctx, candidate)
+	candidate.RootAdmission = secondRoot.Admission()
+	secondCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), secondRoot.Admission())
+	sourceartifactfixture.RequireArtifact(t, secondCtx, store, secondArtifact)
+	stopped, err := workflowStore.ReconcileStandingService(secondCtx, candidate)
 	if err != nil {
 		t.Fatalf("ReconcileStandingService(terminal): %v", err)
 	}
@@ -239,13 +248,15 @@ func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
-	artifact := storeTestSourceArtifact("standing-unknown-terminality")
+	rooted, _ := sourceartifactfixture.Rooted(t, "standing-terminality", storeTestSourceArtifact("standing-unknown-terminality"))
+	artifact := rooted.Artifact()
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
 
-		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), RootAdmission: rooted.Admission(),
 	}
-	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), artifact)
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rooted.Admission())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, artifact)
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -271,13 +282,15 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
-	artifact := storeTestSourceArtifact("sqlite-standing-operator-lifecycle")
+	rooted, _ := sourceartifactfixture.Rooted(t, "standing-operator", storeTestSourceArtifact("sqlite-standing-operator-lifecycle"))
+	artifact := rooted.Artifact()
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
 
-		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), RootAdmission: rooted.Admission(),
 	}
-	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), artifact)
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rooted.Admission())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, artifact)
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -425,13 +438,15 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
-	artifact := storeTestSourceArtifact("sqlite-standing-orphan")
+	rooted, _ := sourceartifactfixture.Rooted(t, "standing-orphan", storeTestSourceArtifact("sqlite-standing-orphan"))
+	artifact := rooted.Artifact()
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
 
-		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), RootAdmission: rooted.Admission(),
 	}
-	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), artifact)
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rooted.Admission())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, artifact)
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
 		t.Fatalf("create set = %#v, %v", created, err)
@@ -464,14 +479,18 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	ctx = originalStoreFixtureContext(t, ctx, selected)
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, selected)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
-	artifact := storeTestSourceArtifact("postgres-standing-operator-lifecycle")
+	rooted, _ := sourceartifactfixture.Rooted(t, "standing-operator", storeTestSourceArtifact("postgres-standing-operator-lifecycle"))
+	artifact := rooted.Artifact()
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
 
-		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), RootAdmission: rooted.Admission(),
 	}
-	seedStoreTestPersistedArtifact(t, db, artifact)
-	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rooted.Admission())
+	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	fixtureCtx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), rooted.Admission())
 	fixtureCtx = startupownership.CarryMutationAuthority(fixtureCtx, ctx)
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
@@ -970,12 +989,14 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
-	artifact := storeTestSourceArtifact("sqlite-standing-run-stop")
+	rooted, _ := sourceartifactfixture.Rooted(t, "standing-run-stop", storeTestSourceArtifact("sqlite-standing-run-stop"))
+	artifact := rooted.Artifact()
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: "project/ingress",
-		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), RootAdmission: rooted.Admission(),
 	}
-	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), artifact)
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, candidate.Source), rooted.Admission())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, artifact)
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -1020,12 +1041,15 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 			flowPath := "run-stop-guidance/" + backend
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			artifact := storeTestSourceArtifact("standing-run-stop-guidance-" + backend)
+			rooted, _ := sourceartifactfixture.Rooted(t, "run-stop-guidance", artifact)
+			ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact())), rooted.Admission())
 			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: serviceID, FlowPath: flowPath,
-
-				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
+				Source: sourceartifactfixture.FactFor(rooted.Artifact()), RootAdmission: rooted.Admission(),
 			}
-			seedStoreTestPersistedArtifact(t, db, artifact)
+			if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			created, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatalf("create standing service: %v", err)

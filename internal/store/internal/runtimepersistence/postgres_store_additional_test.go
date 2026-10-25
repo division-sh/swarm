@@ -681,6 +681,7 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 		Config:        []byte(`{}`),
 		Identity:      specMemoryIdentity(agentID, "global"),
 	})
+	ctx = requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{RunID: cfg.Identity.RunID, Origin: semanticScenarioSetupRunOriginForTest()})
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    cfg,
 		Status:    "active",
@@ -2367,7 +2368,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_FailsOnNonStringCanonicalRuntim
 func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), pg)
 
 	rec := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "a1",
@@ -2410,7 +2411,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), pg)
 
 	entityID := uuid.NewString()
 	rec := runtimemanager.PersistedAgent{
@@ -2616,7 +2617,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeKeys(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), pg)
 	identity := testAgentIdentity(t, "agent-invalid-config", "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -2641,7 +2642,7 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelMissing(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), pg)
 	identity := testAgentIdentity(t, "agent-missing-type", "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -2805,7 +2806,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), pg)
 	identity := testAgentIdentity(t, "legacy-session-agent", "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -2841,7 +2842,7 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx := runtimeeffects.WithDifferentOwner(requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), pg), runtimeeffects.OwnerBuildTestInfrastructure)
 	ctx = originalStoreFixtureContext(t, ctx, pg)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 

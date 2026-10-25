@@ -38,7 +38,7 @@ func TestStandingFreshNoopRejectsCorruptRelationBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					result, err := call(ctx, operation)
-					if err == nil || !strings.Contains(err.Error(), "exact active generation relations") || result.CommittedMutation != "" {
+					if err == nil || !strings.Contains(err.Error(), "standing generation run origin relation mismatch:") || result.CommittedMutation != "" {
 						t.Fatalf("corrupt fresh %s acknowledged: result=%+v err=%v", command, result, err)
 					}
 					_, after := f.standingRevisionAndJournalCount(t, ctx, current.ServiceID)

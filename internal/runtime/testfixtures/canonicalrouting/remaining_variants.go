@@ -437,7 +437,7 @@ connect:
     to: consumer
     resolution: select-or-create
 `,
-		"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n",
+		"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message], verify_secret: webhook_signing_secret}, cannot: [bypass journal]}\n",
 		"telegram/trigger.yaml": `secret: {required: true}
 signature: {type: token_equality, header: X-Telegram-Token}
 event_name: {literal: raw}

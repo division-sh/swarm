@@ -55,7 +55,13 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			store, db, sqlite := tc.open(t)
 			sourceA := mustExternalStoreTestSourceArtifactFact()
 			hashA := sourceA.BundleHash()
-			sourceBArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  source_b: {}\n"))
+			sourceBArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("agents:\n  source_b: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			sourceB := sourceartifactfixture.FactFor(sourceBArtifact)
 			hashB := sourceB.BundleHash()
 			rootB, _ := sourceartifactfixture.Rooted(t, "readiness-b", sourceBArtifact)
@@ -67,7 +73,7 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 				t.Fatalf("run fixture retargeted its captured source: root=%+v err=%v", stored.Admission(), err)
 			}
 			seedExactFlowInstanceDescriptorOwner(t, ctx, store, runA, uuid.NewString(), "account/a", hashA)
-			seedExactFlowInstanceDescriptorOwner(t, store, runB, uuid.NewString(), "account/b", hashB)
+			seedExactFlowInstanceDescriptorOwner(t, ctx, store, runB, uuid.NewString(), "account/b", hashB)
 			setReadinessCoordinate(t, db, sqlite, runA, "account/a", "phase", time.Now().UTC())
 			projection, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceA)
 			if err != nil {
@@ -111,10 +117,22 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 			selected, db, sqlite := tc.open(t)
 			current := mustExternalStoreTestSourceArtifactFact()
 			currentHash := current.BundleHash()
-			predecessorArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  predecessor: {}\n"))
+			predecessorArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("agents:\n  predecessor: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			predecessor := sourceartifactfixture.FactFor(predecessorArtifact)
 			predecessorHash := predecessor.BundleHash()
-			foreignArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  foreign: {}\n"))
+			foreignArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("agents:\n  foreign: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			foreign := sourceartifactfixture.FactFor(foreignArtifact)
 			foreignHash := foreign.BundleHash()
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
@@ -208,7 +226,13 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 			selected, db, sqlite := tc.open(t)
 			source := mustExternalStoreTestSourceArtifactFact()
 			bundleHash := source.BundleHash()
-			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  other: {}\n"))
+			otherArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("agents:\n  other: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			otherSource := sourceartifactfixture.FactFor(otherArtifact)
 			otherRoot, _ := sourceartifactfixture.Rooted(t, "readiness-target", otherArtifact)
 			for _, race := range []string{"plan", "source", "topology", "creation", "run_status", "instance_status", "terminated_at"} {

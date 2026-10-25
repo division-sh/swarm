@@ -202,6 +202,7 @@ func createNamedLifecycleDiagnostic(t *testing.T, ctx context.Context, store lif
 
 func createLifecycleDiagnosticWithIdentity(t *testing.T, ctx context.Context, store lifecycleDiagnosticTestStore, identity agentidentity.Identity) diaglog.LifecycleDiagnostic {
 	t.Helper()
+	ctx = requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: identity.RunID, Origin: semanticScenarioSetupRunOriginForTest()})
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{

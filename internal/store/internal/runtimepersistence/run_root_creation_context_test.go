@@ -17,7 +17,7 @@ func TestS1RunCreationChecksSuppliedRootContextBothStores(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedRunStore)
 			sourceA, _ := admittedRootForStorage(t, "create-a")
 			sourceB, _ := admittedRootForStorage(t, "create-b")
-			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash()), selected)
 			for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
 				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 					t.Fatal(err)

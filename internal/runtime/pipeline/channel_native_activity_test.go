@@ -32,7 +32,7 @@ func nativeActivityStructuralPlan(t *testing.T) packs.SatisfactionPlan {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, plan := packfixture.WhatsAppSessionProvider(t, filepath.Join(root, "platform-spec.yaml"), body)
+	_, plan := packfixture.WhatsAppSessionProvider(t, filepath.Join(root, "platform-spec.yaml"), body, []string{"raw", "edit", "message", "revoke"})
 	return plan
 }
 

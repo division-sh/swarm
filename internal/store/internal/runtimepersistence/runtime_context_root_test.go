@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -14,8 +15,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -24,9 +27,16 @@ func TestS1RuntimeContextUsesNativeRunRootBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedRunAvailabilityStore)
-			first, _ := sourceartifactfixture.Rooted(t, "first", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+			artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":   []byte("stages: []\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, _ := sourceartifactfixture.Rooted(t, "first", artifact)
 			second, _ := sourceartifactfixture.Rooted(t, "second", first.Artifact())
-			ctx := testAuthorActivityContextForBundle(first.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(first.Artifact().BundleHash()), selected)
 			for _, source := range []sourceartifact.RootedSource{first, second} {
 				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 					t.Fatal(err)
@@ -40,7 +50,28 @@ func TestS1RuntimeContextUsesNativeRunRootBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			definition := nativeRootedContextFixture(t, retained)
+			coordinate, err := agenttopology.NewSourceCoordinate(retained.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant, err := agentfixture.AdmitGeneration(t, ctx, selected.(agentfixture.Store), sourceSet, coordinate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			admitAgentFixtureFlowGrant(t, ctx, grant)
+			ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			evidence, err := grant.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			definition := nativeRootedContextFixture(t, retained, evidence.RuntimeInstanceID)
 			manager, err := runtimepkg.NewRuntimeContextManager(selected, definition)
 			if err != nil {
 				t.Fatal(err)
@@ -77,7 +108,7 @@ func TestS1RuntimeContextUsesNativeRunRootBothStores(t *testing.T) {
 			if lookup, _, err := manager.LookupRunStatus(ctx, request.RunID); err == nil || lookup.Loaded() {
 				t.Fatalf("native readback borrowed the previous root: %+v, %v", lookup, err)
 			}
-			if err := manager.Register(nativeRootedContextFixture(t, second)); err == nil || manager.Len() != 1 {
+			if err := manager.Register(nativeRootedContextFixture(t, second, uuid.NewString())); err == nil || manager.Len() != 1 {
 				t.Fatal("second native root created a second public same-hash context")
 			}
 			use, _, err = manager.AcquireBundleHash(ctx, definition.BundleHash())
@@ -93,18 +124,25 @@ func TestS1RuntimeContextUsesNativeRunRootBothStores(t *testing.T) {
 
 // This component fixture installs real compiled and occurrence owners with the
 // native availability reader; it is not a RunServe or provider execution proof.
-func nativeRootedContextFixture(t *testing.T, source sourceartifact.RootedSource) runtimepkg.BundleContext {
+func nativeRootedContextFixture(t *testing.T, source sourceartifact.RootedSource, runtimeID string) runtimepkg.BundleContext {
 	t.Helper()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), source, "", runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+	providers, err := packadmission.AdmitProviderSource(source, bundle.Platform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle.PackAdmission = projection
-	subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects, err := catalog.InstalledCapabilitySubjects()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +154,6 @@ func nativeRootedContextFixture(t *testing.T, source sourceartifact.RootedSource
 		}
 	})
 	fact := sourceartifactfixture.FactFor(source.Artifact())
-	runtimeID := uuid.NewString()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: fact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
@@ -136,8 +173,8 @@ func nativeRootedContextFixture(t *testing.T, source sourceartifact.RootedSource
 	}
 	return runtimepkg.BundleContext{
 		Source: semantic, SourceArtifactFact: fact, RootAdmission: source.Admission(), WorkOwner: owner,
-		Runtime:             &runtimepkg.Runtime{Bus: bus, Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: runtimeID}},
-		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: projection.ProviderTriggers.Generation(),
-		InstalledTriggerSubjects: subjects,
+		Runtime:             &runtimepkg.Runtime{Bus: bus, Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: runtimeID, SourceArtifactFact: fact}},
+		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(),
+		InstalledTriggerSubjects: subjects, ProviderTriggerCatalog: catalog,
 	}
 }

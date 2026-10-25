@@ -12,6 +12,14 @@ import (
 func TestS1ForkOperationRequiresItsExactTargetRoot(t *testing.T) {
 	rootA, _ := sourceartifactfixture.Rooted(t, "fork-a", sourceartifactfixture.Artifact())
 	rootB, _ := sourceartifactfixture.Rooted(t, "fork-b", sourceartifactfixture.Artifact())
+	foreign, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+		"nodes.yaml":    []byte("worker: {}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := ForkOperationRequest{
 		OperationID: uuid.NewString(), SourceRunID: uuid.NewString(), Actor: "operator", TransportHash: "wire-request",
 		TargetBundleHash: rootA.Artifact().BundleHash(), TargetRootReference: rootA.Admission().Reference(),
@@ -34,7 +42,7 @@ func TestS1ForkOperationRequiresItsExactTargetRoot(t *testing.T) {
 		{"missing", sourceartifact.RootAdmissionReference{}},
 		{"hash_only", sourceartifact.RootAdmissionReference{BundleHash: request.TargetBundleHash}},
 		{"malformed", sourceartifact.RootAdmissionReference{BundleHash: request.TargetBundleHash, RootDirectory: "fork-a "}},
-		{"crossed_content", sourceartifact.RootAdmissionReference{BundleHash: sourceartifactfixture.New("nodes.yaml", []byte("worker: {}\n")).BundleHash(), RootDirectory: "fork-a"}},
+		{"crossed_content", sourceartifact.RootAdmissionReference{BundleHash: foreign.BundleHash(), RootDirectory: "fork-a"}},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			broken := request

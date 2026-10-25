@@ -96,7 +96,7 @@ func TestPrimaryEntityConformance(t *testing.T) {
 }
 
 func primaryEntityConformanceSchema(extra string) string {
-	return "name: scoring\n" + extra + `stages:
+	return "# fixture: scoring\n" + extra + `stages:
   pending: {}
   done: {final: true}
 `

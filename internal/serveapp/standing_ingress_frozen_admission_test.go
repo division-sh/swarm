@@ -64,9 +64,15 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := file.Set(ctx, "telegram.telegram_bot_token", "fixture-bot-token"); err != nil {
+		t.Fatal(err)
+	}
 	signingKey := "telegram.webhook_signing_secret"
 	if policy != "pack" {
 		signingKey = "telegram_raw.webhook_signing_secret"
+		if err := file.Set(ctx, "telegram.webhook_signing_secret", "unused-telegram-signing-secret"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	set := func(value string) {
 		t.Helper()
@@ -134,6 +140,22 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
+	if policy == "unsigned" {
+		body, err := os.ReadFile(opts.ConfigPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var deployment map[string]any
+		if err := yaml.Unmarshal(body, &deployment); err != nil {
+			t.Fatal(err)
+		}
+		deployment["triggers"] = map[string]any{"telegram_raw/trigger.yaml": map[string]any{"acknowledge": "unsigned_webhook"}}
+		body, err = yaml.Marshal(deployment)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeStandingCandidateFile(t, opts.ConfigPath, string(body))
+	}
 	var process *serveRuntimeTestProcess
 	var endpoint string
 	start := func() {
@@ -148,7 +170,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		t.Helper()
 		alias := "chat"
 		if hasSibling && provider == "partner" {
-			alias = "partner"
+			alias = "chat.partner"
 			if point == "shared_key_sibling" {
 				provider = "telegram"
 			}
@@ -434,8 +456,13 @@ func addFrozenIngressSibling(t *testing.T, root, signingKey string) {
 
 func writeFrozenIngressTrigger(t *testing.T, root, provider string, unsigned bool) {
 	t.Helper()
-	manifest := "version: 1.0.0\nplatform_version: '*'\n"
-	body := `payload_object_required: true
+	manifest := "version: 1.0.0\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [raw]\n"
+	if !unsigned {
+		manifest += "    verify_secret: webhook_signing_secret\n"
+	}
+	manifest += "  cannot: [execute code]\n"
+	body := `transport: webhook
+payload_object_required: true
 secret: {required: true}
 signature: {type: token_equality, header: X-Telegram-Bot-Api-Secret-Token}
 delivery_id: {json_path: $.update_id, required: true}
@@ -444,7 +471,10 @@ event_name: {literal: raw}
 `
 	if unsigned {
 		body = strings.Replace(body, "secret: {required: true}", "secret: {required: false}", 1)
-		body = strings.Replace(body, "signature: {type: token_equality, header: X-Telegram-Bot-Api-Secret-Token}", "signature: {type: none}", 1)
+		body = strings.Replace(body, "signature: {type: token_equality, header: X-Telegram-Bot-Api-Secret-Token}\n", "", 1)
+	}
+	if err := os.MkdirAll(filepath.Join(root, provider), 0700); err != nil {
+		t.Fatal(err)
 	}
 	writeStandingCandidateFile(t, filepath.Join(root, provider, "manifest.yaml"), manifest)
 	writeStandingCandidateFile(t, filepath.Join(root, provider, "trigger.yaml"), body)

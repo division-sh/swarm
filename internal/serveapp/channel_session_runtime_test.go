@@ -31,7 +31,15 @@ func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := semanticview.Wrap(bundle)
-	fact := sourceartifactfixture.Fact()
+	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := contracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	owner := newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{
 		WorkOwner: owner, ContractBundle: source, SourceArtifactFact: fact, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -40,8 +48,8 @@ func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
-		Source: source, SourceArtifactFact: fact, WorkOwner: owner,
-		BundleIdentity: contracts.BundleIdentity{WorkflowName: "root", WorkflowVersion: "1", BundleHash: fact.BundleHash()},
+		Source: source, SourceArtifactFact: fact, RootAdmission: rooted.Admission(), WorkOwner: owner,
+		BundleIdentity: identity,
 		Runtime:        &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID}},
 	}))
 	if err != nil {

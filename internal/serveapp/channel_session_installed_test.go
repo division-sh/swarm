@@ -47,6 +47,14 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		t.Fatal(err)
 	}
 	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected, bundle.SourceArtifact)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := contracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	owner := newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
 	serveBootstrapWireFixture(t, "connected", owner)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{WorkOwner: owner,
@@ -54,15 +62,11 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := completeServeTestPackContext(t, runtimepkg.BundleContext{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact, WorkOwner: owner,
-		BundleIdentity: contracts.BundleIdentity{WorkflowName: "whatsapp-session", WorkflowVersion: "1.0.0", BundleHash: fact.BundleHash()},
+	definition := completeServeTestPackContext(t, runtimepkg.BundleContext{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact, RootAdmission: rooted.Admission(), WorkOwner: owner,
+		BundleIdentity: identity,
 		ChannelPlans:   projection.ChannelPlans,
 		Runtime: &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live,
 			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID, SourceArtifactFact: fact, ChannelPlans: projection.ChannelPlans}}})
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		t.Fatal(err)
-	}
 	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), owner.Identity().RuntimeInstanceID, rooted.Admission())
 	definition.Runtime.Manager = manager.NewAgentManager(bus, nil)
 	if err := definition.Runtime.InstallStartupGrant(grant); err != nil {
@@ -82,7 +86,7 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		t.Fatal(err)
 	}
 	candidate, err := catalog.Resolve(channelonboarding.CandidateSelection{Provider: "whatsapp"})
-	if err != nil || candidate.ValidateDeclaration() != nil || candidate.Validate() == nil || candidate.Target.Alias != "reception" ||
+	if err != nil || candidate.ValidateDeclaration() != nil || candidate.Validate() == nil || candidate.Target.Alias != rooted.Admission().Reference().RootDirectory ||
 		candidate.Coordinate.BundleHash != fact.BundleHash() || candidate.Target.Generation != 0 || candidate.Plan.HasNativeInbox() {
 		t.Fatal("artifact-derived catalog invented authority or lost source ownership", candidate, err)
 	}

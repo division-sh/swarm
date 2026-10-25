@@ -57,7 +57,7 @@ func TestRunServeWhatsAppUnpairedDeclarationBothStores(t *testing.T) {
 				requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{}, &listed)
 				found := 0
 				for _, channel := range listed.Channels {
-					if channel.Identity.Interface.ChannelPackID == "provider.whatsapp.hitl_channel" {
+					if channel.Identity.Interface.ChannelPackID == "whatsapp" {
 						found++
 						if channel.Identity.Status != "unbound" || channel.Identity.PrincipalID != listed.PrincipalID || listed.PrincipalID == "" {
 							t.Fatal("declaration readback invented account or operator binding", channel)

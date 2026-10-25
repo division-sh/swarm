@@ -20,7 +20,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -36,7 +35,6 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -155,7 +153,14 @@ func (startupRecoveryOrderLLM) ProviderContract() llm.ProviderContract {
 }
 
 func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity(t *testing.T) {
-	bundle := loadEntitylessStartupRecoveryBundle(t)
+	const agentID = "startup-order-agent"
+	base := loadEntitylessStartupRecoveryBundle(t)
+	files := make(map[string]string)
+	for _, entry := range base.SourceArtifact.Entries() {
+		files[entry.Label()] = string(entry.Bytes())
+	}
+	files["agents.yaml"] = agentID + ":\n  type: test\n  role: observer\n  model: regular\n  intent: {inline: observe startup order}\n  subscriptions: [task.completed]\n"
+	bundle := loadRuntimeTempBundle(t, files)
 	persistedSource, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct persisted startup bundle source: %v", err)
@@ -179,10 +184,6 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-					BundleHash: persistedBundleHash, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
-				})
 				return ctx, db, db, selected
 			},
 		},
@@ -194,10 +195,6 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-					BundleHash: persistedBundleHash, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
-				})
 				return ctx, nil, storetest.Database(selected), selected
 			},
 		},
@@ -207,20 +204,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
 			storetest.RequireRun(t, externalRuntimeProcessContext(t, ctx, prepared), selected, storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-				BundleHash: persistedBundleHash,
+				BundleHash: persistedBundleHash, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 			})
 			activationCleanupErr := errors.New("injected delivery authority postcommit cleanup failure")
 			activationProbe := &startupRecoveryActivationProbe{Store: selected, cleanupErr: activationCleanupErr}
-			const agentID = "startup-order-agent"
-			agentConfig := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
-				ID: agentID, Type: "test", Role: "observer", FlowID: "global", Model: "regular",
-				ExecutionMode: "live", Subscriptions: []string{"task.completed"},
-			})
-			bundle.Agents[agentID] = runtimecontracts.AgentRegistryEntry{
-				ID: agentID, Type: "test", Role: "observer", Model: "regular",
-				ResolvedIntent: agentConfig.Intent, Subscriptions: []string{"task.completed"},
-			}
-			source := semanticviewtest.WrapRootAgents(bundle)
+			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
 			hydrated := atomic.Bool{}
 			newRuntime := func(process *worklifetime.Process, deliveries runtimedelivery.Store) *swarmruntime.Runtime {
@@ -277,6 +265,14 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}); err != nil {
 				t.Fatalf("construct startup predecessor tree: %v", err)
 			}
+			predecessorAgent, err := predecessor.Manager.ResolveAgentConfig(templateInstanceDeliveryRunID, agentID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			agentIdentity, err := predecessorAgent.ConcreteIdentity()
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
 				t.Fatalf("retire startup predecessor: %v", err)
 			}
@@ -295,7 +291,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			storetest.CommitSemanticEventWithRoutes(t, handoffCtx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			agentEventID := eventtest.UUID("startup-order-agent-event-" + backend.name)
-			agentRoute := startupRecoveryAgentRoute(t, templateInstanceDeliveryRunID, agentID)
+			agentRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity}
 			agentEvent := eventtest.ExistingRunRootIngress(
 				agentEventID, "task.completed", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EventEnvelope{}, time.Now().UTC(),

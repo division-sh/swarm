@@ -928,7 +928,7 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	defer cancel()
 	constructionCtx := runtimeeffects.WithExecutionMode(worklifetime.WithOccurrence(ctx, h.rt.WorkOccurrence()), executionmode.Live)
 	if _, err := h.rt.Manager.EnsureFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
+		ContractBundle: h.rt.Options.WorkflowModule.SemanticSource(),
 		Instance:       runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), ".", catalogRuntimeRunID, catalogRuntimeRunID, "", ""),
 		OccurredAt:     h.startedAt,
 	}); err != nil {
@@ -1391,7 +1391,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 		h.t.Fatalf("root constructor entity = %s, want exact run %s", entityID, catalogRuntimeRunID)
 	}
 	if err := h.rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
+		ContractBundle: h.rt.Options.WorkflowModule.SemanticSource(),
 		Instance:       runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), ".", catalogRuntimeRunID, catalogRuntimeRunID, entityID, ""),
 		OccurredAt:     h.startedAt,
 	}); err != nil {
@@ -1428,7 +1428,7 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 		runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), target.FlowID, route.InstancePath, route.InstanceID, target.EntityID, ""),
 	)
 	_, err := h.rt.Manager.EnsureFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle:   semanticview.Wrap(h.bundle),
+		ContractBundle:   h.rt.Options.WorkflowModule.SemanticSource(),
 		Instance:         instance,
 		ConstructorInput: constructorInput,
 		ResolvedKey:      resolvedKey,

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -29,6 +30,10 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
 			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			process, err := agentfixture.ProcessCapability(t, ctx, store.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -63,6 +68,7 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 			fixture = reopen()
 			store = fixture.store.(eventRecordContractStore)
 			ctx = originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			restored, found, err := loadEventProducerIdentityRecord(ctx, fixture, event.ID())
 			if err != nil || !found || !restored.Equal(record) {
 				t.Fatalf("reopened canonical record differs: found=%v err=%v", found, err)

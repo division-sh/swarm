@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -97,6 +99,15 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 		if err := point.Validate(); err != nil || point.Kind != binding.ForkPoint.Kind || point.Revision != binding.ForkPoint.Revision || point.EventID != binding.ForkPoint.EventID {
 			return runfork.RunForkActivation{}, fmt.Errorf("fixture lost the original full fixed point: %v", err)
 		}
+		rooted, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, original.ForkRunID)
+		if err != nil {
+			return runfork.RunForkActivation{}, err
+		}
+		if rooted.Admission().Reference() != binding.TargetRootReference {
+			return runfork.RunForkActivation{}, fmt.Errorf("fixture selected root differs from its exact child binding")
+		}
+		selectedCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())), rooted.Admission())
+		selectedCtx = authoractivity.WithScope(selectedCtx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, rooted.Admission().BundleHash()))
 		probe.binding, probe.original, probe.point = binding, original, point
 		reached := false
 		probe.call = func(actualCtx context.Context, actual runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
@@ -119,7 +130,7 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 		if original.ForkOperation != nil {
 			request.DataPinOverrides = original.ForkOperation.DataPinOverrides
 		}
-		result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, request)
+		result, err := runforkexecution.ExecuteSelectedContractRunFork(selectedCtx, request)
 		err = errors.Join(err, owner.RetireSelectedContexts(context.Background()))
 		if !reached {
 			return result.Activation, fmt.Errorf("original-child execution did not reach the prepared native activation: %w", err)

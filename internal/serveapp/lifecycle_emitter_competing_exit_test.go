@@ -22,6 +22,7 @@ import (
 func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			for _, exit := range []string{"ordinary", "timer"} {
 				t.Run(exit, func(t *testing.T) {
 					for _, order := range []string{"gate_first", "exit_first", "contended"} {

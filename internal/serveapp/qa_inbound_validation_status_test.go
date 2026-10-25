@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -30,8 +32,57 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 		t.Run(fixture.name, func(t *testing.T) {
 			backend := fixture.backend
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
-			writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "types:\n  AccountInput:\n    delivery_id: text\n    user_id: text\n    labels: {type: '[text]?'}\n    attributes: 'map[text]text?'\n    nested: NullProbe?\n  NullProbe:\n    user_id: text\n")
-			writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: AccountInput\n")
+			writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "instance: provider_event_id\nstages: []\npins:\n  inputs: [inbound.partner.raw, inbound.partner.account_opened]\n")
+			writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "receiver:\n  execution_type: system_node\n  subscribes_to: [inbound.partner.account_opened]\n  event_handlers:\n    inbound.partner.account_opened:\n      data_accumulation:\n        source_event: inbound.partner.account_opened\n        writes: [{target_field: processed_count, value: entity.processed_count + 1}]\n")
+			if err := os.Remove(filepath.Join(root, "events.yaml")); err != nil {
+				t.Fatal(err)
+			}
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [raw, account_opened]\n    verify_secret: webhook_signing_secret\n  cannot: [execute code]\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), `transport: webhook
+payload_object_required: true
+secret: {required: true}
+signature: {type: hmac_sha256, header: X-Signature, prefix: 'sha256=', signed_payload: raw_body}
+delivery_id: {json_path: $.delivery_id, required: true}
+event_type: {literal: account_opened, required: true}
+event_name: {literal: raw}
+normalized_events:
+  - event: account_opened
+    fields:
+      provider_event_id: {from: delivery_id, schema: {type: string}}
+      data:
+        from: input
+        schema:
+          type: object
+          additionalProperties: false
+          required: [delivery_id, user_id]
+          properties:
+            delivery_id: {type: string}
+            user_id: {type: string}
+            labels:
+              type: any
+              oneOf:
+                - {type: 'null'}
+                - {type: array, items: {type: string}}
+            attributes:
+              type: any
+              oneOf:
+                - {type: 'null'}
+                - {type: object, additionalProperties: {type: string}}
+            nested:
+              type: any
+              oneOf:
+                - {type: 'null'}
+                - type: object
+                  additionalProperties: false
+                  required: [user_id]
+                  properties:
+                    user_id: {type: string}
+`)
+			selected := filepath.Join(filepath.Dir(root), "keyed-shop")
+			if err := os.Rename(root, selected); err != nil {
+				t.Fatal(err)
+			}
+			root = selected
 			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			file, err := credentials.NewFileStore(credentialPath)
@@ -39,7 +90,7 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 				t.Fatal(err)
 			}
 			const secret = "qa-validation-signing-secret"
-			if err := file.Set(t.Context(), "webhook_signing.partner", secret); err != nil {
+			if err := file.Set(t.Context(), "partner.webhook_signing_secret", secret); err != nil {
 				t.Fatal(err)
 			}
 			opts, start := clockDeploymentHarness(t, backend, root)
@@ -72,7 +123,8 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 				{"null-undeclared", `{"delivery_id":"null-undeclared","user_id":"user-7","extra":null}`, "$.data.extra"},
 				{"null-nested", `{"delivery_id":"null-nested","user_id":"user-7","nested":{"user_id":null}}`, "$.data.nested.user_id"},
 			} {
-				code, response := a9PostSignedRawIngress(t, endpoint, secret, invalid.body)
+				body := fmt.Sprintf(`{"delivery_id":%q,"input":%s}`, invalid.id, invalid.body)
+				code, response := a9PostSignedRawIngress(t, endpoint, secret, body)
 				t.Logf("typed invalid id=%s status=%d body=%s", invalid.id, code, response)
 				if code != http.StatusBadRequest && code != http.StatusUnprocessableEntity {
 					t.Errorf("typed validation is permanent, status=%d want400/422", code)
@@ -131,21 +183,11 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 					t.Fatalf("invalid input changed construction: before=%+v after=%+v err=%v", before, after, err)
 				}
 			}
-			config := writeCLIAPIConfigFile(t, map[string]string{"api_server": strings.TrimSuffix(served.Endpoint, "/v1/rpc")})
-			var stdout, stderr bytes.Buffer
-			code := executeCLIFrom(context.Background(), t.TempDir(), []string{"incidents", "--component", "inbound-gateway", "--level", "warn", "--limit", "100", "--config", config}, &stdout, &stderr, nil)
-			if code != 0 {
-				t.Fatalf("incidents CLI exit=%d stderr=%s", code, stderr.String())
-			}
-			incidentOutput := stdout.String()
-			if !strings.Contains(incidentOutput, "schema_validation_failed") || !strings.Contains(incidentOutput, "$.data.nested.user_id") || strings.Contains(incidentOutput, "internal failure") {
-				t.Fatalf("CLI lost sender rejection classification/path: %s", incidentOutput)
-			}
-			t.Logf("sender incidents CLI: %s", incidentOutput)
 			body := `{"delivery_id":"valid-user","user_id":"user-7"}`
 			if fixture.optionalNull {
 				body = `{"delivery_id":"valid-user","user_id":"user-7","labels":null,"attributes":null,"nested":null}`
 			}
+			body = `{"delivery_id":"valid-user","input":` + body + `}`
 			code, accepted := a9PostSignedRawIngress(t, endpoint, secret, body)
 			if code != http.StatusAccepted {
 				t.Fatalf("valid typed input status=%d receipt=%s", code, accepted)
@@ -154,11 +196,22 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 				RunID    string   `json:"run_id"`
 				EventIDs []string `json:"event_ids"`
 			}
-			if err := json.Unmarshal(accepted, &receipt); err != nil || receipt.RunID != standing.RunID || len(receipt.EventIDs) != 1 {
+			if err := json.Unmarshal(accepted, &receipt); err != nil || receipt.RunID != standing.RunID || len(receipt.EventIDs) != 2 {
 				t.Fatalf("valid typed receipt=%s err=%v", accepted, err)
 			}
-			a9RequireRootIngressSettlement(t, served.Endpoint, receipt.RunID, receipt.EventIDs[0])
+			a9RequireRootIngressSettlement(t, served.Endpoint, receipt.RunID, receipt.EventIDs[1])
 			t.Logf("valid typed control status=%d receipt=%s", code, accepted)
+			config := writeCLIAPIConfigFile(t, map[string]string{"api_server": strings.TrimSuffix(served.Endpoint, "/v1/rpc")})
+			var stdout, stderr bytes.Buffer
+			code = executeCLIFrom(context.Background(), t.TempDir(), []string{"incidents", "--component", "inbound-gateway", "--level", "warn", "--limit", "100", "--config", config}, &stdout, &stderr, nil)
+			if code != 0 {
+				t.Fatalf("incidents CLI exit=%d stderr=%s", code, stderr.String())
+			}
+			incidentOutput := stdout.String()
+			if !strings.Contains(incidentOutput, "schema_validation_failed") || !strings.Contains(incidentOutput, "$.data.nested.user_id") || strings.Contains(incidentOutput, "internal failure") {
+				t.Fatalf("CLI lost sender rejection classification/path: %s", incidentOutput)
+			}
+			t.Logf("sender incidents CLI: %s", incidentOutput)
 		})
 	}
 }

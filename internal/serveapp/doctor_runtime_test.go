@@ -108,7 +108,7 @@ func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelect
 	if code != 1 {
 		t.Fatalf("Run code = %d, want config load failure\noutput:\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "config_load") || !strings.Contains(out.String(), filepath.Join(configDir, "packs", "missing-provider")) {
+	if !strings.Contains(out.String(), "config_load") || !strings.Contains(out.String(), "capture provider missing-provider: file does not exist") {
 		t.Fatalf("serve output missing declared provider pack load failure:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "not-a-store") || strings.Contains(out.String(), "db_connection") {

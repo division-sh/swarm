@@ -42,8 +42,14 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		if failures := authorityDebtRatchet(after, before, before, before); len(failures) != 0 {
 			t.Fatal(failures)
 		}
-		if failures := authorityDebtRatchet(after, before, before, after); len(failures) != 0 {
-			t.Fatal("landed selected source must preserve all five baseline occurrences:", failures)
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, head := range []map[string]authorityDebtSite{before, after} {
+			if failures := authorityDebtRatchet(after, head, before, after); len(failures) != 0 {
+				t.Fatal("exact landed selected source rejected: ", failures)
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("comparison normalization mutated baseline or source evidence")
 		}
 		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
 			t.Fatal("reverse original-owner signature continuation admitted")
@@ -51,9 +57,38 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		if failures := authorityDebtRatchet(after, after, before, debtControlSet()); len(failures) == 0 {
 			t.Fatal("original-owner signature continuation admitted without its source")
 		}
-		for _, pair := range debtSelectedFixtureSignatureTransitions() {
-			debtRunFixtureSignatureHostileControls(t, pair, before, after)
+		if failures := authorityDebtRatchet(before, before, before, after); len(failures) == 0 {
+			t.Fatal("landed selected source admitted old-call resurrection")
 		}
+		added := maps.Clone(after)
+		unrelated := debtControlSite("call:Exec", 1)
+		added[unrelated.identity()] = unrelated
+		if failures := authorityDebtRatchet(added, added, before, after); len(failures) == 0 {
+			t.Fatal("landed selected source paid for an unrelated addition")
+		}
+		for _, pair := range debtSelectedFixtureSignatureTransitions() {
+			for _, landed := range []bool{false, true} {
+				name := "forward/" + pair[0].Declaration
+				if landed {
+					name = "landed/" + pair[0].Declaration
+				}
+				t.Run(name, func(t *testing.T) { debtRunFixtureSignatureHostileControls(t, pair, before, after, landed) })
+			}
+		}
+	})
+	t.Run("selected-binding-root-arguments", func(t *testing.T) {
+		pair := debtSelectedBindingRootArgumentTransition()
+		before, after := debtControlSet(pair[0]), debtControlSet(pair[1])
+		if failures := authorityDebtRatchet(after, before, before, before); len(failures) != 0 {
+			t.Fatal(failures)
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse rooted INSERT correspondence admitted")
+		}
+		if failures := authorityDebtRatchet(after, after, before, after); len(failures) == 0 {
+			t.Fatal("rooted INSERT correspondence admitted without the old source occurrence")
+		}
+		debtRunFixtureSignatureHostileControls(t, pair, before, after, false)
 	})
 	if authorityDebtCount(old) != 9 || authorityDebtCount(current) != 9 {
 		t.Fatal("signature accounting must preserve all nine distinct debt occurrences")
@@ -67,7 +102,7 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		{"forward-refresh", current, old, old, old, true},
 		{"forward-refreshed", current, current, old, old, true},
 		{"landed-inert", current, current, current, current, true},
-		{"unreviewed-landed-unrefreshed", current, old, old, current, false},
+		{"landed-source-does-not-extend-nine-pair-family", current, old, old, current, false},
 		{"reverse", old, old, current, current, false},
 		{"old-source-resurrection", old, old, old, current, false},
 		{"foreign-source", current, current, old, debtControlSet(), false},
@@ -83,7 +118,7 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 	}
 	for _, pair := range debtRunFixtureSignatureTransitions() {
 		t.Run(pair[0].Declaration, func(t *testing.T) {
-			debtRunFixtureSignatureHostileControls(t, pair, old, current)
+			debtRunFixtureSignatureHostileControls(t, pair, old, current, false)
 		})
 	}
 	t.Run("forward-cannot-pay-for-unrelated-addition", func(t *testing.T) {
@@ -107,11 +142,15 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 	}
 }
 
-func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtSite, old, current map[string]authorityDebtSite) {
+func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtSite, old, current map[string]authorityDebtSite, landed bool) {
 	t.Helper()
+	source := old
+	if landed {
+		source = current
+	}
 	for slot := range 4 {
 		t.Run([]string{"coexists-actual", "coexists-head", "coexists-baseline", "coexists-source"}[slot], func(t *testing.T) {
-			states := [4]map[string]authorityDebtSite{current, current, old, old}
+			states := [4]map[string]authorityDebtSite{current, current, old, source}
 			states[slot] = maps.Clone(states[slot])
 			states[slot][pair[0].identity()] = pair[0]
 			states[slot][pair[1].identity()] = pair[1]
@@ -135,7 +174,11 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 			case "argument":
 				changed.Resolved = strings.Replace(changed.Resolved, "|arg=string|", "|arg=int|", 1)
 			case "receiver":
-				changed.Resolved = strings.Replace(changed.Resolved, "|recv=<nil>|", "|recv=*database/sql.DB|", 1)
+				if strings.Contains(changed.Resolved, "|recv=*database/sql.DB|") {
+					changed.Resolved = strings.Replace(changed.Resolved, "|recv=*database/sql.DB|", "|recv=*database/sql.Conn|", 1)
+				} else {
+					changed.Resolved = strings.Replace(changed.Resolved, "|recv=<nil>|", "|recv=*database/sql.DB|", 1)
+				}
 			case "result":
 				changed.Resolved += ",error"
 			case "family":
@@ -148,7 +191,7 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 			actual := maps.Clone(current)
 			delete(actual, pair[1].identity())
 			actual[changed.identity()] = changed
-			if failures := authorityDebtRatchet(actual, actual, old, old); len(failures) == 0 {
+			if failures := authorityDebtRatchet(actual, actual, old, source); len(failures) == 0 {
 				t.Fatal("non-reviewed identity or duplicate call admitted")
 			}
 		})
@@ -156,10 +199,14 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 	for slot := range 2 {
 		for _, mutation := range []string{"missing", "duplicate", "changed"} {
 			t.Run(mutation+[]string{"-baseline-predecessor", "-source-predecessor"}[slot], func(t *testing.T) {
-				states := [2]map[string]authorityDebtSite{maps.Clone(old), maps.Clone(old)}
-				delete(states[slot], pair[0].identity())
+				states := [2]map[string]authorityDebtSite{maps.Clone(old), maps.Clone(source)}
+				predecessor := pair[0]
+				if slot == 1 && landed {
+					predecessor = pair[1]
+				}
+				delete(states[slot], predecessor.identity())
 				if mutation != "missing" {
-					changed := pair[0]
+					changed := predecessor
 					if mutation == "duplicate" {
 						changed.Multiplicity++
 					} else {

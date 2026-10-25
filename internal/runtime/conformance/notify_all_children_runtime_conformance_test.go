@@ -1333,7 +1333,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	rootV2 := notifyAllChildrenRootedSource(t, sourceV2)
 	ctxV2 = runtimecorrelation.WithRootAdmission(ctxV2, rootV2.Admission())
 	ctxV2 = originalConformanceFixtureContext(t, ctxV2, selected)
-	if _, err := selected.ReviseRunSource(ctxV2, runtimerunlifecycle.SourceRevisionRequest{
+	if _, err := selected.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
 		RunID:         runID,
 		Source:        runtimeV2.sourceArtifactFact,
 		RootAdmission: rootV2.Admission(),
@@ -1436,7 +1436,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	rootV3 := notifyAllChildrenRootedSource(t, sourceV3)
 	ctxV3 = runtimecorrelation.WithRootAdmission(ctxV3, rootV3.Admission())
 	ctxV3 = originalConformanceFixtureContext(t, ctxV3, selected)
-	if _, err := selected.ReviseRunSource(ctxV3, runtimerunlifecycle.SourceRevisionRequest{
+	if _, err := selected.ReviseRunSource(ctxV2, runtimerunlifecycle.SourceRevisionRequest{
 		RunID:         runID,
 		Source:        runtimeV4.sourceArtifactFact,
 		RootAdmission: rootV3.Admission(),

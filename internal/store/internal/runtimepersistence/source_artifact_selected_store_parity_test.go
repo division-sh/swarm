@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -42,6 +44,9 @@ func TestPayloadlessEventSourceArtifactBytesBothStores(t *testing.T) {
 				}
 				t.Run(name, func(t *testing.T) {
 					root := t.TempDir()
+					if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
 					body := []byte("# Exact authored bytes\ninvestigation.timed_out: " + variant + "\n")
 					path := filepath.Join(root, "events.yaml")
 					if err := os.WriteFile(path, body, 0o600); err != nil {
@@ -103,18 +108,27 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 			for i, condition := range []string{"valid", "missing", "corrupt", "hash mismatch"} {
 				t.Run(condition, func(t *testing.T) {
 					root := t.TempDir()
-					if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(fmt.Sprintf("name: startup-integrity-%d\n", i)), 0o600); err != nil {
+					if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(fmt.Sprintf("stages: []\n# fixture: startup-integrity-%d\n", i)), 0o600); err != nil {
 						t.Fatal(err)
 					}
 					artifact, err := sourceartifact.AdmitDirectory(root)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
+					rooted, err := artifact.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					fixtureCtx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(artifact.BundleHash()), rooted.Admission())
+					fixtureCtx = startupownership.CarryMutationAuthority(fixtureCtx, ctx)
+					if _, err := selected.EnsureRootedSource(fixtureCtx, rooted); err != nil {
 						t.Fatal(err)
 					}
 					runID := uuid.NewString()
-					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: artifact.BundleHash()})
+					requireRunFixtureForTest(t, fixtureCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: artifact, RootAdmission: rooted.Admission()})
 					setBlob := func(blob []byte) {
 						t.Helper()
 						query := "UPDATE source_artifacts SET source_blob = ? WHERE bundle_hash = ?"
@@ -133,7 +147,7 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 					case "corrupt":
 						setBlob([]byte{0})
 					case "hash mismatch":
-						if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: different\n"), 0o600); err != nil {
+						if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n# fixture: different\n"), 0o600); err != nil {
 							t.Fatal(err)
 						}
 						other, err := sourceartifact.AdmitDirectory(root)
@@ -152,7 +166,7 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 					}
 					// Remove only this test's injected corruption before the next census.
 					if condition == "missing" {
-						if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
+						if _, err := selected.EnsureRootedSource(fixtureCtx, rooted); err != nil {
 							t.Fatal(err)
 						}
 					} else {
@@ -166,7 +180,10 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 
 func TestSourceArtifactSelectedStoreParity(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: source-artifact-parity\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n# fixture: source-artifact-parity\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)

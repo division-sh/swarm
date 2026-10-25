@@ -85,10 +85,49 @@ type Response struct {
 type Error struct {
 	Status  int
 	Message string
+	cause   *NormalizationError
 }
 
 func (e Error) Error() string {
 	return e.Message
+}
+
+func (e Error) Unwrap() error {
+	if e.cause == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// Only ProjectDelivery can attach an authenticated projection's schema cause.
+// Independent joined failures keep their transient/internal classification.
+func NormalizedInputValidationPath(err error) (string, bool) {
+	switch cause := err.(type) {
+	case Error:
+		if cause.Status == http.StatusBadRequest && cause.cause != nil && cause.cause.schemaViolation != nil {
+			return cause.cause.Path, true
+		}
+	case *Error:
+		if cause != nil {
+			return NormalizedInputValidationPath(*cause)
+		}
+	case interface{ Unwrap() []error }:
+		var first string
+		causes := cause.Unwrap()
+		for i, child := range causes {
+			path, valid := NormalizedInputValidationPath(child)
+			if !valid {
+				return "", false
+			}
+			if i == 0 {
+				first = path
+			}
+		}
+		return first, len(causes) > 0
+	case interface{ Unwrap() error }:
+		return NormalizedInputValidationPath(cause.Unwrap())
+	}
+	return "", false
 }
 
 type PackIdentity struct {

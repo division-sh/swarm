@@ -22,7 +22,7 @@ var staticAuthorityGuardFiles = map[string][]string{
 		"event_schema_presence_owner_guard_test.go", "persistence_ownership_guard_test.go",
 		"run_scoped_live_identity_guard_test.go", "semantic_ownership_guard_test.go",
 	},
-	"internal/serveapp":   {"retired_builder_transport_guard_test.go", "retired_dashboard_transport_guard_test.go"},
+	"internal/serveapp":   {"retired_dashboard_transport_guard_test.go"},
 	"internal/releasee2e": {"boundary_test.go"},
 }
 

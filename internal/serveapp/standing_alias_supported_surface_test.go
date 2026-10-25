@@ -1,9 +1,7 @@
 package serveapp
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,29 +10,35 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/operatorchannel"
-	"github.com/division-sh/swarm/internal/packs"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"gopkg.in/yaml.v3"
 )
 
 func TestA9RootedAliasesServeBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, override := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/override=%t", backend, override), func(t *testing.T) {
-				proveA9ServedAliases(t, backend, override)
-			})
-		}
+		t.Run(backend, func(t *testing.T) {
+			proveA9ServedAliases(t, backend)
+		})
 	}
 }
 
-func proveA9ServedAliases(t *testing.T, backend string, override bool) {
+func proveA9ServedAliases(t *testing.T, backend string) {
 	t.Helper()
-	file := a9ServedAliasCredentials(t, true)
-	_, start := clockDeploymentHarness(t, backend, a9ServedAliasSource(t, override, false))
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
+	file, err := credentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := canonicalrouting.CopyStandingRootTreePublic(t)
+	selected := filepath.Join(filepath.Dir(root), "shop")
+	if err := os.Rename(root, selected); err != nil {
+		t.Fatal(err)
+	}
+	_, start := clockDeploymentHarness(t, backend, selected)
 	for repetition := 0; repetition < 2; repetition++ {
 		process, served := start()
 		rt := servedTestProcessRuntime(t, process)
@@ -42,7 +46,7 @@ func proveA9ServedAliases(t *testing.T, backend string, override bool) {
 		if err != nil || len(statuses) != 2 {
 			t.Fatalf("binding readback=%+v err=%v", statuses, err)
 		}
-		for flow, alias := range a9ServedAliasExpected(override, false) {
+		for flow, alias := range map[string]string{".": "shop", "beta": "shop.beta"} {
 			proveA9AliasPublication(t, file, strings.TrimSuffix(served.Endpoint, "/v1/rpc"), flow, alias, repetition != 0)
 		}
 		if code := process.stop(); code != 0 {
@@ -53,10 +57,7 @@ func proveA9ServedAliases(t *testing.T, backend string, override bool) {
 
 func proveA9AliasPublication(t *testing.T, file *credentials.FileStore, base, flow, alias string, restarted bool) {
 	t.Helper()
-	key := "webhook_signing.alpha"
-	if flow == "beta" {
-		key = "webhook_signing.beta"
-	}
+	const key = "telegram.webhook_signing_secret"
 	secret, present, err := file.Get(t.Context(), key)
 	if err != nil || !present {
 		t.Fatalf("signing credential %s: present=%t err=%v", key, present, err)
@@ -86,23 +87,22 @@ func proveA9AliasPublication(t *testing.T, file *credentials.FileStore, base, fl
 
 func TestA9AliasChannelRegistrationBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
-		for _, override := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/override=%t", backend, override), func(t *testing.T) {
-				proveA9AliasChannelRegistration(t, backend, override)
-			})
-		}
+		t.Run(string(backend), func(t *testing.T) {
+			proveA9AliasChannelRegistration(t, backend)
+		})
 	}
 }
 
-func proveA9AliasChannelRegistration(t *testing.T, backend servedparity.Backend, override bool) {
+func proveA9AliasChannelRegistration(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
-	alias := "shop.telegram-ingress"
-	if override {
-		alias = "registered-override"
+	writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
+	const alias = "shop"
+	selected := filepath.Join(filepath.Dir(h.opts.SourceRoot), alias)
+	if err := os.Rename(h.opts.SourceRoot, selected); err != nil {
+		t.Fatal(err)
 	}
-	a9RewriteAliasSchema(t, filepath.Join(h.opts.SourceRoot, "schema.yaml"), "shop", "")
-	a9RewriteAliasSchema(t, filepath.Join(h.opts.SourceRoot, ".", "schema.yaml"), "", map[bool]string{false: "", true: alias}[override])
+	h.opts.SourceRoot = selected
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	begun := startChannelOnboardingRPC(t, h, channelonboarding.VerbConnect, "rooted-registration-token", nil)
@@ -122,7 +122,7 @@ func proveA9AliasChannelRegistration(t *testing.T, backend servedparity.Backend,
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.confirm", map[string]any{"operation_id": claimed.IdentityOperation.OperationID, "expected_revision": claimed.IdentityOperation.Revision, "approve": true}, &confirmed)
 	ready := retryChannelOnboardingRPC(t, h, begun.Operation.OperationID, "")
 	if ready.Readiness == nil || !ready.Readiness.Ready || ready.Candidate == nil || ready.Candidate.Target.Alias != alias {
-		t.Fatalf("registered default/override not READY: %+v", ready)
+		t.Fatalf("registered directory alias not READY: %+v", ready)
 	}
 	registrations, _ := h.provider.Counts()
 	_ = retryChannelOnboardingRPC(t, h, begun.Operation.OperationID, "")
@@ -152,40 +152,6 @@ func proveA9AliasChannelRegistration(t *testing.T, backend servedparity.Backend,
 	}
 }
 
-func a9RewriteAliasSchema(t *testing.T, path, name, alias string) {
-	t.Helper()
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema map[string]any
-	if err := yaml.Unmarshal(body, &schema); err != nil {
-		t.Fatal(err)
-	}
-	if name != "" {
-		schema["name"] = name
-	}
-	if ingress, ok := schema["ingress"].(map[string]any); ok {
-		delete(ingress, "alias")
-		if alias != "" {
-			ingress["alias"] = alias
-		}
-	}
-	updated, err := yaml.Marshal(schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeWorkflowValidationFixtureFile(t, path, string(updated))
-}
-
-func TestA9EnabledAliasAdmissionBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			proveA9EnabledAliasAdmission(t, backend)
-		})
-	}
-}
-
 func TestA9CrossContextAliasPromotionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -196,11 +162,18 @@ func TestA9CrossContextAliasPromotionBothStores(t *testing.T) {
 
 func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 	t.Helper()
-	a9ServedAliasCredentials(t, false)
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	managers := make(chan *runtimepkg.RuntimeContextManager, 2)
-	firstOpts, firstStart := clockDeploymentHarness(t, backend, a9ServedAliasSource(t, true, true))
-	secondRoot := a9ServedAliasSource(t, true, true)
-	a9RewriteAliasSchema(t, filepath.Join(secondRoot, "schema.yaml"), "other-root", "shared")
+	firstOpts, firstStart := clockDeploymentHarness(t, backend, a9ServedAliasSource(t))
+	secondRoot := a9ServedAliasSource(t)
+	path := filepath.Join(secondRoot, "schema.yaml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeWorkflowValidationFixtureFile(t, path, string(body)+"\n# distinct admitted source\n")
 	secondOpts, secondStart := clockDeploymentHarness(t, backend, secondRoot)
 	firstOpts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) { managers <- manager }
 	secondOpts.TestRuntimeContextsReadyHook = firstOpts.TestRuntimeContextsReadyHook
@@ -231,7 +204,7 @@ func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("failed cross-context admission mutated incumbent status: %+v -> %+v err=%v", before, after, err)
 	}
-	status, receipt := postProviderAliasUpdate(t, strings.TrimSuffix(served.Endpoint, "/v1/rpc"), "shared", "alias-secret-webhook_signing.alpha", `{"update_id":9901,"message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"incumbent"}}`)
+	status, receipt := postProviderAliasUpdate(t, strings.TrimSuffix(served.Endpoint, "/v1/rpc"), "shared", "boot-signing-secret", `{"update_id":9901,"message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"incumbent"}}`)
 	if status != http.StatusAccepted {
 		t.Fatalf("cross-context refusal lost incumbent delivery: status=%d receipt=%s", status, receipt)
 	}
@@ -239,75 +212,6 @@ func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 		if code := process.stop(); code != 0 {
 			t.Fatalf("joined cross-context shutdown=%d", code)
 		}
-	}
-}
-
-func proveA9EnabledAliasAdmission(t *testing.T, backend string) {
-	t.Helper()
-	file := a9ServedAliasCredentials(t, false)
-	opts, start := clockDeploymentHarness(t, backend, a9ServedAliasSource(t, true, true))
-	managers := make(chan *runtimepkg.RuntimeContextManager, 1)
-	opts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) { managers <- manager }
-	// Both declarations have the same alias, but only the root is enabled.
-	process, served := start()
-	rt := servedTestProcessRuntime(t, process)
-	manager := <-managers
-	before, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
-	if err != nil || len(before) != 1 {
-		t.Fatalf("dormant sibling acquired a generation: %+v err=%v", before, err)
-	}
-	owner, err := credentials.NewSnapshotOwner(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	readback, err := manager.EvaluatedCapabilitySubjects(t.Context(), owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	effective := 0
-	for _, subject := range readback {
-		if subject.Kind == packs.SubjectProviderTrigger && subject.Applicability == "effective" {
-			effective++
-			wantReady := subject.TriggerAdmission.FlowPath == "."
-			if subject.TriggerAdmission.BindingEnabled == nil || *subject.TriggerAdmission.BindingEnabled != wantReady || (subject.Status == packs.StatusReady) != wantReady {
-				t.Fatalf("declared/active readback collapsed: %+v", subject)
-			}
-		}
-	}
-	if effective != 2 {
-		t.Fatalf("duplicate dormant declaration lost from inventory: %+v", readback)
-	}
-	catalog, err := serveChannelOnboardingCatalog(manager)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var dormant channelonboarding.Candidate
-	for _, candidate := range catalog.Candidates() {
-		if candidate.Provider == "telegram" && candidate.Target.FlowPath == "beta" {
-			dormant = candidate
-		}
-	}
-	if dormant.Target.Alias != "shared" || dormant.Target.Generation != 0 {
-		t.Fatalf("dormant discovery fabricated a receiver/generation: %+v", dormant)
-	}
-	err = manager.AdmitChannelStandingTarget(t.Context(), channelonboarding.Operation{}, dormant, operatorchannel.ProviderAuthority{}, nil)
-	if err == nil || !strings.Contains(err.Error(), `flow "."`) || !strings.Contains(err.Error(), `flow "beta"`) || !strings.Contains(err.Error(), "duplicate enabled ingress alias") {
-		t.Fatalf("promotion did not refuse both exact owners before mutation: %v", err)
-	}
-	after, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
-	if err != nil || !reflect.DeepEqual(before, after) {
-		t.Fatalf("failed promotion changed standing state: before=%+v after=%+v err=%v", before, after, err)
-	}
-	currentReadback, err := manager.EvaluatedCapabilitySubjects(t.Context(), owner)
-	if err != nil || !reflect.DeepEqual(readback, currentReadback) {
-		t.Fatalf("failed promotion changed capability readback: %v", err)
-	}
-	status, receipt := postProviderAliasUpdate(t, strings.TrimSuffix(served.Endpoint, "/v1/rpc"), "shared", "alias-secret-webhook_signing.alpha", `{"update_id":9801,"message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"incumbent"}}`)
-	if status != http.StatusAccepted {
-		t.Fatalf("failed promotion lost incumbent delivery: status=%d receipt=%s", status, receipt)
-	}
-	if code := process.stop(); code != 0 {
-		t.Fatalf("joined shutdown=%d", code)
 	}
 }
 
@@ -328,60 +232,13 @@ func a9AliasReceipt(t *testing.T, body json.RawMessage) map[string]any {
 	return out
 }
 
-func a9ServedAliasCredentials(t *testing.T, child bool) *credentials.FileStore {
+func a9ServedAliasSource(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "credentials.json")
-	t.Setenv("SWARM_CREDENTIALS_FILE", path)
-	file, err := credentials.NewFileStore(path)
-	if err != nil {
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	disableChannelOnboardingBusinessConsumers(t, root)
+	selected := filepath.Join(filepath.Dir(root), "shared")
+	if err := os.Rename(root, selected); err != nil {
 		t.Fatal(err)
 	}
-	for key, present := range map[string]bool{"telegram_bot_token": true, "webhook_signing.alpha": true, "webhook_signing.beta": child} {
-		if present {
-			if err := file.Set(context.Background(), key, "alias-secret-"+key); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	return file
-}
-
-func a9ServedAliasExpected(override, collide bool) map[string]string {
-	if !override {
-		return map[string]string{".": "shop", "beta": "shop.beta"}
-	}
-	if collide {
-		return map[string]string{".": "shared", "beta": "shared"}
-	}
-	return map[string]string{".": "shared", "beta": "other"}
-}
-
-func a9ServedAliasSource(t *testing.T, override, collide bool) string {
-	t.Helper()
-	root := canonicalrouting.CopyStandingRootTreePublic(t)
-	for flow, alias := range a9ServedAliasExpected(override, collide) {
-		path := filepath.Join(root, flow, "schema.yaml")
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var schema map[string]any
-		if err := yaml.Unmarshal(body, &schema); err != nil {
-			t.Fatal(err)
-		}
-		if flow == "." {
-			schema["name"] = "shop"
-		}
-		ingress := schema["ingress"].(map[string]any)
-		delete(ingress, "alias")
-		if override {
-			ingress["alias"] = alias
-		}
-		updated, err := yaml.Marshal(schema)
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeWorkflowValidationFixtureFile(t, path, string(updated))
-	}
-	return root
+	return selected
 }

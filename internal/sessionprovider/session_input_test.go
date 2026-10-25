@@ -282,7 +282,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				})
 			}
 			foreignProvider, err := packartifact.LoadProviderFS(fstest.MapFS{
-				"whatsapp/manifest.yaml": {Data: []byte("version: 2.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n")},
+				"whatsapp/manifest.yaml": {Data: []byte("version: 2.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, message, edit, revoke]}, cannot: [execute code]}\n")},
 				"whatsapp/trigger.yaml":  {Data: manifest.SourceBytes()},
 			}, "whatsapp", "0.7.0")
 			if err != nil {
@@ -358,6 +358,7 @@ func sessionInputManifestFixture(t *testing.T) providertriggers.Manifest {
 	t.Helper()
 	body := string(incomingNormalizationFixture(t).SourceBytes())
 	body = strings.Replace(body, "secret: {required: true}\nsignature: {type: token_equality, header: X-Fixture-Signature}\n", "transport: session\nack: {mode: durable_before_dispatch}\n", 1)
+	body = strings.TrimPrefix(body, "transport: webhook\n")
 	body = strings.ReplaceAll(body, "      provider_timestamp_ms:\n", `      entry_invocation:
         from: entry_invocation
         optional: true
@@ -371,7 +372,7 @@ func sessionInputManifestFixture(t *testing.T) providertriggers.Manifest {
       provider_timestamp_ms:
 `)
 	provider, err := packartifact.LoadProviderFS(fstest.MapFS{
-		"whatsapp/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {}, cannot: [execute code]}\n")},
+		"whatsapp/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, message, edit, revoke]}, cannot: [execute code]}\n")},
 		"whatsapp/trigger.yaml":  {Data: []byte(body)},
 	}, "whatsapp", "0.7.0")
 	if err != nil {

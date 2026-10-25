@@ -28,6 +28,7 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				selected = newTestPostgresStore(t, db)
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 				ID: "receiver-storage-proof", Identity: testAgentIdentity(t, "receiver-storage-proof", "review/item"),
 				ExecutionMode: "live", Role: "worker", Type: "worker", Model: "regular", LLMBackend: "claude_cli",

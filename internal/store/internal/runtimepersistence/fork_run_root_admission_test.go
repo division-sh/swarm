@@ -35,7 +35,7 @@ func TestS1ForkRunCreationKeepsTargetRootAndParentHistoryBothStores(t *testing.T
 			a, pathA := admittedRootForStorage(t, "fork-parent")
 			b, pathB := admittedRootForStorage(t, "fork-target")
 			unretained, _ := admittedRootForStorage(t, "fork-unretained")
-			ctx := testAuthorActivityContextForBundle(a.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(a.Artifact().BundleHash()), selected)
 			for _, source := range []sourceartifact.RootedSource{a, b} {
 				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 					t.Fatal(err)

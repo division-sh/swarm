@@ -30,7 +30,7 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 					"scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "scout/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "scout/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if keyed {
-					documents["schema.yaml"] = "name: root-construction\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n"
+					documents["schema.yaml"] = "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n"
 					documents["events.yaml"] = "task.started:\n  request_id: text\n"
 					documents["entities.yaml"] = "request:\n  request_id: text\n"
 				}

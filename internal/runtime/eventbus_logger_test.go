@@ -143,6 +143,27 @@ func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 			t.Fatalf("apply authored timer payload: %v", err)
 		}
 	}
+	timeoutAdmitter := testRuntimePayloadAdmitter(t, loadRootPayloadBundle(t, "turn.aborted:\n", ""))
+	actorSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: "actor-instance"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventType := range []events.EventType{"turn.aborted", "turn.undeclared"} {
+		timeout := eventtest.RuntimeControlWithRoutingSource(uuid.NewString(), eventType, "agent-turn-timeout", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, actorSource, time.Time{})
+		proof, err := timeoutAdmitter(context.Background(), timeout, events.EventPayloadProducer(timeout, "."))
+		if eventType == "turn.undeclared" {
+			if err == nil || !strings.Contains(err.Error(), "not declared by flow") || proof.Valid() {
+				t.Fatalf("undeclared timeout payload admission: %v", err)
+			}
+			continue
+		}
+		if err != nil || !proof.Binding().Producer().IsAuthored() || proof.Binding().FlowID() != "." {
+			t.Fatalf("authored timeout payload admission: %v", err)
+		}
+		if _, err := events.ApplyPayloadAdmission(timeout, proof); err != nil {
+			t.Fatalf("apply authored timeout payload: %v", err)
+		}
+	}
 }
 
 func TestRuntimePayloadAdmitter_ClassifiesGeneratedActivitySchema(t *testing.T) {

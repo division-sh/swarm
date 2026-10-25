@@ -521,7 +521,7 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 			return result.Acknowledged(), result.Err()
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true)
 		},
 		deliveries: postgresDeliveryAdapter,
 		loadSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
@@ -569,7 +569,7 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 			return result.Acknowledged(), result.Err()
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
 		},
 		deliveries: sqliteDeliveryAdapter,
 		loadSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {

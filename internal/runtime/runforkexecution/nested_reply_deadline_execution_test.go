@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -81,10 +82,10 @@ func (p *nestedDeadlineWorkerHold) NotifyLifecycle(ctx context.Context, signal l
 // selected child alone can fire the original, overdue deadlines.
 func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource) (*rootruntime.Runtime, func()) {
 	t.Helper()
-	return nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+	return nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, nil)
 }
 
-func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture) (*rootruntime.Runtime, func()) {
+func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, credentials runtimecredentials.Store) (*rootruntime.Runtime, func()) {
 	t.Helper()
 	nodes, err := pipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
@@ -95,6 +96,7 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 	rt, err := rootruntime.NewRuntime(ctx, rootruntime.RuntimeDeps{
 		Config: &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4}, LLM: config.LLMConfig{Backend: "anthropic"}},
 		Options: rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
+			Credentials:        credentials,
 			SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
 			WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}},
 		WorkflowPersistence: p.workflow, EventStore: p.events, EventBusDurable: p.busDurable,

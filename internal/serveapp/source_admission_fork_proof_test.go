@@ -30,6 +30,7 @@ import (
 func Test2376VerifyServeArtifactParityBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			root := canonicalrouting.CopyLifecycleForkSource(t, true)
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			var out, errOut bytes.Buffer
@@ -91,6 +92,7 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, condition := range []string{"incompatible", "malformed range", "unknown path", "retired name", "oversized version", "oversized platform_version"} {
 			t.Run(backend+"/"+condition, func(t *testing.T) {
+				configureStandingLifecycleCredentials(t)
 				root := canonicalrouting.CopyLifecycleForkSource(t, true)
 				opts, start := lifecycleRestartHarness(t, backend, root)
 				process, selected := start()
@@ -219,6 +221,7 @@ func observe2376RuntimeConstruction(t *testing.T, before func()) {
 func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			previous := buildSelectedAPICapabilities
 			buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 				caps, err := previous(owner, req)
@@ -327,7 +330,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 						missing := copy2376ForkSourceWithFeed(t)
 						write2376SourceFile(t, missing, "README.md", "Unstored source D.\n")
 						args = append(args, "--source", missing)
-						want = "serve"
+						want = "BUNDLE_UNAVAILABLE: load exact rooted selected source: " + sourceartifact.ErrRootAdmissionMissing.Error()
 					} else {
 						args = append(args, "--pin", "work.requested@v1", "--pin", "work.requested@"+string(imported.Candidate.VersionID))
 					}
@@ -335,7 +338,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					var beforeRun map[string]any
 					requireServedJSONRPCResult(t, servedB.Endpoint, "run.get", map[string]any{"run_id": p.runID}, &beforeRun)
 					out, errOut, code := runServedCLICommand(t, servedB.Endpoint, args)
-					if code == 0 || !strings.Contains(errOut, want) {
+					if code == 0 || (name == "missing" && code != 3) || !strings.Contains(errOut, want) {
 						t.Fatalf("refusal=%d %s / %s", code, out, errOut)
 					}
 					var afterRun map[string]any

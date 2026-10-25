@@ -284,7 +284,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
-	if _, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, executionposture.MockOnly); err != nil {
+	if _, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, executionposture.MockOnly, true); err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("test completeness: %w", err))
 	}
 	var plans []scenarioderivation.Plan

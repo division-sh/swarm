@@ -101,7 +101,7 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				for _, member := range originalBundle.SourceArtifact.Entries() {
 					body := member.Bytes()
 					if member.Label() == "schema.yaml" {
-						body = []byte("name: revised-creation-proof\n")
+						body = []byte("stages: []\n# fixture: revised-creation-proof\n")
 					}
 					path := filepath.Join(root, member.Label())
 					if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

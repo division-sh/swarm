@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -25,9 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -36,14 +35,30 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 		t.Run(backend, func(t *testing.T) {
 			_, selected := newAgentFixtureAuthorityStore(t, backend)
 			repo := pipeline.WorkflowRepoRoot()
-			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyProviderReceiverInitialization(t), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			root := filepath.Join(t.TempDir(), "receiver")
+			for name, contents := range map[string]string{
+				"manifest.yaml":               "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":                 "pins:\n  inputs: [conversation.received]\n  outputs: [conversation.received]\nconnect:\n  - {event: conversation.received, from: ., to: telegram-chat, resolution: select-or-create}\n",
+				"events.yaml":                 "conversation.received:\n  conversation_reference: text\n  conversation_scope: text\n  external_account_reference: text\n  provider_message_reference: integer\n  text: text\n",
+				"telegram-chat/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"telegram-chat/schema.yaml":   "instance: conversation_reference\nauto_emit_on_create:\n  event: chat.initialized\npins:\n  inputs: [conversation.received]\n",
+				"telegram-chat/entities.yaml": "chat:\n  conversation_reference: {type: text, _unused_reason: canonical receiver key}\n  text: text\n  provider_message_reference: integer\n  enabled: {type: boolean, initial: false}\n",
+				"telegram-chat/events.yaml":   "chat.initialized:\n  conversation_reference: text\n  text: text\n  provider_message_reference: integer\n  enabled: boolean\n",
+				"telegram-chat/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [conversation.received, chat.initialized]\n  event_handlers:\n    conversation.received:\n      guard: {check: payload.conversation_reference != ''}\n    chat.initialized:\n      data_accumulation:\n        writes: [text, provider_message_reference, enabled]\n",
+			} {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 			if err != nil {
 				t.Fatal(err)
 			}
-			source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), packfixture.TriggerCatalog(t))
-			if err != nil {
-				t.Fatal(err)
-			}
+			source := semanticview.Wrap(bundle)
 			rooted, err := bundle.RootedSource()
 			if err != nil {
 				t.Fatal(err)
@@ -75,6 +90,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			probe := lifecycleprobe.New()
 			publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), bus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: fact,
+				PayloadAdmitter: runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact),
 				MutationContext: func(work context.Context) (context.Context, error) {
 					return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
 				},
@@ -83,15 +99,20 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 					return am.PrepareFlowInstanceActivation(ctx, req)
 				}),
 				FlowActivationFinalizer: pipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, activation pipeline.CommittedFlowInstanceActivation) error {
-					finalized = append(finalized, activation)
 					err := am.FinalizeCommittedFlowInstanceActivation(ctx, activation)
-					if err == nil {
-						readiness, found, readErr := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, activation.Plan.Identity.Route())
-						if readErr != nil || !found || (readiness.Phase != pipeline.FlowAttachmentReady) || (activation.Plan.Readiness.CreationEvent == nil) != readiness.CreationEventEmittedAt.IsZero() {
-							err = fmt.Errorf("readiness incomplete inside initial finalizer: %+v found=%v err=%v", readiness, found, readErr)
+					pending := []pipeline.CommittedFlowInstanceActivation{activation}
+					for len(pending) > 0 {
+						current := pending[0]
+						pending = append(pending[1:], current.Children...)
+						finalized = append(finalized, current)
+						if err == nil {
+							readiness, found, readErr := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, current.Plan.Identity.Route())
+							if readErr != nil || !found || (readiness.Phase != pipeline.FlowAttachmentReady) || (current.Plan.Readiness.CreationEvent == nil) != readiness.CreationEventEmittedAt.IsZero() {
+								err = fmt.Errorf("readiness incomplete inside initial finalizer: %+v found=%v err=%v", readiness, found, readErr)
+							}
 						}
+						finalizationErrors = append(finalizationErrors, err)
 					}
-					finalizationErrors = append(finalizationErrors, err)
 					return err
 				}),
 			})
@@ -130,12 +151,12 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			admitAgentFixtureFlowGrant(t, ctx, grant)
 			// Never Run/Resume/Ensure: only this first publication may finalize
 			// readiness. An eventual recovery cannot conceal the callback error.
-			apiEndpoint, err := bus.NewRootInputAPIEventPublicationEndpoint(source, "inbound.telegram.text_message")
+			apiEndpoint, err := bus.NewRootInputAPIEventPublicationEndpoint(source, "conversation.received")
 			if err != nil {
 				t.Fatal(err)
 			}
 			eventID := uuid.NewString()
-			event := eventtest.RunCreatingRootIngress(eventID, "inbound.telegram.text_message", "operator-api", "", []byte(`{"conversation_reference":"2307","conversation_scope":"direct","external_account_reference":"2307","provider_message_reference":7,"text":"first-pass"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+			event := eventtest.RunCreatingRootIngress(eventID, "conversation.received", "operator-api", "", []byte(`{"conversation_reference":"2307","conversation_scope":"direct","external_account_reference":"2307","provider_message_reference":7,"text":"first-pass"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 			request := apiidempotency.Request{Method: "event.publish", Actor: apiidempotency.BearerActor("operator"), IdempotencyKey: "first-pass", RequestHash: "exact-request"}
 			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
 			initialEvent, err := json.Marshal(map[string]any{"event_name": event.Type(), "payload": json.RawMessage(event.Payload()), "emitter": "operator-api", "entity_id": "", "flow_instance": "", "source_event_id": ""})
@@ -153,7 +174,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 				t.Fatal(err)
 			}
 			if len(finalizationErrors) != 2 || len(finalized) != 2 {
-				t.Fatalf("first-pass finalizations=%d", len(finalizationErrors))
+				t.Fatalf("first-pass finalized constructions=%d", len(finalizationErrors))
 			}
 			var plan pipeline.FlowInstanceActivationPlan
 			seen := make(map[string]bool)
@@ -212,7 +233,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			}
 			got, replay, err = publisher.PublishAPIEventWithRunCreationAcknowledged(ctx, event, &apiEndpoint, request, completion, &runCreation)
 			if err != nil || !replay || got.ResourceID != eventID || len(finalizationErrors) != 2 {
-				t.Fatalf("duplicate replay reran finalization: replay=%v callbacks=%d err=%v", replay, len(finalizationErrors), err)
+				t.Fatalf("duplicate replay reran finalization: replay=%v constructions=%d err=%v", replay, len(finalizationErrors), err)
 			}
 		})
 	}

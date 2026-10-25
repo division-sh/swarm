@@ -59,11 +59,15 @@ func sourceWithDirectoryTriggerSchemas(source semanticview.Source, providers pac
 	if err != nil {
 		return nil, err
 	}
-	inputs, err := bindProviderTriggerInputPins(schemaSource, compiled)
+	outputs, err := bindProviderTriggerOutputPins(schemaSource, compiled)
 	if err != nil {
 		return nil, err
 	}
-	outputs, err := bindProviderTriggerOutputPins(schemaSource, compiled)
+	inputs, err := bundle.BindConnectedProviderInputPins(outputs)
+	if err != nil {
+		return nil, err
+	}
+	inputs, err = bindProviderTriggerInputPins(schemaSource, compiled, inputs)
 	if err != nil {
 		return nil, err
 	}

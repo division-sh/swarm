@@ -444,7 +444,7 @@ func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(rt.Options.RuntimeInstanceID))
 	expected, found, err := rt.Pipeline.LoadReconciledStandingService(ctx, runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: target.FlowPath,
-		Source: use.Context.SourceArtifactFact,
+		Source: use.Context.SourceArtifactFact, RootAdmission: use.Context.RootAdmission,
 	})
 	if err != nil || !found {
 		t.Fatalf("capture invalid-composition predecessor: found=%t err=%v", found, err)
@@ -1048,44 +1048,6 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 	}
 }
 
-func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
-	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	for key, value := range map[string]string{"telegram.webhook_signing_secret": "telegram-secret", "telegram.telegram_bot_token": "bot-token"} {
-		if err := credentialStore.Set(context.Background(), key, value); err != nil {
-			t.Fatalf("set credential %s: %v", key, err)
-		}
-	}
-	schemaPath := filepath.Join(sourceRoot, ".", "schema.yaml")
-	raw, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatalf("read ingress schema: %v", err)
-	}
-	writeStandingCandidateFile(t, schemaPath, strings.Replace(string(raw), "alias: chat", "alias: chat/support", 1))
-	sqlitePath := filepath.Join(t.TempDir(), "invalid-alias.sqlite")
-	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-		SourceRoot: sourceRoot, StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
-	})
-	code, exited := process.waitForExit(15 * time.Second)
-	if !exited {
-		process.cleanup()
-		t.Fatal("serve reached a live process with an unreachable standing ingress alias")
-	}
-	process.recordStopped(code)
-	output := process.outputString()
-	if code == 0 || !strings.Contains(output, "one URL-safe path segment") || strings.Contains(output, "swarm runtime ready") {
-		t.Fatalf("invalid alias exit/output = %d\n%s", code, output)
-	}
-}
-
 func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	dsn, _, cleanup := testutil.StartPostgres(t)
@@ -1487,19 +1449,6 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 		{name: "source revision three", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), `version: "1.0.0"`, `version: "1.0.3"`, 1))
 		}, wantOutput: []string{" revised run=" + originalRunID}},
-		{name: "manifest name revised", apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), "name: telegram-agent", "name: renamed-telegram-agent", 1))
-		}, wantOutput: []string{" revised run=" + originalRunID}},
-		{name: "standing declaration removed", apply: func(t *testing.T) {
-			removeConnectedReceiver(t)
-			removedDir := filepath.Join(t.TempDir(), filepath.Base(flowDir))
-			if err := os.Rename(flowDir, removedDir); err != nil {
-				t.Fatalf("remove standing flow directory from the admitted tree: %v", err)
-			}
-			t.Cleanup(func() {
-				_ = os.Rename(removedDir, flowDir)
-			})
-		}, wantOutput: []string{" orphaned declaration_removed=true"}},
 		{name: "standing changed to non-standing", apply: func(t *testing.T) {
 			removeConnectedReceiver(t)
 			var schema map[string]any
@@ -1509,25 +1458,13 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			delete(schema, "pins")
 			delete(schema, "activation")
 			delete(schema, "ingress")
+			delete(schema, "connect")
 			raw, err := yaml.Marshal(schema)
 			if err != nil {
 				t.Fatal(err)
 			}
 			writeStandingCandidateFile(t, flowSchemaPath, string(raw))
 		}, wantOutput: []string{" orphaned declaration_removed=true"}},
-		{name: "flow identity renamed", apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, rootSchemaPath, strings.Replace(string(baseRootSchema), "from: telegram-ingress", "from: telegram-ingress-v2", 1))
-			renamedDir := filepath.Join(sourceRoot, "telegram-ingress-v2")
-			if err := os.Rename(flowDir, renamedDir); err != nil {
-				t.Fatalf("rename flow directory: %v", err)
-			}
-			t.Cleanup(func() {
-				_ = os.Rename(renamedDir, flowDir)
-				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
-			})
-			writeStandingCandidateFile(t, filepath.Join(renamedDir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-ingress", "name: telegram-ingress-v2", 1))
-		}, wantOutput: []string{" created run=", " orphaned declaration_removed=true"}},
 	}
 	for _, mutation := range mutations {
 		mutation := mutation

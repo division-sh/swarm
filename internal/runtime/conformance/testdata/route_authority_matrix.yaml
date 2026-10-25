@@ -629,7 +629,6 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: source_artifacts}
     proof_refs:
       - {kind: go_test, name: TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres}
-      - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON}
       - {kind: go_test, name: TestTier12RuntimeFork_SelectedContractForkExecutionFixture}
       - {kind: proof_projection, projection: required-full}
     notes: >

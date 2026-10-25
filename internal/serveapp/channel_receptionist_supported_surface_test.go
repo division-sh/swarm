@@ -40,6 +40,9 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			if err := credentials.Set(context.Background(), "telegram.telegram_bot_token", "bot-token"); err != nil {
 				t.Fatal(err)
 			}
+			if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "boot-signing-secret"); err != nil {
+				t.Fatal(err)
+			}
 			if err := credentials.Set(context.Background(), "ANTHROPIC_API_KEY", "anthropic-key"); err != nil {
 				t.Fatal(err)
 			}

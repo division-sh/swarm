@@ -297,6 +297,57 @@ func TestRunScopedRuntimeControlPreservesExactRootRoutingSource(t *testing.T) {
 	if !EventPayloadProducer(stage, ".").IsPlatform() {
 		t.Fatal("platform stage timer lost its catalog producer")
 	}
+	for _, flowID := range []string{".", "producer"} {
+		timeout := timer.Clone()
+		timeout.producer, _ = NewProducerIdentity(EventProducerPlatform, "agent-turn-timeout")
+		timeout.routingSource, err = NewFlowOwnedControlRoutingSource(RouteIdentity{FlowID: flowID, FlowInstance: "actor-instance", EntityID: "entity-root"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		timeout.envelope.Source = timeout.routingSource.Route()
+		input.FlowID = flowID
+		binding, err := NewPayloadSchemaBinding(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		restored, err := RestoreEventPayloadSchemaBinding(input, timeout.AdmissionClass(), timeout.Type(), timeout.Producer())
+		if err != nil || !restored.Equal(binding) {
+			t.Fatalf("authored timeout binding restore: %v", err)
+		}
+		proof, err := NewPayloadAdmission([]byte(`{}`), restored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ApplyPayloadAdmission(timeout, proof); err != nil {
+			t.Fatalf("apply exact actor timeout binding: %v", err)
+		}
+		wrongProducer := timeout.Clone()
+		wrongProducer.producer, _ = NewProducerIdentity(EventProducerPlatform, "runtime.other")
+		if _, err := ApplyPayloadAdmission(wrongProducer, proof); err == nil {
+			t.Fatal("timeout binding admitted a different runtime emitter")
+		}
+		for _, class := range []EventAdmissionClass{EventAdmissionRuntimeDiagnostic, EventAdmissionChild, EventAdmissionSelectedForkReplay} {
+			wrongClass := timeout.Clone()
+			wrongClass.admissionClass = class
+			if _, err := ApplyPayloadAdmission(wrongClass, proof); err == nil {
+				t.Fatalf("timeout binding admitted a different event class %q", class)
+			}
+			if _, err := RestoreEventPayloadSchemaBinding(input, class, timeout.Type(), timeout.Producer()); err == nil {
+				t.Fatalf("timeout restore admitted a different event class %q", class)
+			}
+		}
+		for _, flow := range []string{"", "foreign", " . "} {
+			if err := EventPayloadProducer(timeout, flow).ValidateForEvent(timeout); err == nil {
+				t.Fatalf("timeout admitted foreign flow %q", flow)
+			}
+		}
+		for _, reserved := range []EventType{"platform.stage_timer", "platform.join_complete", "platform.join_timeout"} {
+			timeout.eventType = reserved
+			if _, err := ApplyPayloadAdmission(timeout, proof); err == nil {
+				t.Fatalf("actor timeout binding admitted reserved event %q", reserved)
+			}
+		}
+	}
 }
 
 func TestAdmitRuntimeControlEventTypeBindsFlowOwnedSourceExactly(t *testing.T) {

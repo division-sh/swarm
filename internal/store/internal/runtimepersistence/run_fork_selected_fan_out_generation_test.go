@@ -159,10 +159,15 @@ func activateSelectedForkFanOutForTest(t *testing.T, ctx context.Context, fixtur
 	if err != nil || len(sourceEvents) != 0 {
 		t.Fatalf("settled fan-out source unexpectedly has replay frontier: %v err=%v", sourceEvents, err)
 	}
+	processEvidence, err := process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
 	activation, err := fixture.store.(interface {
 		ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 	}).ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID: child.ForkRunID, AllowSourceFreeze: true, ExecutionSource: source,
+		Process: processEvidence.LeaseStamp(), OriginalRootAdmission: request.OriginalRootAdmission, ForkOperation: request.ForkOperation,
 		DataPins: child.DataPins, InheritedSchedules: request.Readiness, AllowedSourceEventIDs: sourceEvents,
 		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
 	})

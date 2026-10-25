@@ -33,6 +33,7 @@ func CopyRootInputFeed(t testing.TB, kind DeploymentFeedRoot) string {
 	switch kind {
 	case DeploymentFeedConnectedRoot:
 	case DeploymentFeedSameFlowRoot, DeploymentFeedKeyedRoot:
+		delete(files, "registry/manifest.yaml")
 		delete(files, "registry/schema.yaml")
 		delete(files, "registry/entities.yaml")
 		delete(files, "registry/nodes.yaml")
@@ -206,7 +207,9 @@ func CopyFiniteSelectedFeedClosure(t testing.TB, offender FiniteClosureOffender)
 		worker = "stages: {done: {final: true}}\n"
 	}
 	files := finiteSelectedFeedFiles("stages: {done: {final: true}}\n", "stages: {active: {}}\n", worker)
+	files["worker/support/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 	files["worker/support/schema.yaml"] = "stages: {done: {final: true}}\n"
+	files["worker/support/leaf/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 	files["worker/support/leaf/schema.yaml"] = leaf
 	return copyFiniteSource(t, files)
 }

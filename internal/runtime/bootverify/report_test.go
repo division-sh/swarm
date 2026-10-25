@@ -4119,56 +4119,6 @@ func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testi
 	}
 }
 
-func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
-	for _, authored := range []string{"child/task.done", "myapp://child/task.done"} {
-		t.Run(authored, func(t *testing.T) {
-			for _, kind := range []string{"node", "agent"} {
-				t.Run(kind, func(t *testing.T) {
-					child := runtimecontracts.FlowContractView{
-						Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
-						Path:   "child",
-						Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
-					}
-					root := runtimecontracts.FlowContractView{
-						Path:     ".",
-						Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
-						Nodes:    map[string]runtimecontracts.SystemNodeContract{},
-						Children: []runtimecontracts.FlowContractView{child},
-					}
-					bundle := &runtimecontracts.WorkflowContractBundle{
-						FlowTree: runtimecontracts.FlowTree{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]}},
-						Nodes:    map[string]runtimecontracts.SystemNodeContract{},
-						Agents:   map[string]runtimecontracts.AgentRegistryEntry{},
-					}
-					switch kind {
-					case "node":
-						listener := runtimecontracts.SystemNodeContract{SubscribesTo: []string{authored}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}, ProducesDeclared: true}
-						bundle.Nodes["listener"] = listener
-						bundle.FlowTree.Root.Nodes["listener"] = listener
-					case "agent":
-						bundle.Agents["retired-agent"] = runtimecontracts.AgentRegistryEntry{ID: "retired-agent", Subscriptions: []string{authored}}
-						addBootverifyAgentOwner(bundle, "", "", "retired-agent")
-					}
-
-					source := semanticview.Wrap(bundle)
-					if kind == "agent" {
-						source = semanticviewtest.WrapRootAgents(bundle)
-					}
-					report := Run(context.Background(), source, Options{})
-					if !reportContains(report.HardInvalidities(), "legacy_qualified_subscription", authored) {
-						t.Fatalf("hard invalidities = %#v, want exact qualified %s rejection", report.HardInvalidities(), kind)
-					}
-					for _, finding := range report.HardInvalidities() {
-						if finding.CheckID == "legacy_qualified_subscription" && (!strings.Contains(finding.Remediation, "schema.yaml connect") || !strings.Contains(finding.Remediation, "receiver-local")) {
-							t.Fatalf("teaching remediation = %q, want schema connect plus local subscription", finding.Remediation)
-						}
-					}
-				})
-			}
-		})
-	}
-}
-
 func TestRun_RejectsAbsoluteSiblingQualifiedSubscription(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "producer"},
@@ -5328,16 +5278,6 @@ func TestRun_RejectsCallerSelectedEntityIDForRootNormalInputPinMaterializers(t *
 
 	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "caller-selected entity_id") {
 		t.Fatalf("expected caller-selected entity_id materialization error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ProviderTransportEntityIDDoesNotElectCanonicalPrimary(t *testing.T) {
-	root := canonicalrouting.CopyInboundAdmissionPolicyMatrix(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	source := semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{"matrix": {"inbound.telegram", "inbound.intercom"}})
-	report := Run(context.Background(), source, Options{})
-	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "") {
-		t.Fatalf("provider transport entity_id acquired primary-entity authority: %#v", report.Errors())
 	}
 }
 

@@ -1,6 +1,7 @@
 package pipeline_test
 
 import (
+	"context"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -8,13 +9,14 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -97,7 +99,15 @@ func TestPublishedBarrierSelectedDeclarationDoesNotRelaxLiveAdmission(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err = eventtest.AdmitPayload(event, ".", "platform.join_complete")
+	fact, err := correlation.NewSourceArtifactFact(original.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(context.Background(), event, events.EventPayloadProducer(event, join.Node.FlowPath()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err = events.ApplyPayloadAdmission(event, payload)
 	if err != nil {
 		t.Fatal(err)
 	}

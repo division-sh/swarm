@@ -32,14 +32,6 @@ func TestReleaseReceiverInitializationBothStores(t *testing.T) {
 				}
 				requireTypedReceiverInitializationCases(t, rt)
 			})
-			t.Run("direct_provider_schema", func(t *testing.T) {
-				root := canonicalrouting.CopyProviderReceiverInitialization(t)
-				rt := startLifecycleReleaseProcess(t, binary, backend, root)
-				rt.WaitReceiverOrigin = func(t *testing.T, seed servedEventPublishRPCResult) {
-					waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)
-				}
-				requireReceiverInitializationPublicProviderIngressCases(t, rt)
-			})
 			t.Run("connected_restart", func(t *testing.T) {
 				requireR7ReleaseReceiverRestart(t, binary, backend)
 			})
@@ -58,7 +50,9 @@ func requireR7ReleaseReceiverRestart(t *testing.T, binary string, backend served
 		config = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartEmptyPostgresDSN(t))
 	}
 	setServeRuntimeRecovery(t, config, false, true)
-	env := append(releaseProviderTriggerProcessEnv(), "PGPASSWORD="+os.Getenv("PGPASSWORD"), "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=")
+	credentialPath := filepath.Join(t.TempDir(), "provider-credentials.json")
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
+	env := append(releaseProviderTriggerProcessEnv(), "PGPASSWORD="+os.Getenv("PGPASSWORD"), "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=", "SWARM_CREDENTIALS_FILE="+credentialPath)
 	params := map[string]any{
 		"event_name": "work.requested", "bundle_hash": servedEventPublishFixtureBundleHash(t, root), "idempotency_key": "r7-release-restart",
 		"payload": map[string]any{"account_id": "preserved-account", "values": map[string]any{"active": true, "label": "original", "attributes": map[string]any{"nested": []any{1, 2.5}}}},

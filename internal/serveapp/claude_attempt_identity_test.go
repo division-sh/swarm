@@ -16,12 +16,12 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentframe "github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -47,10 +47,12 @@ import (
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -105,6 +107,7 @@ type claudeAttemptProofStore interface {
 	runtimellm.ConversationPersistence
 	runtimedelivery.Store
 	PipelineObligations() runtimepipelineobligation.Store
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
@@ -201,6 +204,8 @@ type claudeAttemptProofBackend struct {
 	db       *sql.DB
 	sessions runtimesessions.Registry
 	source   runtimecorrelation.SourceArtifactFact
+	root     sourceartifact.RootAdmission
+	semantic semanticview.Source
 	workflow runtimepipeline.WorkflowPersistence
 }
 
@@ -208,7 +213,7 @@ func (b claudeAttemptProofBackend) context() context.Context {
 	if b.original != nil {
 		return b.original
 	}
-	return claudeAttemptProofContext(b.source)
+	return runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(claudeAttemptProofContext(b.source), b.source), b.root)
 }
 
 type claudeAttemptProofSpendProjection struct{}
@@ -621,8 +626,25 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		t.Fatalf("unknown Claude proof backend %q", name)
 		return claudeAttemptProofBackend{}
 	}
+	root := filepath.Join(t.TempDir(), "claude-proof")
+	cfg := claudeAttemptProofAgentConfig()
+	for name, body := range map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\npins:\n  inputs: [claude.attempt.proof.requested]\n",
+		"events.yaml":   "claude.attempt.proof.requested:\n  request: text\n",
+		"agents.yaml": fmt.Sprintf("%s:\n  type: %s\n  role: worker\n  model: regular\n  intent: {inline: %s}\n  subscriptions: [claude.attempt.proof.requested]\n",
+			cfg.ID, cfg.Type, strconv.Quote(cfg.Intent.Content)),
+	} {
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, name), body)
+	}
+	bundle := loadWorkflowValidationBundleAt(t, root)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.source = sourceartifactfixture.RequireArtifact(t, context.Background(), backend.store, rooted.Artifact())
+	backend.root, backend.semantic = rooted.Admission(), semanticview.Wrap(bundle)
 	backend.fixture = backend.store
-	backend.source = requireServeTestSourceArtifactFact(t, backend.store)
 	backend.original = serveFixtureProcessContext(t, backend.context(), backend.store)
 	process, err := agentfixture.ProcessCapability(t, backend.original, backend.store)
 	if err != nil {
@@ -681,7 +703,7 @@ func newClaudeAttemptProofManagerForGeneration(
 		BaseContext:      backend.context(),
 		LifecycleStore:   storetest.AgentLifecycleFixture(t, backend.fixture),
 		DeliveryStore:    backend.store,
-		SemanticSource:   claudeAttemptProofSemanticSource(),
+		SemanticSource:   backend.semantic,
 		Sessions:         backend.sessions,
 		SessionResetter:  backend.store,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, eventBus),
@@ -700,18 +722,6 @@ func installClaudeAttemptProofManagerTopology(t testing.TB, backend claudeAttemp
 		t.Fatalf("resolve Claude attempt proof identity: %v", err)
 	}
 	installServeTestExactAgentReadiness(t, eventBus, identity)
-}
-
-func claudeAttemptProofSemanticSource() semanticview.Source {
-	cfg := claudeAttemptProofAgentConfig()
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			cfg.ID: {
-				ID: cfg.ID, Type: cfg.Type, Role: cfg.Role, Model: cfg.Model,
-				ResolvedIntent: cfg.Intent,
-			},
-		},
-	})
 }
 
 func claudeAttemptProofAdmissionContext(t testing.TB, backend claudeAttemptProofBackend) context.Context {
@@ -765,9 +775,13 @@ func newClaudeAttemptProofEventBus(
 	if err := backend.store.ActivateDeliveryAuthority(backend.context(), authority); err != nil {
 		t.Fatalf("activate Claude proof delivery authority: %v", err)
 	}
+	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(backend.semantic)
+	if err != nil {
+		t.Fatal(err)
+	}
 	lease, err := backend.store.RegisterAuthorActivityEventCatalog(
 		runtimeauthoractivity.BundleScope(claudeAttemptProofRuntimeID, backend.source.BundleHash()),
-		[]runtimeauthoractivity.EventDescriptor{{EventType: string(claudeAttemptProofEventType), Disposition: runtimeauthoractivity.StoryDifferent}},
+		descriptors,
 	)
 	if err != nil {
 		t.Fatalf("register Claude proof author activity catalog: %v", err)
@@ -781,6 +795,7 @@ func newClaudeAttemptProofEventBus(
 		ExecutionPosture:     executionposture.Live,
 		RuntimeInstanceID:    claudeAttemptProofRuntimeID,
 		SourceArtifactFact:   backend.source,
+		ContractBundle:       backend.semantic,
 		WorkOwner:            workOwner,
 		ReceiverExecution:    eventreceiver.NormalExecution(),
 		PipelineObligations:  backend.store.PipelineObligations(),
@@ -838,7 +853,7 @@ func claudeAttemptProofAgentConfig(surfaces ...claudeAttemptProofSurface) runtim
 	}
 	cfg := runtimeactors.AgentConfig{
 		ExecutionMode: "live",
-		ID:            "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
+		ID:            "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", FlowID: ".", Model: "regular",
 		LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", ResolvedLLMProvider: "claude",
 		ResolvedLLMTransport: "cli", ResolvedModel: "sonnet",
 		Memory: agentmemory.Plan{Enabled: surface.memory}, FlowPath: "proof/inst-1",

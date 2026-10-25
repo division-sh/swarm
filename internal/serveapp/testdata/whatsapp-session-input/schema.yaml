@@ -3,6 +3,7 @@ stages:
 pins:
   inputs:
     - inbound.whatsapp.raw
+    - inbound.whatsapp.message
     - work.requested
   outputs:
     - inbound.whatsapp.message

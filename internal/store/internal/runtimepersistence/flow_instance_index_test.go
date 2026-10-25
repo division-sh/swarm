@@ -342,8 +342,12 @@ func TestR7DirectoryScopedInventoryIgnoresAmbientRunBothStores(t *testing.T) {
 			f, first := newR7KeylessIndexProof(t, backend)
 			source := semanticview.Wrap(f.bundle)
 			fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
+			rooted, err := f.bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
 			standing, err := f.workflows.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
-				BindingEnabled: true, ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: fact,
+				BindingEnabled: true, ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: fact, RootAdmission: rooted.Admission(),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -413,8 +417,12 @@ func TestR7DirectoryUnconstructedStandingRunHasNoObservationBothStores(t *testin
 			}, nil)
 			source := semanticview.Wrap(f.bundle)
 			fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
+			rooted, err := f.bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
 			standing, err := f.workflows.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
-				BindingEnabled: true, ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: fact,
+				BindingEnabled: true, ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: fact, RootAdmission: rooted.Admission(),
 			})
 			if err != nil {
 				t.Fatal(err)

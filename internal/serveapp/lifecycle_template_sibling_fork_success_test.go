@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -23,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 // Keep the original T17 success oracle active. Construction is read through
@@ -30,6 +32,7 @@ import (
 func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			var selected *selectedStoreOwner
 			executions := make(chan lifecycleTemplateForkObservation, 1)
 			failureReadback := make(chan func(), 1)
@@ -87,7 +90,11 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			if backend == servedparity.BackendExplicitPostgres {
 				store = "postgres"
 			}
-			_, native := startServedBoundaryFixture(t, store, canonicalrouting.CopyLifecycleNestedTemplates(t))
+			root := canonicalrouting.CopyLifecycleNestedTemplates(t)
+			if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+				t.Fatal(err)
+			}
+			_, native := startServedBoundaryFixture(t, store, root)
 			rt := lifecycleTemplateObservation{Endpoint: native.Endpoint, BundleHash: native.BundleHash, ReceiverStateReader: native.ReceiverStateReader}
 			runID, sourceEvent, siblings := prepareLifecycleTemplateSiblingsFromReader(t, rt)
 			waitServedRunDeliveryQuiescence(t, native.Selected.RuntimeDeps().DeliveryStore.SummarizeRun, runID)

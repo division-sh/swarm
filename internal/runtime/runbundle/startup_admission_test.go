@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -53,8 +54,22 @@ func TestAdmitPinnedSourcesRequiresCompleteObservation(t *testing.T) {
 }
 
 func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
-	first, _ := sourceartifactfixture.Rooted(t, "pinned", sourceartifactfixture.New("schema.yaml", []byte("stages:\n  pending: {}\n")))
-	second, _ := sourceartifactfixture.Rooted(t, "other", sourceartifactfixture.New("schema.yaml", []byte("stages:\n  ready: {}\n")))
+	firstArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages:\n  pending: {}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages:\n  ready: {}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := sourceartifactfixture.Rooted(t, "pinned", firstArtifact)
+	second, _ := sourceartifactfixture.Rooted(t, "other", secondArtifact)
 	hash, other := first.Admission().BundleHash(), second.Admission().BundleHash()
 	if hash == other {
 		t.Fatal("pinning fixtures must have different content")

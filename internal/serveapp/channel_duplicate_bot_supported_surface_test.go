@@ -15,6 +15,7 @@ func TestChannelDuplicatePhysicalBotRejectsDurablyWithoutStealingConnection(t *t
 		for _, credential := range []string{"duplicate-bot-token", "credential-alias"} {
 			t.Run(string(backend)+"/"+credential, func(t *testing.T) {
 				h := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 				addSecondChannelOnboardingTarget(t, h.opts.SourceRoot)
 				h.start(t)
 				defer h.stop(t)

@@ -40,7 +40,7 @@ func newCompletion2270ReleaseFixture(t *testing.T, proof *completion2270Invocati
 	if err := os.WriteFile(filepath.Join(sourceRoot, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("stages: []\n# fixture: selected completion source\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(sourceRoot)
@@ -135,9 +135,9 @@ func newCompletion2270PublishedProof(t *testing.T) *completion2270InvocationProo
 		}
 		return "", nil
 	})
-	if err := contexts.Register(runtimepkg.BundleContext{SourceArtifactFact: fact, RootAdmission: rooted.Admission(), Source: source, WorkOwner: owner,
+	if err := contexts.Register(completeServeTestPackContext(t, runtimepkg.BundleContext{SourceArtifactFact: fact, RootAdmission: rooted.Admission(), Source: source, WorkOwner: owner,
 		Runtime: &runtimepkg.Runtime{Bus: publisher, Workspace: &completion2270ObservedWorkspace{DockerManager: manager}},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	proof := &completion2270InvocationProof{}

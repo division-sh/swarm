@@ -15,6 +15,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -36,7 +37,14 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	olderEntity := uuid.NewString()
 	olderEventOnly := uuid.NewString()
 	rootA, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
-	rootB, _ := sourceartifactfixture.Rooted(t, "readback-b", sourceartifactfixture.New("agents.yaml", []byte("agents:\n  readback_b: {}\n")))
+	artifactB, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents:\n  readback_b: {}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, _ := sourceartifactfixture.Rooted(t, "readback-b", artifactB)
 	bundleAArtifact, bundleBArtifact := rootA.Artifact(), rootB.Artifact()
 	bundleA := bundleAArtifact.BundleHash()
 	bundleB := bundleBArtifact.BundleHash()

@@ -238,6 +238,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			var sourceStore interface {
 				storetest.RootedDataCatalogStore
 				runtimerunforkexecution.SourceArtifactSelectedContractSourceStore
+				runtimerunforkexecution.SelectedContractForkLifecycle
 			} = h.pg
 			if h.sqlite != nil {
 				sourceStore = h.sqlite
@@ -268,8 +269,9 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			cfg.LLM.Backend = "anthropic"
 			agentRuntime := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
 			executionCtx := worklifetime.WithOccurrence(catalogRunContext(h, sourceRunID), h.rt.WorkOccurrence())
+			operation := catalogStagedForkOperation(t, executionCtx, sourceStore, selection, sourceRunID, sourceEvent.ID())
 			materialization := materializeCatalogSelectedForkForBootResume(
-				t, executionCtx, selected, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID,
+				t, executionCtx, selected, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, operation, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID,
 			)
 			result, err := runtimerunforkexecution.ActivateSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractActivationGateRequest{
 				ForkRunID: materialization.ForkRunID, AllowSourceFreeze: true, Store: selected,
@@ -313,6 +315,7 @@ func materializeCatalogSelectedForkForBootResume(
 	owner runtimerunforkexecution.SelectedContractExecutionOwner,
 	loader runtimerunforkexecution.SelectedContractSourceLoader,
 	selection runfork.RunForkContractSelection,
+	operation runfork.ForkOperationRequest,
 	plan runfork.RunForkPlan,
 	agentRuntime runtimerunforkexecution.SelectedContractAgentRuntimeOptions,
 	sourceEventID, flowPath, entityID string,
@@ -320,6 +323,7 @@ func materializeCatalogSelectedForkForBootResume(
 	t.Helper()
 	prepared, err := owner.Prepare(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: plan.SourceRunID, At: sourceEventID, ContractSelection: selection,
+		AllowSourceFreeze: true, ForkOperation: &operation,
 		SourceLoader: loader, AgentRuntime: agentRuntime, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil {
@@ -338,7 +342,7 @@ func materializeCatalogSelectedForkForBootResume(
 	if err != nil || len(projection.States) != 1 || projection.States[0].EntityID != entityID || projection.States[0].Route.InstancePath != flowPath || len(projection.States[0].Agents) == 0 {
 		t.Fatalf("admitted boot-resume readiness lacks exact template owner: %#v, %v", projection, err)
 	}
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, request.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), request.RootAdmission)
 	materialization, err := selected.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("materialize selected-contract boot-resume crash boundary: %v", err)
@@ -390,7 +394,7 @@ func seedCatalogRootStateForRun(t testing.TB, h *runtimeHarness, runID string) {
 	ctx := worklifetime.WithOccurrence(catalogRunContext(h, runID), h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	if err := h.rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
+		ContractBundle: h.rt.Options.WorkflowModule.SemanticSource(),
 		Instance:       runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), ".", runID, runID, runID, ""),
 		OccurredAt:     h.startedAt,
 	}); err != nil {
@@ -437,7 +441,7 @@ func catalogChildConstructionIdentity(t testing.TB, h *runtimeHarness, runID str
 
 func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, runID, flowPath, constructorInput string) string {
 	t.Helper()
-	source := semanticview.Wrap(h.bundle)
+	source := h.rt.Options.WorkflowModule.SemanticSource()
 	entityID := eventtest.UUID("run-scoped-selected-fork-worker")
 	instance := catalogChildConstructionIdentity(t, h, runID,
 		runtimeflowidentity.Stored(source, "worker-flow", flowPath, "worker-001", entityID, ""),

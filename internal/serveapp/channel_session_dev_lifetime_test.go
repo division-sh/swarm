@@ -19,16 +19,7 @@ func TestRunServeWhatsAppDevDoesNotRetainPrivateState(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	root := t.TempDir()
-	schema, err := os.ReadFile(filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session/schema.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), schema, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session"), root)
 	peer := newServeNativeProtocolPeer(t)
 	opts := cliapp.ServeOptions{SourceRoot: root,
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", "", channelOnboardingHostWorkspaceFields()),

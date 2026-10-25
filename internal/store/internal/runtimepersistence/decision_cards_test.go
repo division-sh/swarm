@@ -921,8 +921,7 @@ func TestStandaloneCompletionCandidatePublishesChangedGateRevisionParity(t *test
 		backend := backend
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
-			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			ctx := requireDefaultSourceArtifactForTest(t, originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store), fixture.store)
 			eventBus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)

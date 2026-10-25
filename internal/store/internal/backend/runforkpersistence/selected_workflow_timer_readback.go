@@ -86,7 +86,7 @@ func postgresRunForkWorkflowTimerReadbackPort(s *RunForkPostgresOwner) runForkWo
 			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true)
 		},
 		timers: s.PipelinePostgresOwner, arrivalSchedules: s.PipelinePostgresOwner, replies: s.replies,
 	}
@@ -98,7 +98,7 @@ func sqliteRunForkWorkflowTimerReadbackPort(s *RunForkSQLiteOwner) runForkWorkfl
 			return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
 		},
 		timers: s.PipelineSQLiteOwner, arrivalSchedules: s.PipelineSQLiteOwner, replies: s.replies,
 	}

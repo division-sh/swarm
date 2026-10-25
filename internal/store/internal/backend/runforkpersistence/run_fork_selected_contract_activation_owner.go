@@ -480,7 +480,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 		},
 		lockFrontier: lockRunForkSourceRevisionFrontier,
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true)
 		},
 		deliveries: postgresDeliveryAdapter,
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
@@ -531,7 +531,7 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 		},
 		lockFrontier: lockSQLiteRunForkSourceRevisionFrontier,
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
 		},
 		deliveries: sqliteDeliveryAdapter,
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {

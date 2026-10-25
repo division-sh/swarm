@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -11,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -58,6 +59,29 @@ func emitRefusalNativeInstances(t testing.TB, source semanticview.Source) emitIn
 	return emitInstanceObservationFixture{observations: observations}
 }
 
+func emitRefusalSource(t *testing.T, reply bool) semanticview.Source {
+	t.Helper()
+	root := canonicalrouting.CopyStaticAgentOutputConnect(t)
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "producer/agents.yaml"), "producer-agent:\n  role: producer\n  model: regular\n  intent: {inline: Report deployment completion.}\n  emit_events: [deploy.done]\n")
+	if reply {
+		for name, body := range map[string]string{
+			"schema.yaml":          "connect:\n  - {event: deploy.requested, from: consumer, to: producer}\n  - {event: deploy.done, from: producer, to: consumer, rename: deploy.completed, replies_to: deploy.requested}\n",
+			"producer/schema.yaml": "pins:\n  inputs: [deploy.requested]\n  outputs: [deploy.done]\n",
+			"producer/nodes.yaml":  "request-observer:\n  execution_type: system_node\n  event_handlers:\n    deploy.requested: {}\n",
+			"consumer/schema.yaml": "pins:\n  inputs: [deploy.completed]\n  outputs: [deploy.requested]\n",
+			"consumer/events.yaml": "deploy.requested:\n",
+		} {
+			writeToolFlowDataFixtureFile(t, filepath.Join(root, name), body)
+		}
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func TestIssue642ToolEmitRefusalFailureTaxonomy(t *testing.T) {
 	connectFailure := pinrouting.TargetFailureFromConnect(pinrouting.ConnectFailureTargetUnresolved).Code()
 	for _, test := range []struct {
@@ -71,12 +95,12 @@ func TestIssue642ToolEmitRefusalFailureTaxonomy(t *testing.T) {
 		{connectFailure, failures.ClassTargetUnreachable, connectFailure},
 	} {
 		t.Run(test.code, func(t *testing.T) {
-			source := emitRoutePlanSource(t, []contracts.FlowConnect{{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"}})
+			source := emitRefusalSource(t, false)
 			store := newEmitRoutePlanStore()
-			store.instanceIndex = emitRefusalNativeInstances(t, source)
+			instances := emitRefusalNativeInstances(t, source)
+			store.instanceIndex = instances
 			eventBus := newEmitRoutePlanEventBus(t, store, source, emitInstanceSourceFact(t, source))
-			actor := actors.AgentConfig{ExecutionMode: "live", ID: "producer-agent", Identity: toolTestAgentIdentity(t, "producer-agent", "producer", "producer"),
-				Role: "producer", FlowID: "producer", FlowPath: "producer", EntityID: flowidentity.EntityID("producer-entity"), EmitEvents: []string{"deploy.done"}}
+			actor := emitInstanceActor(t, source, instances.observations[1].Identity(), "deploy.done")
 			executor := NewExecutorWithOptions(emitRefusalBoundaryBus{eventBus, test.code}, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
 			actor = toolTestConstructedActor(t, executor, actor)
 			ctx := bus.WithInboundEvent(correlation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), eventtest.RunCreatingRootIngress(
@@ -143,20 +167,7 @@ func TestIssue642ToolEmitConsumesActualReplyPlanRefusals(t *testing.T) {
 			name, class, detail = "missing_reference", failures.ClassStaleArrival, "stale_arrival"
 		}
 		t.Run(name, func(t *testing.T) {
-			bundle := emitRoutePlanTestBundle(t, []emitRoutePlanTestFlow{
-				{id: "producer", mode: "static", inputs: []contracts.FlowInputEventPin{{Event: "deploy.requested"}},
-					outputs: []contracts.FlowOutputEventPin{{Event: "deploy.done"}}, nodes: map[string]contracts.SystemNodeContract{
-						"request-observer": {EventHandlers: map[string]contracts.SystemNodeEventHandler{"deploy.requested": {}}},
-					}},
-				{id: "consumer", mode: "static", inputs: []contracts.FlowInputEventPin{{Event: "deploy.completed"}},
-					outputs: []contracts.FlowOutputEventPin{{Event: "deploy.requested"}}, nodes: map[string]contracts.SystemNodeContract{
-						"consumer-node": {EventHandlers: map[string]contracts.SystemNodeEventHandler{"deploy.completed": {}}},
-					}},
-			}, []contracts.FlowConnect{
-				{Event: "deploy.requested", From: "consumer", To: "producer"},
-				{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed", RepliesTo: "deploy.requested"},
-			})
-			source := toolTestSourceWithDeclaredAgent(t, bundle, "producer-agent", "producer", "deploy.done")
+			source := emitRefusalSource(t, true)
 			graph := pinrouting.CompileConnectGraph(source)
 			if len(graph.Issues()) != 0 {
 				t.Fatalf("real reply fixture did not compile: %+v", graph.Issues())
@@ -190,10 +201,10 @@ func TestIssue642ToolEmitConsumesActualReplyPlanRefusals(t *testing.T) {
 			}
 			replies := &emitReplyReadOwner{record: record}
 			store := newEmitRoutePlanStore()
-			store.instanceIndex = emitRefusalNativeInstances(t, source)
+			instances := emitRefusalNativeInstances(t, source)
+			store.instanceIndex = instances
 			probe := &emitCanonicalReplyPlanBus{EventBus: newEmitRoutePlanEventBusWithReplyOwner(t, store, source, replies)}
-			actor := actors.AgentConfig{ExecutionMode: "live", ID: "producer-agent", Identity: toolTestAgentIdentity(t, "producer-agent", "producer", "producer"),
-				Role: "producer", FlowID: "producer", FlowPath: "producer", EntityID: flowidentity.EntityID("producer-entity"), EmitEvents: []string{"deploy.done"}}
+			actor := emitInstanceActor(t, source, instances.observations[1].Identity(), "deploy.done")
 			executor := NewExecutorWithOptions(probe, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
 			actor = toolTestConstructedActor(t, executor, actor)
 			ctx := bus.WithInboundEvent(correlation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), eventtest.RunCreatingRootIngress(

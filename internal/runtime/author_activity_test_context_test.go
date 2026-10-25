@@ -961,7 +961,18 @@ func newScopedTestRuntimeWithCapability(t testing.TB, ctx context.Context, deps 
 }
 
 func nativeRuntimeTestGrant(ctx context.Context, runtime *Runtime, capability runtimestartupownership.ProcessCapability) (runtimestartupownership.LiveGenerationGrant, error) {
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+	bundle, found := semanticview.Bundle(runtime.Options.WorkflowModule.SemanticSource())
+	if !found {
+		return nil, errors.New("native runtime fixture requires its compiled rooted source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		return nil, err
+	}
 	desired, err := runtime.Manager.CompileStaticTopologyDesiredAgents(runtime.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		return nil, err

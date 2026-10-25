@@ -23,9 +23,12 @@ func TestA9KeyedStandingGenerationDoesNotConstructBothStores(t *testing.T) {
 		for _, keyed := range []string{".", "parent"} {
 			t.Run(backend+"/"+keyed, func(t *testing.T) {
 				documents := map[string]string{
-					"schema.yaml":                "name: root\n",
-					"parent/schema.yaml":         "name: parent\n",
-					"parent/service/schema.yaml": "name: service\n",
+					"manifest.yaml":                "version: 1.0.0\nplatform_version: '*'\n",
+					"parent/manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+					"parent/service/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":                  "stages: []\n",
+					"parent/schema.yaml":           "stages: []\n",
+					"parent/service/schema.yaml":   "stages: []\n",
 				}
 				documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
 				documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
@@ -35,9 +38,13 @@ func TestA9KeyedStandingGenerationDoesNotConstructBothStores(t *testing.T) {
 				if !found {
 					t.Fatal("source authority is missing")
 				}
+				root, found, err := correlation.RootAdmissionFromContext(f.ctx)
+				if err != nil || !found {
+					t.Fatal("captured root authority is missing", err)
+				}
 				serviceID := flowidentity.StandingServiceID("parent/service")
 				req := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.StandingTargetMutation{{
-					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: "parent/service", Source: fact},
+					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: "parent/service", Source: fact, RootAdmission: root},
 					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, OccurredAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)},
 				}}}
 				results, finish, err := f.workflows.PrepareStandingTargets(f.ctx, req, f.manager)
@@ -93,21 +100,28 @@ func TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores(t *te
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":       "name: standing-atomic-set\n",
-				"alpha/schema.yaml": "name: alpha\n",
-				"beta/schema.yaml":  "name: beta\n",
+				"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+				"alpha/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"beta/manifest.yaml":  "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":         "stages: []\n# fixture: standing-atomic-set\n",
+				"alpha/schema.yaml":   "stages: []\n",
+				"beta/schema.yaml":    "stages: []\n",
 			}, nil)
 			source := semanticview.Wrap(f.bundle)
 			fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
 			if !found {
 				t.Fatal("source authority is missing")
 			}
+			root, found, err := correlation.RootAdmissionFromContext(f.ctx)
+			if err != nil || !found {
+				t.Fatal("captured root authority is missing", err)
+			}
 			req := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)}
 			for _, flowID := range []string{"alpha", "beta"} {
 				serviceID := flowidentity.StandingServiceID(flowID)
 				instance := flowidentity.StandingForService(source, flowID, serviceID)
 				req.Targets = append(req.Targets, pipeline.StandingTargetMutation{
-					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: flowID, Source: fact},
+					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: flowID, Source: fact, RootAdmission: root},
 					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, OccurredAt: req.ObservedAt},
 				})
 			}
@@ -136,11 +150,15 @@ func TestDormantStandingPreparationDoesNotConstructBothStores(t *testing.T) {
 			if !found {
 				t.Fatal("source authority is missing")
 			}
+			root, found, err := correlation.RootAdmissionFromContext(f.ctx)
+			if err != nil || !found {
+				t.Fatal("captured root authority is missing", err)
+			}
 			serviceID := flowidentity.StandingServiceID("service")
 			instance := flowidentity.StandingForService(source, "service", serviceID)
 			request := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.StandingTargetMutation{{
 				Candidate: pipeline.StandingServiceCandidate{BindingEnabled: false, BindingBlockReason: runlifecycle.StandingBindingCredentialsAbsent,
-					ServiceID: serviceID, FlowPath: "service", Source: fact},
+					ServiceID: serviceID, FlowPath: "service", Source: fact, RootAdmission: root},
 				Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance},
 			}}}
 			owner := &failSecondStandingTreeOwner{AgentManager: f.manager}
@@ -175,14 +193,19 @@ func TestStandingPreparationVerifiesCompleteRootTreeBothStores(t *testing.T) {
 		for _, damage := range []string{"intact", "missing_sibling", "missing_fields", "foreign_parent"} {
 			t.Run(backend+"/"+damage, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-					"schema.yaml":                "name: standing-root-tree\n",
-					"service/schema.yaml":        "name: service\n",
-					"service/detail/schema.yaml": "name: detail\n",
-					"receiver/schema.yaml":       "name: receiver\n",
-					"receiver/entities.yaml":     "receipt:\n  marker: {type: text, initial: unchanged}\n",
-					"deferred/schema.yaml":       "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",
-					"deferred/entities.yaml":     "job:\n  job_id: text\n",
-					"deferred/events.yaml":       "job.started:\n  job_id: text\n",
+					"manifest.yaml":                "version: 1.0.0\nplatform_version: '*'\n",
+					"service/manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+					"service/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"receiver/manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+					"deferred/manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":                  "stages: []\n# fixture: standing-root-tree\n",
+					"service/schema.yaml":          "stages: []\n",
+					"service/detail/schema.yaml":   "stages: []\n",
+					"receiver/schema.yaml":         "stages: []\n",
+					"receiver/entities.yaml":       "receipt:\n  marker: {type: text, initial: unchanged}\n",
+					"deferred/schema.yaml":         "instance: job_id\npins:\n  inputs:\n    - job.started\n",
+					"deferred/entities.yaml":       "job:\n  job_id: text\n",
+					"deferred/events.yaml":         "job.started:\n  job_id: text\n",
 				}, nil)
 				runID := correlation.RunIDFromContext(f.ctx)
 				req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

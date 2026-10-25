@@ -16,6 +16,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -41,6 +42,7 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 				}
 				workCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), created.RunID)
 				workCtx = runtimestartupownership.CarryMutationAuthority(workCtx, ctx)
+				workCtx = runtimecorrelation.WithRootAdmission(workCtx, candidate.RootAdmission)
 				eventID, unsettledID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 				identity := mustTestAgentIdentityForRun(created.RunID, "standing-agent", "standing/ingress")
 				fields := testAgentIdentityStorageFields(t, identity)
@@ -163,25 +165,29 @@ func TestDormantStandingReconciliationBothStores(t *testing.T) {
 			ctx := testAuthorActivityRuntimeContext()
 			var db *sql.DB
 			var coordinator *runtimepipeline.PipelineCoordinator
+			var selected workflowTestSelectedStore
 			if backend == "sqlite" {
-				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				selected, db = store, store.backend.ConstructionHandle()
 				ctx = originalStoreFixtureContext(t, ctx, selected)
-				db = selected.backend.ConstructionHandle()
 				coordinator = newSQLiteWorkflowTestCoordinator(t, db, selected)
 			} else {
 				_, opened, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				db = opened
-				selected := admitTestPostgresStore(t, opened)
+				selected = admitTestPostgresStore(t, opened)
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				coordinator = newPostgresWorkflowTestCoordinator(t, db, selected)
 			}
 			artifact := storeTestSourceArtifact("credential-dormancy-" + backend)
-			seedStoreTestPersistedArtifact(t, db, artifact)
+			rooted, _ := sourceartifactfixture.Rooted(t, "standing", artifact)
+			if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			candidate := runtimepipeline.StandingServiceCandidate{
 				ServiceID: runtimeflowidentity.StandingServiceID("telegram-ingress"), FlowPath: "telegram-ingress",
 
-				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), BindingEnabled: false,
+				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), RootAdmission: rooted.Admission(), BindingEnabled: false,
 				BindingBlockReason: runtimerunlifecycle.StandingBindingCredentialsAbsent,
 			}
 			for _, reason := range []runtimerunlifecycle.StandingBindingBlockReason{
