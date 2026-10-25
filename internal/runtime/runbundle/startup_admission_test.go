@@ -230,6 +230,11 @@ func testUpgradeRetainedInstances(t *testing.T) {
 					t.Fatalf("missing %s in aggregate blockers: %+v", kind, blockers)
 				}
 			}
+			refusal := &UpgradeConflictError{Blockers: blockers}
+			failure, typed := runtimefailures.As(refusal)
+			if !typed || failure.Failure.Class != runtimefailures.ClassLifecycleConflict || !strings.Contains(refusal.Error(), identity.EntityID) || !strings.Contains(refusal.Error(), "candidate/schema.yaml") {
+				t.Fatalf("upgrade refusal lost its type or actionable blockers: %v", refusal)
+			}
 			queued.Deliveries[0].RunID = "another-run"
 			if partial, err := CheckUpgrade(context.Background(), current, candidate, queued); err == nil || partial != nil {
 				t.Fatalf("foreign delivery returned a partial admission: %+v, %v", partial, err)

@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -18,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
@@ -196,8 +199,8 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		}
 		return startupownership.AdmitAuthorityInspection(inspection)
 	})
-	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		return runbundle.AdmitPinnedSources(ctx, snapshot, hash, []string{hash})
+	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.CheckUpgrade", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		return inspectVerifyBundleUpgrades(ctx, snapshot, repo, source, packBases)
 	})
 	verifyDeploymentObservation(ctx, result, "retained_source_integrity", "internal/runtime/startuprecovery.Inspect", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
 		_, err := startuprecovery.Inspect(ctx, startuprecovery.Request{AvailabilityReader: snapshot, ArtifactReader: snapshot})
@@ -277,6 +280,67 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return nil
 	})
 	return retained
+}
+
+func inspectVerifyBundleUpgrades(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, repo string, candidate semanticview.Source, packBases packartifact.PlatformPackBaseResolver) error {
+	bundle, ok := semanticview.Bundle(candidate)
+	if !ok || bundle.SourceArtifact == nil {
+		return fmt.Errorf("bundle upgrade inspection requires the candidate artifact")
+	}
+	availabilities, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx)
+	if err != nil {
+		return err
+	}
+	sources := map[string]semanticview.Source{bundle.SourceArtifact.BundleHash(): candidate}
+	var blockers []runbundle.UpgradeBlocker
+	for _, availability := range availabilities {
+		// Paused sources are retained, not loaded; artifact integrity is checked separately.
+		if availability.Status != string(runlifecycle.StateRunning) || !availability.Available() || availability.BundleHash == bundle.SourceArtifact.BundleHash() {
+			continue
+		}
+		current := sources[availability.BundleHash]
+		if current == nil {
+			record, err := snapshot.GetSourceArtifact(ctx, availability.BundleHash)
+			if err != nil {
+				return err
+			}
+			if record.BundleHash != availability.BundleHash {
+				return fmt.Errorf("bundle upgrade artifact disagrees with run %s source", availability.RunID)
+			}
+			artifact, err := record.Decode()
+			if err != nil {
+				return err
+			}
+			spec, err := EmbeddedPlatformSpecPath()
+			if err != nil {
+				return err
+			}
+			retained, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, spec, contracts.WorkflowContractLoadOptions{
+				PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
+			})
+			if err != nil {
+				return err
+			}
+			current = semanticview.Wrap(retained)
+			sources[availability.BundleHash] = current
+		}
+		state, err := snapshot.ReadBundleUpgradeState(ctx, availability.RunID, current)
+		if err != nil {
+			return err
+		}
+		stranded, err := runbundle.CheckUpgrade(ctx, current, candidate, state)
+		if err != nil {
+			return err
+		}
+		blockers = append(blockers, stranded...)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(blockers) != 0 {
+		return &runbundle.UpgradeConflictError{Blockers: blockers}
+	}
+	return nil
 }
 
 func verifyRetainedSourceLoader(repo string, packBases packartifact.PlatformPackBaseResolver) (runforkexecution.SourceArtifactSelectedContractSourceLoader, error) {
