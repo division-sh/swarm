@@ -47,6 +47,13 @@ func originalAPIFixtureContext(t testing.TB, ctx context.Context, selected any) 
 		}
 		return ctx
 	}
+	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+		runtimeID := authorActivityTestRuntimeInstanceID
+		if scope, present := runtimeauthoractivity.ScopeFromContext(ctx); present {
+			runtimeID = scope.RuntimeInstanceID
+		}
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+	}
 	owner, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("native API fixture lacks its original process owner: %T", selected)
