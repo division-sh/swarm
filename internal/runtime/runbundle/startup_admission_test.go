@@ -248,6 +248,23 @@ func testUpgradeRetainedInstances(t *testing.T) {
 			}
 		})
 	})
+	t.Run("removed occupied flow names the candidate root", func(t *testing.T) {
+		withChild := source("ready", "integer", func(bundle *contracts.WorkflowContractBundle) {
+			root := bundle.FlowTree.Root
+			root.Children = []contracts.FlowContractView{{Paths: contracts.FlowContractPaths{FlowPath: "child"}, Schema: *bundle.RootSchema, Parent: root}}
+			bundle.FlowTree.ByID["child"] = &root.Children[0]
+			bundle.FlowSources["child"] = contracts.FlowSource{Schema: "child/schema.yaml"}
+		})
+		child := flowidentity.Derive(withChild, "child", "one")
+		retained := UpgradeState{RunID: state.RunID, Instances: []UpgradeInstance{{
+			Route:    flowidentity.StoredRoute(child.ScopeKey, child.InstanceID, child.InstancePath),
+			EntityID: child.EntityID, FlowID: "child", Status: "active", Stage: "ready",
+		}}}
+		blockers, err := CheckUpgrade(context.Background(), withChild, source("ready", "integer"), retained)
+		if err != nil || len(blockers) != 1 || blockers[0].Kind != "stage_removed" || blockers[0].Location != "schema.yaml" || blockers[0].FlowInstance != child.InstancePath {
+			t.Fatalf("removed flow lost its candidate location or exact instance: %+v, %v", blockers, err)
+		}
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := CheckUpgrade(ctx, current, source("ready", "integer"), state); !errors.Is(err, context.Canceled) {
