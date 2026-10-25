@@ -48,8 +48,8 @@ func (p *q1FreezeBetweenTransactions) MaterializeRunForkForSelectedContractExecu
 		return result, fmt.Errorf("unexpected third materialization in two-child race")
 	}
 	source, err := p.headers.LoadRunHeader(ctx, req.SourceRunID)
-	if err == nil && source.Status != "running" {
-		err = fmt.Errorf("both children must materialize before the first freeze; source state=%s", source.Status)
+	if err == nil && source.Status != "paused" {
+		err = fmt.Errorf("both children must materialize from the retained paused source; source state=%s", source.Status)
 	}
 	if err != nil {
 		return result, selectedMaterializationCommitTestError{value: result, cause: err}

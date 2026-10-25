@@ -168,7 +168,7 @@ func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, a
 		LiveScope: scope,
 	})
 	if err != nil {
-		return err
+		return &publicationRunCreationFailure{cause: err}
 	}
 	return storescenarioexecution.EnsureSQLiteFromContext(ctx, tx, runID, runtimerunlifecycle.CanonicalTimestamp(now))
 }

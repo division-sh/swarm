@@ -707,7 +707,16 @@ func publicationLiveScope(command runtimebus.PublicationCommand) runlifecycle.Li
 	return runlifecycle.LiveRunScope{}
 }
 
+type publicationRunCreationFailure struct{ cause error }
+
+func (e *publicationRunCreationFailure) Error() string { return e.cause.Error() }
+func (e *publicationRunCreationFailure) Unwrap() error { return e.cause }
+
 func classifyPublicationFailure(ctx context.Context, store eventCommitTxStore, command runtimebus.PublicationCommand, err error) error {
+	var creation *publicationRunCreationFailure
+	if !errors.As(err, &creation) {
+		return err
+	}
 	return store.ClassifyLiveRunCreationFailure(ctx, publicationLiveScope(command), command.Commit.Event.Event().RunID(), err)
 }
 

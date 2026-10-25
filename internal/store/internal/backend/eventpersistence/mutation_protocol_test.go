@@ -16,10 +16,15 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimelifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/lib/pq"
 )
 
 func TestComposedEventWritersRequireMutationAttempt(t *testing.T) {
 	ctx := context.Background()
+	unrelated := &pq.Error{Code: "23505", Constraint: "idx_runs_live_flow"}
+	if got := classifyPublicationFailure(ctx, nil, runtimebus.PublicationCommand{}, unrelated); got != unrelated {
+		t.Fatalf("publication classified a uniqueness error without run-creation evidence: %v", got)
+	}
 	checks := map[string]func() error{
 		"publication": func() error {
 			_, err := commitPublicationTx(ctx, nil, nil, runtimebus.PublicationCommand{})
