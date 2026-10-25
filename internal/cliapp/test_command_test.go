@@ -725,7 +725,11 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 			}
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": rows})
 		case entityListMethod:
-			if req.Params["run_id"] != activeRunID || req.Params["flow"] != entityExpect.Flow {
+			flow := entityExpect.Flow
+			if flow == "." {
+				flow = activeRunID
+			}
+			if req.Params["run_id"] != activeRunID || req.Params["flow"] != flow {
 				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
@@ -1400,7 +1404,7 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 		calls = append(calls, req)
 		switch req.Method {
 		case entityListMethod:
-			if req.Params["run_id"] != "run-1" || req.Params["flow"] != "." {
+			if req.Params["run_id"] != "run-1" || req.Params["flow"] != "run-1" {
 				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
