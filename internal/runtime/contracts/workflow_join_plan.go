@@ -126,7 +126,7 @@ func joinTopLevelField(path, root string) string {
 
 func joinMembersSourcePath(raw string) paths.Path {
 	if field := joinTopLevelField(raw, "state"); field != "" {
-		return paths.Parse("entity." + field)
+		return paths.Parse("state." + field)
 	}
 	return paths.Parse(raw)
 }

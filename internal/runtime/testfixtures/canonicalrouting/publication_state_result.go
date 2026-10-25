@@ -25,10 +25,9 @@ func CopyPublicationStateResult(t testing.TB, mode string) string {
 		writeClosedVariantFile(t, root, "events.yaml", "document.requested:\n  request_id: text\n  content: text\n  result_kind: text\n")
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
-	writeClosedVariantFile(t, root, prefix+"entities.yaml", `document:
-  request_id: text
-  content: text
-  result_kind: text
+	writeClosedVariantFile(t, root, prefix+"state.yaml", `request_id: text
+content: text
+result_kind: text
 `)
 	eventSchemas := `document.requested:
   request_id: text
@@ -79,11 +78,11 @@ result.rejected:
         - when: payload.result_kind == 'accepted'
           emit:
             event: result.accepted
-            fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
+            fields: {request_id: state.request_id, content: state.content, result_kind: state.result_kind}
         - when: payload.result_kind == 'rejected'
           emit:
             event: result.rejected
-            fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
+            fields: {request_id: state.request_id, content: state.content, result_kind: state.result_kind}
 `+local)
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - result.accepted\n    - result.rejected\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)

@@ -2,11 +2,11 @@ gate-setter-1:
   execution_type: system_node
   subscribes_to: [gate.g1_set]
   produces: [gate.set]
-  gate_state:
-    g1: first gate in the approval pipeline
   event_handlers:
     gate.g1_set:
-      sets_gate: g1
+      data_accumulation:
+        writes:
+          - {target_field: g1, value: 'true'}
       emit:
         event: gate.set
 
@@ -14,11 +14,11 @@ gate-setter-2:
   execution_type: system_node
   subscribes_to: [gate.g2_set]
   produces: [gate.set]
-  gate_state:
-    g2: second gate in the approval pipeline
   event_handlers:
     gate.g2_set:
-      sets_gate: g2
+      data_accumulation:
+        writes:
+          - {target_field: g2, value: 'true'}
       emit:
         event: gate.set
 
@@ -26,11 +26,11 @@ gate-setter-3:
   execution_type: system_node
   subscribes_to: [gate.g3_set]
   produces: [gate.set]
-  gate_state:
-    g3: third gate in the approval pipeline
   event_handlers:
     gate.g3_set:
-      sets_gate: g3
+      data_accumulation:
+        writes:
+          - {target_field: g3, value: 'true'}
       emit:
         event: gate.set
 
@@ -42,7 +42,7 @@ approval-node:
     approval.requested:
       guard:
         id: all_gates_check
-        check: _entity.gates.g1 == true && _entity.gates.g2 == true && _entity.gates.g3 == true
+        check: state.g1 == true && state.g2 == true && state.g3 == true
       advances_to: approved
       emit:
         event: approval.granted

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/google/uuid"
 )
 
 func TestActiveProofRemainsRevocableAfterCredentialRetirement(t *testing.T) {
@@ -46,7 +45,7 @@ func TestProofResponsibilityRejectsProviderEvidenceContradictions(t *testing.T) 
 		mutate func(*ProofResponsibility)
 	}{
 		{name: "binding", mutate: func(value *ProofResponsibility) { value.Binding.ProviderAuthority = other }},
-		{name: "proof projection", mutate: func(value *ProofResponsibility) { value.Proof.ProviderAuthority = other }},
+		{name: "operation", mutate: func(value *ProofResponsibility) { value.Operation.ProviderAuthority = other }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			contradictory := responsibility
@@ -63,7 +62,7 @@ func TestProviderCredentialEvidenceIsPrivateInPublicLifecycleJSON(t *testing.T) 
 	for name, value := range map[string]any{
 		"operation": responsibility.Operation,
 		"binding":   responsibility.Binding,
-		"proof":     responsibility.Proof,
+		"proof":     proofFromOperation(responsibility.Operation),
 	} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := json.Marshal(value)
@@ -99,9 +98,5 @@ func testProofResponsibility(t *testing.T) ProofResponsibility {
 		ProofID: operation.ProofID, ProofRevision: operation.ProofRevision, OperationID: operation.OperationID,
 		UpdatedAt: operation.CompletedAt, ProviderAuthority: operation.ProviderAuthority,
 	}
-	projected := proofFromOperation(operation, binding)
-	if _, err := uuid.Parse(projected.ProofID); err != nil {
-		t.Fatal(err)
-	}
-	return ProofResponsibility{Operation: operation, Binding: binding, Proof: projected}
+	return ProofResponsibility{Operation: operation, Binding: binding}
 }

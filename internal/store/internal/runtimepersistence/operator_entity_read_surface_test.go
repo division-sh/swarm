@@ -70,7 +70,6 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	page1, err := pg.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{
 		RunID: runA,
 		Flow:  "review",
-		Type:  "mvp_spec",
 		Limit: 1,
 	})
 	if err != nil {
@@ -85,7 +84,6 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	page2, err := pg.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{
 		RunID:  runA,
 		Flow:   "review",
-		Type:   "mvp_spec",
 		Limit:  1,
 		Cursor: page1.NextCursor,
 	})
@@ -131,18 +129,11 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 || stateAgg.AbsentCount != 0 {
 		t.Fatalf("state aggregate = %#v", stateAgg.Counts)
 	}
-	typedStateAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
-	if err != nil {
-		t.Fatalf("AggregateOperatorEntities typed current_state: %v", err)
-	}
-	if typedStateAgg.Counts["collecting"] != 1 || typedStateAgg.Counts["done"] != 1 || typedStateAgg.Counts["ticket"] != 0 {
-		t.Fatalf("typed state aggregate = %#v", typedStateAgg.Counts)
-	}
-	typeAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "entity_type"})
+	typeAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "flow"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities entity_type: %v", err)
 	}
-	if typeAgg.Counts["mvp_spec"] != 2 || typeAgg.Counts["ticket"] != 1 || typeAgg.Counts["default"] != 0 {
+	if typeAgg.Counts["review/primary"] != 1 || typeAgg.Counts["review/secondary"] != 1 || typeAgg.Counts["triage"] != 1 || len(typeAgg.Counts) != 3 {
 		t.Fatalf("entity_type aggregate = %#v", typeAgg.Counts)
 	}
 	fieldAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority"})
@@ -227,7 +218,6 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	page1, err := sqliteStore.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{
 		RunID: runA,
 		Flow:  "review",
-		Type:  "mvp_spec",
 		Limit: 1,
 	})
 	if err != nil {
@@ -242,7 +232,6 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	page2, err := sqliteStore.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{
 		RunID:  runA,
 		Flow:   "review",
-		Type:   "mvp_spec",
 		Limit:  1,
 		Cursor: page1.NextCursor,
 	})
@@ -307,18 +296,11 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 || stateAgg.AbsentCount != 0 {
 		t.Fatalf("state aggregate = %#v", stateAgg.Counts)
 	}
-	typedStateAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
-	if err != nil {
-		t.Fatalf("AggregateOperatorEntities typed current_state: %v", err)
-	}
-	if typedStateAgg.Counts["collecting"] != 1 || typedStateAgg.Counts["done"] != 1 || typedStateAgg.Counts["ticket"] != 0 {
-		t.Fatalf("typed state aggregate = %#v", typedStateAgg.Counts)
-	}
-	typeAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "entity_type"})
+	typeAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "flow"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities entity_type: %v", err)
 	}
-	if typeAgg.Counts["mvp_spec"] != 2 || typeAgg.Counts["ticket"] != 1 || typeAgg.Counts["default"] != 0 {
+	if typeAgg.Counts["review/primary"] != 1 || typeAgg.Counts["review/secondary"] != 1 || typeAgg.Counts["triage"] != 1 || len(typeAgg.Counts) != 3 {
 		t.Fatalf("entity_type aggregate = %#v", typeAgg.Counts)
 	}
 	fieldAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority"})

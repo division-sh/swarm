@@ -464,7 +464,7 @@ func TestFlowConstructionReceiptV3PersistenceRecordSeparatesReadiness(t *testing
 	plan := FlowInstanceActivationPlan{
 		Identity: receipt.Identity, Readiness: readiness, CreatingInput: receipt.CreatingInput, OccurredAt: receipt.OccurredAt,
 		Instance: WorkflowInstance{
-			StorageRef: receipt.FlowInstance, InstanceID: receipt.Identity.InstanceID, EntityID: receipt.EntityID, EntityType: "account",
+			StorageRef: receipt.FlowInstance, InstanceID: receipt.Identity.InstanceID, EntityID: receipt.EntityID, EntityType: "state",
 			WorkflowName: receipt.WorkflowName, WorkflowVersion: receipt.WorkflowVersion, Mode: "template", Status: "active",
 			CurrentState: receipt.InitialState, Fields: receipt.Persisted.Fields, StageDefined: true, InstanceKey: receipt.InstanceKey,
 			EnteredStageAt: receipt.OccurredAt, CreatedAt: receipt.OccurredAt,

@@ -2699,7 +2699,7 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 				ID:            "one",
 				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "account/one",
-				AddressFields: map[string]string{"entity.account_id": "acct-1"},
+				AddressFields: map[string]string{"state.account_id": "acct-1"},
 			}}
 			values := map[string]string{"payload.account_id": "acct-1"}
 			key := "acct-1"
@@ -2710,7 +2710,7 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 				evt = connectRoutePlanStaticProducerEvent(uuid.NewString(),
 					events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"`+key+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 				descriptors[0].FlowInstance = "validator/one"
-				descriptors[0].AddressFields = map[string]string{"entity.validation_case_id": "acct-1"}
+				descriptors[0].AddressFields = map[string]string{"state.validation_case_id": "acct-1"}
 				values = map[string]string{"payload.candidate": key}
 			} else {
 				source = connectRoutePlanCarriedKeyResolutionSource(t, tc.mode)

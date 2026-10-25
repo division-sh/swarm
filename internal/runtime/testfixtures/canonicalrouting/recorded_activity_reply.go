@@ -19,7 +19,7 @@ pins:
   inputs: [provider.requested]
   outputs: [provider.replied]
 `)
-	writeClosedVariantFile(t, root, "provider/entities.yaml", "work: {}\n")
+	removeClosedVariantFiles(t, root, "provider/state.yaml")
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
   execution_type: system_node
   subscribes_to: [provider.requested, compute.succeeded, compute.failed, compute.revision_requested, compute.rejected]

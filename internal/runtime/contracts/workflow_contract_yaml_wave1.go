@@ -379,29 +379,7 @@ func (d *EntityContractsDocument) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func projectEntityContractsDocument(root yamlsource.Value) (EntityContractsDocument, error) {
-	if root.Presence() != yamlsource.PresenceMapping && root.Presence() != yamlsource.PresenceEmptyMapping {
-		return nil, fmt.Errorf("entity contracts document must be a mapping")
-	}
-	fields, err := root.Mapping()
-	if err != nil {
-		return nil, err
-	}
-	out := make(EntityContractsDocument, len(fields))
-	for _, field := range fields {
-		key := strings.TrimSpace(field.Name)
-		if key == "" {
-			continue
-		}
-		if key != field.Name {
-			return nil, fmt.Errorf("entity name %q must not have surrounding whitespace", field.Name)
-		}
-		entity, err := projectEntityContract(field.Value)
-		if err != nil {
-			return nil, err
-		}
-		out[key] = entity
-	}
-	return out, nil
+	return projectStateDeclarations(root, TypeCatalogDocument{})
 }
 
 func (e *EntityContract) UnmarshalYAML(node *yaml.Node) error {
@@ -417,46 +395,7 @@ func (e *EntityContract) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func projectEntityContract(value yamlsource.Value) (EntityContract, error) {
-	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-		return EntityContract{}, fmt.Errorf("entity contract must be a mapping")
-	}
-	fields, err := uniqueYAMLMappingFields(value, "entity contract")
-	if err != nil {
-		return EntityContract{}, err
-	}
-	decl := EntityContract{Fields: map[string]EntityFieldDecl{}}
-	for _, field := range fields {
-		name := strings.TrimSpace(field.Name)
-		if name == "" {
-			return EntityContract{}, fmt.Errorf("entity contract has an empty field name")
-		}
-		if name != field.Name {
-			return EntityContract{}, fmt.Errorf("entity field %q must not have surrounding whitespace", field.Name)
-		}
-		if strings.HasPrefix(name, "_") {
-			switch name {
-			case "_description":
-				decl.Description, err = optionalScalarString(field.Value, "entity description")
-			case "_owner":
-				decl.Owner, err = optionalScalarString(field.Value, "entity owner")
-			default:
-				return EntityContract{}, NewUndefinedFieldDiagnostic("entity metadata", name, entityMetadataFieldOptions, field)
-			}
-			if err != nil {
-				return EntityContract{}, err
-			}
-			continue
-		}
-		if name == "state_field" {
-			return EntityContract{}, fmt.Errorf("entity field name %q at %s is reserved for schema-owned state authority", name, field.IntroductionLocation())
-		}
-		spec, err := projectEntityFieldDecl(field.Value)
-		if err != nil {
-			return EntityContract{}, fmt.Errorf("field %s: %w", name, err)
-		}
-		decl.Fields[name] = spec
-	}
-	return decl, nil
+	return projectStateContract(value, TypeCatalogDocument{})
 }
 
 func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
@@ -472,26 +411,7 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func projectEntityFieldDecl(value yamlsource.Value) (EntityFieldDecl, error) {
-	parsed, err := decodeWave1FieldValue(value, wave1FieldNodeOptions{
-		Context:                 "entity field",
-		AllowInitial:            true,
-		AllowImmutable:          true,
-		AllowIndexed:            true,
-		AllowUnusedReason:       true,
-		AllowUnusedReaderReason: true,
-		AllowMaterializeFrom:    true,
-		AllowProject:            true,
-	})
-	if err != nil {
-		return EntityFieldDecl{}, err
-	}
-	return EntityFieldDecl{
-		Type: parsed.Type, IsOptional: parsed.IsOptional, Initial: parsed.Initial, Indexed: parsed.Indexed,
-		Immutable: parsed.Immutable, Description: parsed.Description,
-		Refinements: parsed.Refinements, MaterializeFrom: parsed.MaterializeFrom,
-		Project: parsed.Project, UnusedReason: parsed.UnusedReason,
-		UnusedReaderReason: parsed.UnusedReaderReason,
-	}, nil
+	return projectStateField(value, TypeCatalogDocument{})
 }
 
 func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (wave1ParsedFieldNode, error) {

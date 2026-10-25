@@ -1,0 +1,1 @@
+task_id: {type: text, indexed: true}

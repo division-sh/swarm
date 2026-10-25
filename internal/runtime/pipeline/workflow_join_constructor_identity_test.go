@@ -12,7 +12,7 @@ import (
 func TestWorkflowJoinAdmissionUsesConstructedDescendantCoordinate(t *testing.T) {
 	files := workflowJoinLifecycleFixtureFiles(false, "")
 	files["orders/child/schema.yaml"] = "name: child\nstages:\n  awaiting: {}\n  ready: {final: true}\n  attention: {final: true}\n"
-	for _, name := range []string{"entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
+	for _, name := range []string{"state.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 		files["orders/child/"+name] = files["orders/"+name]
 	}
 	source := semanticview.Wrap(loadWorkflowTempBundle(t, files))

@@ -7,7 +7,7 @@ import "testing"
 func CopyHandlerRuleSelectionProof(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	removeClosedVariantFiles(t, root, "entities.yaml")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "schema.yaml", `name: handler-rule-selection-proof
 pins:
   inputs:
@@ -74,10 +74,7 @@ pins:
   inputs:
     - item.completed
 `
-	joinEntities := `join_state:
-  expected:
-    type: "[text]"
-    initial: []
+	joinEntities := `expected: [text]
 `
 	joinEvents := `item.completed:
   member_id: text
@@ -104,15 +101,15 @@ pins:
 	switch flowID {
 	case "":
 		writeClosedVariantFile(t, root, "schema.yaml", joinSchema)
-		writeClosedVariantFile(t, root, "entities.yaml", joinEntities)
+		writeClosedVariantFile(t, root, "state.yaml", joinEntities)
 		writeClosedVariantFile(t, root, "events.yaml", joinEvents)
 		writeClosedVariantFile(t, root, "types.yaml", joinTypes)
 		writeClosedVariantFile(t, root, "nodes.yaml", joinNodes)
 	case "orders":
 		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
-		removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
+		removeClosedVariantFiles(t, root, "state.yaml", "events.yaml", "nodes.yaml")
 		writeLegacyInstanceFlow(t, root, "orders", "instance: order_id\n"+joinSchema,
-			joinEvents, joinEntities+"  order_id: {type: text, _unused_reason: receiver instance identity}\n", joinNodes)
+			joinEvents, joinEntities+"order_id: text\n", joinNodes)
 		writeClosedVariantFile(t, root, "orders/types.yaml", joinTypes)
 	default:
 		t.Fatalf("unsupported exact join flow %q", flowID)
@@ -137,7 +134,7 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel:
 `)
-	writeClosedVariantFile(t, root, "entities.yaml", "timer_state: {}\n")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
   subscribes_to: [timer.cancel]
@@ -165,7 +162,6 @@ connect:
     from: producer
     to: .
 `)
-	writeClosedVariantFile(t, root, "entities.yaml", "root_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
   execution_type: system_node
   subscribes_to: [deploy.done]
@@ -173,14 +169,16 @@ connect:
     deploy.done:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `)
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
-	writeLegacyInstanceFlow(t, root, "producer", `name: producer
+	writeClosedVariantFile(t, root, "producer/schema.yaml", `name: producer
 instance: producer_id
 pins:
   outputs:
     - deploy.done
-`, "deploy.done:\n", "producer_state:\n  producer_id: string\n", "")
+`)
+	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n")
+	writeClosedVariantFile(t, root, "producer/state.yaml", "producer_id: string\n")
 	return root
 }

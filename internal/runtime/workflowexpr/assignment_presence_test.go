@@ -13,12 +13,12 @@ func TestEntityAssignmentExpressionFactsRespectScope(t *testing.T) {
 		facts      []string
 		want       []string
 	}{
-		{"entity.score + 1", nil, []string{"score"}},
-		{"entity.score + 1", []string{"entity.score"}, nil},
-		{"has(entity.score) && entity.score > 0", nil, nil},
-		{"entity.?score.orValue(0)", nil, nil},
-		{"has(entity.record.score) && entity.record.score > 0", nil, []string{"record"}},
-		{"[1].exists(entity, entity > 0)", []string{"entity.score"}, nil},
+		{"state.score + 1", nil, []string{"score"}},
+		{"state.score + 1", []string{"state.score"}, nil},
+		{"has(state.score) && state.score > 0", nil, nil},
+		{"state.?score.orValue(0)", nil, nil},
+		{"has(state.record.score) && state.record.score > 0", nil, []string{"record"}},
+		{"[1].exists(entity, entity > 0)", []string{"state.score"}, nil},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			got := RequiredEntityReferences(tc.expression, tc.facts)
@@ -37,18 +37,18 @@ func TestEntityAssignmentKnownPresenceDoesNotChangeDeclaration(t *testing.T) {
 		{Name: "score", Type: c.ResolvedCatalogType{Kind: c.CatalogTypeInteger}, IsOptional: true},
 	}}
 	options := ValueExpressionOptions{EntityType: &typ}
-	if err := ValidateValueExpressionWithOptions("entity.score + 1", options); err == nil {
+	if err := ValidateValueExpressionWithOptions("state.score + 1", options); err == nil {
 		t.Fatal("unproved optional read accepted")
 	}
-	options.KnownPresence = []string{"entity.score"}
-	if err := ValidateValueExpressionWithOptions("entity.score + 1", options); err != nil {
+	options.KnownPresence = []string{"state.score"}
+	if err := ValidateValueExpressionWithOptions("state.score + 1", options); err != nil {
 		t.Fatal(err)
 	}
 	if !typ.Fields[0].IsOptional {
 		t.Fatal("program fact mutated declaration")
 	}
 	options.KnownPresence = nil
-	if err := ValidateValueExpressionWithOptions("entity.score + 1", options); err == nil {
+	if err := ValidateValueExpressionWithOptions("state.score + 1", options); err == nil {
 		t.Fatal("proof survived into another program point")
 	}
 }
@@ -59,11 +59,11 @@ func TestEntityAssignmentStageNarrowingIsBounded(t *testing.T) {
 		truth      bool
 		want       bool
 	}{
-		{"_entity.current_state == 'ready'", true, true},
-		{"_entity.current_state == 'ready'", false, false},
-		{"_entity.current_state == 'other' && entity.score > 0", true, false},
-		{"_entity.current_state == 'other' || entity.score > 0", true, true},
-		{"!(_entity.current_state != 'ready')", true, true},
+		{"instance.stage == 'ready'", true, true},
+		{"instance.stage == 'ready'", false, false},
+		{"instance.stage == 'other' && state.score > 0", true, false},
+		{"instance.stage == 'other' || state.score > 0", true, true},
+		{"!(instance.stage != 'ready')", true, true},
 		{"payload.event_name == 'ready'", true, true},
 		{"payload.event_name == 'ready'", false, true},
 	} {

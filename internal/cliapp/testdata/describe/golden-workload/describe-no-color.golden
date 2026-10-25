@@ -5,7 +5,7 @@ events:
   - candidate.requested (fields: batch_id, candidate_id)
   - scout.requested (fields: candidate_ids, query)
   - search.requested (fields: candidate_ids, query)
-root primary entity: search_batch
+root primary entity: state
 root constructor: (no arguments)
 flows:
   - candidate (template)
@@ -13,16 +13,16 @@ flows:
       - candidate.analyzed (fields: batch_id, candidate_id, summary)
       - candidate.completed (fields: batch_id, candidate_id, summary)
       - candidate.work.requested (fields: batch_id, candidate_id)
-    primary entity: candidate_analysis
+    primary entity: state
     instance: field=candidate_id identity=run + flow + instance_key
     constructor: candidate.requested key=candidate_id supplied=[]
   - scout (static)
     events:
       - scout.completed (fields: batch_id, candidate_ids)
       - scout.work.requested (fields: candidate_ids, query)
-    primary entity: scout_task
+    primary entity: state
     constructor: (no arguments)
-    singleton coordinator: primary_entity=scout_task contained_fields=1
+    singleton coordinator: primary_entity=state contained_fields=1
 routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners
   - [typed_pubsub] candidate/candidate.analyzed: candidate.candidate-worker -> candidate.candidate-completion
@@ -69,6 +69,6 @@ routing topology: routing-topology/v1
     - candidate.requested: ..scout-collector -> output ..candidate.requested
     - scout/scout.completed: scout.scout-worker -> output scout.scout.completed
 diagnostics:
-  - [INFO] entity_reader_coverage @ candidate/schema.yaml: flow candidate entity_type candidate_analysis declares field candidate_id with no detected internal reader coverage
-  - [INFO] entity_reader_coverage @ schema.yaml: flow root entity_type search_batch declares field batch_id with no detected internal reader coverage
-  - [INFO] entity_reader_coverage @ scout/schema.yaml: flow scout entity_type scout_task declares field candidate_ids with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ candidate/schema.yaml: flow candidate entity_type state declares field candidate_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ schema.yaml: flow root entity_type state declares field batch_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ scout/schema.yaml: flow scout entity_type state declares field candidate_ids with no detected internal reader coverage

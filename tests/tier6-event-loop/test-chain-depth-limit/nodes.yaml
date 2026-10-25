@@ -13,7 +13,7 @@ node-2:
   event_handlers:
     chain.e1:
       guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
+        check: has(state.chain_marker) && state.chain_marker == "active"
       emit: chain.e2
 
 node-3:
@@ -23,7 +23,7 @@ node-3:
   event_handlers:
     chain.e2:
       guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
+        check: has(state.chain_marker) && state.chain_marker == "active"
       emit: chain.e3
 
 node-4:
@@ -33,7 +33,7 @@ node-4:
   event_handlers:
     chain.e3:
       guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
+        check: has(state.chain_marker) && state.chain_marker == "active"
       emit: chain.e4
 
 node-5:
@@ -43,7 +43,7 @@ node-5:
   event_handlers:
     chain.e4:
       guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
+        check: has(state.chain_marker) && state.chain_marker == "active"
       emit: chain.e5
 
 node-6:
@@ -53,7 +53,7 @@ node-6:
   event_handlers:
     chain.e5:
       guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
+        check: has(state.chain_marker) && state.chain_marker == "active"
       emit: chain.e6
 
 node-7:
@@ -63,4 +63,4 @@ node-7:
   event_handlers:
     chain.e6:
       guard:
-        check: has(entity.chain_marker) && entity.chain_marker == "active"
+        check: has(state.chain_marker) && state.chain_marker == "active"

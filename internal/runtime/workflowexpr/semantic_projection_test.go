@@ -77,7 +77,7 @@ func TestProjectCELValueRecursesAndNamesHostilePath(t *testing.T) {
 func TestEvalValueExpressionProjectsEveryRuntimeRootAndResult(t *testing.T) {
 	ctx := ValueContext{
 		Entity:         map[string]any{"value": json.Number("1")},
-		PlatformEntity: map[string]any{"value": json.Number("2")},
+		PlatformEntity: map[string]any{"id": "instance-2"},
 		Event:          map[string]any{"id": "event-3"},
 		Payload:        map[string]any{"value": json.Number("4")},
 		Policy:         map[string]any{"value": json.Number("5")},
@@ -90,14 +90,14 @@ func TestEvalValueExpressionProjectsEveryRuntimeRootAndResult(t *testing.T) {
 		{Name: "value", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
 	}}
 	value, err := EvalValueExpressionWithOptions(
-		`[entity.value, _entity.value, event.id, payload.value, policy.value, computed.value, row.value, loop.attempt]`,
+		`[state.value, instance.id, event.id, payload.value, policy.value, computed.value, row.value, loop.attempt]`,
 		ctx,
 		ValueExpressionOptions{ItemAlias: "row", ItemType: &valueType, EntityType: &valueType, PayloadType: &valueType},
 	)
 	if err != nil {
 		t.Fatalf("EvalValueExpressionWithOptions: %v", err)
 	}
-	want := []any{int64(1), int64(2), "event-3", int64(4), int64(5), int64(6), int64(7), int64(9)}
+	want := []any{int64(1), "instance-2", "event-3", int64(4), int64(5), int64(6), int64(7), int64(9)}
 	if !reflect.DeepEqual(value, want) {
 		t.Fatalf("projected roots/result = %#v, want %#v", value, want)
 	}

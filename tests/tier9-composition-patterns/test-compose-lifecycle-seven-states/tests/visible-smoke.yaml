@@ -15,6 +15,3 @@ steps:
 expect:
   events:
     include: [lifecycle.complete]
-  entities:
-    - type: test_entity
-      current_state: closed

@@ -51,10 +51,9 @@ pins:
   inputs:
     - work.ready
 `,
-		"account/entities.yaml": `account_state:
-  account_id: {type: text, _unused_reason: receiver instance identity}
-  values: InitializationValues
-  processed_count: {type: integer, initial: 0}
+		"account/state.yaml": `account_id: text
+values: InitializationValues
+processed_count: 0
 `,
 		"account/nodes.yaml": `collector:
   execution_type: system_node
@@ -66,7 +65,7 @@ pins:
         writes:
           - target_field: processed_count
             value: |-
-              has(entity.processed_count) ? entity.processed_count + 1 : 1
+              has(state.processed_count) ? state.processed_count + 1 : 1
 `,
 	} {
 		writeClosedVariantFile(t, root, path, contents)

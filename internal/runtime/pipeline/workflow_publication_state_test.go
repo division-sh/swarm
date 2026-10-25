@@ -93,7 +93,7 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 	}
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: entityID, WorkflowName: "review", WorkflowVersion: "v1",
-		Mode: "template", Status: "active", CurrentState: "review", EntityType: "work",
+		Mode: "template", Status: "active", CurrentState: "review", EntityType: "state",
 		InstanceKey: "exact", ParentInstance: runID,
 		Fields: json.RawMessage(`{"case_id":"exact"}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
 		Accumulator: json.RawMessage(`{}`), Config: rawConfig, InitialFields: json.RawMessage(`{}`),
@@ -241,12 +241,12 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 		}
 	})
 	descriptor, err := prepared.PinRoutingDescriptor()
-	if err != nil || descriptor.ID != "one" || descriptor.AddressFields["entity.case_id"] != "exact" {
+	if err != nil || descriptor.ID != "one" || descriptor.AddressFields["state.case_id"] != "exact" {
 		t.Fatalf("prospective selector evidence=%#v err=%v", descriptor, err)
 	}
-	descriptor.AddressFields["entity.case_id"] = "hostile"
+	descriptor.AddressFields["state.case_id"] = "hostile"
 	again, err := prepared.PinRoutingDescriptor()
-	if err != nil || again.AddressFields["entity.case_id"] != "exact" {
+	if err != nil || again.AddressFields["state.case_id"] != "exact" {
 		t.Fatal("selector projection shared mutable fields")
 	}
 	for _, target := range []events.RouteIdentity{

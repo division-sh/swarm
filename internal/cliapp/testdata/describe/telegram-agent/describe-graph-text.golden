@@ -6,13 +6,12 @@ flows:
   - telegram-chat (template)
     events:
       - telegram.reply_requested (fields: chat_id, text)
-    primary entity: chat
+    primary entity: state
     instance: field=conversation_reference identity=run + flow + instance_key
     constructor: inbound.telegram.text_message key=conversation_reference supplied=[]
   - telegram-ingress (static)
     ingress: alias=chat
       - provider=telegram admission=pack-required signing_secret=webhook_signing.telegram
-    primary entity: telegram_service
     constructor: (no arguments)
 routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners
@@ -43,4 +42,4 @@ stage graph:
       - active decision retire_service authority=stage_activation_cas reminder=24h draft_ttl=15m
         - retire -> done
 diagnostics:
-  - [INFO] entity_reader_coverage @ telegram-chat/schema.yaml: flow telegram-chat entity_type chat declares field conversation_reference with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ telegram-chat/schema.yaml: flow telegram-chat entity_type state declares field conversation_reference with no detected internal reader coverage

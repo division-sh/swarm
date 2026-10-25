@@ -7,6 +7,3 @@ steps:
 expect:
   events:
     include: [task.timed_out]
-  entities:
-    - type: test_entity
-      current_state: timed_out

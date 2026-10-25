@@ -20,7 +20,7 @@ func TestServedRootScenarioCLISetupUsesRuntimeCoordinates(t *testing.T) {
 setup:
   entities:
     - as: widget
-      type: widget
+      type: state
       current_state: waiting
       fields: {score: 5}
 steps:

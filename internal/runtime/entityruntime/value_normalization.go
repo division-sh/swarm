@@ -42,7 +42,7 @@ func NormalizeState(contract Contract, provided map[string]any) (map[string]any,
 	if err != nil {
 		return nil, err
 	}
-	if err := validateEntityFieldEqualities("entity", contract.Entity.Fields, out); err != nil {
+	if err := validateEntityFieldEqualities("state", contract.Entity.Fields, out); err != nil {
 		return nil, err
 	}
 	return out, nil

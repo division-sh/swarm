@@ -5,6 +5,3 @@ steps:
 expect:
   events:
     include: [slot.granted]
-  entities:
-    - type: core
-      current_state: active

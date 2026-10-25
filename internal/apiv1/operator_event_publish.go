@@ -820,12 +820,26 @@ func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts Even
 	if target.EntityID == "" || target.FlowInstance == "" {
 		return params, NewInvalidParamsError(map[string]any{"field": "target", "reason": "flow_instance and entity_id are required"})
 	}
-	entities, err := requireEntityReadStore(opts.Entities)
+	if opts.Instances == nil {
+		return params, fmt.Errorf("event publication requires the workflow instance index")
+	}
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(params.RunID, runtimeflowidentity.StoredRoute(target.FlowID, runtimeflowidentity.LogicalInstanceID(target.FlowInstance), target.FlowInstance))
 	if err != nil {
 		return params, err
 	}
-	entity, err := entities.LoadOperatorEntity(ctx, target.EntityID, params.RunID)
-	if errors.Is(err, operatorread.ErrEntityNotFound) {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(opts.Bundle.BundleHash)
+	if err != nil {
+		return params, err
+	}
+	lookup, err := pipeline.NewExactFlowInstanceLookup(opts.Source, fact, owner)
+	if err != nil {
+		return params, err
+	}
+	instance, found, err := opts.Instances.LookupFlowInstance(ctx, lookup)
+	if err != nil {
+		return params, err
+	}
+	if !found || instance.Identity().EntityID != target.EntityID {
 		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":      params.EventName,
 			"run_id":          params.RunID,
@@ -835,10 +849,7 @@ func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts Even
 			"reason":          "selected_target_entity_not_found",
 		})
 	}
-	if err != nil {
-		return params, err
-	}
-	storedFlowInstance := strings.Trim(strings.TrimSpace(entity.Entity.FlowInstance), "/")
+	storedFlowInstance := instance.Identity().InstancePath
 	if storedFlowInstance != target.FlowInstance {
 		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":           params.EventName,

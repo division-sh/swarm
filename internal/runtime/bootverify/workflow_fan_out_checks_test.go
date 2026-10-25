@@ -140,7 +140,7 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 			name: "direct write",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
-					{TargetRef: "entity.line_items", Value: runtimecontracts.CELExpression("payload.line_items")},
+					{TargetRef: "state.line_items", Value: runtimecontracts.CELExpression("payload.line_items")},
 					{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}
 			},
@@ -149,30 +149,15 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 			name: "contained write",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
-					{Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "entity.line_items", Value: runtimecontracts.LiteralExpression(map[string]any{"id": "later"})},
+					{Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "state.line_items", Value: runtimecontracts.LiteralExpression(map[string]any{"id": "later"})},
 					{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}
-			},
-		},
-		{
-			name: "accumulator projection",
-			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
-				handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "collected"}
-				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")}}
-				node := bundle.Nodes["dispatcher"]
-				node.StateSchema.Fields = []runtimecontracts.NodeStateField{{Name: "collected", Type: "[LineItem]"}}
-				bundle.Nodes["dispatcher"] = node
-				entity := bundle.RootEntities["subject"]
-				field := entity.Fields["line_items"]
-				field.MaterializeFrom = "dispatcher.collected"
-				entity.Fields["line_items"] = field
-				bundle.RootEntities["subject"] = entity
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := runtimecontracts.FanOutSpec{
-				ItemsFrom: "entity.line_items",
+				ItemsFrom: "state.line_items",
 				As:        "line_item",
 				Identity:  "line_item.id",
 				Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
@@ -181,7 +166,7 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 			}
 			bundle := fanOutValidationBundle(spec)
 			bundle.RootEntities = runtimecontracts.EntityContractsDocument{
-				"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"line_items": {Type: "[LineItem]"},
 				}},
 			}

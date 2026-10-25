@@ -101,7 +101,7 @@ func ValidateJoinOutcomeExpressionScope(expression string) error {
 func validateJoinOutcomeExpr(expr celast.NavigableExpr, bound map[string]bool) error {
 	if expr.Kind() == celast.IdentKind && !bound[expr.AsIdent()] {
 		switch root := expr.AsIdent(); root {
-		case "payload", "event", "policy", "computed", "fan_out", "accumulated", "_entity", "metadata", "gates", "_loop":
+		case "payload", "event", "policy", "computed", "fan_out", "accumulated", "entity", "_entity", "instance", "metadata", "gates", "_loop":
 			return fmt.Errorf("closed join outcome may not reference %s; only typed state, join, and captured loop context are available", root)
 		}
 	}

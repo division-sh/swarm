@@ -7,34 +7,34 @@ owner:
       advances_to: assess
     work.annotated:
       guard:
-        check: _entity.current_state == 'assess'
+        check: instance.stage == 'assess'
       data_accumulation:
         writes: [review_note]
     work.assessed:
       guard:
-        check: _entity.current_state == 'assess'
+        check: instance.stage == 'assess'
       data_accumulation:
         writes:
           - business_brief
           - target_field: attempt_count
-            value: entity.attempt_count + 1
+            value: state.attempt_count + 1
       advances_to: consume
       emit:
         event: work.consume
     work.consume:
       guard:
-        check: _entity.current_state == 'consume'
+        check: instance.stage == 'consume'
       data_accumulation:
         writes:
           - op: clear
-            target: entity.review_note
+            target: state.review_note
       emit:
         event: work.completed
         fields:
-          business_brief: entity.business_brief
-          note_supplied: has(entity.review_note)
-          attempt_count: entity.attempt_count
+          business_brief: state.business_brief
+          note_supplied: has(state.review_note)
+          attempt_count: state.attempt_count
     work.completed:
       guard:
-        check: _entity.current_state == 'consume' && payload.business_brief == entity.business_brief && payload.attempt_count == entity.attempt_count && !payload.note_supplied
+        check: instance.stage == 'consume' && payload.business_brief == state.business_brief && payload.attempt_count == state.attempt_count && !payload.note_supplied
       advances_to: done

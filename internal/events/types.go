@@ -1802,9 +1802,6 @@ func (e Event) ContextMap(currentState string) map[string]any {
 			out["target_set"] = items
 		}
 	}
-	if currentState = strings.TrimSpace(currentState); currentState != "" {
-		out["current_state"] = currentState
-	}
 	if parentEventID := e.ParentEventID(); parentEventID != "" {
 		out["source_event_id"] = parentEventID
 	}

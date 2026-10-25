@@ -36,7 +36,7 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 					"review/schema.yaml": "name: review\nstages:\n  pending: {}\n",
 				}
 				if fielded {
-					files["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
+					files["review/state.yaml"] = "marker: \"original\"\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 				runID := correlation.RunIDFromContext(f.ctx)
@@ -216,8 +216,8 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 			gate, emits                       bool
 		}{
 			{name: "fieldless_stage"},
-			{name: "fielded_stage", entity: "review_item", wantMarker: "original"},
-			{name: "fielded_accumulation", entity: "review_item", effects: "      data_accumulation:\n        writes:\n          - {target_field: marker, value: 'changed'}\n", wantMarker: "changed"},
+			{name: "fielded_stage", entity: "state", wantMarker: "original"},
+			{name: "fielded_accumulation", entity: "state", effects: "      data_accumulation:\n        writes:\n          - {target_field: marker, value: 'changed'}\n", wantMarker: "changed"},
 			{name: "fieldless_gate", effects: "      sets_gate: {name: approved}\n", gate: true},
 			{name: "fieldless_emit", effects: "      emit: {event: work.recorded}\n", emits: true},
 		} {
@@ -234,7 +234,7 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 						"review/nodes.yaml":  "inspect:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      advances_to: reviewing\n" + shape.effects,
 					}
 					if shape.entity != "" {
-						files["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
+						files["review/state.yaml"] = "marker: \"original\"\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 					runID := correlation.RunIDFromContext(f.ctx)

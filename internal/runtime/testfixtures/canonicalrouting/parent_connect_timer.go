@@ -18,6 +18,6 @@ pins:
   outputs:
     - work.ready
 `)
-	writeClosedVariantFile(t, root, "producer/entities.yaml", "test_entity: {}\n")
+	removeClosedVariantFiles(t, root, "producer/state.yaml")
 	return root
 }

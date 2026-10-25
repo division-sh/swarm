@@ -15,7 +15,7 @@ func TestA2JoinClosureContextTypes(t *testing.T) {
 				t.Fatalf("context %v lost %s: %v", context, expression, err)
 			}
 		}
-		for _, expression := range []string{"join.close_reason > 1", "payload.result", "event.id", "_entity.current_state"} {
+		for _, expression := range []string{"join.close_reason > 1", "payload.result", "event.id", "instance.stage"} {
 			if err := ValidateValueExpressionWithOptions(expression, options); err == nil {
 				t.Fatalf("context %v admitted %s", context, expression)
 			}

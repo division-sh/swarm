@@ -6,7 +6,7 @@ dispatcher:
     batch.requested:
       count:
         items_from: payload.items
-        store_as: entity.dispatch_count
+        store_as: state.dispatch_count
       rules:
         - when: payload.mode == 'parallel'
           advances_to: dispatched

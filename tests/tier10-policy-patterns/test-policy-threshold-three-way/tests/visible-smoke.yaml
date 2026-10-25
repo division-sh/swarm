@@ -7,7 +7,7 @@ expect:
   events:
     include: [eval.tier_b]
   entities:
-    - type: core
+    - flow: .
       current_state: tier_b
       fields:
         score: 60

@@ -1,9 +1,0 @@
-hub:
-  hub_id: text
-  items: [text]
-  labels: map[text]text
-  positions: [text]
-  marker: text
-  result: text
-  result_stage: text
-  results: integer
