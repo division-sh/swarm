@@ -241,14 +241,7 @@ func TestIssue2566ReporterFiniteFixtureCanCloseBothStores(t *testing.T) {
 			requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{
 				"run_id": opened.RunID, "event_name": "portfolio.close.requested", "payload": map[string]any{}, "idempotency_key": uuid.NewString(),
 			}, &publication)
-			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
-				requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &diagnosis)
-				if diagnosis.Run.Status == "completed" {
-					return
-				}
-				time.Sleep(20 * time.Millisecond)
-			}
-			t.Fatalf("fixture finals were decorative rather than executable: %+v", diagnosis)
+			requireServedFinalInstancesSettled(t, endpoint, opened.RunID, map[string]string{".": "done", "portfolio": "done"})
 		})
 	}
 }

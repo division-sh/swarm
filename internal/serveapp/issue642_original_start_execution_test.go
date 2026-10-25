@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -26,6 +27,16 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 				nativeBackend = "postgres"
 			}
 			forkRuntime := captureServedForkRuntimeOptions(t)
+			var liveFork apiv1.RunForkExecutor
+			priorCapabilities := buildSelectedAPICapabilities
+			buildSelectedAPICapabilities = func(owner *selectedStoreOwner, request selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+				capabilities, err := priorCapabilities(owner, request)
+				if err == nil {
+					liveFork = capabilities.RunFork
+				}
+				return capabilities, err
+			}
+			t.Cleanup(func() { buildSelectedAPICapabilities = priorCapabilities })
 			publication := newExactOriginPublicationProbe(t)
 			start := newServedBoundaryFixtureLifetime(t, nativeBackend, canonicalrouting.CopyExample(t, canonicalrouting.RootIngress))
 			process, rt := start()
@@ -46,7 +57,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 				t.Fatalf("first turn lacks acknowledged native creation: %+v", receipt)
 			}
 			initial := receipt.RunCreation.EventID
-			requireServedRunStatus(t, rt.Endpoint, started.RunID, "completed")
+			requireServedFinalInstancesSettled(t, rt.Endpoint, started.RunID, map[string]string{".": "done"})
 			waitServedRunDeliveryQuiescence(t, deliveries, started.RunID)
 			if err := waitExactOriginPublications(t.Context(), publication, initial); err != nil {
 				t.Fatal(err)
@@ -84,12 +95,18 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 					RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 				}, AgentRuntime: *forkRuntime,
 			}
-			result, err := family.Execute(ctx, request)
-			if err != nil || !result.Activation.Activated || result.Activation.SourceFrozen ||
-				result.Materialization.ForkPoint != plan.ForkPoint || result.Materialization.ForkRunID == "" {
+			if liveFork == nil {
+				t.Fatal("original start requires the real served live-fork executor")
+			}
+			result, err := liveFork.ExecuteRunFork(ctx, apiv1.RunForkExecutionRequest{
+				ForkOperation: &operation, SourceRunID: started.RunID, AtStart: true,
+				BundleHash: rt.BundleHash, ContractSelection: selection,
+			})
+			if err != nil || result.SourceFrozen || result.SourceRunStatus != "paused" ||
+				result.ForkPointKind != string(plan.ForkPoint.Kind) || result.ForkRevision != plan.ForkPoint.Revision || result.ForkRunID == "" {
 				t.Fatalf("execute actual original start: %+v error=%v", result, err)
 			}
-			child := result.Materialization.ForkRunID
+			child := result.ForkRunID
 			t.Cleanup(func() {
 				if t.Failed() {
 					var diagnosis json.RawMessage
@@ -97,7 +114,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 					t.Logf("original-start child failure: %s", diagnosis)
 				}
 			})
-			requireServedRunStatus(t, rt.Endpoint, child, "completed")
+			requireServedFinalInstancesSettled(t, rt.Endpoint, child, map[string]string{".": "done"})
 			waitServedRunDeliveryQuiescence(t, deliveries, child)
 			_, childHeader := requireReceiverTargetState(t, rt.ReceiverStateReader, child, ".", child, child)
 			if childHeader.CurrentState != "done" {
@@ -200,7 +217,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			if _, err := freshFamily.Execute(freshContext, coldTamper); err == nil || !strings.Contains(err.Error(), "original invocation semantics") {
 				t.Fatalf("reopened process admitted changed operation semantics or hit the wrong refusal: %v", err)
 			}
-			requireServedRunStatus(t, rt.Endpoint, persisted.ForkRunID, "completed")
+			requireServedFinalInstancesSettled(t, rt.Endpoint, persisted.ForkRunID, map[string]string{".": "done"})
 			_, restoredHeader := requireReceiverTargetState(t, rt.ReceiverStateReader, persisted.ForkRunID, ".", persisted.ForkRunID, persisted.ForkRunID)
 			if !reflect.DeepEqual(restoredHeader, childHeader) {
 				t.Fatalf("cold replay changed the exact completed receiver: before=%+v after=%+v", childHeader, restoredHeader)

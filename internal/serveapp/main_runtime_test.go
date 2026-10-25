@@ -3553,9 +3553,8 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	componentNode := identitytest.FlowNode(t, "operating", "component-scaffold").Key()
 	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, componentEventName, componentNode)
 	requireServedTraceReadback(t, endpoint, runID, componentEventID, componentEventName, componentNode)
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
-	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
-	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
+	requireServedFinalInstancesSettled(t, endpoint, runID, map[string]string{servedTypedCreationInstancePath: "ready"})
+	requireServedStatusCLIReadback(t, endpoint, runID, "  live")
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
 	requireServedParitySettlementPostconditions(t, endpoint, db, backend, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
@@ -4995,7 +4994,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
+	requireServedFinalInstancesSettled(t, endpoint, runID, map[string]string{".": "done"})
 	itemObserver := identitytest.RootNode(t, "item-observer").Key()
 	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", itemObserver)
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", itemObserver)
@@ -5014,7 +5013,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
 		}
 	}
-	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
+	requireServedStatusCLIReadback(t, endpoint, runID, "  live")
 	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entity", "list", "--run-id", runID, "--limit", "10"})
 	if entityListCode != 0 {
 		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
@@ -5035,6 +5034,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
+	requireServedOKJSONRPC(t, endpoint, "run.stop", map[string]any{"run_id": runID})
 	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 		"event_name":      "item.processed",
 		"run_id":          runID,
@@ -5045,7 +5045,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		t.Fatalf("unhandled follow-up error data = %#v, want %s", errResp.Data, apiv1.RunAlreadyTerminalCode)
 	}
 	details, ok := errResp.Data["details"].(map[string]any)
-	if !ok || details["current_status"] != "completed" {
+	if !ok || details["current_status"] != "cancelled" {
 		t.Fatalf("unhandled follow-up details = %#v", errResp.Data["details"])
 	}
 	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledIdempotencyKey); got != 0 {
@@ -5263,7 +5263,7 @@ func runServedEventPublishActiveLoadProof(
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
+	requireServedFinalInstancesSettled(t, endpoint, runID, map[string]string{".": "done"})
 	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", itemObserver)
 }
 
@@ -5384,6 +5384,31 @@ func requestServedRawJSONRPC(t *testing.T, endpoint, raw string) servedJSONRPCEn
 		t.Fatalf("decode raw JSON-RPC response: %v", err)
 	}
 	return envelope
+}
+
+func requireServedFinalInstancesSettled(t *testing.T, endpoint, runID string, stages map[string]string) {
+	t.Helper()
+	var last cliapp.DiagnosticRunDiagnosisResult
+	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &last)
+		final := len(stages) != 0
+		for path, stage := range stages {
+			found := false
+			for _, instance := range last.Instances {
+				if instance.FlowInstance == path {
+					found = instance.Stage == stage && instance.Disposition == "final"
+					break
+				}
+			}
+			final = final && found
+		}
+		if final && last.Run.RunID == runID && last.Run.Status == "live" && last.Run.EndedAt == "" &&
+			last.Run.Failure == nil && last.TestQuiescence != nil && cliapp.BoolPointerValue(last.TestQuiescence.Ready) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("live run %s did not retain exact final instances %v with settled work: %+v", runID, stages, last)
 }
 
 func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
