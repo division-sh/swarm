@@ -1,13 +1,31 @@
 package main
 
 import (
+	"bytes"
 	"go/ast"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 )
+
+func TestFacadeForwardersAreFresh(t *testing.T) {
+	got, err := exec.Command("go", "run", ".").CombinedOutput()
+	if err != nil {
+		t.Fatalf("generate facade: %v\n%s", err, got)
+	}
+	want, err := os.ReadFile(filepath.Join("..", "..", "facade_forwarders_generated.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("facade forwarders are stale; run go generate ./internal/store/internal/runtimepersistence")
+	}
+}
 
 func TestContainsRawSQLRejectsConcreteNamedCarriers(t *testing.T) {
 	const source = `package fixture
