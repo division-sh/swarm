@@ -99,9 +99,6 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 			if constructorFields[fieldName] {
 				continue
 			}
-			if strings.TrimSpace(fieldDecl.MaterializeFrom) != "" {
-				continue
-			}
 			if strings.TrimSpace(fieldDecl.UnusedReason) != "" {
 				continue
 			}

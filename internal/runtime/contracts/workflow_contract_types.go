@@ -1065,8 +1065,6 @@ type EntityFieldDecl struct {
 	Immutable          bool              `yaml:"immutable"`
 	Description        string            `yaml:"description"`
 	Refinements        SchemaRefinements `yaml:"-"`
-	MaterializeFrom    string            `yaml:"materialize_from"`
-	Project            map[string]any    `yaml:"project"`
 	UnusedReason       string            `yaml:"_unused_reason"`
 	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
 }

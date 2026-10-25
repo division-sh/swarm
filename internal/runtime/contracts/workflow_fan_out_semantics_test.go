@@ -410,10 +410,9 @@ func TestFanOutSourceAfterWritesClassifiesEveryEntityMutationForm(t *testing.T) 
 	}
 
 	tests := []struct {
-		name       string
-		write      WorkflowDataWrite
-		projection bool
-		want       bool
+		name  string
+		write WorkflowDataWrite
+		want  bool
 	}{
 		{name: "explicit direct", write: WorkflowDataWrite{TargetRef: "state.items", Value: LiteralExpression([]any{"next"})}, want: true},
 		{name: "implicit direct", write: WorkflowDataWrite{TargetField: "items", Value: LiteralExpression([]any{"next"})}, want: true},
@@ -422,7 +421,6 @@ func TestFanOutSourceAfterWritesClassifiesEveryEntityMutationForm(t *testing.T) 
 		{name: "contained append", write: WorkflowDataWrite{Operation: WorkflowDataOperationAppend, TargetRef: "state.items", Value: LiteralExpression("next")}, want: true},
 		{name: "nested source field", write: WorkflowDataWrite{TargetRef: "state.items.0", Value: LiteralExpression("next")}, want: true},
 		{name: "different field", write: WorkflowDataWrite{TargetRef: "state.other", Value: LiteralExpression([]any{"next"})}, want: false},
-		{name: "accumulator projection", projection: true, want: true},
 	}
 
 	for _, tc := range tests {
@@ -438,16 +436,7 @@ func TestFanOutSourceAfterWritesClassifiesEveryEntityMutationForm(t *testing.T) 
 			handler := SystemNodeEventHandler{
 				FanOut: &FanOutSpec{ItemsFrom: "state.items", As: "item", Identity: "item", Emit: EmitSpec{Event: "item.requested"}},
 			}
-			if tc.projection {
-				handler.Accumulate = &AccumulateSpec{Into: "collected"}
-				decl := bundle.RootEntities["state"]
-				field := decl.Fields["items"]
-				field.MaterializeFrom = "dispatcher.collected"
-				decl.Fields["items"] = field
-				bundle.RootEntities["state"] = decl
-			} else {
-				handler.DataAccumulation.Writes = []WorkflowDataWrite{tc.write}
-			}
+			handler.DataAccumulation.Writes = []WorkflowDataWrite{tc.write}
 			qualified, err := completeFanOutSemanticsTestIdentity(node, handler)
 			if err != nil {
 				t.Fatal(err)

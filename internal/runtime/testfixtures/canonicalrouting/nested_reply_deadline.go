@@ -95,10 +95,7 @@ func CopyTwoOpenFanOutReplyDeadlines(t testing.TB) string {
 	writeClosedVariantFile(t, root, "state.yaml", `expected: ["same-business-key"]
 `)
 	applyClosedReplacement(t, filepath.Join(root, "provider/schema.yaml"), "pins:\n", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\npins:\n")
-	writeClosedVariantFile(t, root, "provider/state.yaml", `request_state:
-  expected:
-    type: "[text]"
-    initial: [same-business-key]
+	writeClosedVariantFile(t, root, "provider/state.yaml", `expected: ["same-business-key"]
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    provider.replied:
       emit:
