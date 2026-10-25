@@ -45,6 +45,19 @@ import (
 	"github.com/google/uuid"
 )
 
+type publishedJoinMutationDiagnostic struct {
+	pipeline.WorkflowPersistenceOwner
+	t *testing.T
+}
+
+func (p publishedJoinMutationDiagnostic) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
+	result, err := p.WorkflowPersistenceOwner.CommitWorkflowEngineMutation(ctx, command)
+	if err != nil {
+		p.t.Logf("PUBLISHED_JOIN_NATIVE_MUTATION committed=%t error=%v", result.Committed, err)
+	}
+	return result, err
+}
+
 type publishedJoinSourceDriver struct {
 	callback func(context.Context, genericschedule.Wakeup)
 	wakeup   genericschedule.Wakeup
@@ -481,10 +494,19 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-join", IdempotencyKey: "fixed-cut",
 				TransportHash: "published-join-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+			owner.ports.workflow = pipeline.NewWorkflowPersistence(publishedJoinMutationDiagnostic{selected.(pipeline.WorkflowPersistenceOwner), t})
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true,
 				Owner: owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability}})
 			if err != nil || !result.Activation.Activated {
+				diagnostic, diagnosticErr := storetest.ReadServedRunDebugSummary(context.WithoutCancel(ctx), selected, result.Materialization.ForkRunID)
+				t.Logf("PUBLISHED_JOIN_HANDOFF diagnostic=%s err=%v", diagnostic, diagnosticErr)
 				t.Fatalf("selected published-join activation: %+v err=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID
@@ -499,13 +521,18 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			defer cancel()
 			reader := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 			})
 			for {
 				header, err := reader.LoadRunHeader(wait, child)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if header.Status == "completed" && header.EndedAt != nil && header.Failure == nil && process.ActiveCount() == baseline {
+				settled, err := reader.LoadRunTestQuiescence(wait, child, time.Now().UTC())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if header.Status == "live" && header.EndedAt == nil && header.Failure == nil && settled.Ready {
 					break
 				}
 				if header.Failure != nil {
@@ -563,6 +590,9 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			retry, found, err := operations.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
 			if err != nil || !found || !reflect.DeepEqual(acknowledged, retry) {
 				t.Fatalf("published occurrence settlement changed permanent acknowledgment: %+v err=%v", retry, err)
+			}
+			if err := liveRuntime.Shutdown(); err != nil || process.ActiveCount() != baseline {
+				t.Fatalf("ordinary published join did not join its resources: work=%d baseline=%d err=%v", process.ActiveCount(), baseline, err)
 			}
 		})
 	}

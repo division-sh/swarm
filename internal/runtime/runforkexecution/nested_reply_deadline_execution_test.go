@@ -552,11 +552,12 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				}
 			}
 			if restartVariant == "" {
-				activated, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut,
+				attachment := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut,
 					AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ForkOperation: operation})
-				if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != staged.ForkRunID {
-					t.Fatalf("activate exact selected child: %+v error=%v", activated, err)
+				if attachment.materialized.ForkRunID != staged.ForkRunID {
+					t.Fatalf("selected component changed its exact child: %+v", attachment.materialized)
 				}
+				attachment.serveSelectedControls(t)
 			} else {
 				if err := prepared.Close(); err != nil {
 					t.Fatal(err)

@@ -15,10 +15,13 @@ import (
 	"testing"
 	"time"
 
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -273,9 +276,41 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	} else if armedJoinCut {
 		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
 	} else {
-		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+		seedSelectedLiveOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
 	}
-	liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+	var liveRuntime *rootruntime.Runtime
+	var liveContexts *rootruntime.RuntimeContextManager
+	if timerCut {
+		liveRuntime, liveContexts = ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+		plan, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
+		if err != nil || len(plan.WorkflowTimers) != 1 {
+			t.Fatalf("original workflow timer fixed cut: %+v err=%v", plan, err)
+		}
+		setup, finish := context.WithTimeout(ctx, 15*time.Second)
+		defer finish()
+		for {
+			clock, found, err := selected.(interface {
+				LoadWorkflowTimerActivation(context.Context, string) (pipeline.WorkflowTimerActivation, bool, error)
+			}).LoadWorkflowTimerActivation(setup, plan.WorkflowTimers[0].ActivationID)
+			if err != nil || !found {
+				t.Fatalf("original workflow timer: %+v found=%t err=%v", clock, found, err)
+			}
+			summary, err := selected.(deliverylifecycle.Store).SummarizeRun(setup, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if clock.Status == "fired" && summary.Total > 0 && summary.Total == summary.Delivered {
+				break
+			}
+			select {
+			case <-setup.Done():
+				t.Fatalf("original workflow timer setup did not settle: clock=%+v delivery=%+v err=%v", clock, summary, setup.Err())
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	} else {
+		liveRuntime, liveContexts = liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+	}
 	if armedJoinCut {
 		plan, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
 		if err != nil || len(plan.JoinSchedules) != 1 {

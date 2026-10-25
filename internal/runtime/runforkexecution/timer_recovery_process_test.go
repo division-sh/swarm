@@ -42,7 +42,7 @@ type issue642TimerCrashPersistence struct {
 
 func (p issue642TimerCrashPersistence) CommitWorkflowTimerOccurrence(ctx context.Context, command pipeline.WorkflowTimerOccurrenceCommand) (pipeline.CommittedWorkflowTimerOccurrence, error) {
 	result, err := p.WorkflowPersistenceOwner.CommitWorkflowTimerOccurrence(ctx, command)
-	if result.Outcome == pipeline.WorkflowTimerOccurrenceCommitted {
+	if result.Outcome == pipeline.WorkflowTimerOccurrenceCommitted && command.Activation.ForkedFromRunID != "" {
 		// The native timer and publication transaction has acknowledged; no
 		// postcommit dispatch or graceful cleanup runs before the parent kills us.
 		p.checkpoint(command.Activation.RunID)
@@ -69,15 +69,11 @@ func issue642TimerCrashFixture(t *testing.T, repo string) string {
 		"nodes.yaml": `test-node:
   execution_type: system_node
   subscribes_to: [timer.check]
-  timers:
-    - id: check_timer
-      event: timer.check
-      delay: 1s
-      start_on: state:waiting
   event_handlers:
     timer.check:
       advances_to: checked
 `,
+		"schema.yaml": "stages:\n  waiting:\n    timers:\n      - {after: 1s, emit: timer.check}\n  checked: {final: true}\npins:\n  inputs: [timer.scheduled, timer.check]\n  outputs: [timer.check]\n",
 		"events.yaml": "timer.scheduled:\ntimer.check:\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
@@ -191,6 +187,12 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				preservedSource, found, err := selected.(interface {
+					LoadWorkflowTimerActivation(context.Context, string) (pipeline.WorkflowTimerActivation, bool, error)
+				}).LoadWorkflowTimerActivation(t.Context(), plan.WorkflowTimers[0].ActivationID)
+				if err != nil || !found || preservedSource.Status != "fired" {
+					t.Fatalf("original source setup did not retain its settled clock: %+v found=%t err=%v", preservedSource, found, err)
+				}
 				ctx := runForkTestContext(t)
 				capability := selectedContractTestProcessCapability(t, ctx, selected)
 				process, _ := worklifetime.ProcessFromContext(ctx)
@@ -207,9 +209,18 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 				})
-				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
 					t.Fatalf("timer continuation recovery: %+v err=%v", recovered, err)
 				}
+				binding, err := owner.ports.fork.RequireRunForkSelectedContractBinding(ctx, checkpoint.ForkRun)
+				if err != nil {
+					t.Fatal(err)
+				}
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: binding.ContractSelection})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ordinary, _ := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
 				wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 				defer cancel()
 				root := flowidentity.RunScopedFlowInstance{RunID: checkpoint.ForkRun, Route: flowidentity.StoredRoute(".", checkpoint.ForkRun, checkpoint.ForkRun)}
@@ -229,7 +240,7 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 					owner.ports.contexts.mu.Lock()
 					retained := len(owner.ports.contexts.entries)
 					owner.ports.contexts.mu.Unlock()
-					if found && header.CurrentState == "checked" && availability.Status == "completed" && pending == 0 && retained == 0 && process.ActiveCount() == baseline {
+					if found && header.CurrentState == "checked" && availability.Status == "live" && pending == 0 && retained == 0 {
 						break
 					}
 					select {
@@ -238,13 +249,16 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 					case <-time.After(10 * time.Millisecond):
 					}
 				}
+				if err := ordinary.Shutdown(); err != nil || process.ActiveCount() != baseline {
+					t.Fatalf("timer recovery did not join its ordinary resources: work=%d baseline=%d err=%v", process.ActiveCount(), baseline, err)
+				}
 				reader := selected.(interface {
 					LoadWorkflowTimerActivation(context.Context, string) (pipeline.WorkflowTimerActivation, bool, error)
 					LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
 				})
 				header, err := reader.LoadRunHeader(wait, checkpoint.ForkRun)
-				if err != nil || header.Status != "completed" || header.EndedAt == nil || header.Failure != nil {
-					t.Fatalf("timer receiver completion is not successful run completion: %+v err=%v", header, err)
+				if err != nil || header.Status != "live" || header.EndedAt != nil || header.Failure != nil {
+					t.Fatalf("timer receiver completion changed live-run disposition: %+v err=%v", header, err)
 				}
 				source, err := pipeline.DecodeWorkflowTimerActivationPersistenceRecord(plan.WorkflowTimers[0])
 				if err != nil {
@@ -284,7 +298,7 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 					t.Fatalf("timer recovery rearmed or retained work: %+v", storage)
 				}
 				unchanged, found, err := reader.LoadWorkflowTimerActivation(wait, source.Ref.ActivationID)
-				if err != nil || !found || !reflect.DeepEqual(source.Canonical(), unchanged.Canonical()) {
+				if err != nil || !found || !reflect.DeepEqual(preservedSource.Canonical(), unchanged.Canonical()) {
 					t.Fatalf("recovery changed the source's armed obligation: %+v found=%v err=%v", unchanged, found, err)
 				}
 				retry, found, err := operations.LoadForkOperation(wait, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)
@@ -304,8 +318,8 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				terminal, err := terminalOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
-				if err != nil || len(terminal) != 1 || terminal[0].RunID != checkpoint.ForkRun || terminal[0].Disposition != runfork.SelectedForkRecoveryTerminal {
-					t.Fatalf("completed timer child reopened execution: %+v state_before=%+v cleanup=%v err=%v", terminal, stateBefore, owner.ports.contexts.cleanupErr, err)
+				if err != nil || len(terminal) != 1 || terminal[0].RunID != checkpoint.ForkRun || terminal[0].Disposition != runfork.SelectedForkRecoveryControlOnly || terminal[0].Continuation != nil {
+					t.Fatalf("settled live timer child reopened selected execution: %+v state_before=%+v cleanup=%v err=%v", terminal, stateBefore, owner.ports.contexts.cleanupErr, err)
 				}
 				stateAfter, err := storetest.ReadSelectedExecutionStorage(wait, selected, checkpoint.ForkRun)
 				if err != nil || !reflect.DeepEqual(stateBefore, stateAfter) || process.ActiveCount() != baseline {
