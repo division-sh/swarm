@@ -263,6 +263,9 @@ func copyTree(t testing.TB, source, target string) {
 		}
 		destination := filepath.Join(target, rel)
 		if entry.IsDir() {
+			if entry.Name() == ".swarm" {
+				return filepath.SkipDir
+			}
 			return os.MkdirAll(destination, 0o755)
 		}
 		contents, err := os.ReadFile(path)
