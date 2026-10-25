@@ -183,7 +183,11 @@ func waitServedBoundaryPublicationCompletion(t *testing.T, rt servedBoundaryFixt
 			t.Fatal(err)
 		}
 		if incomplete == 0 {
-			return
+			var diagnosis cliapp.DiagnosticRunDiagnosisResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
+			if diagnosis.TestQuiescence != nil && cliapp.BoolPointerValue(diagnosis.TestQuiescence.Ready) {
+				return
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

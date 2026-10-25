@@ -36,6 +36,13 @@ func originalEventBusFixtureContext(t testing.TB, ctx context.Context, selected 
 		}
 		return ctx
 	}
+	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+		runtimeID := authorActivityTestRuntimeInstanceID
+		if scope, present := runtimeauthoractivity.ScopeFromContext(ctx); present {
+			runtimeID = scope.RuntimeInstanceID
+		}
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+	}
 	original, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("native event-bus fixture lacks its original process owner: %T", selected)
@@ -86,10 +93,14 @@ type pipelineObligationTestProvider interface {
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
-func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+func newScopedTestEventBus(t testing.TB, store runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+	t.Helper()
 	opts := runtimebus.EventBusOptions{}
 	if len(options) > 0 {
 		opts = options[0]
+	}
+	if _, native := store.(agentfixture.Store); native && opts.MutationContext == nil {
+		return newNativeScopedTestEventBus(t, store, opts)
 	}
 	if opts.CarryMutationContext == nil {
 		opts.CarryMutationContext = startupownership.CarryMutationAuthority
@@ -314,16 +325,19 @@ func newNativeScopedTestEventBus(t testing.TB, selected runtimebus.EventStore, o
 		}()
 		ctx = setup.Context()
 	}
-	process, present := worklifetime.ProcessFromContext(ctx)
-	if !present {
-		ctx = nativeBusProcessContext(t, ctx, selected)
-	} else if _, bound := process.OriginalProcess(); !bound {
-		ctx = nativeBusProcessContext(t, ctx, selected)
-	}
+	ctx = nativeBusProcessContext(t, ctx, selected)
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = nativeBusWorkOwner(t, ctx)
 	}
-	return newScopedTestEventBus(selected, opts)
+	if opts.MutationContext == nil {
+		opts.MutationContext = func(caller context.Context) (context.Context, error) {
+			if !startupownership.HasMutationAuthority(caller) {
+				caller = startupownership.CarryMutationAuthority(caller, ctx)
+			}
+			return startupownership.FreezeMutationAuthority(caller)
+		}
+	}
+	return newScopedTestEventBus(t, selected, opts)
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {

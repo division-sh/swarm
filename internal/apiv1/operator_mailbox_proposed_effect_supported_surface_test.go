@@ -235,7 +235,7 @@ func newProposedEffectMailboxHandler(
 
 func installProposedEffectAPIJournal(t *testing.T, selected agentfixture.Store, bus *runtimebus.EventBus, coordinator *runtimepipeline.PipelineCoordinator, fact runtimecorrelation.SourceArtifactFact) {
 	t.Helper()
-	ctx := testAuthorActivityContextForSource(context.Background(), fact)
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContextForSource(context.Background(), fact), selected)
 	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {

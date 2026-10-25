@@ -45,25 +45,42 @@ func originalAPIFixtureContext(t testing.TB, ctx context.Context, selected any) 
 		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
 			t.Fatal(err)
 		}
-		return ctx
-	}
-	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
-		runtimeID := authorActivityTestRuntimeInstanceID
-		if scope, present := runtimeauthoractivity.ScopeFromContext(ctx); present {
-			runtimeID = scope.RuntimeInstanceID
+	} else {
+		if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+			runtimeID := authorActivityTestRuntimeInstanceID
+			if scope, present := runtimeauthoractivity.ScopeFromContext(ctx); present {
+				runtimeID = scope.RuntimeInstanceID
+			}
+			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 		}
-		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+		owner, ok := selected.(agentfixture.Store)
+		if !ok {
+			t.Fatalf("native API fixture lacks its original process owner: %T", selected)
+		}
+		var err error
+		ctx, err = agentfixture.ProcessContext(t, ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
-	owner, ok := selected.(agentfixture.Store)
-	if !ok {
-		t.Fatalf("native API fixture lacks its original process owner: %T", selected)
-	}
-	process, err := agentfixture.ProcessCapability(t, ctx, owner)
+	original, err := startupownership.CaptureMutationAuthority(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
-	if err != nil {
+	process, found := worklifetime.ProcessFromContext(ctx)
+	if !found {
+		process = worklifetime.NewProcess()
+		ctx = worklifetime.WithProcess(ctx, process)
+		t.Cleanup(func() {
+			process.Retire()
+			wait, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := process.Join(wait); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err := process.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
 	return ctx
@@ -136,33 +153,7 @@ func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
 
 func apiTestOriginalProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	ctx = originalAPIFixtureContext(t, ctx, selected)
-	if process, found := worklifetime.ProcessFromContext(ctx); found {
-		if _, bound := process.OriginalProcess(); bound {
-			return ctx
-		}
-	} else {
-		process := worklifetime.NewProcess()
-		ctx = worklifetime.WithProcess(ctx, process)
-		t.Cleanup(func() {
-			process.Retire()
-			if _, err := process.Join(context.Background()); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	owner, ok := selected.(agentfixture.Store)
-	if !ok {
-		t.Fatalf("API native fixture requires its process owner, got %T", selected)
-	}
-	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
-		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
-	}
-	ctx, err := agentfixture.ProcessContext(t, ctx, owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ctx
+	return originalAPIFixtureContext(t, ctx, selected)
 }
 
 func bindAPITestHandlerOriginalProcess(t testing.TB, handler *Handler, ctx context.Context) {

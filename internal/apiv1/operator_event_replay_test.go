@@ -711,6 +711,7 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			f := tc.open(t, ctx)
+			ctx = originalAPIFixtureContext(t, ctx, f.store)
 			if _, err := f.store.EnsureSourceArtifactWithData(ctx, authorActivityTestSourceArtifact, durabledata.Catalog{BundleHash: runStartTestBundleHash}); err != nil {
 				t.Fatalf("admit replay fixture source: %v", err)
 			}

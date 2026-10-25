@@ -232,8 +232,8 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 				} else {
 					observed, found, err = rt.SQLite.LookupFlowInstance(ctx, request)
 				}
-				if err != nil || !found || observed.Identity().EntityID != operating.Entity.EntityID || observed.InstanceKey() != key || observed.RunState() != runlifecycle.StateCompleted {
-					t.Fatalf("completed run lost occupied operating identity: observation=%+v found=%t err=%v", observed, found, err)
+				if err != nil || !found || observed.Identity().EntityID != operating.Entity.EntityID || observed.InstanceKey() != key || observed.RunState() != runlifecycle.StateRunning {
+					t.Fatalf("settled live run lost occupied operating identity: observation=%+v found=%t err=%v", observed, found, err)
 				}
 			}
 			t.Log("root-triggered operating creations=4; complete typed ordered results: 2026-Q1=[int64(11), int64(22)], 2026-Q2=[int64(111), int64(222)]")

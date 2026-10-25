@@ -711,7 +711,7 @@ func (o *Owner) Show(ctx context.Context, bundleHash string, ref runtimedata.Dec
 		return runtimedata.ResourceSnapshot{}, err
 	}
 	var snapshot runtimedata.ResourceSnapshot
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		declaration := runtimedata.Declaration{Ref: ref}
 		if strings.TrimSpace(bundleHash) != "" {
 			var err error
@@ -749,7 +749,7 @@ func (o *Owner) ListDeclarationSummaries(ctx context.Context, bundleHash string)
 		return nil, err
 	}
 	var summaries []runtimedata.DeclarationSummary
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(txctx, o.query(`
 			SELECT d.flow_path, d.event_name, d.display_name, d.schema_digest, d.canonical_schema_bytes,
 			       h.version_id, h.revision,

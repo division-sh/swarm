@@ -88,7 +88,7 @@ func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *test
 			"task.started": {Emit: runtimecontracts.EmitSpec{Event: "task.started"}},
 		},
 	})
-	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, &routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestEventBusRejectsInvalidExactNodeSubscriptionsBeforeRouteInstallation(t *
 			if _, err := runtimebus.DeriveRouteTable(source); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
 				t.Fatalf("DeriveRouteTable error = %v, want typed exact-node rejection", err)
 			}
-			if _, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{ContractBundle: source}); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
+			if _, err := newScopedTestEventBus(t, runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{ContractBundle: source}); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
 				t.Fatalf("NewEventBusWithOptions error = %v, want typed exact-node rejection", err)
 			}
 		})
@@ -432,7 +432,7 @@ func TestEventBusCompiledFlowInstanceBindingDoesNotRewritePersistence(t *testing
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
 	index := runtimebus.FlowInstanceIndexFixture(observed)
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
+	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -456,7 +456,7 @@ func TestCompiledFlowInstanceBindingRejectsUnknownCanonicalTemplateWithoutMutati
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "known", "inst-1", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
 	index := runtimebus.FlowInstanceIndexFixture(observed)
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
+	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestEventBusIndexedFlowInstanceDeliversDeclaredAgentSubscriber(t *testing.T
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", "11111111-1111-4111-8111-111111111111", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, instance.InstanceID)
 	index := runtimebus.FlowInstanceIndexFixture(observed)
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
+	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Durable:        runtimebus.DurableDependencies{Instances: index},
 	})

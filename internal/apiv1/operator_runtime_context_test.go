@@ -823,7 +823,10 @@ func runtimeContextTestRuntime(t *testing.T, selected *store.PostgresStore, rt *
 	rt.ExecutionPosture = executionposture.Live
 	rt.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	rt.Options.SourceArtifactFact = runtimeContextTestSourceFact(bundleHash)
-	ctx := testAuthorActivityContextForSource(context.Background(), rt.Options.SourceArtifactFact)
+	ctx := apiTestOriginalProcessContext(t, testAuthorActivityContextForSource(context.Background(), rt.Options.SourceArtifactFact), selected)
+	if rt.Options.ProcessWorkOwner == nil {
+		rt.Options.ProcessWorkOwner, _ = worklifetime.ProcessFromContext(ctx)
+	}
 	process, err := agentfixture.ProcessCapability(t, ctx, selected)
 	if err != nil {
 		t.Fatal(err)
