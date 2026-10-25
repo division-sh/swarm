@@ -238,6 +238,17 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 			source = debtForwardQuiescenceUncertainty(source, old, current)
 		}
 	}
+	// The selected-owner calls may already be landed while their allowance
+	// retains the old signature. Only the exact reviewed source proves this arm.
+	for _, pair := range selectedFixtures {
+		old, current := pair[0], pair[1]
+		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+			source[current.identity()] == current && source[old.identity()].Multiplicity == 0 &&
+			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 {
+			head = debtForwardQuiescenceUncertainty(head, old, current)
+			base = debtForwardQuiescenceUncertainty(base, old, current)
+		}
+	}
 	return head, base, source, nil
 }
 
