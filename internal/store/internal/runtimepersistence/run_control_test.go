@@ -21,6 +21,8 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	owner := selectedAdmissionLifecycleWriter(fixture.store).(interface {
 		runtimerunlifecycle.LiveRunReader
 		CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
+		CreateRunTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
+		ClassifyLiveRunCreationFailure(context.Context, runtimerunlifecycle.LiveRunScope, string, error) error
 		PauseRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 		ContinueRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 		StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
@@ -56,6 +58,23 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	}
 	request.RunID = second
 	var conflict *runtimerunlifecycle.LiveRunConflictError
+	failed := runSelectedFixtureMutation(ctx, fixture.store, "publication live conflict", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		_, err := owner.CreateRunTx(ctx, attempt, request)
+		return err
+	})
+	if failed == nil {
+		t.Fatal("transactional creation ignored the live sibling")
+	}
+	cleanup := errors.New("independent publication cleanup")
+	classified := owner.ClassifyLiveRunCreationFailure(ctx, scope, second, errors.Join(failed, cleanup))
+	if !errors.As(classified, &conflict) || conflict.LiveRunID != first || !errors.Is(classified, failed) || !errors.Is(classified, cleanup) {
+		t.Fatalf("settled publication lost its conflict or independent errors: %v", classified)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if got := owner.ClassifyLiveRunCreationFailure(cancelled, scope, second, failed); got != failed {
+		t.Fatalf("cancelled publication attempted conflict readback: %v", got)
+	}
 	if _, err := owner.CreateRun(ctx, request); !errors.As(err, &conflict) || conflict.LiveRunID != first {
 		t.Fatalf("competing live creation did not name the current run: %v", err)
 	}

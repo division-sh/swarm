@@ -323,15 +323,13 @@ func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sq
 }
 
 func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	if scoped, err := rejectLiveRunStop(ctx, tx, runID); scoped || err != nil {
-		return err
-	}
 	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, true, runID)
 	if err != nil {
 		return fmt.Errorf("inspect standing run control ownership: %w", err)
 	}
 	if disposition.UsesGenericRecovery() {
-		return nil
+		_, err := rejectLiveRunStop(ctx, tx, runID)
+		return err
 	}
 	return fmt.Errorf("run %s is owned by standing service %s; %s", runID, disposition.ServiceID, disposition.RunControlGuidance())
 }

@@ -396,6 +396,7 @@ type RuntimeContextDeactivationResult struct {
 type RuntimeContextManager struct {
 	mu                         sync.RWMutex
 	sourceSetMu                sync.Mutex
+	liveSelectionMu            sync.Mutex
 	availability               RunBundleAvailabilityReader
 	liveRuns                   runtimerunlifecycle.LiveRunReader
 	contexts                   map[string]*runtimeContextEntry
@@ -2788,6 +2789,13 @@ func (p *PreparedRuntimeSourceSetTransition) publishCommittedVisibility() error 
 		updates = append(updates, runtimeContextVisibilityUpdate{entry: item.entry, state: RuntimeContextStateLoaded})
 	}
 	return p.manager.publishRuntimeContextVisibilityLocked(updates...)
+}
+
+// Serialize the native selection and its post-ACK reconciliation, not preparation
+// or source-set replacement. Durable writers still enforce their own fences.
+func (m *RuntimeContextManager) BeginLiveRunSelection() func() {
+	m.liveSelectionMu.Lock()
+	return m.liveSelectionMu.Unlock
 }
 
 func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*RuntimeContextUse, RuntimeContextLookup, runbundle.Availability, error) {

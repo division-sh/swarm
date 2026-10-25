@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
@@ -329,6 +330,14 @@ func (s *postgresSession) InspectRunExecutionOwnership(ctx context.Context, evid
 	return result, err
 }
 
+func (s *postgresSession) InspectLiveForkReconciliation(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (current bool, err error) {
+	err = s.lease.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		current, err = inspectLiveForkReconciliationTx(ctx, tx, evidence, runID, false)
+		return err
+	})
+	return current, err
+}
+
 func (s *postgresSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
@@ -537,6 +546,14 @@ func (s *sqliteSession) InspectRunExecutionOwnership(ctx context.Context, eviden
 		return err
 	})
 	return result, err
+}
+
+func (s *sqliteSession) InspectLiveForkReconciliation(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (current bool, err error) {
+	err = s.owner.backend.RunTransaction(ctx, "inspect live fork reconciliation", func(ctx context.Context, tx *sql.Tx) error {
+		current, err = inspectLiveForkReconciliationTx(ctx, tx, evidence, runID, true)
+		return err
+	})
+	return current, err
 }
 
 func (s *sqliteSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
@@ -992,6 +1009,27 @@ func requirePausedSourceRemoval(ctx context.Context, tx *sql.Tx, previous, next 
 		}
 	}
 	return nil
+}
+
+func inspectLiveForkReconciliationTx(ctx context.Context, tx *sql.Tx, evidence runtimestartupownership.GrantEvidence, runID string, sqlite bool) (bool, error) {
+	ownership, err := inspectRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite)
+	if err != nil {
+		return false, err
+	}
+	retained, err := sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, runID, evidence.BundleHash)
+	if err != nil {
+		return false, err
+	}
+	if retained && ownership == runtimemanager.RunExecutionOwned {
+		return true, nil
+	}
+	if retained && ownership == runtimemanager.RunExecutionForeign {
+		current, err := sourceadmission.ObserveLiveHandoff(ctx, tx, runID, evidence.BundleHash)
+		if err != nil || !current {
+			return false, err
+		}
+	}
+	return false, fmt.Errorf("%w: %s", runtimemanager.ErrRunExecutionNotOwned, runID)
 }
 
 func inspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence runtimestartupownership.GrantEvidence, runID string, sqlite bool) (runtimemanager.RunExecutionOwnership, error) {

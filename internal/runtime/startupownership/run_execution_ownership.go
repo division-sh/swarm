@@ -36,6 +36,27 @@ func (g *generationGrant) InspectRunExecutionOwnership(ctx context.Context, runI
 	return result, errors.Join(err, g.owner.requireLive())
 }
 
+func (g *generationGrant) InspectLiveForkReconciliation(ctx context.Context, runID string) (bool, error) {
+	g.owner.opMu.Lock()
+	defer g.owner.opMu.Unlock()
+	if err := g.owner.proveCurrent(ctx); err != nil {
+		return false, err
+	}
+	evidence, err := g.Evidence()
+	if err != nil {
+		return false, err
+	}
+	reader, ok := g.owner.session.(interface {
+		InspectLiveForkReconciliation(context.Context, GrantEvidence, string) (bool, error)
+	})
+	if !ok || evidence.SelectedFork != nil || evidence.State != GrantAdmitted {
+		return false, errors.New("live fork reconciliation requires admitted ordinary authority")
+	}
+	current, err := reader.InspectLiveForkReconciliation(ctx, evidence, runID)
+	err = errors.Join(g.owner.retireOnPossessionFailure(err), g.owner.requireLive())
+	return current && err == nil, err
+}
+
 // Startup source applicability is not executable ownership. In particular a
 // prepared ordinary grant may hydrate retained facts but cannot dispatch them.
 func (g *generationGrant) ObserveStartupRunSource(ctx context.Context, runID string) (bool, error) {

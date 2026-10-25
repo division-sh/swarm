@@ -26,6 +26,7 @@ import (
 )
 
 type eventCommitTxStore interface {
+	ClassifyLiveRunCreationFailure(context.Context, runlifecycle.LiveRunScope, string, error) error
 	standaloneCompletionOwner() standaloneCompletionCapability
 	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement, runlifecycle.LiveRunScope) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
@@ -293,7 +294,7 @@ func commitPublication(
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
-		return runtimebus.CommittedPublication{}, outcome.Err()
+		return runtimebus.CommittedPublication{}, classifyPublicationFailure(ctx, store, command, outcome.Err())
 	}
 	result = result.WithCommitAcknowledgment()
 	if err := result.Validate(); err != nil {
@@ -456,7 +457,7 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 	var acknowledged bool
 	result, acknowledged = outcome.Value()
 	if !acknowledged {
-		return result, outcome.Err()
+		return result, classifyPublicationFailure(ctx, s, command.Publication, outcome.Err())
 	}
 	result.Acknowledged = true
 	result.Publication = result.Publication.WithCommitAcknowledgment()
@@ -557,7 +558,7 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 	var acknowledged bool
 	result, acknowledged = outcome.Value()
 	if !acknowledged {
-		return result, outcome.Err()
+		return result, classifyPublicationFailure(ctx, s, command.Publication, outcome.Err())
 	}
 	result.Acknowledged = true
 	result.Publication = result.Publication.WithCommitAcknowledgment()
@@ -640,16 +641,10 @@ func commitValidatedPublicationSQL(
 			return runtimebus.CommittedPublication{}, err
 		}
 	}
-	var scope runlifecycle.LiveRunScope
-	if request.Event.RunDisposition() == events.AdmittedRunCreateAuthorized {
-		for _, activation := range command.Activations {
-			if activation.Identity.EntityID == request.Event.Event().RunID() {
-				scope = runlifecycle.LiveRunScope{FlowPath: activation.Identity.TemplateID}
-				if err := scope.Validate(); err != nil {
-					return runtimebus.CommittedPublication{}, err
-				}
-				break
-			}
+	scope := publicationLiveScope(command)
+	if !scope.Empty() {
+		if err := scope.Validate(); err != nil {
+			return runtimebus.CommittedPublication{}, err
 		}
 	}
 	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, request.Event, request.RouteSettlement, scope)
@@ -699,6 +694,21 @@ func commitValidatedPublicationSQL(
 		}
 	}
 	return result, nil
+}
+
+func publicationLiveScope(command runtimebus.PublicationCommand) runlifecycle.LiveRunScope {
+	if command.Commit.Event.RunDisposition() == events.AdmittedRunCreateAuthorized {
+		for _, activation := range command.Activations {
+			if activation.Identity.EntityID == command.Commit.Event.Event().RunID() {
+				return runlifecycle.LiveRunScope{FlowPath: activation.Identity.TemplateID}
+			}
+		}
+	}
+	return runlifecycle.LiveRunScope{}
+}
+
+func classifyPublicationFailure(ctx context.Context, store eventCommitTxStore, command runtimebus.PublicationCommand, err error) error {
+	return store.ClassifyLiveRunCreationFailure(ctx, publicationLiveScope(command), command.Commit.Event.Event().RunID(), err)
 }
 
 func (s *EventPostgresOwner) CommitPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {

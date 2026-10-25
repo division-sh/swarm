@@ -43,6 +43,9 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 		return out, err
 	}
 	if found {
+		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
+		defer releaseSelection()
+		req.liveSelectionHeld = true
 		use, err := acquireLivePredecessor(ctx, req.LiveContexts, live)
 		if err != nil {
 			return out, err
@@ -79,6 +82,10 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 		finalErr = execute(ctx)
 	}
 	if out.Activation.Activated {
+		if !req.liveSelectionHeld {
+			releaseSelection := req.LiveContexts.BeginLiveRunSelection()
+			defer releaseSelection()
+		}
 		finalErr = errors.Join(finalErr, reconcileCommittedLiveFork(context.WithoutCancel(ctx), req.LiveContexts, out.Materialization.ForkRunID))
 	}
 	return out, finalErr
@@ -125,7 +132,7 @@ func reconcileCommittedLiveFork(ctx context.Context, contexts *runtimepkg.Runtim
 		err = errors.New("committed live fork requires its current ordinary runtime")
 	}
 	if err == nil {
-		err = use.Runtime().ReconcileLiveRun(use.WorkContext(), runID)
+		err = use.Runtime().ReconcileAcknowledgedLiveFork(use.WorkContext(), runID)
 	}
 	if use != nil {
 		err = errors.Join(err, use.Done())
@@ -188,6 +195,10 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	}
 	ctx := startupownership.WithGenerationGrantEvidence(p.operation.Context(), evidence)
 	ctx = effects.WithAuthority(ctx, c.authority)
+	if !req.liveSelectionHeld {
+		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
+		defer releaseSelection()
+	}
 	activation, err := c.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation, DataPins: result.Materialization.DataPins,
 		ExecutionSource: p.loadedSource.Source, ForkRunID: result.Materialization.ForkRunID,

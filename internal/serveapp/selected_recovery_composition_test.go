@@ -47,12 +47,13 @@ func (p *selectedRecoveryFailureProbe) RecoverSelectedForkContexts(_ context.Con
 func TestSelectedRecoveryFailurePreventsServeReadiness(t *testing.T) {
 	stubServeRuntimeWorkspaceLifecycle(t)
 	failure := errors.New("selected recovery probe failure")
-	var probe *selectedRecoveryFailureProbe
+	var probes []*selectedRecoveryFailureProbe
 	prior := buildSelectedAPICapabilities
 	buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 		caps, err := prior(owner, req)
 		if err == nil && caps.SelectedForkProcess != nil {
-			probe = &selectedRecoveryFailureProbe{selectedForkProcessOwner: caps.SelectedForkProcess, failure: failure}
+			probe := &selectedRecoveryFailureProbe{selectedForkProcessOwner: caps.SelectedForkProcess, failure: failure}
+			probes = append(probes, probe)
 			caps.SelectedForkProcess = probe
 		}
 		return caps, err
@@ -65,8 +66,17 @@ func TestSelectedRecoveryFailurePreventsServeReadiness(t *testing.T) {
 		WorkspaceBackend: "host", WorkspaceBackendSet: true,
 		TestLLMRuntime: servedNoopLLMRuntime{}, Output: &out,
 	})
+	var probe *selectedRecoveryFailureProbe
+	for _, candidate := range probes {
+		if candidate.recoveries != 0 {
+			if probe != nil {
+				t.Fatal("serve attempted recovery through multiple process owners")
+			}
+			probe = candidate
+		}
+	}
 	if probe == nil {
-		t.Fatalf("serve did not construct selected recovery capability\n%s", out.String())
+		t.Fatalf("serve did not attempt selected recovery\n%s", out.String())
 	}
 	if probe.bindings != 1 || probe.recoveries != 1 || !probe.environmentSeen {
 		t.Fatalf("selected recovery composition binds=%d recoveries=%d environment=%t\n%s", probe.bindings, probe.recoveries, probe.environmentSeen, out.String())

@@ -22,6 +22,7 @@ import (
 
 type q1FreezeBetweenTransactions struct {
 	SelectedContractForkLifecycle
+	SelectedContractRuntimeExecutionLifecycle
 	headers interface {
 		LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
 	}
@@ -59,26 +60,30 @@ func (p *q1FreezeBetweenTransactions) MaterializeRunForkForSelectedContractExecu
 	return result, nil
 }
 
-// Observe the committed response after its native command has released the
-// process lock, so the other genuine materialization can make progress.
-func (p *q1FreezeBetweenTransactions) RequireRunForkSelectedContractBinding(ctx context.Context, runID string) (runfork.RunForkSelectedContractBinding, error) {
+// Observe both native materializations and executor issues before either child
+// executes. Binding readback is no longer an activation barrier.
+func (p *q1FreezeBetweenTransactions) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
+	result, err := p.SelectedContractRuntimeExecutionLifecycle.IssueRunForkSelectedContractRuntimeExecution(ctx, req)
+	if err != nil {
+		return result, err
+	}
 	p.completeMu.Lock()
 	index := -1
 	for i, child := range p.children {
-		if child == runID && !p.observed[i] {
+		if child == req.Admission.ForkRunID && !p.observed[i] {
 			index, p.observed[i] = i, true
 			break
 		}
 	}
 	p.completeMu.Unlock()
 	if index < 0 {
-		return p.SelectedContractForkLifecycle.RequireRunForkSelectedContractBinding(ctx, runID)
+		return result, nil
 	}
 	if index == 0 && p.secondFirst {
 		select {
 		case <-p.completed[1]:
 		case <-ctx.Done():
-			return runfork.RunForkSelectedContractBinding{}, ctx.Err()
+			return result, ctx.Err()
 		}
 	}
 	p.completeMu.Lock()
@@ -91,7 +96,7 @@ func (p *q1FreezeBetweenTransactions) RequireRunForkSelectedContractBinding(ctx 
 	select {
 	case <-p.allReady:
 	case <-ctx.Done():
-		return runfork.RunForkSelectedContractBinding{}, ctx.Err()
+		return result, ctx.Err()
 	}
 	ready := p.allReady
 	if index == 1 {
@@ -99,10 +104,10 @@ func (p *q1FreezeBetweenTransactions) RequireRunForkSelectedContractBinding(ctx 
 	}
 	select {
 	case <-ready:
-		return p.SelectedContractForkLifecycle.RequireRunForkSelectedContractBinding(ctx, runID)
 	case <-ctx.Done():
-		return runfork.RunForkSelectedContractBinding{}, ctx.Err()
+		return result, ctx.Err()
 	}
+	return result, nil
 }
 
 func (p *q1FreezeBetweenTransactions) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
@@ -215,11 +220,13 @@ func proveSelectedQ1FirstFreezeRaceBothStores(t *testing.T) {
 					LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
 				})
 				other := q1IndependentExecutionOwner(t, request.Owner)
-				probe := &q1FreezeBetweenTransactions{SelectedContractForkLifecycle: request.Owner.ports.fork, headers: headers,
+				probe := &q1FreezeBetweenTransactions{SelectedContractForkLifecycle: request.Owner.ports.fork, SelectedContractRuntimeExecutionLifecycle: request.Owner.ports.runtimeExecution, headers: headers,
 					completed: [2]chan struct{}{make(chan struct{}), make(chan struct{})}, allReady: make(chan struct{}),
 					secondFirst: order == "second_completes_first", releaseSecond: make(chan struct{})}
 				request.Owner.ports.fork = probe
 				other.ports.fork = probe
+				request.Owner.ports.runtimeExecution = probe
+				other.ports.runtimeExecution = probe
 				type outcome struct {
 					result SelectedContractExecutionResult
 					err    error
@@ -256,15 +263,15 @@ func proveSelectedQ1FirstFreezeRaceBothStores(t *testing.T) {
 					}
 				}
 				first := await()
-				if first.err != nil || !first.result.Activation.Activated || !first.result.Activation.SourceFrozen || first.result.Materialization.ForkRunID != probe.children[0] {
-					t.Fatalf("first child failed to perform the original freeze: %+v %v", first.result, first.err)
+				if first.err != nil || !first.result.Activation.Activated || first.result.Activation.SourceFrozen || first.result.Materialization.ForkRunID != probe.children[0] {
+					t.Fatalf("first child failed to hand off its live selection: %+v %v", first.result, first.err)
 				}
 				if order == "second_completes_first" && !reflect.DeepEqual(probe.completeOrder, []int{1, 0}) {
 					t.Fatalf("reversed completion schedule did not execute: %v", probe.completeOrder)
 				}
 				frozen, err := headers.LoadRunHeader(ctx, request.SourceRunID)
-				if err != nil || frozen.Status != "forked" || frozen.ContinuedAsRunID != probe.children[0] || frozen.EndedAt == nil {
-					t.Fatalf("original source freeze lineage: %+v %v", frozen, err)
+				if err != nil || frozen.Status != "paused" || frozen.ContinuedAsRunID != "" || frozen.EndedAt != nil {
+					t.Fatalf("source was not retained paused after the handoff: %+v %v", frozen, err)
 				}
 				paused, err := headers.LoadRunHeader(ctx, probe.children[1])
 				if err != nil || paused.Status != "paused" {
@@ -276,7 +283,7 @@ func proveSelectedQ1FirstFreezeRaceBothStores(t *testing.T) {
 				}
 				release.Do(func() { close(probe.releaseSecond) })
 				second := await()
-				if second.err != nil || !second.result.Activation.Activated || !second.result.Activation.SourceFrozen || second.result.Activation.SourceRunStatus != "forked" ||
+				if second.err != nil || !second.result.Activation.Activated || second.result.Activation.SourceFrozen || second.result.Activation.SourceRunStatus != "paused" ||
 					second.result.Activation.BranchDivergence != nil || second.result.Materialization.ForkRunID != probe.children[1] || probe.children[0] == probe.children[1] ||
 					!first.result.Materialization.ForkPoint.SameIdentity(second.result.Materialization.ForkPoint) || probe.materializations.Load() != 2 || probe.refused.Load() != 2 {
 					t.Fatalf("second activation did not re-prove historical source admission: %+v %v", second.result, second.err)
