@@ -478,19 +478,7 @@ func (b *WorkflowContractBundle) fanOutSourceAfterWrites(node runtimeidentity.Ex
 			return true
 		}
 	}
-	if handler.Accumulate == nil || strings.TrimSpace(handler.Accumulate.Into) == "" {
-		return false
-	}
-	primary, err := b.ResolveFlowPrimaryEntity(node.FlowPath())
-	if err != nil {
-		return false
-	}
-	decl, ok := primary.Contract.Fields[sourceField]
-	if !ok {
-		return false
-	}
-	want := strings.TrimSpace(node.NodeID()) + "." + strings.TrimSpace(handler.Accumulate.Into)
-	return strings.TrimSpace(decl.MaterializeFrom) == want
+	return false
 }
 
 func fanOutSiteWrites(handler SystemNodeEventHandler, spec FanOutSpec) []WorkflowDataWrite {

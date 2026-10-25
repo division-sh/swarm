@@ -63,9 +63,6 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if err != nil {
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", map[string]any{"field": fieldName}, err)
 	}
-	if strings.TrimSpace(field.FieldDecl.MaterializeFrom) != "" {
-		return nil, failures.New(failures.ClassAuthorizationDenied, "runtime_materialized_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName})
-	}
 	actorContract, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok {
 		return nil, failures.New(failures.ClassAuthorizationDenied, "role_scoped_tool_forbidden", "tool-executor", "exec_save_entity_field.actor", map[string]any{"action": "entity_write", "actor_id": strings.TrimSpace(actor.ID)})

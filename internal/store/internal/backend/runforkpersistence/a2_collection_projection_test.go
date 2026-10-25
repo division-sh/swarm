@@ -41,7 +41,7 @@ func a2ForkMapSelectedFixture(t *testing.T, changed bool) (runfork.RunForkPlan, 
 	if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte(strings.Replace(string(nodes), "items_from: payload.items", "items_from: state.items", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "state.yaml"), []byte("items: 'map[text][integer]'\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "state.yaml"), []byte("items: map[text][integer]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	repo := canonicalrouting.RepoRoot(t)

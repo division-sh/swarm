@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	c "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -360,7 +359,7 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		}
 		return true
 	}
-	topWritten, ruleWritten, projected := false, false, false
+	topWritten, ruleWritten := false, false
 	applyWrites := func(selected bool) bool {
 		if selected && outcome.rule != nil && !ruleWritten {
 			if !writes(outcome.rule.DataAccumulation, true) {
@@ -375,16 +374,6 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 			topWritten = true
 		}
 		return true
-	}
-	applyProjection := func() {
-		if projected {
-			return
-		}
-		bindings, _ := accprojection.ForExecutableHandler(a.source, node, event)
-		for _, binding := range bindings {
-			assign("state." + binding.TargetField)
-		}
-		projected = true
 	}
 	fanOut := func(step Step, selected bool) bool {
 		kind, index := c.FanOutSiteHandler, -1
@@ -412,7 +401,6 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		if !applyWrites(selected) {
 			return false
 		}
-		applyProjection()
 		return point == nil || point.Step != step || !point.FanOut
 	}
 	for _, step := range OrderedSteps {
@@ -494,22 +482,6 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		case StepDataWrites:
 			if !applyWrites(true) {
 				return facts
-			}
-		case StepProjection:
-			applyProjection()
-		case StepClear:
-			if handler.Clear == nil {
-				continue
-			}
-			for _, target := range handler.Clear.Targets {
-				if target != "accumulator_state" {
-					continue
-				}
-				for _, binding := range accprojection.Resolve(a.source).Bindings {
-					if binding.SourceNode.Equal(node) {
-						assign("state." + binding.TargetField)
-					}
-				}
 			}
 		}
 	}

@@ -1280,8 +1280,8 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	steps := exec.Steps()
-	if len(steps) != 22 {
-		t.Fatalf("step count = %d, want 22", len(steps))
+	if len(steps) != 21 {
+		t.Fatalf("step count = %d, want 21", len(steps))
 	}
 	if steps[0] != StepLoop || steps[1] != StepQuery || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
@@ -1289,11 +1289,8 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 	if steps[6] != StepFilter {
 		t.Fatalf("expected filter at index 6, got order %v", steps)
 	}
-	if steps[17] != StepProjection {
-		t.Fatalf("expected projection after data_writes at index 17, got order %v", steps)
-	}
-	if steps[20] != StepActivity {
-		t.Fatalf("expected activity after emits at index 20, got order %v", steps)
+	if steps[19] != StepActivity {
+		t.Fatalf("expected activity after emits at index 19, got order %v", steps)
 	}
 }
 

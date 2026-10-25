@@ -54,6 +54,8 @@ func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 		{name: "multiple_types", source: "x: [text, integer]\n", refusal: "must be quoted"},
 		{name: "unknown_type_list", source: "x: [Missing]\n", refusal: "not a declared type"},
 		{name: "initial_mapping", source: "x: {type: text, initial: new}\n", refusal: "retired"},
+		{name: "retired_materialize_from", source: "x: {type: [Profile], materialize_from: collector.items}\n", refusal: "The accumulate target is the collected list"},
+		{name: "retired_project", source: "x: {type: [Profile], project: {name: source.name}}\n", refusal: "The accumulate target is the collected list"},
 		{name: "plain_mapping", source: "x: {type: text}\n", refusal: "only state field mapping"},
 		{name: "indexed_false", source: "x: {type: text, indexed: false}\n", refusal: "indexed: true"},
 		{name: "unused", source: "x: {type: text, _unused_reason: fixture only}\n", refusal: "retired"},

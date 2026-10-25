@@ -50,10 +50,10 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			requireServedEventPublishEntityState(t, db, backend, seed.RunID, flowidentity.EntityID("sink"), "active")
 			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 			var childID, parentID string
-			if err := db.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='sink'`, seed.RunID).Scan(&childID); err != nil {
+			if err := db.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='sink'`, seed.RunID).Scan(&childID); err != nil {
 				t.Fatal(err)
 			}
-			if err := db.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance<>'sink'`, seed.RunID).Scan(&parentID); err != nil {
+			if err := db.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=CAST($1 AS TEXT)`, seed.RunID).Scan(&parentID); err != nil {
 				t.Fatal(err)
 			}
 			if childID == parentID || childID == "" {
