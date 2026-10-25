@@ -134,9 +134,9 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				seedRows := readForkReceiverRows(t, rt, seed.RunID)
 				wantSeedRows := map[string]forkReceiverRow{
-					seed.RunID: {ID: seed.RunID, Flow: seed.RunID, Type: "root", State: "active", Fields: map[string]any{"marker": "root-owned"}},
-					"producer": {ID: flowidentity.EntityID("producer"), Flow: "producer", Type: "work", State: "waiting", Fields: map[string]any{}},
-					"consumer": {ID: flowidentity.EntityID("consumer"), Flow: "consumer", Type: "receipt", State: "waiting", Fields: map[string]any{}},
+					seed.RunID: {ID: seed.RunID, Flow: seed.RunID, Type: "state", State: "active", Fields: map[string]any{"marker": "root-owned"}},
+					"producer": {ID: flowidentity.EntityID("producer"), Flow: "producer", Type: "state", State: "waiting", Fields: map[string]any{}},
+					"consumer": {ID: flowidentity.EntityID("consumer"), Flow: "consumer", Type: "state", State: "waiting", Fields: map[string]any{}},
 				}
 				if !reflect.DeepEqual(seedRows, wantSeedRows) {
 					t.Fatalf("seed did not construct the exact inert child tree: got=%+v want=%+v", seedRows, wantSeedRows)
