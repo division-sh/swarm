@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -85,6 +86,10 @@ func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any
 }
 
 func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture) (*rootruntime.Runtime, func()) {
+	return nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, false)
+}
+
+func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool) (*rootruntime.Runtime, func()) {
 	t.Helper()
 	nodes, err := pipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
@@ -103,7 +108,8 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 		RuntimeLogStore: p.logs, ManagerStore: p.manager, ManagerPersistenceRoles: p.managerRoles,
 		EffectsStore: p.effects, CompletionStore: p.completion, CompletionHeartbeatStore: p.completionHeartbeat,
 		ManagedCapabilitiesStore: p.managedCapabilities, DeliveryStore: p.busDurable.DeliveryLifecycle, PipelineObligations: p.pipelineObligations,
-		GenericScheduleStore: p.genericSchedules, DecisionCards: p.decisionCards, ProposedEffects: p.proposedEffects,
+		GenericScheduleStore: p.genericSchedules, TimerObligationReader: selected.(timerobligation.Reader),
+		DecisionCards: p.decisionCards, ProposedEffects: p.proposedEffects,
 		DecisionCardHumanTasks: p.humanTasks, DecisionCardDraftExpiry: p.decisionCardDraftExpiry, HumanTaskExpiry: p.humanTaskExpiry,
 		BudgetSpendStore: p.budget,
 	})
@@ -130,6 +136,17 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 	}
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)
+	}
+	if live {
+		ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+		if err := rt.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return rt, func() {
+			if err := rt.Shutdown(); err != nil {
+				t.Error(err)
+			}
+		}
 	}
 	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
 		t.Fatal(err)
@@ -163,6 +180,27 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 	rt.Pipeline.InstallFanOutWorkNotifier(serving)
 	t.Cleanup(serving.Close)
 	return rt, serving.Close
+}
+
+func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
+	t.Helper()
+	rt, _ := nodeReplyRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, true)
+	contexts, err := rootruntime.NewRuntimeContextManager(owner.ports.fork, rootruntime.BundleContext{
+		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source,
+		Runtime: rt, WorkOwner: rt.WorkOccurrence(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	use, lookup, err := contexts.AcquireBundleHash(ctx, loaded.SourceArtifactFact.BundleHash())
+	if err != nil || !lookup.Loaded() || use == nil {
+		t.Fatalf("acquire original live fixture: loaded=%t err=%v", lookup.Loaded(), err)
+	}
+	result, err := rt.RunControl.Pause(use.WorkContext(), runcontrol.TransitionRequest{RunID: sourceRunID, Reason: "retained fork source", ControlledBy: "native fixture"})
+	if doneErr := use.Done(); err != nil || doneErr != nil || result.Status != runcontrol.StatusPaused {
+		t.Fatalf("park retained native source: result=%+v err=%v join=%v", result, err, doneErr)
+	}
+	return rt, contexts
 }
 
 func nestedDeadlineArm(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, row replycontext.Record) joinruntime.Activation {

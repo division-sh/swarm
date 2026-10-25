@@ -35,6 +35,7 @@ type RunFixture struct {
 	StartedAt  time.Time
 	EndedAt    time.Time
 	Failure    *runtimefailures.Envelope
+	LiveScope  runtimerunlifecycle.LiveRunScope
 }
 
 func ScenarioSetupOrigin() runtimerunlifecycle.RunOrigin {
@@ -108,6 +109,12 @@ func MaterializeRun(
 	}
 	if fixture.State == "" {
 		fixture.State = runtimerunlifecycle.StateRunning
+		if !fixture.LiveScope.Empty() {
+			fixture.State = runtimerunlifecycle.StateLive
+		}
+	}
+	if fixture.State == runtimerunlifecycle.StateLive && fixture.LiveScope.Empty() {
+		return fmt.Errorf("live run fixture requires its exact flow scope")
 	}
 	if fixture.State == runtimerunlifecycle.StateForked {
 		return fmt.Errorf("semantic run fixture must use the named fork operation")
@@ -138,11 +145,12 @@ func MaterializeRun(
 		Origin:    fixture.Origin,
 		Source:    source,
 		StartedAt: fixture.StartedAt.UTC(),
+		LiveScope: fixture.LiveScope,
 	}); err != nil {
 		return err
 	}
 	switch fixture.State {
-	case runtimerunlifecycle.StateRunning:
+	case runtimerunlifecycle.StateRunning, runtimerunlifecycle.StateLive:
 	case runtimerunlifecycle.StatePaused:
 		_, err = runner.TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 			RunID: fixture.RunID,
