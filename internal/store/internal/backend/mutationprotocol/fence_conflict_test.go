@@ -409,8 +409,9 @@ func VerifyNativeRetainedPostgresFenceRetryRechecksAdmissionForTest(t *testing.T
 			session := lease.Session()
 			ctx, cancel := context.WithCancel(baseCtx)
 			defer cancel()
+			armed := &atomic.Bool{}
 			if scenario == "backoff_cancel" {
-				ctx = fenceBackoffCancellation{Context: ctx, cancel: cancel, armed: &atomic.Bool{}}
+				ctx = fenceBackoffCancellation{Context: ctx, cancel: cancel, armed: armed}
 			}
 			nativeCalls, domainCalls := 0, 0
 			independent := errors.New("independent wrapper failure")
@@ -431,7 +432,7 @@ func VerifyNativeRetainedPostgresFenceRetryRechecksAdmissionForTest(t *testing.T
 							t.Fatal(revokeErr)
 						}
 					case "backoff_cancel":
-						ctx.(fenceBackoffCancellation).armed.Store(true)
+						armed.Store(true)
 					}
 				}
 				return ack, err
