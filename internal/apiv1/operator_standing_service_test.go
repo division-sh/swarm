@@ -45,7 +45,7 @@ func TestOperatorStandingServiceHandlersUseCanonicalOwner(t *testing.T) {
 	controller := &standingServiceControllerProbe{}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			StandingServices: controller,
 			Idempotency:      directStandingIdempotencyStore{},
 		}),

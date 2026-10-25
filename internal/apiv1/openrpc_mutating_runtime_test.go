@@ -883,7 +883,7 @@ func newMutatingRuntimeProbeHandler(t *testing.T, methodName string, modifiers .
 	for _, modifier := range modifiers {
 		modifier(state)
 	}
-	allHandlers := testOperatorHandlers(state.options(t))
+	allHandlers := testOperatorHandlers(t, state.options(t))
 	calls := map[string]int{}
 	handlers := map[string]MethodHandler{}
 	for _, name := range approvedMutatingHTTPRuntimeMethods() {

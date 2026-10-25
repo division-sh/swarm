@@ -806,7 +806,7 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 	bus = diagnosingReplayPublisher{eventReplayPublisher: bus, t: t}
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now: func() time.Time { return now }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: owner, Observability: owner, AgentConversations: owner, Idempotency: owner, Events: bus,
 			Source: completeOperatorReplaySource(t),
@@ -1601,7 +1601,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			ExecutionPosture:   posture,
 			Now:                func() time.Time { return time.Now().UTC() },
 			Ready:              func() bool { return true },

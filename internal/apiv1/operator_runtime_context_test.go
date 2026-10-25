@@ -296,7 +296,7 @@ func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.
 	)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Idempotency:      fixture.pg,
 			RunBundleContext: fixture.pg,
@@ -337,7 +337,7 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 	)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Idempotency:      fixture.pg,
 			RunBundleContext: fixture.pg,
@@ -406,7 +406,7 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: testOperatorHandlers(testOperatorCapabilities{
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 		Now: func() time.Time { return now.Add(time.Minute) }, Idempotency: fixture.pg,
 		Mailbox: fixture.pg, DecisionCards: fixture.pg, DecisionAuthority: primaryPipeline, Events: fixture.busA,
 		RunBundleContext: fixture.pg, RuntimeContexts: manager, Source: fixture.sourceA,
@@ -459,7 +459,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 	executor := &recordingRunForkExecutor{operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runStartTestBundleHash)}},
 			RunForkOperations:   operations,
@@ -521,7 +521,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 	executor := &recordingRunForkExecutor{operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runStartTestBundleHash)}},
 			RunForkOperations:   operations,
@@ -568,7 +568,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 	ingress := &recordingRuntimeIngress{}
 	runtimeHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:             func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RuntimeIngress:  ingress,
 			Idempotency:     newMutatingProbeIdempotencyStore(),
@@ -606,7 +606,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 	}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runStartTestBundleHash)}},
 			RunForkOperations:   operations,
@@ -636,7 +636,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 	agentControl := &fakeAgentControlController{}
 	agentHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:             func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			AgentControl:    agentControl,
 			Idempotency:     newMutatingProbeIdempotencyStore(),
@@ -732,7 +732,7 @@ func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 	t.Helper()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Ready:              func() bool { return true },
 			Database:           fakePinger{},

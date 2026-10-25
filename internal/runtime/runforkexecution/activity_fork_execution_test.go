@@ -694,7 +694,8 @@ func seedSelectedContractActivityAttempt(t *testing.T, selected any, fact activi
 	requestEventID := activityidentity.RequestEventID(fact)
 	resultEventID := activityidentity.ResultEventID(fact, resultEventType)
 	inputHash := sha256.Sum256([]byte(`{"value":"x"}`))
-	if err := storetest.SeedHistoricalActivityForkAttempt(runForkTestContext(t), selected, pipeline.ActivityAttemptRecord{
+	ctx := nativeRunForkTestContext(t, runForkTestContext(t), selected)
+	if err := storetest.SeedHistoricalActivityForkAttempt(ctx, selected, pipeline.ActivityAttemptRecord{
 		RequestEventID: requestEventID, RunID: fact.RunID, ExecutionMode: executionmode.Live,
 		SourceEventID: fact.SourceEventID, EntityID: fact.EntityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), HandlerEventKey: "review.requested",
 		ActivityID: "connector", Tool: "provider.connector", Attempt: 1, Status: status,

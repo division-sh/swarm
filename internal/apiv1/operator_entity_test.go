@@ -76,7 +76,7 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Entities: entities,
 		}),
 	})
@@ -144,7 +144,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	ctx = apiTestOriginalProcessContext(t, ctx, pg)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	createOperatorReadbackEntities(t, ctx, pg, source, runID, entityA, entityB, time.Now().UTC())
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Entities: pg})})
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Entities: pg})})
 	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"11111111-1111-1111-1111-111111111111","type":"vertical","limit":10}}`)
 	if list.Error != nil {
 		t.Fatalf("entity.list error = %#v", list.Error)
@@ -211,7 +211,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	createOperatorReadbackEntities(t, ctx, sqliteStore, source, runID, entityA, entityB, now)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Entities: sqliteStore,
 		}),
 	})
@@ -358,7 +358,7 @@ func TestOperatorEntityHandlersTypedErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					Entities: tc.store,
 				}),
 			})

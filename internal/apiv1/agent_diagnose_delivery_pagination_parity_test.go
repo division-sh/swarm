@@ -104,7 +104,7 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					Now:                func() time.Time { return now.Add(time.Minute) },
 					AgentConversations: selected,
 				}),

@@ -614,7 +614,7 @@ func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus EventPublish
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},

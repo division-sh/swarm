@@ -49,7 +49,7 @@ func assertObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T, fixture obs
 	}
 	handler := testHandler(t, Options{
 		AuthTokens:    []string{testToken},
-		Handlers:      testOperatorHandlers(readOpts),
+		Handlers:      testOperatorHandlers(t, readOpts),
 		Subscriptions: testOperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
 
@@ -212,7 +212,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:           func() time.Time { return base.Add(time.Minute) },
 			Observability: sqliteStore,
 		}),
