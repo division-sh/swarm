@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -112,7 +113,10 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				t.Fatalf("prepared orders source lost its actual constructor receipt: %+v err=%v", receipt, err)
 			}
 			declaration := semanticview.ResolveFlowEventProof(loaded.Source, "orders", receipt.CreatingInput.Input)
-			if !declaration.HasSchema || !declaration.IsAuthored(loaded.Source) || declaration.EventKey() == "item.completed" {
+			producer := semanticview.ResolveFlowEventProof(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), declaration.CatalogKey)
+			authoredSchema := declaration.IsAuthored(loaded.Source) ||
+				producer.HasSchema && producer.IsAuthored(loaded.Source) && producer.EventKey() == declaration.CatalogKey
+			if !declaration.HasSchema || !authoredSchema || declaration.FlowID != "orders" || declaration.EventKey() == "item.completed" {
 				t.Fatalf("orders constructor borrowed a root event declaration: %+v", declaration)
 			}
 			creating := storetest.LoadCanonicalEventRecord(t, ctx, selected, receipt.CreatingInput.EventID)
@@ -187,8 +191,11 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-template-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-template-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, target, sourceRun, executionposture.MockOnly)
+			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
+				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
@@ -226,7 +233,9 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			defer cancel()
 			reader := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 			})
+			workflow := flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()}
 			for {
 				header, err := reader.LoadRunHeader(wait, child)
 				if err != nil {
@@ -241,16 +250,23 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+				instance, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, workflow)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement, err := reader.LoadRunTestQuiescence(wait, child, time.Now().UTC())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if found && instance.CurrentState == "attention" && settlement.Ready && header.Status == "live" && header.EndedAt == nil && process.ActiveCount() == baseline && retained == 0 {
 					break
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("prepared orders arrival did not complete and release resources: header=%+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
+					t.Fatalf("prepared orders arrival did not settle its final instance: header=%+v contexts=%d leases=%d baseline=%d instance=%+v found=%t settlement=%+v", header, retained, process.ActiveCount(), baseline, instance, found, settlement)
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
-			workflow := flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, workflow)
 			if err != nil || !found || header.CurrentState != "attention" || header.EntityID != projected.EntityID || header.WorkflowName != projected.TemplateID ||
 				header.InstanceID != projected.InstanceID || header.StorageRef != projected.InstancePath ||

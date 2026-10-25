@@ -164,8 +164,11 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, sourceCtx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(sourceCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
+				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
@@ -184,7 +187,9 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			defer cancel()
 			reader := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 			})
+			workflow := flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(".", child, child)}
 			for {
 				header, err := reader.LoadRunHeader(wait, child)
 				if err != nil {
@@ -196,16 +201,23 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+				instance, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, workflow)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement, err := reader.LoadRunTestQuiescence(wait, child, time.Now().UTC())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if found && instance.CurrentState == "attention" && settlement.Ready && header.Status == "live" && header.EndedAt == nil && process.ActiveCount() == baseline && retained == 0 {
 					break
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("prepared arrival did not complete and release resources: header=%+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
+					t.Fatalf("prepared arrival did not settle its final instance: header=%+v contexts=%d leases=%d baseline=%d instance=%+v found=%t settlement=%+v", header, retained, process.ActiveCount(), baseline, instance, found, settlement)
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
-			workflow := flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(".", child, child)}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, workflow)
 			if err != nil || !found || header.CurrentState != "attention" || header.EntityID != child || header.WorkflowName != "." {
 				t.Fatalf("exact prepared timeout receiver did not reach attention: %+v found=%v err=%v", header, found, err)

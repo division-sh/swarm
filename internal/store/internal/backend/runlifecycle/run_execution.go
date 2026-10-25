@@ -152,11 +152,16 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 			return err
 		}
 		if handedOff {
-			evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx)
-			if !present {
-				return fmt.Errorf("%w: live handoff requires its ordinary generation grant", runtimerunlifecycle.ErrRunExecutionAuthority)
+			original, err := startupownership.CaptureMutationAuthority(ctx)
+			if err != nil || !original.HasRuntimeGrant() {
+				return errors.Join(err, fmt.Errorf("%w: live handoff requires its ordinary generation grant", runtimerunlifecycle.ErrRunExecutionAuthority))
 			}
-			return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, evidence, fact.BundleHash(), !postgres)
+			if evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx); present {
+				if err := generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, evidence, fact.BundleHash(), !postgres); err != nil {
+					return err
+				}
+			}
+			return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, original.GrantEvidence(), fact.BundleHash(), !postgres)
 		}
 	}
 	if state != runtimerunlifecycle.StateRunning {

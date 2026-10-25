@@ -193,6 +193,21 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 
 func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string, posture executionposture.Posture) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
+	availability, err := owner.ports.fork.LoadRunBundleAvailability(ctx, sourceRunID)
+	if err != nil || !availability.Available() {
+		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
+	}
+	sourceHash := availability.BundleHash
+	controlCtx := authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceHash))
+	if availability.Status != "paused" {
+		outcome, err := selected.(runcontrol.Store).PauseRunControlOutcome(controlCtx, runcontrol.TransitionRequest{
+			RunID: sourceRunID, Reason: "retained fork source", ControlledBy: "native fixture", Now: time.Now().UTC(),
+		})
+		if err != nil || !outcome.Acknowledged || outcome.State.Status != "paused" {
+			t.Fatalf("park source before ordinary runtime recovery: outcome=%+v err=%v", outcome, err)
+		}
+	}
 	rt, _ := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, true)
 	definition := rootruntime.BundleContext{
 		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source,
@@ -218,23 +233,16 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 	if err != nil || !lookup.Loaded() || use == nil {
 		t.Fatalf("acquire original live fixture: loaded=%t err=%v", lookup.Loaded(), err)
 	}
-	controlCtx := correlation.WithRuntimeInstanceID(use.WorkContext(), rt.Options.RuntimeInstanceID)
+	controlCtx = correlation.WithRuntimeInstanceID(use.WorkContext(), rt.Options.RuntimeInstanceID)
 	controlCtx = correlation.WithSourceArtifactFact(controlCtx, rt.Options.SourceArtifactFact)
 	controlCtx = authoractivity.WithScope(controlCtx, authoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.SourceArtifactFact.BundleHash()))
-	availability, err := owner.ports.fork.LoadRunBundleAvailability(controlCtx, sourceRunID)
-	if err != nil || !availability.Available() || availability.BundleHash != loaded.SourceArtifactFact.BundleHash() {
+	availability, err = owner.ports.fork.LoadRunBundleAvailability(controlCtx, sourceRunID)
+	if err != nil || !availability.Available() || availability.BundleHash != sourceHash || availability.Status != "paused" {
 		_ = use.Done()
 		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
 	}
-	if availability.Status == "paused" {
-		if err := use.Done(); err != nil {
-			t.Fatal(err)
-		}
-		return rt, contexts
-	}
-	result, err := rt.RunControl.Pause(controlCtx, runcontrol.TransitionRequest{RunID: sourceRunID, Reason: "retained fork source", ControlledBy: "native fixture"})
-	if doneErr := use.Done(); err != nil || doneErr != nil || result.Status != runcontrol.StatusPaused {
-		t.Fatalf("park retained native source: result=%+v err=%v join=%v", result, err, doneErr)
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
 	}
 	return rt, contexts
 }
