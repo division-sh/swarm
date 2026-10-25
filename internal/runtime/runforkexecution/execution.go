@@ -38,6 +38,7 @@ type SelectedContractExecutionRequest struct {
 	AcquireLiveRuntime      func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)
 	LiveContexts            *runtimepkg.RuntimeContextManager
 	LiveRuns                runlifecycle.LiveRunReader
+	liveSelectionHeld       bool
 	DataPinOverrides        []durabledata.ExplicitPin
 
 	Owner             SelectedContractExecutionOwner

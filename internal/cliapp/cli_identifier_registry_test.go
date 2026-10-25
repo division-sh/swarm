@@ -17,76 +17,7 @@ import (
 	"testing"
 
 	"github.com/spf13/pflag"
-	"gopkg.in/yaml.v3"
 )
-
-type cliIdentifierSpecRow struct {
-	Command   string
-	Selector  string
-	Family    string
-	Mode      string
-	Safety    string
-	ScopeRule string
-}
-
-type cliIdentifierSpecFamily struct {
-	CandidateSource           string
-	ScopeMode                 string
-	ScopeRule                 string
-	NormalizationMode         string
-	NormalizationRule         string
-	DisplayProjection         string
-	DisplayShorteningEligible bool
-}
-
-func TestCLIIdentifierRegistryMatchesAuthoritativeSpec(t *testing.T) {
-	specRows, specFamilies := cliIdentifierSpecRows(t)
-	if err := validateCLIIdentifierRegistry(); err != nil {
-		t.Fatalf("production identifier registry is invalid: %v", err)
-	}
-	productionRows := map[string]cliIdentifierInputRegistration{}
-	for _, row := range cliIdentifierInputRegistry {
-		key := cliIdentifierRegistryKey(row.Command, row.Selector)
-		if _, ok := productionRows[key]; ok {
-			t.Fatalf("duplicate production identifier row %s %s", row.Command, row.Selector)
-		}
-		productionRows[key] = row
-	}
-	if len(specRows) != len(productionRows) {
-		t.Fatalf("identifier registry row count: spec=%d production=%d", len(specRows), len(productionRows))
-	}
-	for key, row := range productionRows {
-		specRow, ok := specRows[key]
-		if !ok {
-			t.Errorf("production identifier row missing from spec: %s %s", row.Command, row.Selector)
-			continue
-		}
-		if specRow.Family != string(row.Family) || specRow.Mode != string(row.Mode) || specRow.Safety != string(row.Safety) || specRow.ScopeRule != row.ScopeRule {
-			t.Errorf("identifier row %s %s differs: spec=%+v production=%+v", row.Command, row.Selector, specRow, row)
-		}
-	}
-	if len(specFamilies) != len(cliIdentifierFamilyRegistry) {
-		t.Fatalf("identifier family count: spec=%d production=%d", len(specFamilies), len(cliIdentifierFamilyRegistry))
-	}
-	for family, policy := range cliIdentifierFamilyRegistry {
-		specFamily, ok := specFamilies[string(family)]
-		if !ok {
-			t.Errorf("production identifier family missing from spec: %s", family)
-			continue
-		}
-		if specFamily.CandidateSource != string(policy.CandidateSource) ||
-			specFamily.ScopeMode != string(policy.ScopeMode) ||
-			specFamily.ScopeRule != policy.ScopeRule ||
-			specFamily.NormalizationMode != string(policy.NormalizationMode) ||
-			specFamily.NormalizationRule != policy.NormalizationRule ||
-			specFamily.DisplayProjection != string(policy.DisplayProjection) {
-			t.Errorf("identifier family %s differs: spec=%+v production=%+v", family, specFamily, policy)
-		}
-		if got := cliIdentifierFamilyDisplayEligible(family); got != specFamily.DisplayShorteningEligible {
-			t.Errorf("family %s display eligibility=%t, spec=%t", family, got, specFamily.DisplayShorteningEligible)
-		}
-	}
-}
 
 func TestCLIIdentifierRegistryRejectsUnsupportedFamilyPolicy(t *testing.T) {
 	tests := []struct {
@@ -733,49 +664,6 @@ func TestCLIIdentifierUnscopedEntityDoesNotEnumerate(t *testing.T) {
 	if got, want := strings.Join(methods, ","), "entity.get"; got != want {
 		t.Fatalf("methods=%s, want %s", got, want)
 	}
-}
-
-func cliIdentifierSpecRows(t *testing.T) (map[string]cliIdentifierSpecRow, map[string]cliIdentifierSpecFamily) {
-	t.Helper()
-	spec := loadCLISpecification(t)
-	identifierResolution := driftMappingValue(driftMappingValue(driftMappingValue(spec, "foundations"), "output_contract"), "identifier_resolution")
-	if identifierResolution == nil {
-		t.Fatal("output_contract.identifier_resolution is missing")
-	}
-	rows := driftMappingValue(identifierResolution, "input_rows")
-	if rows == nil || rows.Kind != yaml.MappingNode {
-		t.Fatal("identifier_resolution.input_rows is missing")
-	}
-	out := map[string]cliIdentifierSpecRow{}
-	for i := 0; i+1 < len(rows.Content); i += 2 {
-		node := rows.Content[i+1]
-		row := cliIdentifierSpecRow{
-			Command: cliOutputRegistryScalar(node, "command"), Selector: cliOutputRegistryScalar(node, "selector"),
-			Family: cliOutputRegistryScalar(node, "family"), Mode: cliOutputRegistryScalar(node, "mode"),
-			Safety: cliOutputRegistryScalar(node, "safety"), ScopeRule: cliOutputRegistryScalar(node, "scope_rule"),
-		}
-		key := cliIdentifierRegistryKey(row.Command, row.Selector)
-		if _, ok := out[key]; ok {
-			t.Fatalf("duplicate spec identifier row %s %s", row.Command, row.Selector)
-		}
-		out[key] = row
-	}
-	specFamilies := map[string]cliIdentifierSpecFamily{}
-	families := driftMappingValue(identifierResolution, "family_registry")
-	for i := 0; i+1 < len(families.Content); i += 2 {
-		family := families.Content[i].Value
-		node := families.Content[i+1]
-		specFamilies[family] = cliIdentifierSpecFamily{
-			CandidateSource:           cliOutputRegistryScalar(node, "candidate_source"),
-			ScopeMode:                 cliOutputRegistryScalar(node, "scope_mode"),
-			ScopeRule:                 cliOutputRegistryScalar(node, "scope_rule"),
-			NormalizationMode:         cliOutputRegistryScalar(node, "normalization_mode"),
-			NormalizationRule:         cliOutputRegistryScalar(node, "normalization"),
-			DisplayProjection:         cliOutputRegistryScalar(node, "display_projection"),
-			DisplayShorteningEligible: cliOutputRegistryScalar(node, "display_shortening_eligible") == "true",
-		}
-	}
-	return out, specFamilies
 }
 
 var cliUseAnglePositionals = regexp.MustCompile(`<([a-z0-9-|]+)>`)

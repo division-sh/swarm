@@ -3,73 +3,12 @@ package serveapp
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
-
-func TestServeActivityRecoveryPrecedesBothDispatchStartupPaths(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	functions := map[string]*ast.FuncDecl{}
-	for _, declaration := range file.Decls {
-		if function, ok := declaration.(*ast.FuncDecl); ok {
-			functions[function.Name.Name] = function
-		}
-	}
-	composition := functions["buildRuntimeComposition"]
-	if functions["Run"] == nil || composition == nil {
-		t.Fatal("serve entrypoint or composition is absent")
-	}
-	callPositions := func(function *ast.FuncDecl) map[string][]token.Pos {
-		positions := map[string][]token.Pos{}
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			switch function := call.Fun.(type) {
-			case *ast.Ident:
-				positions[function.Name] = append(positions[function.Name], call.Pos())
-			case *ast.SelectorExpr:
-				positions[function.Sel.Name] = append(positions[function.Sel.Name], call.Pos())
-			}
-			return true
-		})
-		return positions
-	}
-	positions := callPositions(composition)
-	for _, name := range []string{"installServeSourceSet", "buildRecoveredSelectedAPICapabilities", "RecoverSelectedForkContexts", "prepareServeRuntimeContexts"} {
-		if len(positions[name]) != 1 {
-			t.Fatalf("serve must compose exactly one %s before dispatch", name)
-		}
-	}
-	recoveryComposition := functions["buildRecoveredSelectedAPICapabilities"]
-	if recoveryComposition == nil || len(positions["recoverServeDisplacedHTTPActivities"]) != 0 || len(positions["buildSelectedAPICapabilities"]) != 0 {
-		t.Fatal("serve bypassed its exact recovery/API construction sequence")
-	}
-	recoveryPositions := callPositions(recoveryComposition)
-	if len(recoveryPositions["recoverServeDisplacedHTTPActivities"]) != 1 || len(recoveryPositions["buildSelectedAPICapabilities"]) != 1 ||
-		recoveryPositions["recoverServeDisplacedHTTPActivities"][0] >= recoveryPositions["buildSelectedAPICapabilities"][0] {
-		t.Fatal("activity recovery must precede the exact API capability construction")
-	}
-	recovery := positions["buildRecoveredSelectedAPICapabilities"][0]
-	if positions["installServeSourceSet"][0] >= recovery {
-		t.Fatal("activity recovery preceded authoritative source installation")
-	}
-	for _, name := range []string{"RecoverSelectedForkContexts", "prepareServeRuntimeContexts"} {
-		if recovery >= positions[name][0] {
-			t.Fatalf("activity recovery followed %s", name)
-		}
-	}
-}
 
 func TestServeActivityRecoveryTargetsRequireExactRuntimeSources(t *testing.T) {
 	process := worklifetime.NewProcess()

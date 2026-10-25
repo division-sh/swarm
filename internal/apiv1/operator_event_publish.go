@@ -1007,6 +1007,10 @@ func runStartEventPublishError(params eventPublicationParams, err error) error {
 }
 
 func eventPublishFailureError(params eventPublicationParams, err error, retryable bool) error {
+	var live *runtimerunlifecycle.LiveRunConflictError
+	if errors.As(err, &live) {
+		return runControlError(params.RunID, err)
+	}
 	var terminal *pipeline.TerminalReceiverError
 	if errors.As(err, &terminal) {
 		return NewApplicationError(EventPublishFailedCode, false, map[string]any{

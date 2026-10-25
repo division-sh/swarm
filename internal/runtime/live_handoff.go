@@ -77,3 +77,22 @@ func (rt *Runtime) ReconcileLiveRun(ctx context.Context, runID string) error {
 	_, err = rt.Bus.ReleaseRunQueue(ctx, runID, 200)
 	return err
 }
+
+// The caller holds the context owner's selection exclusion through reconciliation.
+func (rt *Runtime) ReconcileAcknowledgedLiveFork(ctx context.Context, runID string) error {
+	ctx = correlation.WithRunID(rt.authorActivityContext(ctx), runID)
+	rt.lifecycleMu.Lock()
+	grant := rt.startupGrant
+	rt.lifecycleMu.Unlock()
+	reader, ok := grant.(interface {
+		InspectLiveForkReconciliation(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return errors.New("live fork reconciliation requires its current generation owner")
+	}
+	current, err := reader.InspectLiveForkReconciliation(ctx, runID)
+	if err != nil || !current {
+		return err
+	}
+	return rt.ReconcileLiveRun(ctx, runID)
+}

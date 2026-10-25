@@ -115,6 +115,9 @@ func requireCreateScope(ctx context.Context, tx *sql.Tx, request runtimerunlifec
 }
 
 func continueTargetState(ctx context.Context, tx *sql.Tx, postgres bool, state runtimeruncontrol.State) (runtimerunlifecycle.State, error) {
+	if err := requireGenericContinueAuthority(ctx, tx, postgres, state); err != nil {
+		return "", err
+	}
 	scope, err := liveScopeForRun(ctx, tx, state.RunID)
 	if err != nil {
 		return "", err
@@ -122,7 +125,7 @@ func continueTargetState(ctx context.Context, tx *sql.Tx, postgres bool, state r
 	if !scope.Empty() {
 		return runtimerunlifecycle.StateLive, nil
 	}
-	return runtimerunlifecycle.StateRunning, requireGenericContinueAuthority(ctx, tx, postgres, state)
+	return runtimerunlifecycle.StateRunning, nil
 }
 
 func rejectLiveRunStop(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
@@ -164,6 +167,15 @@ func classifyLiveScopeClaimFailure(ctx context.Context, q rowQueryer, scope runt
 		return errors.Join(err, readErr)
 	}
 	return errors.Join(&runtimerunlifecycle.LiveRunConflictError{Scope: scope, LiveRunID: current.RunID}, err)
+}
+
+// Publication calls this only after its native mutation has settled.
+func (s *RunLifecyclePostgresOwner) ClassifyLiveRunCreationFailure(ctx context.Context, scope runtimerunlifecycle.LiveRunScope, runID string, err error) error {
+	return classifyLiveScopeClaimFailure(ctx, s.backend, scope, runID, err)
+}
+
+func (s *RunLifecycleSQLiteOwner) ClassifyLiveRunCreationFailure(ctx context.Context, scope runtimerunlifecycle.LiveRunScope, runID string, err error) error {
+	return classifyLiveScopeClaimFailure(ctx, s.backend, scope, runID, err)
 }
 
 type liveSelectionMutation interface {
