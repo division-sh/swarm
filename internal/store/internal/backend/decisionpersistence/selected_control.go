@@ -38,8 +38,12 @@ func RequireCardRunControl(ctx context.Context, q runstate.RowQueryer, runID str
 		return err
 	}
 	admission, _ := managedexecution.FromContext(ctx)
-	ordinary := exists && admission.AuthorizesNormal() && operation.IsDecisionCardControl()
+	evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx)
+	ordinary := exists && present && evidence.SelectedFork == nil && operation.IsDecisionCardControl()
 	if ordinary {
+		if admission.Kind != "" && !admission.AuthorizesNormal() {
+			return fmt.Errorf("live card control cannot mix selected admission and ordinary grant evidence")
+		}
 		// The historical binding remains immutable after the child becomes live.
 		// Its ordinary owner must prove the actual handoff in this snapshot.
 		var unsupported *runfork.SelectedForkControlUnsupported
@@ -56,10 +60,9 @@ func RequireCardRunControl(ctx context.Context, q runstate.RowQueryer, runID str
 	if !transactional || tx == nil {
 		return fmt.Errorf("selected card control requires its native transaction snapshot")
 	}
-	evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx)
 	if ordinary {
-		if !present || evidence.SelectedFork != nil || evidence.BundleHash != admission.BundleHash ||
-			evidence.GrantID != admission.ExecutionAuthorityID || evidence.RuntimeGeneration != admission.Generation {
+		if admission.AuthorizesNormal() && (evidence.BundleHash != admission.BundleHash ||
+			evidence.GrantID != admission.ExecutionAuthorityID || evidence.RuntimeGeneration != admission.Generation) {
 			return fmt.Errorf("live card control requires its own ordinary generation grant")
 		}
 	} else if !present || evidence.SelectedFork == nil || evidence.SelectedFork.BindingID != binding.BindingID ||
