@@ -26,7 +26,7 @@ func TestChannelActivityNativeAcknowledgementCutsBothStores(t *testing.T) {
 		for _, operation := range []string{"start", "claim", "complete", "uncertain"} {
 			for _, phase := range []string{"entry_cancel", "callback_cancel", "commit_refused", "commit_ack_lost", "commit_admitted_cancel", "healthy"} {
 				t.Run(backend+"/"+operation+"/"+phase, func(t *testing.T) {
-					fixture, control := openCompletionOutcomeFixture(t, backend)
+					fixture, control := openCompletionSettlementOutcomeFixture(t, backend)
 					ctx, cancel := context.WithCancel(fixture.original)
 					defer cancel()
 					card, continuation := newRootProposedEffectTestCard(t, fixture.authority.Target.RunID, time.Now().UTC())

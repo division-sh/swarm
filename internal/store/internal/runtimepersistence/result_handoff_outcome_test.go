@@ -28,7 +28,7 @@ func TestResultSiblingsPreserveAcknowledgedHandoffOutcomeBothStores(t *testing.T
 					phase = "healthy"
 				}
 				t.Run(backend+"/"+operation+"/"+phase, func(t *testing.T) {
-					fixture, control := openCompletionOutcomeFixture(t, backend)
+					fixture, control := openCompletionSettlementOutcomeFixture(t, backend)
 					ctx, runID := fixture.context, fixture.authority.Target.RunID
 					var run func() (bool, error)
 					switch operation {
