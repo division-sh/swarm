@@ -162,26 +162,6 @@ type selectedHandlerFanOutBinder interface {
 	ListFanOutIntents(context.Context, fanoutobligation.ListQuery) (fanoutobligation.ListPage, error)
 }
 
-func selectedHandlerFanOutGrant(t *testing.T, owner SelectedContractExecutionOwner, runID string) startupownership.GrantEvidence {
-	t.Helper()
-	owner.ports.contexts.mu.Lock()
-	var grant startupownership.GenerationGrant
-	for _, entry := range owner.ports.contexts.entries {
-		if entry.binding.ForkRunID == runID && entry.retained != nil && entry.retained.retainedRuntime != nil {
-			grant = entry.retained.retainedRuntime.generationGrant
-		}
-	}
-	owner.ports.contexts.mu.Unlock()
-	if grant == nil {
-		t.Fatal("handler claim proof lacks its exact retained native grant")
-	}
-	evidence, err := grant.Evidence()
-	if err != nil || evidence.SelectedFork == nil || evidence.SelectedFork.ForkRunID != runID || evidence.State != startupownership.GrantAdmitted {
-		t.Fatalf("handler claim proof grant: %+v error=%v", evidence, err)
-	}
-	return evidence
-}
-
 func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -277,7 +257,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 			}
 			recoveryCtx := ctx
 			var held *selectedHandlerFanOutClaimHold
-			if live {
+			if claimed {
 				held = newSelectedHandlerFanOutClaimHold(key)
 				defer held.resume()
 				recoveryCtx = startupownership.WithFanOutChunkObserverForTest(ctx, held.observe)
@@ -340,10 +320,17 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 			// No Wake or manual ServeFanOutCandidate call occurs after reopening.
 			wait, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 			defer cancel()
-			if live {
+			var currentGrant startupownership.GrantEvidence
+			if claimed {
 				select {
 				case acquired := <-held.acquired:
-					requireSelectedHandlerFanOutLiveClaimFenced(t, wait, selected, owner, checkpoint, acquired)
+					if acquired.grantErr != nil {
+						t.Fatal(acquired.grantErr)
+					}
+					currentGrant = acquired.grant
+					if live {
+						requireSelectedHandlerFanOutLiveClaimFenced(t, wait, selected, owner, checkpoint, acquired)
+					}
 					held.resume()
 				case result := <-done:
 					joined = true
@@ -402,7 +389,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer stop()
 			if claimed {
-				requireSelectedHandlerFanOutPredecessorFenced(t, cleanup, selected, owner, checkpoint)
+				requireSelectedHandlerFanOutPredecessorFenced(t, cleanup, selected, checkpoint, currentGrant)
 			}
 			resumeACK()
 			result := <-done
@@ -428,7 +415,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 	}
 }
 
-func requireSelectedHandlerFanOutPredecessorFenced(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, checkpoint selectedForkCrashCheckpoint) {
+func requireSelectedHandlerFanOutPredecessorFenced(t *testing.T, ctx context.Context, selected any, checkpoint selectedForkCrashCheckpoint, grant startupownership.GrantEvidence) {
 	t.Helper()
 	binder := selected.(selectedHandlerFanOutBinder)
 	before, err := storetest.ReadFanOutIntentCompletionStorage(ctx, selected, checkpoint.FanOut.Key)
@@ -438,7 +425,6 @@ func requireSelectedHandlerFanOutPredecessorFenced(t *testing.T, ctx context.Con
 	if stale, err := binder.BindSelectedFanOutGrant(*checkpoint.FanOut.Grant); err == nil || stale != nil {
 		t.Fatalf("successor admitted predecessor process/executor grant: owner=%T error=%v", stale, err)
 	}
-	grant := selectedHandlerFanOutGrant(t, owner, checkpoint.ForkRun)
 	current, err := binder.BindSelectedFanOutGrant(grant)
 	if err != nil || current == nil {
 		t.Fatalf("exact successor grant positive control: owner=%T error=%v", current, err)

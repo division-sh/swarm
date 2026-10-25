@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -41,33 +42,33 @@ func proveQ1BranchPointCleanup(t *testing.T, backend string, kind runfork.RunFor
 	t.Helper()
 	fixture := newActivityForkFixture(t, backend)
 	owner, selected := fixture.owner, fixture.owner.ports.fork
-	// Source constructors and the sole process exist before either pending fork.
-	ctx, eventRequest, advanceEvent := q1GateComponentSource(t, owner, false, kind == runfork.RunForkPointEvent && operation == "reset", false)
-	deploymentCtx, deploymentRequest, advanceDeployment := q1DeploymentComponentSource(t, owner)
-	if operation == "discard" {
-		eventRequest.ForkOperation = nil
+	ctx, eventRequest, advanceEvent := q1CleanupSource(t, owner, kind, operation == "reset")
+	loaded, err := eventRequest.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: eventRequest.SourceRunID, Selection: eventRequest.ContractSelection})
+	if err != nil {
+		t.Fatal(err)
 	}
+	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, eventRequest.SourceRunID, executionposture.Live)
+	deploymentRequest := eventRequest
+	siblingOperation := *eventRequest.ForkOperation
+	siblingOperation.OperationID, siblingOperation.IdempotencyKey = uuid.NewString(), uuid.NewString()
+	deploymentRequest.ForkOperation = &siblingOperation
 	first := q1StageBranchPointComponent(t, ctx, eventRequest)
-	second := q1StageBranchPointComponent(t, deploymentCtx, deploymentRequest)
+	second := q1StageBranchPointComponent(t, ctx, deploymentRequest)
 	advanceEvent()
-	advanceDeployment()
 	for _, attachment := range []*q1BranchPointAttachment{first, second} {
-		result, err := attachment.activate()
-		if err != nil || !result.Activated || result.BranchDivergence == nil || result.BranchDivergence.ForkPoint.Kind != result.ForkPoint.Kind || result.BranchDivergence.ForkPoint.Revision != result.ForkPoint.Revision || result.BranchDivergence.ForkPoint.EventID != result.ForkPoint.EventID {
-			t.Fatalf("sibling branch fixture did not activate: %+v err=%v", result, err)
+		result, err := attachment.container.activateLive(attachment.prepared, SelectedContractExecutionRequest{
+			LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+		}, SelectedContractExecutionResult{Materialization: attachment.materialized})
+		if err != nil || !result.Activation.Activated || !result.Activation.ForkPoint.SameIdentity(attachment.materialized.ForkPoint) {
+			t.Fatalf("sibling fixture did not commit its exact live handoff: %+v err=%v", result, err)
 		}
-		if attachment == first && kind == runfork.RunForkPointEvent && operation == "reset" {
-			inputs, err := attachment.container.commitSelectedInputs()
-			if err != nil || len(inputs) != 1 {
-				t.Fatalf("reset requires a real linked selected publication: inputs=%d err=%v", len(inputs), err)
-			}
-			for _, input := range inputs {
-				if err := attachment.container.dispatchCommittedInput(input); err != nil {
-					t.Fatal(err)
-				}
-			}
+		if err := attachment.prepared.Close(); err != nil {
+			t.Fatal(err)
 		}
-		attachment.close(t)
+		attachment.closed = true
+	}
+	if err := ordinary.Shutdown(); err != nil {
+		t.Fatal(err)
 	}
 	before := q1ComponentSnapshot(t, selected)
 	victimAttachment, survivorAttachment := first, second
@@ -109,8 +110,8 @@ func proveQ1BranchPointCleanup(t *testing.T, backend string, kind runfork.RunFor
 	if count := len(q1ComponentBranchRows(t, after, victim)); count != 0 {
 		t.Fatalf("victim branch evidence=%d, want 0", count)
 	}
-	if count := len(q1ComponentBranchRows(t, after, survivor)); count != 1 {
-		t.Fatalf("survivor branch evidence=%d, want 1", count)
+	if rows := q1ComponentRowsWithIdentity(t, after, "run_fork_selected_contract_bindings", "fork_run_id", survivor); len(rows) != 1 {
+		t.Fatalf("survivor exact binding evidence=%d, want 1", len(rows))
 	}
 	for _, preserved := range []string{eventRequest.SourceRunID, deploymentRequest.SourceRunID, survivor} {
 		if !reflect.DeepEqual(q1ComponentRowsForRun(t, before, preserved), q1ComponentRowsForRun(t, after, preserved)) {
@@ -125,20 +126,27 @@ func proveQ1DetachedAcknowledgmentWithoutSource(t *testing.T, backend string, ki
 	t.Helper()
 	fixture := newActivityForkFixture(t, backend)
 	owner, selected := fixture.owner, fixture.owner.ports.fork
-	build := q1DeploymentComponentSource
-	if kind == runfork.RunForkPointEvent {
-		build = func(t *testing.T, owner SelectedContractExecutionOwner) (context.Context, SelectedContractExecutionRequest, func()) {
-			return q1GateComponentSource(t, owner, false, false, false)
-		}
+	ctx, request, advance := q1CleanupSource(t, owner, kind, false)
+	loaded, err := request.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: request.SourceRunID, Selection: request.ContractSelection})
+	if err != nil {
+		t.Fatal(err)
 	}
-	ctx, request, advance := build(t, owner)
+	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, request.SourceRunID, executionposture.Live)
 	attachment := q1StageBranchPointComponent(t, ctx, request)
 	advance()
-	activation, err := attachment.activate()
-	if err != nil || !activation.Activated {
-		t.Fatalf("source-removal control did not activate: %+v err=%v", activation, err)
+	result, err := attachment.container.activateLive(attachment.prepared, SelectedContractExecutionRequest{
+		LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+	}, SelectedContractExecutionResult{Materialization: attachment.materialized})
+	if err != nil || !result.Activation.Activated {
+		t.Fatalf("source-removal control did not commit its real handoff: %+v err=%v", result, err)
 	}
-	attachment.close(t)
+	if err := attachment.prepared.Close(); err != nil {
+		t.Fatal(err)
+	}
+	attachment.closed = true
+	if err := ordinary.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
 	runRows, err := storetest.DecodeSelectedForkSnapshotRows(q1ComponentSnapshot(t, selected)["runs"])
 	if err != nil {
 		t.Fatal(err)
@@ -163,6 +171,14 @@ func proveQ1DetachedAcknowledgmentWithoutSource(t *testing.T, backend string, ki
 	if !reflect.DeepEqual(before, q1ComponentSnapshot(t, selected)) {
 		t.Fatal("source-less operation replay recreated or mutated durable state")
 	}
+}
+
+func q1CleanupSource(t *testing.T, owner SelectedContractExecutionOwner, kind runfork.RunForkPointKind, pending bool) (context.Context, SelectedContractExecutionRequest, func()) {
+	t.Helper()
+	if kind == runfork.RunForkPointDeploymentRevision {
+		return q1DeploymentComponentSource(t, owner)
+	}
+	return q1GateComponentSource(t, owner, false, pending, true)
 }
 
 func q1DiscardBranchPointComponent(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, attachment *q1BranchPointAttachment) {

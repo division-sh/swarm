@@ -16,8 +16,10 @@ import (
 )
 
 type selectedHandlerFanOutHeldClaim struct {
-	claim fanoutobligation.Claim
-	chunk pipeline.FanOutChunkCommand
+	claim    fanoutobligation.Claim
+	chunk    pipeline.FanOutChunkCommand
+	grant    startupownership.GrantEvidence
+	grantErr error
 }
 
 type selectedHandlerFanOutClaimHold struct {
@@ -36,8 +38,12 @@ func (h *selectedHandlerFanOutClaimHold) observe(ctx context.Context, chunk pipe
 	if claim.Key != h.key {
 		return
 	}
+	mutation, err := startupownership.CaptureMutationAuthority(ctx)
+	if err == nil && !mutation.HasRuntimeGrant() {
+		err = errors.New("native fan-out turn has no installed grant")
+	}
 	select {
-	case h.acquired <- selectedHandlerFanOutHeldClaim{claim: claim, chunk: chunk}:
+	case h.acquired <- selectedHandlerFanOutHeldClaim{claim: claim, chunk: chunk, grant: mutation.GrantEvidence(), grantErr: err}:
 	case <-ctx.Done():
 		return
 	}
@@ -60,7 +66,10 @@ func requireSelectedHandlerFanOutLiveClaimFenced(t *testing.T, ctx context.Conte
 		t.Fatal("successor lease expired before the LIVE fencing probes")
 	}
 	binder := selected.(selectedHandlerFanOutBinder)
-	grant := selectedHandlerFanOutGrant(t, owner, checkpoint.ForkRun)
+	grant := held.grant
+	if held.grantErr != nil || grant.Validate() != nil || grant.SelectedFork == nil || grant.SelectedFork.ForkRunID != checkpoint.ForkRun {
+		t.Fatalf("live claim lost its original native grant: %+v err=%v", grant, held.grantErr)
+	}
 	current, err := binder.BindSelectedFanOutGrant(grant)
 	if err != nil || current == nil {
 		t.Fatalf("current native owner: %T error=%v", current, err)
