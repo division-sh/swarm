@@ -154,11 +154,126 @@ func (p *retainedExecutionOrderProbe) CommitSelectedForkEvent(ctx context.Contex
 }
 
 func TestSelectedForkAcknowledgmentPrecedesBusinessDrainBothStores(t *testing.T) {
-	proveRetainedAcknowledgment(t, "")
+	// W4 reverses the legacy ordering: business settlement precedes live ACK.
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newActivityForkFixture(t, backend)
+			owner, selected := fixture.owner, fixture.owner.ports.fork
+			ctx, request, _ := q1GateComponentSource(t, owner, false, true, true)
+			loaded, err := request.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+				SourceRunID: request.SourceRunID, Selection: request.ContractSelection,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, request.SourceRunID, executionposture.Live)
+			probe := &retainedExecutionOrderProbe{SelectedContractForkLifecycle: owner.ports.fork, SelectedContractReplayPersistence: owner.ports.replay,
+				started: make(chan struct{}), release: make(chan struct{})}
+			owner.ports.fork, owner.ports.replay = probe, probe
+			request.Owner, request.LiveRuntime, request.LiveContexts, request.LiveRuns = owner, ordinary, contexts, selected.(runlifecycle.LiveRunReader)
+			type outcome struct {
+				result SelectedContractExecutionResult
+				err    error
+			}
+			done := make(chan outcome, 1)
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(probe.release) }) }
+			joined := false
+			defer func() {
+				release()
+				if !joined {
+					select {
+					case result := <-done:
+						if result.err != nil {
+							t.Error(result.err)
+						}
+					case <-time.After(5 * time.Second):
+						t.Error("selected publication did not join")
+					}
+				}
+			}()
+			go func() {
+				result, err := ExecuteSelectedContractRunFork(ctx, request)
+				done <- outcome{result, err}
+			}()
+			select {
+			case <-probe.started:
+			case result := <-done:
+				joined = true
+				t.Fatalf("selected publication missed its native cut: %+v err=%v", result.result, result.err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("selected publication never reached its native cut")
+			}
+			operation := request.ForkOperation
+			beforeACK, found, err := selected.LoadForkOperationByID(ctx, operation.OperationID)
+			if err != nil || !found || beforeACK.Status != runfork.ForkOperationMaterialized || beforeACK.Result != nil || beforeACK.ForkRunID == "" {
+				t.Fatalf("unsettled business publication acquired a live ACK: %+v err=%v", beforeACK, err)
+			}
+			storage, err := storetest.ReadSelectedExecutionStorage(ctx, selected, beforeACK.ForkRunID)
+			if err != nil || storage.State != "running" || storage.RunStatus != "paused" || storage.Occurrences != 1 {
+				t.Fatalf("unsettled publication lost its exact private selected executor: %+v err=%v", storage, err)
+			}
+			sourceBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, request.SourceRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case result := <-done:
+				joined = true
+				t.Fatalf("unsettled business work returned a public ACK: %+v err=%v", result.result, result.err)
+			default:
+			}
+			release()
+			select {
+			case result := <-done:
+				joined = true
+				if result.err != nil || !result.result.Activation.Activated || result.result.Materialization.ForkRunID != beforeACK.ForkRunID || result.result.ExecutedEventCount != 1 {
+					t.Fatalf("settled publication lost its exact live ACK: %+v err=%v", result.result, result.err)
+				}
+				for _, event := range result.result.ForkEvents {
+					if receipt := storetest.ObservePipelineReceipt(t, ctx, selected, event.ForkEventID); receipt.Count != 1 || receipt.Outcome != "success" {
+						t.Fatalf("live ACK preceded canonical business settlement: %+v", receipt)
+					}
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("settled selected publication did not return its live ACK")
+			}
+			afterACK, found, err := selected.LoadForkOperationByID(ctx, operation.OperationID)
+			if err != nil || !found || afterACK.Status != runfork.ForkOperationActivated || afterACK.Result == nil || afterACK.ForkRunID != beforeACK.ForkRunID || afterACK.BindingID != beforeACK.BindingID || afterACK.SemanticHash != beforeACK.SemanticHash || !reflect.DeepEqual(afterACK.Request, beforeACK.Request) {
+				t.Fatalf("live ACK changed its original operation or child: %+v err=%v", afterACK, err)
+			}
+			if sourceAfter, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, request.SourceRunID); err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
+				t.Fatalf("selected publication changed source business state: %v", err)
+			}
+		})
+	}
 }
 
 func TestSelectedCompletionActualScopeBothStores(t *testing.T) {
-	proveRetainedAcknowledgment(t, "completion-scope")
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newActivityForkFixture(t, backend)
+			owner, selected := fixture.owner, fixture.owner.ports.fork
+			ctx, request, _ := q1GateComponentSource(t, owner, false, true, false)
+			attachment := q1StageBranchPointComponent(t, ctx, request)
+			selectedCtx := attachment.container.attachment.ctx
+			if _, err := owner.ports.busDurable.RunLifecycle.TransitionActiveRun(selectedCtx, runlifecycle.ActiveTransitionRequest{
+				RunID: attachment.materialized.ForkRunID, State: runlifecycle.StateRunning,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := attachment.container.attachment.runtime.startExecution(selectedCtx, attachment.container.attachment.pipeline, attachment.container.diagnostics, false); err != nil {
+				t.Fatal(err)
+			}
+			requester := selected.(interface {
+				RequestCompletionCandidate(context.Context, runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error)
+			})
+			if _, err := requester.RequestCompletionCandidate(selectedCtx, runlifecycle.CandidateAtTime(attachment.materialized.ForkRunID, time.Now().UTC())); err != nil {
+				t.Fatal(err)
+			}
+			proveSelectedCompletionScope(t, ctx, selectedCtx, selected, owner.ports.candidates, attachment.prepared.loadedSource.Source, attachment.materialized.ForkRunID)
+		})
+	}
 }
 
 func TestReviewerSelectedAsyncFailureDisposesResources(t *testing.T) {
@@ -220,7 +335,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				SelectedContractForkLifecycle: owner.ports.fork, SelectedContractReplayPersistence: owner.ports.replay,
 				started: make(chan struct{}), release: make(chan struct{}), cleanup: errors.New("activation cleanup diagnostic"),
 			}
-			if fault == "publication" || fault == "execution-scope" || fault == "completion-scope" || strings.HasPrefix(fault, "settlement-") || strings.HasPrefix(fault, "cleanup-") || fault == "stale-settlement" {
+			if fault == "publication" || fault == "execution-scope" || strings.HasPrefix(fault, "settlement-") || strings.HasPrefix(fault, "cleanup-") || fault == "stale-settlement" {
 				probe.publicationError = errors.New("reviewer injected publication failure")
 			} else if fault == "cancellation" {
 				probe.publicationError = context.Canceled
@@ -312,12 +427,6 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			}
 			if fault == "" {
 				return
-			}
-			if fault == "completion-scope" {
-				probe.mu.Lock()
-				executionCtx := probe.publicationContext
-				probe.mu.Unlock()
-				proveSelectedCompletionScope(t, ctx, executionCtx, selected, owner.ports.candidates, loaded.Source, result.Materialization.ForkRunID)
 			}
 			sourceBefore, err := storetest.ReadSelectedForkSourceDomain(context.Background(), selected, sourceID)
 			if err != nil {

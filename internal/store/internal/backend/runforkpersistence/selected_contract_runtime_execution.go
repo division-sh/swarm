@@ -32,10 +32,7 @@ func (s *RunForkPostgresOwner) IssueRunForkSelectedContractRuntimeExecution(ctx 
 	if req.RecoveryFromExecutionID != "" {
 		result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil,
 			func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedContractRuntimeExecution, error) {
-				if err := requireSelectedSuccessorWorkflowTimers(txctx, attempt, req, postgresRunForkWorkflowTimerReadbackPort(s)); err != nil {
-					return runfork.SelectedContractRuntimeExecution{}, err
-				}
-				return issueSelectedSuccessorExecution(txctx, attempt, postgresDialect{}, req, postgresDeliveryAdapter)
+				return issueSelectedSuccessorExecution(txctx, attempt, postgresDialect{}, req, postgresRunForkWorkflowTimerReadbackPort(s), postgresDeliveryAdapter)
 			})
 		if !result.Acknowledged() {
 			return runfork.SelectedContractRuntimeExecution{}, result.Err()
@@ -66,10 +63,7 @@ func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx co
 	if req.RecoveryFromExecutionID != "" {
 		result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected successor execution issuance", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil,
 			func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedContractRuntimeExecution, error) {
-				if err := requireSelectedSuccessorWorkflowTimers(txctx, attempt, req, sqliteRunForkWorkflowTimerReadbackPort(s)); err != nil {
-					return runfork.SelectedContractRuntimeExecution{}, err
-				}
-				return issueSelectedSuccessorExecution(txctx, attempt, sqliteDialect{}, req, sqliteDeliveryAdapter)
+				return issueSelectedSuccessorExecution(txctx, attempt, sqliteDialect{}, req, sqliteRunForkWorkflowTimerReadbackPort(s), sqliteDeliveryAdapter)
 			})
 		if !result.Acknowledged() {
 			return runfork.SelectedContractRuntimeExecution{}, result.Err()
@@ -88,7 +82,7 @@ func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx co
 	return issued, err
 }
 
-func issueSelectedSuccessorExecution(ctx context.Context, attempt *mutationprotocol.Attempt, dialect selectedRuntimeDialect, req runfork.SelectedContractRuntimeExecutionIssueRequest, deliveries interface {
+func issueSelectedSuccessorExecution(ctx context.Context, attempt *mutationprotocol.Attempt, dialect selectedRuntimeDialect, req runfork.SelectedContractRuntimeExecutionIssueRequest, readback runForkWorkflowTimerReadbackPort, deliveries interface {
 	TransferSelectedSuccessorAuthority(context.Context, *mutationprotocol.Attempt, string, runtimedelivery.ExecutionAuthority) error
 }) (runfork.SelectedContractRuntimeExecution, error) {
 	if err := req.Admission.ForkPoint.Validate(); err != nil {
@@ -96,6 +90,11 @@ func issueSelectedSuccessorExecution(ctx context.Context, attempt *mutationproto
 	}
 	var issued runfork.SelectedContractRuntimeExecution
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		// Keep the lifecycle row ahead of the binding/execution locks taken by
+		// issuance and the exact predecessor-to-successor authority transfer.
+		if _, err := readback.snapshot(ctx, tx, req.Admission.ForkRunID); err != nil {
+			return err
+		}
 		var issueErr error
 		issued, issueErr = issueSelectedContractRuntimeExecution(ctx, tx, dialect, req)
 		return issueErr
@@ -112,6 +111,9 @@ func issueSelectedSuccessorExecution(ctx context.Context, attempt *mutationproto
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
 	if err := deliveries.TransferSelectedSuccessorAuthority(ctx, attempt, req.RecoveryFromExecutionID, authority); err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
+	if err := requireSelectedSuccessorWorkflowTimers(ctx, attempt, req, readback); err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
 	return issued, nil
