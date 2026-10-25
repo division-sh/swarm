@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync/atomic"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -18,6 +19,7 @@ type externalEffectResult struct {
 	original    runtimeownership.MutationAuthority
 	originalErr error
 	accepted    bool
+	attempt     atomic.Pointer[transaction]
 }
 
 // PrepareExternalEffectResult carries only the exact result request into native
@@ -34,6 +36,10 @@ func PrepareExternalEffectResult(ctx context.Context, result effects.Settlement,
 }
 
 func admitExternalEffectResultTx(ctx context.Context, tx *sql.Tx, sqlite bool, result *externalEffectResult) error {
+	scope, _ := ctx.Value(transactionKey{}).(*transaction)
+	if scope == nil || (!result.attempt.CompareAndSwap(nil, scope) && result.attempt.Load() != scope) {
+		return errors.New("external effect result cannot enter another native transaction")
+	}
 	if err := FenceMutation(ctx, tx, sqlite); err != nil {
 		return err
 	}
@@ -49,12 +55,10 @@ func admitExternalEffectResultTx(ctx context.Context, tx *sql.Tx, sqlite bool, r
 			return err
 		}
 	}
-	scope := ctx.Value(transactionKey{}).(*transaction)
 	scope.Lock()
 	defer scope.Unlock()
-	observed := *result
-	observed.accepted = accepted
-	scope.result = &observed
+	result.accepted = accepted
+	scope.result = result
 	return nil
 }
 

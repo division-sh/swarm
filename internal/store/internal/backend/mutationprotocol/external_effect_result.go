@@ -51,16 +51,16 @@ func runExternalEffectResult[T any](ctx context.Context, dialect privateactivity
 		return failed[T](err)
 	}
 	original, originalErr := runtimeownership.CaptureMutationAuthority(ctx)
-	resultCtx, err = generationauthority.PrepareExternalEffectResult(resultCtx, result, original, originalErr)
-	if err != nil {
-		return failed[T](err)
-	}
 	candidateCtx := resultCtx
 	if originalErr == nil {
 		candidateCtx = runtimeownership.CarryMutationAuthority(resultCtx, ctx)
 	}
 	return run(candidateCtx, dialect, evidence, Ordinary, nil, candidates, func(nativeCtx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
 		nativeCtx, err := runtimeownership.ExternalEffectResultContext(nativeCtx, result)
+		if err != nil {
+			return false, err
+		}
+		nativeCtx, err = generationauthority.PrepareExternalEffectResult(nativeCtx, result, original, originalErr)
 		if err != nil {
 			return false, err
 		}
