@@ -23,8 +23,11 @@ type DeliveryPublicationFixtureStore interface {
 func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected DeliveryPublicationFixtureStore, admitted events.AdmittedEvent, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, root *runtimebus.FlowInstanceActivationCommand) {
 	t.Helper()
 	event := admitted.Event()
-	if err := EnsureRunForAdmittedEvent(ctx, selected, admitted, event.CreatedAt()); err != nil {
-		t.Fatal(err)
+	// A real root publication owns run creation and its flow claim atomically.
+	if root == nil || admitted.RunDisposition() != events.AdmittedRunCreateAuthorized {
+		if err := EnsureRunForAdmittedEvent(ctx, selected, admitted, event.CreatedAt()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ledger, err := events.NewConnectEvaluationLedger(nil)
 	if err != nil {

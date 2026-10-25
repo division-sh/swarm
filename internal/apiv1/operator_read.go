@@ -92,6 +92,7 @@ type runDiagnosis struct {
 }
 
 var runListStatuses = map[string]struct{}{
+	"live":      {},
 	"running":   {},
 	"paused":    {},
 	"completed": {},

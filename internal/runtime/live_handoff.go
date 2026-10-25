@@ -59,7 +59,7 @@ func (rt *Runtime) ReconcileLiveRun(ctx context.Context, runID string) error {
 		return err
 	}
 	ctx = startupownership.WithGenerationGrantEvidence(ctx, grant)
-	ctx = correlation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
+	ctx = rt.authorActivityContext(ctx)
 	ctx = correlation.WithRunID(ctx, runID)
 	if err := rt.Manager.ReconcileLiveRun(ctx, runID); err != nil {
 		return err

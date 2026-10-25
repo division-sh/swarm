@@ -1538,7 +1538,7 @@ func (s *standingServiceAdapter) setStandingRunRunningTx(ctx context.Context, tx
 	}
 	if _, err := s.transitionActiveRun(ctx, tx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: runID,
-		State: runtimerunlifecycle.StateRunning,
+		State: runtimerunlifecycle.StateLive,
 	}); err != nil {
 		return err
 	}

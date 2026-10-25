@@ -404,11 +404,31 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: loaded.SourceArtifactFact.BundleHash()}
 		proveRecovery = prepareSelectedConstructedRecovery(t, ctx, owner, request, loaded)
 	}
-	result, err := ExecuteSelectedContractRunFork(ctx, request)
+	var result SelectedContractExecutionResult
+	if proof.scan {
+		attachment := q1StageBranchPointComponent(t, ctx, request)
+		c := attachment.container
+		proof := c.Proof()
+		result = SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: attachment.materialized,
+			SelectedContractExecutionAdmission: &c.req.Admission, AgentRuntimeMaterialization: &c.req.AgentRuntime.Proof, ForkLocalRuntimeContainer: &proof}
+		if err := c.attachment.runtime.startExecution(c.attachment.ctx, c.attachment.pipeline, c.diagnostics, false); err != nil {
+			t.Fatal(err)
+		}
+		inputs, commitErr := c.commitSelectedInputs()
+		err = commitErr
+		for _, input := range inputs {
+			err = errors.Join(err, c.attachment.runtime.bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+		}
+		err = errors.Join(err, attachment.closeResult())
+	} else if proof.changedVersionRecovery {
+		result, err = ExecuteSelectedContractRunFork(ctx, request)
+	} else {
+		result, err = q1ExecuteSelectedPhaseComponent(t, ctx, request)
+	}
 	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 0 {
-		t.Fatalf("actual selected constructed-input acknowledgment: result=%#v err=%v", result, err)
+	if err != nil || result.SelectedContractExecutionAdmission == nil || result.Materialization.ForkRunID == "" {
+		t.Fatalf("actual selected constructed-input attachment: result=%#v err=%v", result, err)
 	}
 	if scanProof != nil {
 		select {

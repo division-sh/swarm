@@ -158,16 +158,16 @@ func proveSelectedQ1FrozenOwnerlessRecoveryBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx, request := ownerlessSelectedOperationFixture(t, backend)
 			first, err := ExecuteSelectedContractRunFork(ctx, request)
-			if err != nil || !first.Activation.Activated || !first.Activation.SourceFrozen {
-				t.Fatalf("first child did not freeze the source: %+v %v", first, err)
+			if err != nil || !first.Activation.Activated || first.Activation.SourceFrozen || first.Activation.SourceRunStatus != "paused" {
+				t.Fatalf("first child did not preserve its paused source: %+v %v", first, err)
 			}
 			selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
 			headers := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
 			})
 			frozen, err := headers.LoadRunHeader(ctx, request.SourceRunID)
-			if err != nil || frozen.Status != "forked" || frozen.ContinuedAsRunID != first.Materialization.ForkRunID {
-				t.Fatalf("source freeze precondition: %+v %v", frozen, err)
+			if err != nil || frozen.Status != "paused" || frozen.ContinuedAsRunID != "" {
+				t.Fatalf("retained source precondition: %+v %v", frozen, err)
 			}
 			operation := *request.ForkOperation
 			operation.OperationID, operation.IdempotencyKey = uuid.NewString(), uuid.NewString()
@@ -180,16 +180,21 @@ func proveSelectedQ1FrozenOwnerlessRecoveryBothStores(t *testing.T) {
 			retry.OperationID = uuid.NewString()
 			request.ForkOperation = &retry
 			result, err := ExecuteSelectedContractRunFork(ctx, request)
-			if err != nil || !result.Activation.Activated || !result.Activation.SourceFrozen || result.Activation.BranchDivergence != nil || result.Materialization.ForkRunID != materialized.ForkRunID {
+			if err != nil || !result.Activation.Activated || result.Activation.SourceFrozen || result.Activation.SourceRunStatus != "paused" || result.Activation.BranchDivergence != nil || result.Materialization.ForkRunID != materialized.ForkRunID {
 				t.Fatalf("ownerless historical materialization was not recovered exactly: %+v %v", result, err)
 			}
 			record, found, err := request.Owner.ports.fork.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
-			if err != nil || !found || record.Status != runfork.ForkOperationActivated || record.Request.OperationID != operation.OperationID || record.Result == nil || !record.Result.SourceFrozen || record.Result.SourceRunStatus != "forked" || record.ForkRunID != materialized.ForkRunID {
+			if err != nil || !found || record.Status != runfork.ForkOperationActivated || record.Request.OperationID != operation.OperationID || record.Result == nil || record.Result.SourceFrozen || record.Result.SourceRunStatus != "paused" || record.ForkRunID != materialized.ForkRunID {
 				t.Fatalf("historical recovery replaced its durable operation or immutable ACK: %+v found=%t err=%v", record, found, err)
 			}
 			after, err := headers.LoadRunHeader(ctx, request.SourceRunID)
 			if err != nil || !reflect.DeepEqual(frozen, after) {
-				t.Fatalf("historical recovery rewrote the original freeze: before=%+v after=%+v err=%v", frozen, after, err)
+				t.Fatalf("historical recovery rewrote the paused source: before=%+v after=%+v err=%v", frozen, after, err)
+			}
+			previous, previousErr := headers.LoadRunHeader(ctx, first.Materialization.ForkRunID)
+			current, currentErr := headers.LoadRunHeader(ctx, materialized.ForkRunID)
+			if previousErr != nil || currentErr != nil || previous.Status != "paused" || current.Status != "live" {
+				t.Fatalf("historical recovery did not switch the actual live sibling: previous=%+v current=%+v errors=%v/%v", previous, current, previousErr, currentErr)
 			}
 			stored, err := storetest.ReadSelectedExecutionStorage(ctx, selected, materialized.ForkRunID)
 			if err != nil || stored.Occurrences != 1 {
