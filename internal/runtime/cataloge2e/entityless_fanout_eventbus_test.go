@@ -107,7 +107,7 @@ func entitylessScatterGatherFixture(t *testing.T) string {
 			}
 			body = []byte(strings.Replace(string(body), stateful, "", 1))
 		}
-		if rel == "entities.yaml" {
+		if rel == "state.yaml" {
 			return nil
 		}
 		return os.WriteFile(target, body, 0600)

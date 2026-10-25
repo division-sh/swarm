@@ -56,23 +56,12 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 		}
 		put(path, body)
 	}
-	original, err := os.ReadFile(filepath.Join(root, formatproof.Source))
+	original, err := os.ReadFile(filepath.Join(root, "scripts/rewrite-stages-2566/formatproof/testdata/original.go.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if formatproof.Digest(original) != formatproof.Origin {
-		raw, err := os.ReadFile(filepath.Join(root, formatproof.Successors))
-		if err != nil {
-			t.Fatal(err)
-		}
-		history, err := formatproof.Read(raw)
-		if err != nil || len(history.Records) == 0 {
-			t.Fatalf("immutable source unavailable: %v", err)
-		}
-		original = []byte(history.Records[0].Before)
-		if formatproof.Digest(original) != formatproof.Origin {
-			t.Fatal("immutable source changed")
-		}
+		t.Fatal("immutable source changed")
 	}
 	put(formatproof.Source, original)
 	put(formatproof.Successors, []byte(`{"version":1,"records":[]}`))

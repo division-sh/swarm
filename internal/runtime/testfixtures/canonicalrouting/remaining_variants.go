@@ -507,7 +507,10 @@ func CopyTelegramAgentImportedSyntheticProjection(t testing.TB, mint CreateMint,
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 			"    resolution: select-or-create", "    resolution: create\n    key_from: "+source)
 	}
-	applyClosedReplacement(t, filepath.Join(root, "telegram-chat", "state.yaml"),
-		"type: text\n", "  "+field+":\n    type: uuid")
+	state := "conversation_reference: {type: text, indexed: true}\nchat_id: uuid\n"
+	if collision {
+		state = "conversation_reference: {type: uuid, indexed: true}\n"
+	}
+	writeClosedVariantFile(t, root, "telegram-chat/state.yaml", state)
 	return root
 }

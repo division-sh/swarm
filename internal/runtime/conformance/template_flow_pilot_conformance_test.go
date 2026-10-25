@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *testing.T) {
@@ -47,8 +48,8 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 	if err != nil {
 		t.Fatalf("ResolveFlowPrimaryEntity(account): %v", err)
 	}
-	if primary.EntityType != "account_state" {
-		t.Fatalf("account primary entity = %q, want account_state", primary.EntityType)
+	if primary.EntityType != "state" {
+		t.Fatalf("account primary entity = %q, want state", primary.EntityType)
 	}
 	instance, err := bundle.ResolveFlowTemplateInstance("account")
 	if err != nil {
@@ -291,7 +292,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		StateRepo:     stateStore,
 		MutationOwner: stateStore,
 		Locker:        fanOutPinRouteLocker{},
-	}, nil)
+	}, fanOutPinRouteEvaluator{})
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -647,6 +648,24 @@ func (s *fanOutPinRouteStateRepo) CommitEngineMutation(_ context.Context, mutati
 }
 
 type fanOutPinRouteLocker struct{}
+
+type fanOutPinRouteEvaluator struct{ runtimeengine.NoopEvaluator }
+
+func (fanOutPinRouteEvaluator) EvalBool(expression string, base runtimeengine.BaseContext, options workflowexpr.ValueExpressionOptions) (bool, error) {
+	options.RequireBool = true
+	value, err := workflowexpr.EvalValueExpressionWithOptions(expression, workflowexpr.ValueContext{
+		Entity: base.Entity.Raw(), PlatformEntity: base.PlatformEntity.Raw(), Payload: base.Payload.Raw(),
+		Event: base.Event.Raw(), Policy: base.Policy.Raw(),
+	}, options)
+	if err != nil {
+		return false, err
+	}
+	result, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("guard returned %T, want bool", value)
+	}
+	return result, nil
+}
 
 func (fanOutPinRouteLocker) WithEntityLock(ctx context.Context, _ runtimeidentity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)

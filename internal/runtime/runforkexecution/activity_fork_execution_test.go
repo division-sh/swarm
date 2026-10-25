@@ -522,8 +522,7 @@ connect:
   - {event: review.retry, from: ., to: flow_a}
   - {event: review.close, from: ., to: flow_a}
 `,
-		"entities.yaml": "root: {}\n",
-		"events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
+		"events.yaml": "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/schema.yaml": `name: flow_a
 pins:
   inputs: [review.start, review.requested, review.retry, review.close]
@@ -538,7 +537,7 @@ loops:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `,
-		"flow_a/entities.yaml": "test_entity:\n  name: {type: text, _unused_reason: retained source identity witness}\n",
+		"flow_a/state.yaml": "name: text\n",
 		"flow_a/nodes.yaml": `test-node:
   execution_type: system_node
   subscribes_to: [review.start, review.requested, review.retry, review.close]

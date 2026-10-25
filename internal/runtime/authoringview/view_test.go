@@ -316,7 +316,7 @@ func TestBuildShowsTemplateInstanceRouteIdentityAndProjection(t *testing.T) {
 	}
 
 	account := flowByID(t, view, "account")
-	if account.PrimaryEntity == nil || account.PrimaryEntity.Type != "account_state" {
+	if account.PrimaryEntity == nil || account.PrimaryEntity.Type != "state" {
 		t.Fatalf("account primary entity = %#v, want account_state", account.PrimaryEntity)
 	}
 	if account.TemplateInstance == nil {
@@ -452,8 +452,8 @@ func TestBuildShowsRootPrimaryEntity(t *testing.T) {
 	if view.Root.PrimaryEntity == nil {
 		t.Fatalf("root primary entity missing: %#v", view.Root)
 	}
-	if view.Root.PrimaryEntity.Type != "workspace" {
-		t.Fatalf("root primary entity type = %q, want workspace", view.Root.PrimaryEntity.Type)
+	if view.Root.PrimaryEntity.Type != "state" {
+		t.Fatalf("root state identity = %q, want state", view.Root.PrimaryEntity.Type)
 	}
 	if view.Root.PrimaryEntity.Fields["org_id"] != "text" {
 		t.Fatalf("root primary entity fields = %#v, want org_id text", view.Root.PrimaryEntity.Fields)
@@ -964,14 +964,11 @@ func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
 	source := semanticview.Wrap(bundle)
 	view := mustBuild(t, source, nil)
 	flow := flowByID(t, view, "telegram-ingress")
-	if flow.Mode != runtimecontracts.FlowModeStatic || flow.PrimaryEntity == nil {
+	if flow.Mode != runtimecontracts.FlowModeStatic || flow.PrimaryEntity != nil {
 		t.Fatalf("stateless singleton view = %#v", flow)
 	}
 	if flow.SingletonCoordinator != nil || flow.SingletonError != "" {
 		t.Fatalf("stateless singleton coordinator projection = coordinator:%#v error:%q", flow.SingletonCoordinator, flow.SingletonError)
-	}
-	if _, exists := flow.PrimaryEntity.Fields["active_chats"]; exists {
-		t.Fatalf("stateless singleton still exposes removed active_chats ceremony: %#v", flow.PrimaryEntity.Fields)
 	}
 }
 
@@ -998,7 +995,7 @@ func TestBuildShowsStatelessCountJoinWithoutCoordinatorDemandWithExactProvenance
 	if flow.SingletonCoordinator != nil || flow.SingletonError != "" {
 		t.Fatalf("stateless join readback = coordinator:%#v error:%q", flow.SingletonCoordinator, flow.SingletonError)
 	}
-	if flow.PrimaryEntity == nil || flow.PrimaryEntity.Type != "coordinator_state" || len(flow.PrimaryEntity.Fields) != 0 || flow.PrimaryEntityError != "" {
+	if flow.PrimaryEntity != nil || flow.PrimaryEntityError != "" {
 		t.Fatalf("count join changed the declared stateless primary: %#v", flow)
 	}
 	if flow.SourceFiles.Nodes != bundle.FlowTree.ByPath["coordinator"].Paths.NodesFile || flow.SourceFiles.Nodes == "" {
@@ -1271,9 +1268,7 @@ func loadDefaultedTemplatePolicySource(t testing.TB) semanticview.Source {
 name: scoring
 instance: account_id
 `)
-	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
-account:
-  account_id: uuid
+	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "state.yaml"), `account_id: uuid
 `)
 	repo := authoringViewRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
@@ -1288,10 +1283,8 @@ func writeRootPrimaryEntityContracts(t testing.TB) string {
 	root := t.TempDir()
 
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "entities.yaml"), `
-workspace:
-  org_id: text
-  region: text
+	writeAuthoringViewTestFile(t, filepath.Join(root, "state.yaml"), `org_id: text
+region: text
 `)
 	return root
 }
@@ -1326,10 +1319,8 @@ types:
   Item:
     name: text
 `)
-	writeAuthoringViewTestFile(t, filepath.Join(dir, "entities.yaml"), `
-state:
-  id: text
-  items: map[text]Item
+	writeAuthoringViewTestFile(t, filepath.Join(dir, "state.yaml"), `id: text
+items: map[text]Item
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "events.yaml"), `
 observed:

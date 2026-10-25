@@ -21,7 +21,7 @@ func TestCatalogCreationStoragePreservesTimePathAndPhysicalScopeBothStores(t *te
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			foreignRun := uuid.NewString()
-			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyReceiverOptionalChild(t, false), backend, true, foreignRun)
+			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyReceiverCreatingChild(t, false), backend, true, foreignRun)
 			boundary := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			h.startedAt = boundary
 			h.seedInitialState(catalogRuntimeRunID)
@@ -68,8 +68,12 @@ func TestCatalogCreationStoragePreservesTimePathAndPhysicalScopeBothStores(t *te
 				}
 			}
 			fields, found, err := storetest.ReadLatestWorkflowFieldsForPath(ctx, reader, catalogRuntimeRunID)
+			if err != nil || found || fields != nil {
+				t.Fatalf("fieldless root acquired a field projection=%s found=%t err=%v", fields, found, err)
+			}
+			fields, found, err = storetest.ReadLatestWorkflowFieldsForPath(ctx, reader, "sink")
 			if err != nil || !found || string(fields) != "{}" {
-				t.Fatalf("constructed root field projection=%s found=%t err=%v", fields, found, err)
+				t.Fatalf("declared sink field projection=%s found=%t err=%v", fields, found, err)
 			}
 			if fields, found, err := storetest.ReadLatestWorkflowFieldsForPath(ctx, reader, "missing"); err != nil || found || fields != nil {
 				t.Fatalf("missing path received fields=%s found=%t err=%v", fields, found, err)

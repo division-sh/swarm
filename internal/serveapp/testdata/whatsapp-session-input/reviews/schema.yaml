@@ -4,7 +4,7 @@ stages:
   review:
     gate:
       decision: review_decision
-      context: {detail: entity.detail}
+      context: {detail: state.detail}
       outcomes:
         approve: {advances_to: done}
         reject:

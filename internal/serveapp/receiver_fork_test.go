@@ -330,7 +330,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				}
 				waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, forkRunID, forkPoint)
 				checkSource("after supported fork")
-				rootType, childType, rootState := "work", "receipt", "done"
+				rootType, childType, rootState := "state", "state", "done"
 				var rootFields, childFields map[string]any = map[string]any{}, map[string]any{}
 				if fieldless {
 					rootType, childType, rootState = "", "", "pending"

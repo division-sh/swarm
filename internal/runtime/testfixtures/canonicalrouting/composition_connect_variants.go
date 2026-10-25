@@ -192,7 +192,7 @@ connect:
     consumer.work.ready: {}
 `)
 	if includeDynamic {
-		writeLegacyInstanceFlow(t, root, "dynamic", "name: dynamic\ninstance: work_id\npins:\n  inputs:\n    - dynamic.work.ready\n", "", "dynamic_state:\n  work_id: string\n", `dynamic-node:
+		writeLegacyInstanceFlow(t, root, "dynamic", "name: dynamic\ninstance: work_id\npins:\n  inputs:\n    - dynamic.work.ready\n", "", "work_id: text\n", `dynamic-node:
   execution_type: system_node
   subscribes_to: [dynamic.work.ready]
   event_handlers:
