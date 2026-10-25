@@ -338,7 +338,7 @@ worker-completion:
       guard:
         check: _entity.current_state == 'active'
       fan_out:
-        items_from: entity.requests
+        items_from: state.requests
         as: completed_request
         identity: completed_request
         max_items: %d

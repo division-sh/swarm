@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,14 +39,6 @@ import (
 // and counter initialization are preserved; actual admission rates are separate.
 // Deterministic old-head H2a/H2b/H2c mechanism witnesses remain separate proofs.
 const issue2564H2ChildEnv = "SWARM_TEST_ISSUE2564_H2_CHILD"
-
-// Live spelling pin: #2287 rulings 6148375122 and 6169683113; workload unchanged.
-const issue2564H2CorpusSHA = "91ee238cbb469b9ac84ceec4cde0e652001d9624ca52ae8c979ee5b35b045a04"
-
-func TestIssue2564H2EquivalentCorpus(t *testing.T) {
-	root := issue2564H2Source(t)
-	t.Logf("reconstructed equivalent H2 admitted bundle=%s", servedEventPublishFixtureBundleHash(t, root))
-}
 
 type issue2564H2Child struct {
 	Source, Config, Backend string
@@ -122,26 +112,7 @@ func TestIssue2564H2ServeProcessHelper(t *testing.T) {
 
 func issue2564H2Source(t *testing.T) string {
 	t.Helper()
-	root := canonicalrouting.CopyIssue2564H2Equivalent(t)
-	paths := []string{"schema.yaml", "events.yaml", "hub/schema.yaml", "hub/state.yaml", "hub/nodes.yaml"}
-	slices.Sort(paths)
-	manifest := sha256.New()
-	for _, path := range paths {
-		contents, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		checksum := sha256.Sum256(contents)
-		fmt.Fprintf(manifest, "%x  %s\n", checksum, path)
-		t.Logf("reconstructed_equivalent_H2 source=%s sha256=%x", path, checksum)
-	}
-	checksum := fmt.Sprintf("%x", manifest.Sum(nil))
-	if checksum != issue2564H2CorpusSHA {
-		t.Fatalf("reconstructed equivalent H2 corpus drift: sha256=%s pinned=%s", checksum, issue2564H2CorpusSHA)
-	}
-	t.Logf("H2_EQUIVALENT_CORPUS_SHA256 %s", checksum)
-	t.Log("equivalence_authority=https://github.com/division-sh/swarm/issues/2564#issuecomment-6001398406; archive_identity=NOT_UNCHANGED; bounded HTTP transport; independent submission rates are not durable admission rates; six keyed children in one root run; system-node handler writes; explicit hub.start counter initialization; two alternating nonterminal 1s stage timers; close is explicit")
-	return root
+	return canonicalrouting.CopyIssue2564H2Equivalent(t)
 }
 
 func issue2564H2Harness(t *testing.T, backend, root string) (func(bool) (*channelOnboardingCrashServeProcess, issue2564H2Fixture), *os.File, *os.File) {

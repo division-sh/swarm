@@ -261,7 +261,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				var aggregate struct {
 					Counts map[string]int `json:"counts"`
 				}
-				if err := process.rpc.call(ctx, "entity.aggregate", map[string]any{"run_id": runID, "flow": runID, "group_by": "current_state"}, &aggregate); err != nil {
+				if err := process.rpc.call(ctx, "entity.aggregate", map[string]any{"run_id": runID, "group_by": "current_state"}, &aggregate); err != nil {
 					t.Fatal(err)
 				}
 				if !reflect.DeepEqual(aggregate.Counts, map[string]int{stage: 1}) {

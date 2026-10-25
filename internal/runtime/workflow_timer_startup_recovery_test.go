@@ -460,9 +460,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			construction383Instance, construction383Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction383Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.StoredRoute(".", workflowRunID, workflowRunID)}, runtimepipeline.WorkflowInstance{
 				InstanceID: workflowRunID, StorageRef: workflowRunID,
 				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "waiting",
-				Mode:       rootSchema.EffectiveMode(),
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
+				Mode: rootSchema.EffectiveMode(),
 			}, construction383At)
 			if err != nil {
 				t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -730,8 +728,6 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				WorkflowVersion: source.WorkflowVersion(),
 				Mode:            rootSchema.EffectiveMode(),
 				CurrentState:    "waiting",
-				Fields:          map[string]any{},
-				EntityType:      "test_entity",
 			}, construction620At)
 			if err != nil {
 				t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -909,8 +905,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						WorkflowVersion: source.WorkflowVersion(),
 						Mode:            rootSchema.EffectiveMode(),
 						CurrentState:    "waiting",
-						Fields:          map[string]any{},
-						EntityType:      "test_entity",
 					}, construction757At)
 					if err != nil {
 						t.Fatalf("prepare fixture initial lifecycle: %v", err)
