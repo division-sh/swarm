@@ -29,12 +29,6 @@ type DecisionCardAuthority interface {
 	) (json.RawMessage, bool, error)
 }
 
-type StandingServiceController interface {
-	SuspendStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
-	ResumeStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
-	ResetStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
-}
-
 type RuntimePublicationReader interface {
 	CurrentPublication() (runtime.RuntimeContextPublicationSnapshot, error)
 }
@@ -181,11 +175,6 @@ type RuntimeControlHandlerOptions struct {
 type RuntimeNukeHandlerOptions struct {
 	Now         func() time.Time
 	Coordinator DestructiveResetCoordinator
-	Idempotency APIIdempotencyStore
-}
-
-type StandingServiceHandlerOptions struct {
-	Controller  StandingServiceController
 	Idempotency APIIdempotencyStore
 }
 

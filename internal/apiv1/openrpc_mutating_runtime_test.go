@@ -312,9 +312,6 @@ func approvedMutatingHTTPRuntimeMethods() []string {
 		"runtime.nuke",
 		"runtime.pause",
 		"runtime.resume",
-		"standing.reset",
-		"standing.resume",
-		"standing.suspend",
 		"test.setup_entities",
 	}
 }
@@ -336,7 +333,6 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 	forkID := "00000000-0000-0000-0000-000000000301"
 	setupRunID := "00000000-0000-0000-0000-000000000601"
 	setupEntityID := "00000000-0000-0000-0000-000000000602"
-	standingServiceID := "00000000-0000-0000-0000-000000000701"
 	until := time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano)
 	later := time.Unix(1700007200, 0).UTC().Format(time.RFC3339Nano)
 	return map[string]mutatingHTTPRuntimeFixture{
@@ -468,24 +464,6 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			ResultKeys:                     []string{"ok"},
 			SuccessEffects:                 1,
 		},
-		"standing.reset": {
-			Params:         map[string]any{"service_id": standingServiceID, "reason": "reset requested"},
-			ConflictParams: map[string]any{"service_id": standingServiceID, "reason": "different reset"},
-			ResultKeys:     []string{"service_id", "run_id", "generation", "effective_state", "transition"},
-			SuccessEffects: 1,
-		},
-		"standing.resume": {
-			Params:         map[string]any{"service_id": standingServiceID, "reason": "resume requested"},
-			ConflictParams: map[string]any{"service_id": standingServiceID, "reason": "different resume"},
-			ResultKeys:     []string{"service_id", "run_id", "generation", "effective_state", "transition"},
-			SuccessEffects: 1,
-		},
-		"standing.suspend": {
-			Params:         map[string]any{"service_id": standingServiceID, "reason": "suspend requested"},
-			ConflictParams: map[string]any{"service_id": standingServiceID, "reason": "different suspend"},
-			ResultKeys:     []string{"service_id", "run_id", "generation", "effective_state", "transition"},
-			SuccessEffects: 1,
-		},
 		"test.setup_entities": {
 			Params: map[string]any{
 				"bundle_hash": runStartTestBundleHash,
@@ -550,17 +528,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 	sourceSessionID := "00000000-0000-0000-0000-000000000201"
 	sourceTurnID := "00000000-0000-0000-0000-000000000401"
 	forkID := "00000000-0000-0000-0000-000000000301"
-	standingServiceID := "00000000-0000-0000-0000-000000000701"
 	probes := []mutatingHTTPRuntimeErrorProbe{
-		{Method: "standing.suspend", Params: map[string]any{"service_id": standingServiceID, "idempotency_key": "idem-error"}, Code: StandingServiceNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.standing.errs["suspend"] = runtimepipeline.ErrStandingServiceNotFound
-		}}},
-		{Method: "standing.resume", Params: map[string]any{"service_id": standingServiceID, "idempotency_key": "idem-error"}, Code: StandingServiceNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.standing.errs["resume"] = runtimepipeline.ErrStandingServiceNotFound
-		}}},
-		{Method: "standing.reset", Params: map[string]any{"service_id": standingServiceID, "idempotency_key": "idem-error"}, Code: StandingServiceNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.standing.errs["reset"] = runtimepipeline.ErrStandingServiceNotFound
-		}}},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash, "run_id": runID}), Code: BundleMismatchCode},
 		{Method: "event.publish", Params: missingBundleHashEvent, Code: BundleScopeRequiredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
@@ -914,7 +882,6 @@ type mutatingRuntimeProbeState struct {
 	agentControl        *mutatingProbeAgentControl
 	selectedControls    *selectedControlRefusalFixture
 	runtimeIngress      *mutatingProbeRuntimeIngress
-	standing            *mutatingProbeStandingController
 	mailbox             *mutatingProbeMailboxStore
 	decisionCards       *mutatingProbeDecisionCardStore
 	workflowStore       *mutatingProbeDecisionWorkflowStore
@@ -969,7 +936,6 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	state.runControl.state = state
 	state.agentControl.state = state
 	state.runtimeIngress.state = state
-	state.standing = &mutatingProbeStandingController{state: state, errs: map[string]error{}}
 	state.mailbox = newMutatingProbeMailboxStore(state)
 	state.decisionCards = newMutatingProbeDecisionCardStore(state)
 	state.workflowStore = &mutatingProbeDecisionWorkflowStore{state: state, cards: state.decisionCards, events: state.events}
@@ -1115,7 +1081,6 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 		RunForkOperations:   s.runForkOperations,
 		RunFork:             s.runFork,
 		RunControl:          s.runControl,
-		StandingServices:    s.standing,
 		RuntimeIngress:      s.runtimeIngress,
 		ResetCoordinator:    s.nuke,
 		Source:              source,
@@ -1137,37 +1102,6 @@ func (s *mutatingRuntimeProbeState) recordEffect() {
 
 func (s *mutatingRuntimeProbeState) effectCount() int {
 	return s.effects + len(s.nuke.calls)
-}
-
-type mutatingProbeStandingController struct {
-	state *mutatingRuntimeProbeState
-	errs  map[string]error
-}
-
-func (c *mutatingProbeStandingController) SuspendStandingService(_ context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	return c.apply("suspend", operation, 1, "suspended", "suspended")
-}
-
-func (c *mutatingProbeStandingController) ResumeStandingService(_ context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	return c.apply("resume", operation, 1, "active", "operator_resumed")
-}
-
-func (c *mutatingProbeStandingController) ResetStandingService(_ context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	return c.apply("reset", operation, 2, "active", "reset")
-}
-
-func (c *mutatingProbeStandingController) apply(action string, operation runtimepipeline.StandingServiceOperation, generation int64, state, transition string) (runtimepipeline.StandingServiceReconciliation, error) {
-	if err := c.errs[action]; err != nil {
-		return runtimepipeline.StandingServiceReconciliation{}, &runtimepipeline.StandingServiceError{ServiceID: operation.ServiceID, Err: err}
-	}
-	c.state.recordEffect()
-	return runtimepipeline.StandingServiceReconciliation{
-		ServiceID:      operation.ServiceID,
-		RunID:          "00000000-0000-0000-0000-000000000702",
-		Generation:     generation,
-		EffectiveState: state,
-		Transition:     transition,
-	}, nil
 }
 
 type mutatingProbeIdempotencyStore struct {
