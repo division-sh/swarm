@@ -250,7 +250,10 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 	}
 	input := constructors[0].Input()
 	declaration := semanticview.ResolveFlowEventProof(loaded.Source, "orders", input)
-	if !declaration.HasSchema || !declaration.IsAuthored(loaded.Source) || declaration.EventKey() == "item.completed" {
+	producer := semanticview.ResolveFlowEventProof(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), declaration.CatalogKey)
+	authoredSchema := declaration.IsAuthored(loaded.Source) ||
+		producer.HasSchema && producer.IsAuthored(loaded.Source) && producer.EventKey() == declaration.CatalogKey
+	if !declaration.HasSchema || !authoredSchema || declaration.FlowID != "orders" || declaration.EventKey() == "item.completed" {
 		t.Fatalf("orders creating input lacks its canonical scoped declaration: %+v", declaration)
 	}
 	event = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(event.ID(), events.EventType(declaration.EventKey()), "source-runtime", "",
