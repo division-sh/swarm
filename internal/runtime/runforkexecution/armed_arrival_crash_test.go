@@ -2,7 +2,9 @@ package runforkexecution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"reflect"
 	"testing"
@@ -212,6 +214,18 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				sourceRows, err := storetest.DecodeSelectedForkSnapshotRows(before["event_deliveries"])
+				if err != nil || len(sourceRows) != 1 {
+					t.Fatalf("source pending delivery row: rows=%d err=%v", len(sourceRows), err)
+				}
+				sourceDeliveryID, err := sourceRows[0]["delivery_id"].Text()
+				if err != nil {
+					t.Fatal(err)
+				}
+				sourceDelivery, err := selected.(deliverylifecycle.Store).Snapshot(t.Context(), sourceDeliveryID)
+				if err != nil || sourceDelivery.RunID != checkpoint.SourceRun || sourceDelivery.EventID != preservedSource.CurrentEventID || sourceDelivery.Status != deliverylifecycle.StatusPending {
+					t.Fatalf("exact source pending delivery: %+v err=%v", sourceDelivery, err)
+				}
 				child := checkpoint.ForkRun
 				// The exact-row reader grants no execution authority and does not
 				// invent an event cut before the child's first publication.
@@ -281,6 +295,14 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					t.Fatal(err)
 				}
 				ordinary, _ := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+				rebootGrant, err := ordinary.CurrentStartupGrantEvidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rebootAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, rebootGrant.GrantID, rebootGrant.RuntimeGeneration)
+				if err != nil {
+					t.Fatal(err)
+				}
 				wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 				defer cancel()
 				reader := selected.(interface {
@@ -400,12 +422,39 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					t.Fatalf("timeout recovery changed its original source delivery obligation: %+v err=%v", afterSourceSettlement, err)
 				}
 				after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
-				if err != nil || !reflect.DeepEqual(before, after) {
-					for table, old := range before {
-						if !reflect.DeepEqual(old, after[table]) {
-							t.Logf("SOURCE_RECOVERY_DELTA table=%s before=%+v after=%+v", table, old, after[table])
-						}
+				if err != nil {
+					t.Fatal(err)
+				}
+				recoveredDelivery, err := selected.(deliverylifecycle.Store).Snapshot(wait, sourceDeliveryID)
+				if err != nil || !recoveredDelivery.Authority.Equal(rebootAuthority) || recoveredDelivery.UpdatedAt.Before(sourceDelivery.UpdatedAt) {
+					t.Fatalf("pending source delivery lacks exact reboot custody: %+v err=%v", recoveredDelivery, err)
+				}
+				preservedDelivery := sourceDelivery
+				preservedDelivery.Authority, preservedDelivery.UpdatedAt = recoveredDelivery.Authority, recoveredDelivery.UpdatedAt
+				if !reflect.DeepEqual(preservedDelivery, recoveredDelivery) {
+					t.Fatalf("reboot changed source pending delivery beyond authority/time: before=%+v after=%+v", sourceDelivery, recoveredDelivery)
+				}
+				comparison := maps.Clone(after)
+				table := after["event_deliveries"]
+				if len(table.Rows) != 1 {
+					t.Fatalf("reboot changed exact source delivery row count: %d", len(table.Rows))
+				}
+				var cells []storetest.SelectedForkSnapshotCell
+				if err := json.Unmarshal([]byte(table.Rows[0]), &cells); err != nil {
+					t.Fatal(err)
+				}
+				for i, column := range table.Columns {
+					if column == "execution_authority_id" || column == "updated_at" {
+						cells[i] = sourceRows[0][column]
 					}
+				}
+				row, err := json.Marshal(cells)
+				if err != nil {
+					t.Fatal(err)
+				}
+				table.Rows = []string{string(row)}
+				comparison["event_deliveries"] = table
+				if !reflect.DeepEqual(before, comparison) {
 					t.Fatalf("timeout recovery changed source business facts: %v", err)
 				}
 				retry, found, err := operations.LoadForkOperation(wait, acknowledged.Request.Actor, acknowledged.Request.IdempotencyKey, acknowledged.Request.TransportHash)

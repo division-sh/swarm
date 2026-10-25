@@ -424,7 +424,7 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, a
 	if err := validateLifecycleGeneration(req, previous, exists, instanceRebind); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	if err := validateFlowReadinessSuccessor(req, previous, exists, instanceRebind); err != nil {
+	if err := validateFlowReadinessSuccessorTx(ctx, tx, req, previous, exists, instanceRebind); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)
@@ -476,7 +476,7 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, att
 	if err := validateLifecycleGeneration(req, previous, exists, instanceRebind); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	if err := validateFlowReadinessSuccessor(req, previous, exists, instanceRebind); err != nil {
+	if err := validateFlowReadinessSuccessorTx(ctx, tx, req, previous, exists, instanceRebind); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)

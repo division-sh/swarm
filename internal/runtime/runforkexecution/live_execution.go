@@ -189,6 +189,9 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 			return out, err
 		}
 		out.ExecutedEventCount++
+		out.ForkEvents = append(out.ForkEvents, SelectedContractExecutionForkEvent{
+			SourceEventID: input.sourceEventID, ForkEventID: input.prepared.Event.ID(), EventName: string(input.prepared.Event.Type()),
+		})
 	}
 	if err := continuations.Synchronize(c.attachment.ctx); err != nil {
 		return out, err
