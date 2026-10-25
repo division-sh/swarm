@@ -65,7 +65,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
@@ -133,7 +133,7 @@ func TestDecisionCardStoreRejectsNonCanonicalDecisionIdentityWithoutPersistenceO
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			card := newDecisionCardTestCard(t, runID, time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC))
@@ -157,7 +157,7 @@ func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStore
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 13, 11, 0, 0, 0, time.UTC)
@@ -222,7 +222,7 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			card, err := decisioncard.New(decisioncard.Card{
@@ -332,7 +332,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 13, 5, 30, 0, 0, time.UTC)
@@ -380,7 +380,7 @@ func TestDecisionCardStorePaginationUsesCreationOrderOnBothStores(t *testing.T) 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			base := time.Date(2026, 7, 12, 13, 0, 0, 0, time.UTC)
@@ -426,7 +426,7 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 12, 14, 0, 0, 0, time.UTC)
@@ -464,7 +464,7 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 func TestDecisionCardOptionalOnlyInputStartsDraftOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 12, 14, 30, 0, 0, time.UTC)
@@ -497,7 +497,7 @@ func TestDecisionCardDraftReplacementExpiryAndSupersessionAreCursorVisibleOnBoth
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 12, 15, 0, 0, 0, time.UTC)
@@ -820,7 +820,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 		for _, gateStatus := range []string{string(gateruntime.StatusOpen), string(gateruntime.StatusDecisionCommitted)} {
 			backend, gateStatus := backend, gateStatus
 			t.Run(backend+"/"+gateStatus, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cardStore, runID := decisionCardTestStore(t, backend)
 				ctx = originalStoreFixtureContext(t, ctx, cardStore)
 				db, postgres := decisionCardStoreDB(t, cardStore)
@@ -875,7 +875,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 
 		backend := backend
 		t.Run(backend+"/eligible_no_gate", func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)

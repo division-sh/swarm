@@ -62,7 +62,13 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 	} else {
 		f.store = storetest.StartPostgresRuntimeStore(t)
 	}
-	source := sourceartifactfixture.Require(t, context.Background(), f.store)
+	runtimeID := uuid.NewString()
+	process := worklifetime.NewProcess()
+	ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(correlation.WithRuntimeInstanceID(context.Background(), runtimeID), process), f.store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := sourceartifactfixture.Require(t, ctx, f.store)
 	manifest := sessionInputManifestFixture(t)
 	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
 		Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "1.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
@@ -82,7 +88,6 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeID := uuid.NewString()
 	f.candidate = channelonboarding.Candidate{Provider: "whatsapp", Interface: identity, Plan: plan,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: source.BundleHash(), BundleIdentity: "bootstrap-fixture",
 			PackInventoryGeneration: "sha256:bootstrap-fixture", RuntimeInstanceID: runtimeID, ContextPublicationGeneration: 1, PlanGeneration: generation},
@@ -93,7 +98,6 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 	// Database/spec construction is not part of the peer's bounded socket
 	// exchange. Start its existing deadline only once those fixtures are ready.
 	f.peer = newSDKPeerMode(t, false)
-	process := worklifetime.NewProcess()
 	f.owner, err = process.NewRuntime(f.peer.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: source.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
@@ -348,8 +352,13 @@ func TestWhatsAppPublicBootstrapReservesBeforeQRBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newRuntimeBootstrapFixture(t, backend)
 			const token = "authenticated-bootstrap-token"
+			process, found := worklifetime.ProcessFromContext(f.ctx)
+			if !found {
+				t.Fatal("bootstrap fixture lost its retained original process")
+			}
 			handler, err := apiv1.NewHandler(apiv1.Options{
-				AuthTokens: []string{token}, OperatorPrincipalID: f.principal.ID,
+				ProcessWorkOwner: process,
+				AuthTokens:       []string{token}, OperatorPrincipalID: f.principal.ID,
 				Handlers: apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: f.service, Channels: f.channels})})
 			if err != nil {
 				t.Fatal(err)

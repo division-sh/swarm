@@ -36,6 +36,7 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			bundle, _ := semanticview.Bundle(source)
 			selected, _, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
 			childRunID := uuid.NewString()
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, childRunID, time.Now().UTC())
 			root := runtimeflowidentity.Stored(source, ".", runID, runID, "", "")
 			constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: time.Now().UTC()})

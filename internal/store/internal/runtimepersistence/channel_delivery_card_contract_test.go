@@ -26,7 +26,7 @@ import (
 func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cards, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cards)
 			selected := cards.(operatorchannel.Store)
@@ -417,7 +417,7 @@ func proveChannelCardResponsibility(t *testing.T, runTx func(func(context.Contex
 func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			var probe *cardIntentRecheckProbe
 			if backend == "postgres" {
 				probe = &cardIntentRecheckProbe{}

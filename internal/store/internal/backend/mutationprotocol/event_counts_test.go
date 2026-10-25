@@ -16,7 +16,8 @@ import (
 func counterProbeSchema(t *testing.T, db *sql.DB, runID string) {
 	t.Helper()
 	for _, ddl := range []string{
-		`CREATE TABLE runs (run_id UUID PRIMARY KEY, event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0))`,
+		`CREATE TABLE runs (run_id UUID PRIMARY KEY)`,
+		`CREATE TABLE run_event_counts (run_id UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE, event_count BIGINT NOT NULL DEFAULT 0 CHECK (event_count >= 0))`,
 		`CREATE TABLE counter_event_probe (event_id TEXT PRIMARY KEY, run_id TEXT)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
@@ -24,6 +25,9 @@ func counterProbeSchema(t *testing.T, db *sql.DB, runID string) {
 		}
 	}
 	if _, err := db.Exec(`INSERT INTO runs (run_id) VALUES ($1)`, runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO run_event_counts (run_id) VALUES ($1)`, runID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -46,7 +50,7 @@ func counterProbeInsert(ctx context.Context, attempt *Attempt, runID, eventID st
 func counterProbeRead(t *testing.T, db *sql.DB, runID string, want int) {
 	t.Helper()
 	var counter, physical int
-	if err := db.QueryRow(`SELECT event_count, (SELECT COUNT(*) FROM counter_event_probe WHERE run_id = $1) FROM runs WHERE CAST(run_id AS TEXT) = $1`, runID).Scan(&counter, &physical); err != nil {
+	if err := db.QueryRow(`SELECT event_count, (SELECT COUNT(*) FROM counter_event_probe WHERE run_id = $1) FROM run_event_counts WHERE CAST(run_id AS TEXT) = $1`, runID).Scan(&counter, &physical); err != nil {
 		t.Fatal(err)
 	}
 	if counter != want || physical != want {
@@ -69,15 +73,23 @@ func TestEventCountDeltasRollbackAndAcknowledgmentBothStores(t *testing.T) {
 				return "", err
 			}
 			if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				if err := FlushEventCountBeforeRead(ctx, tx, readID); err != nil {
+				var count int
+				if err := tx.QueryRowContext(ctx, `SELECT event_count FROM run_event_counts WHERE run_id=$1`, readID).Scan(&count); err != nil {
 					return err
 				}
-				var count int
-				if err := tx.QueryRowContext(ctx, `SELECT event_count FROM runs WHERE run_id=$1`, readID).Scan(&count); err != nil {
+				count, err := EventCountForRead(ctx, tx, readID, count)
+				if err != nil {
 					return err
 				}
 				if count != 1 {
 					t.Fatalf("in-transaction snapshot saw %d, want 1", count)
+				}
+				var stored int
+				if err := tx.QueryRowContext(ctx, `SELECT event_count FROM run_event_counts WHERE run_id=$1`, readID).Scan(&stored); err != nil {
+					return err
+				}
+				if stored != 0 {
+					t.Errorf("same-attempt read acquired the counter before finalization: stored=%d, want 0", stored)
 				}
 				return nil
 			}); err != nil {
@@ -167,11 +179,18 @@ func TestEventCountDeltasBatchOrderAndForeignReadRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.WithValue(context.Background(), sqlAttemptKey{}, attempt)
-	if err := FlushEventCountBeforeRead(ctx, new(sql.Tx), first); err == nil {
+	if _, err := EventCountForRead(ctx, new(sql.Tx), first, 0); err == nil {
 		t.Fatal("foreign transaction borrowed pending projection")
 	}
-	mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(32), first).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(2), second).WillReturnResult(sqlmock.NewResult(0, 1))
+	ordered := []string{first, second}
+	slices.Sort(ordered)
+	for _, runID := range ordered {
+		amount := int64(32)
+		if runID == second {
+			amount = 2
+		}
+		mock.ExpectExec(`UPDATE run_event_counts SET event_count = event_count \+`).WithArgs(amount, runID).WillReturnResult(sqlmock.NewResult(0, 1))
+	}
 	if err := attempt.FlushEventCounts(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -181,12 +200,11 @@ func TestEventCountDeltasBatchOrderAndForeignReadRefusal(t *testing.T) {
 	if err := attempt.AddEventCountDelta(first, 1); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(1), first).WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := FlushEventCountBeforeRead(ctx, tx, first); err != nil {
-		t.Fatal(err)
+	if count, err := EventCountForRead(ctx, tx, first, 32); err != nil || count != 33 {
+		t.Fatalf("pending count=%d err=%v, want 33", count, err)
 	}
 	attempt.active = false
-	if err := FlushEventCountBeforeRead(ctx, tx, first); err == nil {
+	if _, err := EventCountForRead(ctx, tx, first, 32); err == nil {
 		t.Fatal("ended attempt retained projection authority")
 	}
 	mock.ExpectRollback()
@@ -240,7 +258,13 @@ func TestEventCountDeltasPhysicalIdentityAndOrder(t *testing.T) {
 		if !slices.Equal(attempt.eventCountOrder, order) || len(attempt.eventCounts) != len(order) {
 			t.Fatalf("projection order=%v keys=%v, want order=%v", attempt.eventCountOrder, attempt.eventCounts, order)
 		}
-		for _, runID := range order {
+		ordered := slices.Clone(order)
+		slices.SortFunc(ordered, func(a, b string) int {
+			left, _ := physicalRunKey(dialect, a)
+			right, _ := physicalRunKey(dialect, b)
+			return strings.Compare(left, right)
+		})
+		for _, runID := range ordered {
 			delta := int64(1)
 			if runID == second {
 				delta = 3
@@ -248,9 +272,9 @@ func TestEventCountDeltasPhysicalIdentityAndOrder(t *testing.T) {
 				delta = int64(len(aliases))
 			}
 			if dialect == privateactivity.DialectPostgres {
-				mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(delta, runID).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec(`UPDATE run_event_counts SET event_count = event_count \+`).WithArgs(delta, runID).WillReturnResult(sqlmock.NewResult(0, 1))
 			} else {
-				mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(delta, runID, delta).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec(`UPDATE run_event_counts SET event_count = event_count \+`).WithArgs(delta, runID, delta).WillReturnResult(sqlmock.NewResult(0, 1))
 			}
 		}
 		if err := attempt.FlushEventCounts(ctx); err != nil {
@@ -265,16 +289,26 @@ func TestEventCountDeltasPhysicalIdentityAndOrder(t *testing.T) {
 		if err := attempt.AddEventCountDelta(aliases[2], -1); err != nil {
 			t.Fatal(err)
 		}
+		want := 5
 		if dialect == privateactivity.DialectPostgres {
-			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(1), aliases[3]).WillReturnResult(sqlmock.NewResult(0, 1))
+			want++
 		}
-		// Preserve the reader's SQL spelling while consuming all PG alias deltas.
-		if err := FlushEventCountBeforeRead(ctx, tx, " "+aliases[3]+" "); err != nil {
-			t.Fatal(err)
+		if count, err := EventCountForRead(ctx, tx, " "+aliases[3]+" ", 5); err != nil || count != want {
+			t.Fatalf("alias overlay count=%d err=%v, want %d", count, err, want)
 		}
-		if dialect == privateactivity.DialectSQLite {
-			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(2), first, int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
-			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(-1), aliases[2], int64(-1)).WillReturnResult(sqlmock.NewResult(0, 1))
+		for _, runID := range ordered {
+			key, _ := physicalRunKey(dialect, runID)
+			delta := attempt.eventCounts[key]
+			if delta == 0 {
+				continue
+			}
+			update := mock.ExpectExec(`UPDATE run_event_counts SET event_count = event_count \+`)
+			if dialect == privateactivity.DialectPostgres {
+				update.WithArgs(delta, runID)
+			} else {
+				update.WithArgs(delta, runID, delta)
+			}
+			update.WillReturnResult(sqlmock.NewResult(0, 1))
 		}
 		if err := attempt.FlushEventCounts(ctx); err != nil {
 			t.Fatal(err)
@@ -307,11 +341,11 @@ func TestEventCountDeltasUnrecognizedIdentityPreservesSQLValidation(t *testing.T
 		var want error
 		if dialect == privateactivity.DialectPostgres {
 			want = errors.New("native invalid UUID rejection")
-			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(1), "run").WillReturnError(want)
+			mock.ExpectExec(`UPDATE run_event_counts SET event_count = event_count \+`).WithArgs(int64(1), "run").WillReturnError(want)
 		} else {
-			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(1), "run", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec(`UPDATE run_event_counts SET event_count = event_count \+`).WithArgs(int64(1), "run", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
 		}
-		if err := FlushEventCountBeforeRead(ctx, tx, " run "); !errors.Is(err, want) {
+		if err := attempt.FlushEventCounts(ctx); !errors.Is(err, want) {
 			t.Fatalf("SQL validation err=%v, want %v", err, want)
 		}
 		if dialect == privateactivity.DialectPostgres && attempt.eventCounts["run"] != 1 {

@@ -179,7 +179,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 		triggerType:  eventType,
 		deferredType: deferredType,
 	}
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Interceptors:   []runtimebus.EventInterceptor{recorder},
 	})
@@ -250,7 +250,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 		triggerType:  eventType,
 		deferredType: deferredType,
 	}
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Interceptors:   []runtimebus.EventInterceptor{recorder},
 	})
@@ -331,6 +331,7 @@ func seedRunControlPublicationRoot(t *testing.T, ctx context.Context, selected i
 	componentFlowConstructionStore
 }, bus *runtimebus.EventBus, source semanticview.Source, runID string) {
 	t.Helper()
+	ctx = nativeBusProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: testSourceArtifactFact(source).BundleHash()})
 	identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
 	seedCompleteEventDispatchRoot(t, runtimecorrelation.WithRunID(ctx, runID), selected, bus, source, identity, time.Now().UTC())

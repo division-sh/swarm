@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -46,6 +47,7 @@ type selectedCompletionAuthorityStore interface {
 }
 
 type selectedCompletionFixture struct {
+	ctx            context.Context
 	providerSource semanticview.Source
 	providerActor  manager.PersistedAgent
 	process        startupownership.ProcessCapability
@@ -1403,6 +1405,7 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	forkRunID := uuid.NewString()
 	dependentRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, sourceRunID, now)
 	requirePausedRunForTest(t, ctx, store, forkRunID, now)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
@@ -1514,6 +1517,17 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	}
 	registerTestAuthorActivityCatalog(t, registrar)
 	if len(sourceArtifacts) != 0 {
+		ctx = testAuthorActivityContextForBundle(sourceArtifacts[0].BundleHash())
+	}
+	original, err := process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sourceArtifacts) != 0 {
 		artifact := sourceArtifacts[0]
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
 	} else {
@@ -1572,6 +1586,7 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	}
 	declarations := emptySelectedDeclarationForTest(t, db, forkRun)
 	return selectedCompletionFixture{
+		ctx:     ctx,
 		process: process,
 		store:   store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
 		request: runfork.SelectedContractRuntimeExecutionIssueRequest{

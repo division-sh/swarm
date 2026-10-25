@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -67,6 +68,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			}
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			identity := testAgentIdentity(t, "removed-source-agent", "")
+			ctx = storeTestOriginalProcessContext(t, ctx, store)
 			requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 			record := runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -293,7 +295,9 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
 	runID := uuid.NewString()
 	readinessIdentity := mustTestAgentIdentityForRun(runID, "process-readiness-agent", "readiness/instance-1")
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, staticIdentity.RunID, now)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, runID, now)
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -626,6 +630,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err := predecessor.Release(ctx); err != nil {
 		t.Fatalf("release predecessor process capability: %v", err)
 	}
+	ctx = testAuthorActivityContext()
 	acquire := runtimestartupownership.AcquireRequest{
 		OwnerID: "process-binding-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
 	}
@@ -854,6 +859,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "source-set-rebind-agent"
 	identity := testAgentIdentity(t, agentID, "global")
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, identity.RunID, now)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{

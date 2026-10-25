@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -156,7 +157,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 					case <-time.After(15 * time.Second):
 						t.Fatal("late parent publication activation did not join")
 					}
-					waitUnpublishedReforkRunCompletion(t, ctx, selected, parentRun)
+					waitUnpublishedReforkRunCompletion(t, ctx, selected, owner, parentRun)
 					original := storetest.LoadCanonicalEventRecord(t, ctx, selected, pending.Publication.EventID)
 					if original.RunID() != parentRun || !original.CreatedAt().Equal(cause.CurrentDueAt) {
 						t.Fatal("late immediate-source publication changed its owner or original due")
@@ -179,7 +180,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				t.Fatalf("unpublished continuation flattened the parent boundary: %+v error=%v", binding, err)
 			}
 			id := activityidentity.ForkLineageEventID(child, pending.Publication.EventID)
-			waitUnpublishedReforkRunCompletion(t, ctx, selected, child)
+			waitUnpublishedReforkRunCompletion(t, ctx, selected, owner, child)
 			event := storetest.LoadCanonicalEventRecord(t, ctx, selected, id)
 			lineage, exists := event.SelectedForkLineage()
 			if !exists || lineage.SourceRunID() != parentRun || lineage.SourceEventID() != pending.Publication.EventID ||
@@ -216,6 +217,11 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 					t.Fatal("late parent activation did not finish")
 				}
 			}
+			wantParentExecution := "closed"
+			wantParentStatus := "forked"
+			if latePublication {
+				wantParentExecution, wantParentStatus = "running", "running"
+			}
 			parentDeadline := time.Now().Add(15 * time.Second)
 			var parentState storetest.SelectedExecutionStorage
 			for time.Now().Before(parentDeadline) {
@@ -223,16 +229,12 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				if err != nil {
 					t.Fatal(err)
 				}
-				if parentState.State == "closed" {
+				if parentState.State == wantParentExecution {
 					break
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			wantParentStatus := "forked"
-			if latePublication {
-				wantParentStatus = "completed"
-			}
-			if result.Activation.SourceFrozen == latePublication || parentState.State != "closed" || parentState.RunStatus != wantParentStatus {
+			if result.Activation.SourceFrozen == latePublication || parentState.State != wantParentExecution || parentState.RunStatus != wantParentStatus {
 				t.Fatalf("late execution must retain the exact frozen/diverged source outcome: activation=%+v parent=%+v", result.Activation, parentState)
 			}
 			if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists != latePublication {
@@ -252,7 +254,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 	}
 }
 
-func waitUnpublishedReforkRunCompletion(t *testing.T, ctx context.Context, selected startupownership.Store, runID string) {
+func waitUnpublishedReforkRunCompletion(t *testing.T, ctx context.Context, selected startupownership.Store, owner SelectedContractExecutionOwner, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	var last storetest.SelectedExecutionStorage
@@ -261,7 +263,7 @@ func waitUnpublishedReforkRunCompletion(t *testing.T, ctx context.Context, selec
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.RunStatus == "completed" && state.State == "closed" {
+		if state.RunStatus == "running" && selectedTestInstanceSettled(t, ctx, owner, selected, flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(".", runID, runID)}, "ready") {
 			return
 		}
 		last = state

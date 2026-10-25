@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -38,6 +39,18 @@ type managerDeliveryNativeFactory func(*testing.T) *ManagerDeliveryNativeFixture
 
 func (s *ManagerDeliveryNativeFixture) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {
 	return s.Authority
+}
+
+func (s *ManagerDeliveryNativeFixture) managerTestOriginalProcess() *worklifetime.Process {
+	process, _ := worklifetime.ProcessFromContext(s.Context)
+	return process
+}
+
+func managerTestOriginalProcessFromStore(store any) *worklifetime.Process {
+	if original, ok := store.(interface{ managerTestOriginalProcess() *worklifetime.Process }); ok {
+		return original.managerTestOriginalProcess()
+	}
+	return nil
 }
 
 func (s *ManagerDeliveryNativeFixture) seedAgentDeliveries(t *testing.T, agentID string, pending []events.Event) {

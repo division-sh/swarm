@@ -22,6 +22,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -504,6 +505,16 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 		}
 	}
 	var err error
+	if processEffectAuthority(authority) {
+		stamp, stampErr := runtimeownership.PreparedOperationOriginalProcess(ctx, runtimeownership.PreparedEffectAuthorize, s)
+		if stampErr != nil {
+			return runtimeeffects.Attempt{}, invalidExternalAuthority(authority, "original_process_scope_missing")
+		}
+		ctx, err = generationauthority.MutationContext(ctx, stamp, false)
+		if err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+	}
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -673,6 +684,16 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 		}
 	}
 	var err error
+	if processEffectAuthority(authority) {
+		stamp, stampErr := runtimeownership.PreparedOperationOriginalProcess(ctx, runtimeownership.PreparedEffectAuthorize, s)
+		if stampErr != nil {
+			return runtimeeffects.Attempt{}, invalidExternalAuthority(authority, "original_process_scope_missing")
+		}
+		ctx, err = generationauthority.MutationContext(ctx, stamp, false)
+		if err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+	}
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -1182,9 +1203,6 @@ func (s *EffectPostgresOwner) requestRecoveredExternalEffectCandidates(ctx conte
 			continue
 		}
 		seen[runID] = struct{}{}
-		if _, err := mutation.RequestCompletion(ctx, s.lifecycle, runID, nil); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -1210,9 +1228,6 @@ func (s *EffectSQLiteOwner) requestRecoveredExternalEffectCandidates(ctx context
 			continue
 		}
 		seen[runID] = struct{}{}
-		if _, err := mutation.RequestCompletion(ctx, s.lifecycle, runID, nil); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -2168,14 +2183,9 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 					return err
 				}
 				if runID != "" {
-					terminal, err := externalEffectRunTerminal(txctx, tx, true, runID)
+					_, err := externalEffectRunTerminal(txctx, tx, true, runID)
 					if err != nil {
 						return err
-					}
-					if !terminal {
-						if _, err := mutation.RequestCompletion(txctx, s.lifecycle, runID, nil); err != nil {
-							return err
-						}
 					}
 				}
 			}
@@ -2222,14 +2232,9 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 					return err
 				}
 				if runID != "" {
-					terminal, err := externalEffectRunTerminal(txctx, tx, false, runID)
+					_, err := externalEffectRunTerminal(txctx, tx, false, runID)
 					if err != nil {
 						return err
-					}
-					if !terminal {
-						if _, err := mutation.RequestCompletion(txctx, s.lifecycle, runID, nil); err != nil {
-							return err
-						}
 					}
 				}
 			}

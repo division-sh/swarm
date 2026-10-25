@@ -326,7 +326,11 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 		})
 		f.raw = newStopCommitStoreOwner(t, backend, f.db)
 	}
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 30*time.Second)
+	baseCtx := testAuthorActivityContext()
+	if parent != nil {
+		baseCtx = parent.ctx
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
 	t.Cleanup(cancel)
 	if parent != nil {
 		var err error
@@ -338,6 +342,7 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 		ctx = originalStoreFixtureContext(t, ctx, f.raw)
 	}
 	artifact, bundle := fanOutMixedRouteSource(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, f.raw)
 	f.seed = seedFanOutOwnerFixtureWithArtifact(t, ctx, f.db, f.raw, f.postgres, count, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, f.seed.bundleHash))
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, f.seed.runID), mustStoreTestSourceArtifactFact(f.seed.bundleHash))

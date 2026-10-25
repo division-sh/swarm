@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/google/uuid"
 )
 
@@ -29,10 +31,6 @@ func VerifyMissingMutationRunForTest(t *testing.T, initial bool, prepare Stateme
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
 		}
-	}
-	backend, err := sqlitebackend.New(db)
-	if err != nil {
-		t.Fatal(err)
 	}
 	store := &PipelineSQLiteOwner{RunLifecycleSQLiteOwner: &runlifecycle.RunLifecycleSQLiteOwner{}}
 	ctx := runtimecorrelation.WithRunID(original, uuid.NewString())

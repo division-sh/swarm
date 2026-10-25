@@ -91,6 +91,7 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 			t.Fatal(err)
 		}
 		reusePermanentCohortProcess(t, opened.store, process)
+		ctx = storeTestOriginalProcessContext(t, ctx, opened.store)
 		observer := &selectedCopiedExecutionObserver{SelectedContractRuntimeExecutionLifecycle: opened.store.(runforkexecution.SelectedContractRuntimeExecutionLifecycle)}
 		gate := selectedStoreActivationGateForTest(t, ctx, opened.store, observer)
 		source := selectedActivityProducerSourceWithLoops(t, false, false)

@@ -113,7 +113,7 @@ func TestSemanticEventFixtureEvidenceUsesOriginalReadOwnerBothStores(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, runID := decisionCardTestStore(t, backend)
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			eventID := uuid.NewString()
 			before, err := ReadSemanticEventFixtureEvidenceForTest(ctx, selected, runID, eventID)
 			if err != nil || before.RecordFound || len(before.DeliveryProjections) != 0 || len(before.DeliveryStatuses) != 0 || before.NonPlatformReceiptCount != 0 {
@@ -356,7 +356,7 @@ func TestSemanticEventEvidenceRejectsNonPlatformReceiptsBothStores(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, runID := decisionCardTestStore(t, backend)
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			eventID := uuid.NewString()
 			admitted, settlement, routes := compoundFixtureEvent(t, runID, eventID, `{}`, time.Now().UTC())
 			disposition := runtimepipelineobligation.Acknowledged("evidence_ack")

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,14 +16,90 @@ import (
 	runtimeactivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 const faultMatrixMissingRun = "00000000-0000-0000-0000-000000000241"
+
+func faultMatrixOriginalProcess(t *testing.T, db *sql.DB, dialect privateactivity.Dialect) context.Context {
+	t.Helper()
+	ctx := context.Background()
+	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.TableName != "runtime_process_generation" {
+			continue
+		}
+		statements := plan.Statements
+		if dialect == privateactivity.DialectSQLite {
+			statements, err = schemastore.SQLiteStatementsForPlan(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, statement := range statements {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := platformschema.SeedFreshProcessGeneration(ctx, db, plans); err != nil {
+		t.Fatal(err)
+	}
+	var acquire nativeRunner
+	backendName := processbinding.SQLiteLeaseBackend
+	if dialect == privateactivity.DialectSQLite {
+		backend, err := sqlitebackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		acquire = backend.RunProcessAcquisitionOutcome
+	} else {
+		backend, err := postgresbackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, err := postgresbackend.AcquireBlockingAdvisoryLockLease(ctx, backend, "native-cancellation-original-process")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := lease.Release(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		acquire, backendName = lease.RunProcessAcquisitionOutcome, processbinding.PostgresLeaseBackend
+	}
+	var stamp processbinding.LeaseStamp
+	ack, err := acquire(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		stamp, err = generationauthority.AdvanceProcessGeneration(txctx, tx, processbinding.LeaseIdentity{
+			LeaseID: uuid.NewString(), OwnerID: "native-cancellation-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: backendName,
+		}, dialect == privateactivity.DialectSQLite)
+		return err
+	})
+	if err != nil || !ack {
+		t.Fatalf("original process acquisition: acknowledged=%v err=%v", ack, err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, stamp, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
 
 func faultMatrixStores(t *testing.T, test func(*testing.T, *sql.DB, privateactivity.Dialect)) {
 	t.Helper()
@@ -230,6 +307,7 @@ func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 			}
 		})
 		t.Run("joined native cancellation", func(t *testing.T) {
+			original := faultMatrixOriginalProcess(t, db, dialect)
 			var native nativeRunner
 			if dialect == privateactivity.DialectPostgres {
 				backend, err := postgresbackend.New(db)
@@ -247,7 +325,7 @@ func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 				}
 			}
 			for _, before := range []bool{false, true} {
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel(original)
 				if before {
 					cancel()
 				}

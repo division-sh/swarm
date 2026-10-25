@@ -68,6 +68,8 @@ type runExecutionTestOwner interface {
 	ObserveRunExecution(context.Context, sourceadmission.ExecutionQuery, string) (bool, error)
 }
 
+const admissionTestRevisedBundle = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
 func runExecutionOwner(postgres bool, authority runAuthorityOwner) runExecutionTestOwner {
 	if postgres {
 		return &RunLifecyclePostgresOwner{runAuthority: authority}
@@ -77,7 +79,11 @@ func runExecutionOwner(postgres bool, authority runAuthorityOwner) runExecutionT
 
 func runExecutionTransaction(t *testing.T) (*sql.Tx, sqlmock.Sqlmock) {
 	t.Helper()
-	db, mock := admissionTestSQLMock(t)
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {

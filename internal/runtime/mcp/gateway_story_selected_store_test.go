@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -100,6 +101,17 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 
 			runID := uuid.NewString()
 			runtimeInstanceID := uuid.NewString()
+			process := worklifetime.NewProcess()
+			ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID), process), selected.backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				process.Retire()
+				if _, err := process.Join(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
 			source, sourceArtifact := loadGatewayStorySource(t, server.URL)
 			sourceFact, err := runtimecorrelation.NewSourceArtifactFact(sourceArtifact.BundleHash())
 			if err != nil {
@@ -445,7 +457,7 @@ func seedGatewayStoryRuntime(t *testing.T, ctx context.Context, selected gateway
 	}, source); err != nil {
 		t.Fatalf("seed selected-store agent: %v", err)
 	}
-	state, found, err := selected.backend.LoadAgentLifecycleState(context.Background(), actor.Identity)
+	state, found, err := selected.backend.LoadAgentLifecycleState(ctx, actor.Identity)
 	if err != nil || !found {
 		t.Fatalf("read selected-store agent lifecycle: found=%v err=%v", found, err)
 	}

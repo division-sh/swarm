@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -45,7 +46,11 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 				_, db, _ := testutil.StartPostgres(t)
 				selected = storetest.AdmitPostgresRuntimeStore(t, db)
 			}
-			ctx := context.Background()
+			work := worklifetime.NewProcess()
+			ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(context.Background(), work), selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
 			artifact := sourceartifactfixture.New("schema.yaml", []byte("name: data-show-cli\n"))
 			ref, err := durabledata.ParseDeclarationRef(".", "records.loaded")
 			if err != nil {
@@ -87,7 +92,6 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 			if err != nil || positionResult.Outcome != "accepted" {
 				t.Fatalf("keyless import=%#v/%v", positionResult, err)
 			}
-			work := worklifetime.NewProcess()
 			handlers := apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: selected})
 			for method, handler := range apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{Ready: func() bool { return true }, Database: selected, Publication: source2376Publication{bundle: runtimecontracts.BundleIdentity{BundleHash: artifact.BundleHash(), WorkflowName: ".", WorkflowVersion: artifact.BundleHash(), SourceLabel: artifact.HumanLabel()}}}) {
 				handlers[method] = handler

@@ -103,7 +103,18 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		f.location = testutil.StartPostgresDSN(t)
 		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
-	ctx, now := context.Background(), time.Now().UTC().Truncate(time.Microsecond)
+	runtimeID := uuid.NewString()
+	f.ctx = context.Background()
+	capability := acquireLogoutProcessFixture(t, f, runtimeID)
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := worklifetime.NewProcess()
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, now := worklifetime.WithProcess(f.ctx, process), time.Now().UTC().Truncate(time.Microsecond)
 	source := sourceartifactfixture.Require(t, ctx, f.selected)
 	manifest := sessionInputManifestFixture(t)
 	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
@@ -136,7 +147,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	}
 	f.source = captureSource{Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: source.BundleHash(), BundleIdentity: "active-native-input", PackInventoryGeneration: "sha256:active-native-input",
-		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: targetGeneration}, CatalogGeneration: catalog.Generation()}
+		RuntimeInstanceID: runtimeID, ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: targetGeneration}, CatalogGeneration: catalog.Generation()}
 	id := uuid.NewString()
 	f.operation, err = f.selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{OperationID: id,
 		RequestKeyHash: id, RequestHash: id, PrincipalID: principal.ID, Verb: channelonboarding.VerbConnect, Provider: "whatsapp",
@@ -170,8 +181,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		}
 	}
 	f.peer = newSDKPeer(t)
-	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
-	process := worklifetime.NewProcess()
+	f.ctx = worklifetime.WithProcess(authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash())), process)
 	f.workOwner, err = process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})
 	if err != nil {
 		t.Fatal(err)

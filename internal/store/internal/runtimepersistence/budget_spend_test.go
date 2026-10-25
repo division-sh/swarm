@@ -133,6 +133,7 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	entityID := uuid.NewString()
 	recordedAt := time.Now().UTC().Truncate(time.Second)
 
+	ctx = storeTestOriginalProcessContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: recordedAt})
 	for _, entity := range []struct {
 		id, flow, state string

@@ -20,7 +20,7 @@ import (
 func TestDecisionCardEntityFilterParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			store, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, store)
 			otherRun, entityID, otherEntity := uuid.NewString(), uuid.NewString(), uuid.NewString()

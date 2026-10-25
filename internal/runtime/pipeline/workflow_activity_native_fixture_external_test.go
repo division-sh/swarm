@@ -246,6 +246,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			if err := selected.Close(); err != nil {
 				t.Fatal(err)
 			}
+			replacePipelineExternalWorkOccurrenceForSource(t, fact, pipelineExternalTestWorkOwnerForSource(t, fact))
 			return workflowActivityNativeFixtureFromSelectedSource(t, reopen(), reopen, artifact)
 		},
 		ReadJournal: func(ctx context.Context, runID string) (pipeline.WorkflowJournalStorageForTest, error) {

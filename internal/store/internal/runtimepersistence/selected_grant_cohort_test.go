@@ -121,6 +121,7 @@ func proveRetiredSelectedGrantHistory(t *testing.T, fixture completionSettlement
 		t.Fatal("grant history fixture has no original selected execution owner")
 	}
 	selected := newSelectedCompletionFixtureWithProcess(t, store, fixture.db, fixture.sqlite, process)
+	ctx := selected.ctx
 	selected.request.ContainerPlanFingerprint = "sha256:" + strings.Repeat("1", 64)
 	selected.request.ActorCensusFingerprint = "sha256:" + strings.Repeat("2", 64)
 	selected.request.EffectiveConfigFingerprint = "sha256:" + strings.Repeat("3", 64)

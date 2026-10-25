@@ -357,7 +357,10 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 					if header.Failure != nil {
 						t.Fatalf("recovered published occurrence failed: %+v", *header.Failure)
 					}
-					if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline {
+					if selectedTestInstanceSettled(t, wait, owner, selected, publishedJoinChildInstance(t, source, checkpoint.ForkRun), "ready") {
+						if header.Status != "running" || header.EndedAt != nil || process.ActiveCount() != baseline {
+							t.Fatalf("settled publication changed live run or leaked shutdown work: %+v leases=%d baseline=%d", header, process.ActiveCount(), baseline)
+						}
 						break
 					}
 					select {
@@ -481,7 +484,10 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if header.Status == "completed" && header.EndedAt != nil && header.Failure == nil && process.ActiveCount() == baseline {
+				if header.Failure == nil && selectedTestInstanceSettled(t, wait, owner, selected, publishedJoinChildInstance(t, source, child), "ready") {
+					if header.Status != "running" || header.EndedAt != nil || process.ActiveCount() != baseline {
+						t.Fatalf("settled publication changed live run or leaked shutdown work: %+v leases=%d baseline=%d", header, process.ActiveCount(), baseline)
+					}
 					break
 				}
 				if header.Failure != nil {
@@ -563,6 +569,19 @@ func requirePublishedJoinSourceScope(t *testing.T, source genericschedule.Activa
 		flowID == "orders" && (entry.InstancePath != source.Command.FlowInstance || !strings.HasPrefix(entry.InstancePath, "orders/") || entry.EntityID == source.Command.RunID) {
 		t.Fatalf("published fixture lost its exact constructed receiver: %+v", ref)
 	}
+}
+
+func publishedJoinChildInstance(t *testing.T, source genericschedule.Activation, child string) flowidentity.RunScopedFlowInstance {
+	t.Helper()
+	_, ref, valid := timeridentity.ParseJoinHandle(source.Command.Payload.Interface().(map[string]any))
+	if !valid {
+		t.Fatal("source publication lost its exact join handle")
+	}
+	path := ref.StageEntry().InstancePath
+	if ref.FlowPath() == "." {
+		path = child
+	}
+	return flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(ref.FlowPath(), flowidentity.LogicalInstanceID(path), path)}
 }
 
 func requirePublishedJoinChildReceiver(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, source genericschedule.Activation, child string) {

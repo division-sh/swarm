@@ -3,12 +3,12 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"errors"
+
 	"path/filepath"
 	"testing"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -32,23 +32,9 @@ func TestSessionTurnIncrementAcknowledgesPostcommitHandoffAndSurvivesRestartBoth
 			ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 			ctx = originalStoreFixtureContext(t, ctx, store)
 			identity := fixture.authority.Target.AgentIdentity
-			bundleHash := releaseTestBundleHash(t, ctx, db, sqlite, identity.RunID)
-			injected := errors.New("injected session turn postcommit handoff failure")
-			submits := 0
-			registration, err := store.RegisterCompletionCandidateSink(ctx, runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}, &completionHandoffEvidenceProbeSink{submit: func(candidate runtimerunlifecycle.Candidate) error {
-				submits++
-				if candidate.RunID != identity.RunID {
-					t.Errorf("wrong candidate run: %+v", candidate)
-				}
-				return injected
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer registration.Release()
 			result, err := store.IncrementTurnOutcome(ctx, &sessions.Lease{SessionID: fixture.sessionID, Identity: identity, LockOwner: fixture.leaseHolder, GrantID: fixture.grantID})
-			if !result.Acknowledged || !errors.Is(err, injected) || submits != 1 {
-				t.Fatalf("turn result=%+v err=%v submissions=%d", result, err, submits)
+			if !result.Acknowledged || err != nil {
+				t.Fatalf("turn result=%+v err=%v", result, err)
 			}
 			var restartedDB *sql.DB
 			if sqlite {

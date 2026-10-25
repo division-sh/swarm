@@ -24,6 +24,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -86,7 +87,6 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 			wanted := insert(runA, "wanted", "included-replay", base.Add(time.Second))
 			insert(runA, "other", "excluded-newer", base.Add(2*time.Second))
 			insert(runB, "wanted", "excluded-foreign", base.Add(3*time.Second))
-			work := worklifetime.NewProcess()
 			handler, err := apiv1.NewHandler(apiv1.Options{
 				AuthTokens: []string{"test-token"}, ProcessWorkOwner: work,
 				Handlers:      apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: selected}),

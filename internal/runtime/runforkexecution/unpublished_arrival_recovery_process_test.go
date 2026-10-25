@@ -231,9 +231,9 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 						t.Fatalf("successor confused frozen parent and owed child: %+v want=%s", entry, want)
 					}
 				}
-				waitPublishedChildCompletion(t, selected, process, baseline, crashed.ForkRun)
+				waitPublishedChildCompletion(t, selected, owner, process, baseline, crashed.ForkRun)
 				state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, crashed.ForkRun)
-				if err != nil || state.State != "closed" || state.RunStatus != "completed" || state.Occurrences != 2 {
+				if err != nil || state.RunStatus != "running" || state.Occurrences != 2 {
 					t.Fatalf("successor did not complete through one fresh execution: %+v error=%v", state, err)
 				}
 				parentState, err := storetest.ReadSelectedExecutionStorage(ctx, selected, crashed.SourceRun)

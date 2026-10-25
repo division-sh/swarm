@@ -99,6 +99,7 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 					}
 				case strings.HasPrefix(name, "quiescence") || name == "reset_cleanup":
 					runID := uuid.NewString()
+					base = storeTestOriginalProcessContext(t, base, pg)
 					requireRunFixtureForTest(t, base, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-time.Hour)})
 					table, event = "runs", "UPDATE"
 					observe = `SELECT COALESCE(string_agg(status, ',' ORDER BY run_id), '') FROM runs`

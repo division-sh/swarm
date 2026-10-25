@@ -24,8 +24,8 @@ func TestDeliveryAuthorityActivationPreservesRecordedFrozenSourceBothStores(t *t
 				ctx := testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				source, child := uuid.NewString(), uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, source)
-				seedAuthorActivityReceiptRun(t, fixture, ctx, child)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, source)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, child)
 				var authority deliverylifecycle.ExecutionAuthority
 				for _, state := range []deliverylifecycle.State{
 					deliverylifecycle.StateQueued, deliverylifecycle.StateRetrying,
@@ -93,7 +93,7 @@ func TestDeliveryAuthorityActivationPreservesLiveEligibilityBothStores(t *testin
 				ctx := testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateLaunching} {
 					if _, err := fixture.store.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: runlifecycle.StateRunning}); err != nil {
 						t.Fatal(err)

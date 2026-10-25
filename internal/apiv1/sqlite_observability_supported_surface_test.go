@@ -178,6 +178,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	eventOnlyID := "00000000-0000-0000-0000-000000001401"
 	lateDeliveryID := "00000000-0000-0000-0000-000000001402"
 	secondDeliveryID := "00000000-0000-0000-0000-000000001403"
+	ctx = apiTestOriginalProcessContext(t, ctx, sqliteStore)
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	for _, fixture := range []struct {
 		id        string
@@ -309,6 +310,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	now := time.Now().UTC().Add(-2 * time.Minute)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
+	ctx = apiTestOriginalProcessContext(t, ctx, store)
 	storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Minute)})
 	event := eventtest.PersistedProjection(eventID,
 		events.EventType("trace.visible"),

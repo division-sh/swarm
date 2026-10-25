@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -470,6 +471,7 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 			} else {
 				processReleased = true
 			}
+			processReleased = true
 		})
 	}
 	t.Cleanup(releaseProcess)

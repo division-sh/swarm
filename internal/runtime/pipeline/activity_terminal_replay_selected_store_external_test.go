@@ -29,6 +29,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -386,7 +387,7 @@ func activityJournalProofSource(t *testing.T, tools map[string]runtimecontracts.
 	return semanticview.Wrap(bundle)
 }
 
-func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string) context.Context {
+func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string, original ...startupownership.ProcessCapability) context.Context {
 	t.Helper()
 	ctx := activityReplayContext(t, selected, source, runID)
 	bundle, _ := semanticview.Bundle(source)
@@ -402,7 +403,7 @@ func activityReplayContext(t *testing.T, selected gateRecoveryStoreCase, source 
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("activity journal fixture requires its actual compiled artifact")
 	}
-	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
+	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
 	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(context.Background(), runID), fact))
 	return originalPipelineFixtureContext(t, ctx, selected.events)
 }

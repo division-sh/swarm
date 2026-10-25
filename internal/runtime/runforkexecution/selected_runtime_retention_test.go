@@ -133,7 +133,8 @@ func TestSelectedPartialRuntimeCleanupRemainsOwnedByPreparation(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				grant := &selectedRuntimeRetirementProbe{}
 				calls := 0
-				runtime := &selectedContractAgentRuntime{generationGrant: grant, cleanup: func() {
+				ctx := worklifetime.WithProcess(context.Background(), worklifetime.NewProcess())
+				runtime := &selectedContractAgentRuntime{generationGrant: grant, cleanupContext: ctx, cleanup: func() {
 					calls++
 					if calls <= failures {
 						panic("injected selected cleanup failure")
@@ -142,7 +143,7 @@ func TestSelectedPartialRuntimeCleanupRemainsOwnedByPreparation(t *testing.T) {
 				if adopted {
 					runtime.manager = runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{WorkOwner: testGatewayWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution()}, nil)
 				}
-				operation := selectedContractOperationForTest(t, worklifetime.WithProcess(context.Background(), worklifetime.NewProcess()))
+				operation := selectedContractOperationForTest(t, ctx)
 				prepared := &PreparedSelectedFork{operation: operation, retainedRuntime: runtime}
 				for i := 0; i < failures; i++ {
 					if err := prepared.Close(); err == nil {

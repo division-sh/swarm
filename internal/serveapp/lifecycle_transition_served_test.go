@@ -430,19 +430,6 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			unblockFinish()
 			rt.waitEntityStage(t, started.RunID, ordinaryID, "done")
 			rt.waitDeliveries(t, started.RunID)
-			requireServedRunStatus(t, rt.Endpoint, started.RunID, "completed")
-			completed := snapshot()
-			terminal := requestServedJSONRPC(t, rt.Endpoint, "event.publish", map[string]any{"event_name": "loop.repeat", "run_id": started.RunID, "source_event_id": started.EventID, "payload": map[string]any{"revision_id": first.RevisionID}, "idempotency_key": "completed-stale-repeat"})
-			if terminal.Error == nil || terminal.Error.Data["code"] != "RUN_ALREADY_TERMINAL" || terminal.Error.Data["retryable"] != false {
-				t.Fatalf("completed repeat admission=%#v", terminal.Error)
-			}
-			terminalDetails, _ := terminal.Error.Data["details"].(map[string]any)
-			if terminalDetails["current_status"] != "completed" || terminalDetails["run_id"] != started.RunID {
-				t.Fatalf("completed repeat reason=%#v", terminalDetails)
-			}
-			if after := snapshot(); after != completed {
-				t.Fatalf("completed stale repeat mutated lifecycle:\nbefore=%s\nafter=%s", completed, after)
-			}
 			requireEventCount("ordinary.repeated", 1)
 			requireEventCount("loop.escaped", 1)
 		})

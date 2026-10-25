@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
@@ -100,7 +101,13 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	} else {
 		selected = storetest.StartPostgresRuntimeStore(t)
 	}
-	ctx, now := context.Background(), time.Now().UTC()
+	process := worklifetime.NewProcess()
+	runtimeID := uuid.NewString()
+	ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(correlation.WithRuntimeInstanceID(context.Background(), runtimeID), process), selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
 	source := sourceartifactfixture.Require(t, ctx, selected)
 	catalog := sessionDiscoveryCatalog(t)
 	plan := packfixture.WhatsAppSessionChannel(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), catalog)
@@ -112,8 +119,6 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	if err != nil {
 		t.Fatal(err)
 	}
-	process := worklifetime.NewProcess()
-	runtimeID := uuid.NewString()
 	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: source.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
@@ -192,19 +197,12 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	return f
 }
 
-func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Store, runtimeID, bundleHash string) startupownership.LiveGenerationGrant {
+func admitServeSessionProcessFixture(t *testing.T, ctx context.Context, selected agentfixture.Store, runtimeID, bundleHash string) startupownership.LiveGenerationGrant {
 	t.Helper()
-	ctx := context.Background()
-	process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "serve-session-process-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := process.Release(ctx); err != nil {
-			t.Error(err)
-		}
-	})
 	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -33,24 +33,24 @@ func TestConnectedChannelPublicationPrincipalFirstBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, verb := range []domain.Verb{domain.VerbReconnect, domain.VerbRebind} {
 			t.Run(backend+"/"+string(verb), func(t *testing.T) {
-				r, principalID, probe := publicationLockFixture(t, backend)
+				r, principalID, probe, original := publicationLockFixture(t, backend)
 				now := time.Date(2026, 10, 6, 15, 0, 0, 0, time.UTC)
-				predecessor := preparePublication(t, r, principalID, domain.VerbConnect, now)
-				op, old, err := publishActivation(context.Background(), r, publicationRequest(predecessor, now))
+				predecessor := preparePublication(t, original, r, principalID, domain.VerbConnect, now)
+				op, old, err := publishActivation(original, r, publicationRequest(predecessor, now))
 				if err != nil {
 					t.Fatal(err)
 				}
 				for _, phase := range []domain.Phase{domain.PhasePromotingRegistration, domain.PhaseRetiringPredecessor, domain.PhaseDeliveringConfirmation, domain.PhaseSucceeded} {
-					op, err = advance(context.Background(), r, domain.AdvanceRequest{
+					op, err = advance(original, r, domain.AdvanceRequest{
 						OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: now,
 					})
 					if err != nil {
 						t.Fatal(err)
 					}
 				}
-				successor := preparePublication(t, r, principalID, verb, now.Add(time.Minute))
+				successor := preparePublication(t, original, r, principalID, verb, now.Add(time.Minute))
 				request := publicationRequest(successor, now.Add(time.Minute))
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				ctx, cancel := context.WithTimeout(original, 15*time.Second)
 				defer cancel()
 				deliveryReady, releaseDelivery := make(chan struct{}), make(chan struct{})
 				var deliveryOnce, publicationOnce sync.Once
@@ -121,7 +121,7 @@ func TestConnectedChannelPublicationPrincipalFirstBothStores(t *testing.T) {
 				if !principalFirst {
 					t.Error("publication acquired an activation before the principal fence")
 				}
-				current, err := listActivations(context.Background(), r)
+				current, err := listActivations(original, r)
 				if err != nil || len(current) != 1 || current[0].ActivationID != request.ActivationID || current[0].Revision != old.Revision+1 {
 					t.Fatalf("exact successor = %#v, err=%v", current, err)
 				}
@@ -188,7 +188,7 @@ func (c *publicationLockConn) BeginTx(ctx context.Context, opts driver.TxOptions
 	return c.Conn.Begin()
 }
 
-func publicationLockFixture(t *testing.T, backend string) (runner, string, *publicationLockConnector) {
+func publicationLockFixture(t *testing.T, backend string) (runner, string, *publicationLockConnector, context.Context) {
 	t.Helper()
 	var original *sql.DB
 	var dsn string
@@ -219,6 +219,16 @@ func publicationLockFixture(t *testing.T, backend string) (runner, string, *publ
 			t.Fatal(err)
 		}
 		bootstrapPublicationSchema(t, schema)
+		lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(t.Context(), b, "swarm:runtime:shared-store-owner")
+		if err != nil || !acquired {
+			t.Fatalf("retain original statement process: acquired=%v err=%v", acquired, err)
+		}
+		t.Cleanup(func() {
+			if err := lease.Release(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		ctx = statementOriginalContext(t, false, lease.RunProcessAcquisitionOutcome)
 		r = postgresRunner{&PostgresOwner{backend: b, requireCurrent: schema.RequireCurrent}}
 		identity, err := identityowner.NewPostgres(b, schema.RequireCurrent)
 		if err != nil {
@@ -235,6 +245,7 @@ func publicationLockFixture(t *testing.T, backend string) (runner, string, *publ
 			t.Fatal(err)
 		}
 		bootstrapPublicationSchema(t, schema)
+		ctx = statementOriginalContext(t, true, b.RunProcessAcquisitionOutcome)
 		r = sqliteRunner{&SQLiteOwner{backend: b, requireCurrent: schema.RequireCurrent}}
 		identity, err := identityowner.NewSQLite(b, schema.RequireCurrent)
 		if err != nil {
@@ -246,7 +257,7 @@ func publicationLockFixture(t *testing.T, backend string) (runner, string, *publ
 	if err != nil {
 		t.Fatal(err)
 	}
-	return r, principal.ID, probe
+	return r, principal.ID, probe, ctx
 }
 
 func bootstrapPublicationSchema(t *testing.T, schema schemastore.SchemaBootstrapper) {
@@ -266,14 +277,14 @@ func bootstrapPublicationSchema(t *testing.T, schema schemastore.SchemaBootstrap
 	}
 }
 
-func preparePublication(t *testing.T, r runner, principalID string, verb domain.Verb, now time.Time) domain.Operation {
+func preparePublication(t *testing.T, ctx context.Context, r runner, principalID string, verb domain.Verb, now time.Time) domain.Operation {
 	t.Helper()
 	generation, err := plangeneration.FromCanonicalValue(map[string]string{"test": "publication-lock"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := uuid.NewString()
-	op, err := reserve(context.Background(), r, domain.StartRequest{
+	op, err := reserve(ctx, r, domain.StartRequest{
 		OperationID: id, PrincipalID: principalID, RequestKeyHash: id, RequestHash: id, Verb: verb, Provider: "telegram",
 		Interface: operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2, ChannelPackID: "provider.telegram.hitl_channel", ChannelPackVersion: "0.1.0", ChannelManifestHash: "sha256:manifest", SemanticGeneration: "sha256:plan"},
 		Coordinate: domain.ChannelRuntimeContextCoordinate{
@@ -294,10 +305,10 @@ func preparePublication(t *testing.T, r runner, principalID string, verb domain.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := credentials.Set(context.Background(), "channel.token", "fixture-provider-secret"); err != nil {
+			if err := credentials.Set(ctx, "channel.token", "fixture-provider-secret"); err != nil {
 				t.Fatal(err)
 			}
-			evidence, err := runtimecredentials.SealCurrentValue(context.Background(), credentials, "channel.token")
+			evidence, err := runtimecredentials.SealCurrentValue(ctx, credentials, "channel.token")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -307,7 +318,7 @@ func preparePublication(t *testing.T, r runner, principalID string, verb domain.
 		if phase == domain.PhaseAwaitingOperatorConfirmation || phase == domain.PhasePublishingActivation {
 			request.BindingRevision = 1
 		}
-		op, err = advance(context.Background(), r, request)
+		op, err = advance(ctx, r, request)
 		if err != nil {
 			t.Fatal(err)
 		}

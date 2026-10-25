@@ -815,8 +815,9 @@ func originalSourceForRun(t testing.TB, selected any, runID string) runforkexecu
 		t.Fatal("fixture requires the actual source artifact reader")
 	}
 	repo := canonicalrouting.RepoRoot(t)
+	ctx := storeTestOriginalProcessContext(t, storeTestWorkContext(t, t.Context()), selected)
 	loaded, err := (runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
-		Store: store}).LoadRunForkSelectedContractSourceForRequest(context.Background(), runforkexecution.SelectedContractSourceLoadRequest{
+		Store: store}).LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 		SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	})
 	if err != nil {
@@ -849,7 +850,8 @@ func originalActivityCarriageAtPoint(t *testing.T, store selectedActivityProject
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(t.Context(), sourceRunID), loaded.SourceArtifactFact)
+	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(storeTestWorkContext(t, t.Context()), sourceRunID), loaded.SourceArtifactFact)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	plan, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: point.Input, ResolvedPoint: &point})
 	if err != nil {
 		t.Fatal(err)

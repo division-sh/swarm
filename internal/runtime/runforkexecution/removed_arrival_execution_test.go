@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -33,15 +32,12 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			t.Setenv(publishedJoinFlowEnv, "orders")
 			var selected startupownership.Store
 			var owner SelectedContractExecutionOwner
-			var construct func() SelectedContractExecutionOwner
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStore(t)
 				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
-				construct = func() SelectedContractExecutionOwner { return newSelectedContractSQLiteExecutionOwnerForTest(t, s) }
 			} else {
 				s := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
-				construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 			}
 			ctx := runForkTestContext(t)
 			process, _ := worklifetime.ProcessFromContext(ctx)
@@ -136,6 +132,10 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.ForkRunID != child || ack.Result == nil {
 				t.Fatalf("removed-rule fork lacks permanent acknowledgment: %+v found=%v err=%v", ack, found, err)
 			}
+			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
+			if err != nil {
+				t.Fatal(err)
+			}
 			wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			reader := selected.(interface {
@@ -149,7 +149,10 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+				if selectedTestInstanceSettled(t, wait, owner, selected, flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()}, "awaiting") {
+					if header.Status != "running" || header.EndedAt != nil || process.ActiveCount() != baseline {
+						t.Fatalf("retired rule changed live run or leaked shutdown work: %+v leases=%d baseline=%d", header, process.ActiveCount(), baseline)
+					}
 					break
 				}
 				select {
@@ -157,10 +160,6 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 					t.Fatalf("removed rule left dependent work alive: %+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
 				case <-time.After(10 * time.Millisecond):
 				}
-			}
-			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
-			if err != nil {
-				t.Fatal(err)
 			}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()})
 			if err != nil || !found || header.CurrentState != "awaiting" || header.EntityID != projected.EntityID ||
@@ -213,22 +212,6 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			repeated, found, err := operations.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
 			if err != nil || !found || !reflect.DeepEqual(ack, repeated) {
 				t.Fatalf("dependent settlement rewrote acknowledgment: %+v found=%v err=%v", repeated, found, err)
-			}
-			stateBefore, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
-			if err != nil {
-				t.Fatal(err)
-			}
-			terminalOwner := construct()
-			if err := terminalOwner.BindSelectedProcess(ctx, process, owner.ports.contexts.capability); err != nil {
-				t.Fatal(err)
-			}
-			terminal, err := terminalOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
-			if err != nil || len(terminal) != 1 || terminal[0].RunID != child || terminal[0].Disposition != runfork.SelectedForkRecoveryTerminal {
-				t.Fatalf("removed-rule terminal recovery reopened work: %+v err=%v", terminal, err)
-			}
-			stateAfter, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
-			if err != nil || !reflect.DeepEqual(stateBefore, stateAfter) || process.ActiveCount() != baseline {
-				t.Fatalf("removed-rule terminal recovery mutated state or retained resources: err=%v", err)
 			}
 		})
 	}

@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -718,7 +719,7 @@ func TestStandingServicePostureCensusRejectsEachLiveWorkFamilyBeforeMutation(t *
 				ctx := testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				seedStandingCensusFamily(t, fixture, ctx, runID, family, executionmode.Live)
 				if got := countStandingCensusFamily(t, fixture, ctx, runID, family, executionmode.Live); got != 1 {
 					t.Fatalf("seeded %s count = %d, want 1", family, got)
@@ -747,7 +748,7 @@ func TestStandingServicePostureCensusAdmitsExactMockWork(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			seedStandingCensusFamily(t, fixture, ctx, runID, "raw_pipeline_event", executionmode.Mock)
 			admitter := fixture.store.(interface {
 				AdmitStandingServiceRun(context.Context, string, executionposture.Posture) error
@@ -1025,7 +1026,7 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 
 				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 			}
-			seedStoreTestPersistedArtifact(t, db, artifact)
+			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), artifact)
 			created, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatalf("create standing service: %v", err)

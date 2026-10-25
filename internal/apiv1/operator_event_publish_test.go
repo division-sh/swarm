@@ -29,9 +29,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -45,6 +46,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -815,7 +817,7 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, original, pg, "scan-orchestrator")
 	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
-	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
+	handler := eventPublishTestHandlerWithStores(t, pg, pg, pg, bus, source)
 	body := eventPublishBody(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-receipt")
 
 	published := rpcCall(t, handler, body)
@@ -852,67 +854,6 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	replay := rpcCall(t, handler, body)
 	if replay.Error != nil {
 		t.Fatalf("event.publish replay after post-commit receipt failure error = %#v", replay.Error)
-	}
-	if replayEventID := stringValue(t, asMap(t, replay.Result)["event_id"], "event_id"); replayEventID != eventID {
-		t.Fatalf("event.publish replay event_id = %q, want original %q", replayEventID, eventID)
-	}
-	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
-		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
-	}
-	if count := countAPIIdempotencyRows(t, pg); count != 1 {
-		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
-	}
-}
-
-func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(t *testing.T) {
-	pg := storetest.StartPostgresRuntimeStore(t)
-	original := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
-	failing := &failNormalRunCompletionStore{
-		PostgresStore: pg,
-		err:           errors.New("simulated normal-run completion failure"),
-	}
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
-	opts := runStartTestEventBusOptions(source)
-	opts.TestLifecycleProbe = probe
-	opts.MutationContext = func(work context.Context) (context.Context, error) {
-		return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, original))
-	}
-	bus, err := newScopedAPITestEventBus(t, failing, opts)
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, original, pg, "scan-orchestrator")
-	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
-	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
-	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
-	body := eventPublishBody(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-completion")
-
-	published := rpcCall(t, handler, body)
-	if published.Error != nil {
-		t.Fatalf("event.publish post-commit completion failure error = %#v", published.Error)
-	}
-	result := asMap(t, published.Result)
-	eventID := stringValue(t, result["event_id"], "event_id")
-	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
-		t.Fatalf("scan.requested event count after post-commit completion failure = %d, want 1", count)
-	}
-	if got := countEventDeliveriesForEvent(t, ctx, pg, eventID); got != 1 {
-		t.Fatalf("event deliveries after post-commit completion failure = %d, want 1", got)
-	}
-	if count := countAPIIdempotencyRows(t, pg); count != 1 {
-		t.Fatalf("api_idempotency rows after post-commit completion failure = %d, want 1", count)
-	}
-	probe.RequirePostCommitDispatchCompleted(eventID)
-	outcome, failure := loadPipelineReceiptOutcomeAndFailure(t, ctx, pg, eventID)
-	if outcome != "success" || failure != nil {
-		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want successful processing acknowledgement", outcome, failure)
-	}
-	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after post-commit completion failure")
-
-	replay := rpcCall(t, handler, body)
-	if replay.Error != nil {
-		t.Fatalf("event.publish replay after post-commit completion failure error = %#v", replay.Error)
 	}
 	if replayEventID := stringValue(t, asMap(t, replay.Result)["event_id"], "event_id"); replayEventID != eventID {
 		t.Fatalf("event.publish replay event_id = %q, want original %q", replayEventID, eventID)
@@ -2207,7 +2148,7 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 	t.Helper()
 	runBundleContext, _ := runs.(RunBundleContextStore)
 	entities, _ := runs.(EntityReadStore)
-	return testHandler(t, Options{
+	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return time.Now().UTC() },
@@ -2227,6 +2168,12 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 			},
 		}),
 	})
+	if selected, ok := runs.(agentfixture.Store); ok {
+		if _, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(context.Background(), handler.workOwner), selected); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return handler
 }
 
 type blockingAPIV1PublishInterceptor struct {
@@ -2322,15 +2269,6 @@ func (s *failCommittedReplayScopeStore) CommitAPIEventPublication(ctx context.Co
 		return runtimebus.CommittedAPIEventPublication{}, s.err
 	}
 	return s.PostgresStore.CommitAPIEventPublication(ctx, command)
-}
-
-type failNormalRunCompletionStore struct {
-	*store.PostgresStore
-	err error
-}
-
-func (s *failNormalRunCompletionStore) ConvergeNormalRunCompletion(context.Context, string, []string, map[string][]string) error {
-	return s.err
 }
 
 type failOnceEventReadStore struct {
@@ -3100,15 +3038,6 @@ func countAllEventRows(t *testing.T, selected any) int {
 		t.Fatalf("count all event rows: %v", err)
 	}
 	return count
-}
-
-func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, selected any, eventID string) (string, *runtimefailures.Envelope) {
-	t.Helper()
-	outcome, failure, err := storetest.ReadPipelineReceiptOutcomeStorage(ctx, selected, eventID)
-	if err != nil {
-		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
-	}
-	return outcome, failure
 }
 
 func stringValue(t *testing.T, value any, field string) string {

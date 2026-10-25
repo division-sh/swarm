@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -67,6 +68,28 @@ func deploymentStoreDB(t *testing.T) *sql.DB {
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
+		}
+	}
+	spec, err := runtimecontracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := schemastore.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.TableName != "fan_out_obligation_barriers" {
+			continue
+		}
+		statements, err := schemastore.SQLiteStatementsForPlan(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, statement := range statements {
+			if _, err := db.Exec(statement); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	return db

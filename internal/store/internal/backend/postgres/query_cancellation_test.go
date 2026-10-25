@@ -19,12 +19,12 @@ func TestPostgresQueryCancellationAndMutationDrain(t *testing.T) {
 	for _, read := range []bool{false, true} {
 		for _, surface := range []string{"exec", "query_row", "rows", "prepared_exec", "prepared_rows"} {
 			t.Run(fmt.Sprintf("read=%t/%s", read, surface), func(t *testing.T) {
-				_, db, _ := testutil.StartPostgres(t)
+				dsn, db, _ := testutil.StartPostgres(t)
 				db.SetMaxOpenConns(1)
 				if _, err := db.Exec(`CREATE FUNCTION cancellation_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'query-active'; PERFORM pg_sleep(0.03); RETURN 1; END $$`); err != nil {
 					t.Fatal(err)
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(originalProcessContext(t, dsn), 5*time.Second)
 				defer cancel()
 				conn, err := db.Conn(ctx)
 				if err != nil {
@@ -125,12 +125,12 @@ func TestPostgresCancellationPreservesObservedIndependentFailures(t *testing.T) 
 	for _, read := range []bool{false, true} {
 		for _, scenario := range []string{"statement_timeout", "server_cancel", "server_error_then_cancel", "callback_57014", "callback_bad_connection"} {
 			t.Run(fmt.Sprintf("read=%t/%s", read, scenario), func(t *testing.T) {
-				_, db, _ := testutil.StartPostgres(t)
+				dsn, db, _ := testutil.StartPostgres(t)
 				b, err := New(db)
 				if err != nil {
 					t.Fatal(err)
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(originalProcessContext(t, dsn), 5*time.Second)
 				defer cancel()
 				var independent error
 				run := b.RunTransaction
@@ -250,12 +250,13 @@ func TestPostgresEphemeralStreamingCancellation(t *testing.T) {
 func TestRetainedPostgresCancellationDrainsAndPreservesExactSession(t *testing.T) {
 	for _, surface := range []string{"exec", "query_row", "prepared_exec", "prepared_rows"} {
 		t.Run(surface, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
+			dsn, db, _ := testutil.StartPostgres(t)
+			original := originalProcessContext(t, dsn)
 			db.SetMaxOpenConns(1)
 			if _, err := db.Exec(`CREATE FUNCTION retained_cancel_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'query-active'; PERFORM pg_sleep(0.03); RETURN 1; END $$`); err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(original, 5*time.Second)
 			defer cancel()
 			conn, err := db.Conn(ctx)
 			if err != nil {
@@ -310,7 +311,7 @@ func TestRetainedPostgresCancellationDrainsAndPreservesExactSession(t *testing.T
 			if !onlyCancellationLeaves(err, context.Canceled) {
 				t.Fatalf("retained cancellation lost after drain: %v", err)
 			}
-			next, stop := context.WithTimeout(context.Background(), time.Second)
+			next, stop := context.WithTimeout(original, time.Second)
 			defer stop()
 			if err := lease.ProveCurrent(next); err != nil {
 				t.Fatalf("healthy advisory possession lost: %v", err)
@@ -334,7 +335,7 @@ func TestRetainedPostgresCancellationDrainsAndPreservesExactSession(t *testing.T
 func TestPostgresQueryDeadlineAndRetainedDrain(t *testing.T) {
 	for _, retained := range []bool{false, true} {
 		t.Run(fmt.Sprintf("retained=%t", retained), func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
+			dsn, db, _ := testutil.StartPostgres(t)
 			db.SetMaxOpenConns(1)
 			if _, err := db.Exec(`CREATE FUNCTION deadline_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'deadline-query-active'; PERFORM pg_sleep(0.03); RETURN 1; END $$`); err != nil {
 				t.Fatal(err)
@@ -372,7 +373,7 @@ func TestPostgresQueryDeadlineAndRetainedDrain(t *testing.T) {
 				defer lease.Release(context.Background())
 				run = lease.RunTransaction
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			ctx, cancel := context.WithTimeout(originalProcessContext(t, dsn), time.Second)
 			defer cancel()
 			operationDone = ctx.Done()
 			err = run(ctx, func(ctx context.Context, tx *sql.Tx) error {

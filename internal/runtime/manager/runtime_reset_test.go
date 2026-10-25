@@ -20,6 +20,7 @@ type resetTestBus struct {
 	publishes  []events.Event
 	publishErr error
 	resetErr   error
+	resetCalls int
 }
 
 func (*resetTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
@@ -44,7 +45,10 @@ func (b *resetTestBus) Subscribe(string, ...events.EventType) <-chan events.Even
 }
 func (b *resetTestBus) Unsubscribe(string)           {}
 func (b *resetTestBus) Store() runtimebus.EventStore { return runtimebus.InMemoryEventStore{} }
-func (b *resetTestBus) ResetInMemoryState() error    { return b.resetErr }
+func (b *resetTestBus) ResetInMemoryState() error {
+	b.resetCalls++
+	return b.resetErr
+}
 func (b *resetTestBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.entries = append(b.entries, entry)
 	return nil
@@ -52,6 +56,8 @@ func (b *resetTestBus) LogRuntime(_ context.Context, entry runtimepipeline.Runti
 
 type resetTestRegistry struct {
 	summary sessions.ResetSummary
+	err     error
+	ctx     context.Context
 }
 
 func (*resetTestRegistry) Acquire(context.Context, agentmemory.Identity, string) (*sessions.Lease, error) {
@@ -208,22 +214,34 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 	tests := []struct {
 		name          string
 		bus           *resetTestBus
+		resetErr      error
 		source        string
 		wantCellAfter bool
 	}{
+		{name: "durable session reset failure preserves lifecycle cells", bus: &resetTestBus{}, resetErr: errors.New("durable reset refused"), wantCellAfter: true},
 		{name: "bus reset failure preserves lifecycle cells", bus: &resetTestBus{resetErr: errors.New("reset failed")}, wantCellAfter: true},
 		{name: "reset event failure finalizes cleared lifecycle cells", bus: &resetTestBus{publishErr: errors.New("publish failed")}, source: "admin_cli", wantCellAfter: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			am := newTestAgentManagerWithOptions(t, tt.bus, nil, AgentManagerOptions{})
+			type resetContextKey struct{}
+			base := context.WithValue(testAuthorActivityContext(context.Background()), resetContextKey{}, tt.name)
+			resetter := &resetTestRegistry{err: tt.resetErr}
+			am := newTestAgentManagerWithOptions(t, tt.bus, nil, AgentManagerOptions{BaseContext: base, SessionResetter: resetter})
 			rec := lifecycleTestPersistedAgent(t)
 			if err := registerCoordinatorLifecycleCell(t, am.lifecycle, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 				t.Fatalf("register lifecycle cell: %v", err)
 			}
 
-			if err := am.ResetRuntimeStateWithSource(tt.source); err == nil {
+			err := am.ResetRuntimeStateWithSource(tt.source)
+			if err == nil {
 				t.Fatal("ResetRuntimeStateWithSource succeeded despite injected failure")
+			}
+			if resetter.ctx == nil || resetter.ctx.Value(resetContextKey{}) != tt.name {
+				t.Fatal("durable reset lost the retained manager context")
+			}
+			if tt.resetErr != nil && (!errors.Is(err, tt.resetErr) || tt.bus.resetCalls != 0) {
+				t.Fatalf("durable reset refusal was masked or memory cleared: err=%v memory_resets=%d", err, tt.bus.resetCalls)
 			}
 			if phase := am.lifecycle.phaseSnapshot(); phase != runtimeLifecycleStopped {
 				t.Fatalf("lifecycle phase = %q, want stopped", phase)

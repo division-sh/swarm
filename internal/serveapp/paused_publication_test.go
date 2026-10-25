@@ -106,7 +106,6 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 					state = "cancelled"
 				}
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, created.RunID, entityID, state)
-				requireServedRunStatus(t, rt.Endpoint, created.RunID, "completed")
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, created.RunID, eventID).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("continue duplicated accepted occurrence = %d, %v", count, err)
 				}

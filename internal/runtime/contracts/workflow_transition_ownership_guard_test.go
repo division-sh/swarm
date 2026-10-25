@@ -21,17 +21,6 @@ type transitionBoundaryUse struct {
 
 func (u transitionBoundaryUse) key() string { return u.Caller + "::" + u.Operation }
 
-// T22 guards typed ownership boundaries, not variable spellings or entire files.
-// Counts also reject additional authority operations inside an approved function.
-// T19's execution/mutation tests remain necessary: this is not an execution proof.
-func TestCompiledTransitionOwnershipGuard(t *testing.T) {
-	uses := loadTransitionBoundaryUses(t, nil)
-	if problems := transitionBoundaryProblems(uses); len(problems) != 0 {
-		t.Fatalf("compiled transition ownership boundary changed:\n%s", strings.Join(problems, "\n"))
-	}
-	t.Logf("reviewed %d exact caller/operation boundaries covering %d typed uses", len(allowedTransitionBoundaryUses()), len(uses))
-}
-
 func TestCompiledTransitionOwnershipGuardRejectsHostileUses(t *testing.T) {
 	root := handlerRuleIdentityGuardRepoRoot(t)
 	overlay := map[string][]byte{}

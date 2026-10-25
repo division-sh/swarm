@@ -271,7 +271,6 @@ func newSupplementalServingFixture(t *testing.T, backend string, p *supplemental
 	if !ok || bundle == nil {
 		t.Fatal("supplemental fixture requires actual compiled bundle")
 	}
-	storetest.RequireBundleDataCatalog(t, testAuthorActivityContextForBundle(context.Background(), fact), f.selected, bundle)
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContextForBundle(context.Background(), fact), f.selected, source)
 	rt := newNotifyAllChildrenRuntime(t, f.selected, f.db, source, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: f.topology,

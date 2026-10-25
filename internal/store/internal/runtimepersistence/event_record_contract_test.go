@@ -491,7 +491,7 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 			}
 
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			createdAt := time.Date(2026, 7, 18, 18, 0, 0, 0, time.UTC)
 			ids := make([]string, batchSize*2+3)
 			payloads := make(map[string][]byte, len(ids))

@@ -17,13 +17,15 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -36,7 +38,11 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 	} else {
 		selected = storetest.StartPostgresRuntimeStore(t)
 	}
-	ctx := context.Background()
+	process := worklifetime.NewProcess()
+	ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(correlation.WithRuntimeInstanceID(context.Background(), "11111111-1111-4111-8111-111111111111"), process), selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repoRootForTest(), filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session"),
 		runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
@@ -47,7 +53,7 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		t.Fatal(err)
 	}
 	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected, bundle.SourceArtifact)
-	owner := newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
+	owner := newSupervisorTestRuntimeOccurrence(t, fact.BundleHash(), ctx)
 	serveBootstrapWireFixture(t, "connected", owner)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{WorkOwner: owner,
 		ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: fact, ReceiverExecution: eventreceiver.NormalExecution()})
@@ -58,8 +64,8 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		BundleIdentity: contracts.BundleIdentity{WorkflowName: "whatsapp-session", WorkflowVersion: "1.0.0", BundleHash: fact.BundleHash()},
 		ChannelPlans:   projection.ChannelPlans,
 		Runtime: &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live,
-			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID, SourceArtifactFact: fact, ChannelPlans: projection.ChannelPlans}}})
-	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), owner.Identity().RuntimeInstanceID, fact.BundleHash())
+			Options: runtimepkg.RuntimeOptions{ProcessWorkOwner: process, RuntimeInstanceID: owner.Identity().RuntimeInstanceID, SourceArtifactFact: fact, ChannelPlans: projection.ChannelPlans}}})
+	grant := admitServeSessionProcessFixture(t, ctx, selected.(agentfixture.Store), owner.Identity().RuntimeInstanceID, fact.BundleHash())
 	definition.Runtime.Manager = manager.NewAgentManager(bus, nil)
 	if err := definition.Runtime.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)

@@ -118,6 +118,7 @@ type Attempt struct {
 	eventCountOrder        []string
 	callerCtx              context.Context
 	runAdmissions          activeRunSources
+	runLocks               map[string]bool
 	initialRunConstruction string
 }
 
@@ -390,6 +391,10 @@ func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 		*phase = ActivityFinalize
 		return a.story.Finalize(ctx)
 	}
+	if a.evidence == AuthorityFence {
+		*phase = ActivityFinalize
+		return privateactivity.FenceMutationOrder(ctx, a.tx, a.dialect)
+	}
 	return nil
 }
 
@@ -585,11 +590,6 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 					return err
 				}
 				attempt.story = story
-			case AuthorityFence:
-				if err := privateactivity.FenceMutationOrder(txctx, tx, dialect); err != nil {
-					fenceSpan.End()
-					return err
-				}
 			}
 			fenceSpan.End()
 			phase = DomainWrite
@@ -610,7 +610,8 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 			phase = CommitAdmission
 			return nil
 		})
-		if phase == BeforeAttempt && admission.Attempts() != admissionAttempts {
+		var admissionFailure *generationauthority.AdmissionFailure
+		if phase == BeforeAttempt && (admission.Attempts() != admissionAttempts || errors.As(nativeErr, &admissionFailure)) {
 			phase = AcquireFence
 		}
 		// The native outcome boolean is not rollback proof. Only a sealed,

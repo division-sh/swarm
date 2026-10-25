@@ -267,7 +267,7 @@ func TestAPIEventStorageRefusesRawCancelledClosedAndUnavailableOwnershipBothStor
 			}
 			assertAPIEventStorageRefusal(t, ctx, fixture.store)
 			assertAPIIndependentScalarCountRefusal(t, ctx, fixture.store)
-			ctx = context.Background()
+			ctx = fixture.originalContext(context.Background())
 			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, `ALTER TABLE events RENAME TO unavailable_api_event_observation`)
 				return err
@@ -277,7 +277,7 @@ func TestAPIEventStorageRefusesRawCancelledClosedAndUnavailableOwnershipBothStor
 			restored := false
 			defer func() {
 				if !restored {
-					if err := runUnrevisionedEventFixtureTransactionForTest(context.Background(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+					if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 						_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_api_event_observation RENAME TO events`)
 						return err
 					}); err != nil {

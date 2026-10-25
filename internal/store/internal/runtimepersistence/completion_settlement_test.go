@@ -1573,6 +1573,7 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	if err != nil || !found {
 		t.Fatalf("load admitted completion agent lifecycle: found=%v err=%v", found, err)
 	}
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 	if sqlite {
 		if memory.Enabled {
@@ -1638,6 +1639,8 @@ func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authori
 	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(f.original, authority), newCompletionControllerForTest(f.store))
 	if authority.Target.Memory.Enabled {
 		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: f.sessionID, GrantID: f.grantID, LockOwner: f.leaseHolder})
+	} else {
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{})
 	}
 	return runtimedelivery.WithClaim(ctx, f.origin)
 }

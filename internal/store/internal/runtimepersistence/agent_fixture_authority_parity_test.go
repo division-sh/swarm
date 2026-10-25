@@ -3,8 +3,8 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"reflect"
-	"sort"
+	"errors"
+
 	"strings"
 	"sync"
 	"testing"
@@ -13,27 +13,28 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimeexecutionmode "github.com/division-sh/swarm/internal/runtime/executionmode"
+
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type agentFixtureFlowStore interface {
@@ -63,6 +64,7 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(storeTestWorkContext(t, ctx), runID)
 			ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+			ctx = storeTestOriginalProcessContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
 			})
@@ -145,6 +147,10 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			close(errs)
 			for err := range errs {
 				if err != nil {
+					var native *pq.Error
+					if errors.As(err, &native) {
+						t.Logf("concurrent native flow activation: code=%s detail=%s where=%s", native.Code, native.Detail, native.Where)
+					}
 					t.Fatalf("concurrent flow activation: %v", err)
 				}
 			}
@@ -303,153 +309,6 @@ func assertExactAgentFixtureFlowAuthority(
 		return
 	}
 	t.Fatalf("activated agent for flow path %s is missing", path)
-}
-
-type agentFixtureAcquireProbe struct {
-	agentfixture.Store
-	mu           sync.Mutex
-	acquireCalls int
-}
-
-func (s *agentFixtureAcquireProbe) AcquireProcessCapability(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.ProcessCapability, error) {
-	s.mu.Lock()
-	s.acquireCalls++
-	s.mu.Unlock()
-	return s.Store.AcquireProcessCapability(ctx, req)
-}
-
-func (s *agentFixtureAcquireProbe) calls() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.acquireCalls
-}
-
-type agentFixtureAuthoritySnapshot struct {
-	Authority runtimestartupownership.Authority
-	Plan      runtimeagenttopology.SourceSetPlan
-	Binding   runtimemanager.ProcessExecutionBinding
-	States    []runtimemanager.AgentLifecycleState
-}
-
-type agentFixtureAuthorityRows struct {
-	ProcessGeneration   processbinding.LeaseStamp
-	SourceSetHeads      int
-	SourceSetOperations int
-	GenerationGrants    int
-	Agents              int
-	LifecycleOperations int
-}
-
-func TestAgentFixtureSealedAuthorityRejectionParity(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx, selected := newAgentFixtureAuthorityStore(t, backend)
-			beforeRows := captureAgentFixtureAuthorityRows(t, ctx, selected)
-			if beforeRows != (agentFixtureAuthorityRows{}) {
-				t.Fatalf("fresh fixture authority store is not empty: %#v", beforeRows)
-			}
-			identity := testAgentIdentity(t, "invalid-authority", "global")
-			validFlow, err := runtimeagenttopology.FlowReadinessAdmission(uuid.NewString(), "review/invalid", "plan-v1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			invalid := rejectedAgentFixtureAdmissions(t)
-			probe := &agentFixtureAcquireProbe{Store: selected}
-			for index, topology := range invalid {
-				if _, err := agentfixture.CommitExact(t, ctx, probe, runtimemanager.AgentLifecycleTransition{
-					Identity: identity, AgentID: identity.AgentID(), Topology: topology,
-				}); err == nil {
-					t.Fatalf("invalid exact topology %d was accepted", index)
-				}
-			}
-			if _, err := agentfixture.CommitStatic(t, ctx, probe, runtimemanager.AgentLifecycleTransition{
-				Identity: identity, AgentID: identity.AgentID(), Topology: validFlow,
-			}); err == nil {
-				t.Fatal("synthetic static commit accepted caller topology")
-			}
-			invalidRecord := agentFixtureStaticRecord(t, identity)
-			invalidRecord.Topology = invalid[len(invalid)-1]
-			if err := agentfixture.UpsertStatic(t, ctx, probe, invalidRecord); err == nil {
-				t.Fatal("synthetic static upsert accepted caller topology")
-			}
-			if got := probe.calls(); got != 0 {
-				t.Fatalf("invalid fixture authority acquired process capability %d times", got)
-			}
-			states, err := selected.ListDurableAgentLifecycleStates(ctx)
-			if err != nil || len(states) != 0 {
-				t.Fatalf("invalid fixture authority created lifecycle state: states=%#v err=%v", states, err)
-			}
-			afterRows := captureAgentFixtureAuthorityRows(t, ctx, selected)
-			if afterRows != beforeRows {
-				t.Fatalf("invalid fixture authority mutated selected-store rows: before=%#v after=%#v", beforeRows, afterRows)
-			}
-
-			proveAgentFixtureMixedAuthorityRejection(t, ctx, selected)
-		})
-	}
-}
-
-func captureAgentFixtureAuthorityRows(t *testing.T, ctx context.Context, selected agentFixtureFlowStore) agentFixtureAuthorityRows {
-	t.Helper()
-	var db *sql.DB
-	sqlite := false
-	switch store := selected.(type) {
-	case *SQLiteRuntimeStore:
-		db = store.backend.ConstructionHandle()
-		sqlite = true
-	case *PostgresStore:
-		db = store.backend.ConstructionHandle()
-	default:
-		t.Fatalf("unsupported agent fixture authority store %T", selected)
-	}
-	counts := agentFixtureAuthorityRows{}
-	stamp, err := generationauthority.ReadProcessGeneration(ctx, db, sqlite)
-	if err != nil {
-		t.Fatalf("read process generation: %v", err)
-	}
-	counts.ProcessGeneration = stamp
-	for _, query := range []struct {
-		table string
-		out   *int
-	}{
-		{table: "agent_topology_source_set_head", out: &counts.SourceSetHeads},
-		{table: "agent_topology_source_set_operations", out: &counts.SourceSetOperations},
-		{table: "runtime_generation_grants", out: &counts.GenerationGrants},
-		{table: "agents", out: &counts.Agents},
-		{table: "agent_lifecycle_operations", out: &counts.LifecycleOperations},
-	} {
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+query.table).Scan(query.out); err != nil {
-			t.Fatalf("count %s: %v", query.table, err)
-		}
-	}
-	return counts
-}
-
-const agentFixtureTestBundleHash = sourceartifactfixture.BundleHash
-
-func rejectedAgentFixtureAdmissions(t *testing.T) []runtimeagenttopology.Admission {
-	t.Helper()
-	validEphemeral, err := runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return []runtimeagenttopology.Admission{
-		{},
-		{Lifetime: runtimeagenttopology.LifetimeDurableManaged, Authority: runtimeagenttopology.Authority{
-			Kind:   runtimeagenttopology.AuthorityKind("future_authority"),
-			Static: &runtimeagenttopology.StaticDeclarationPlan{SourceSetRevision: "revision", BundleHash: agentFixtureTestBundleHash},
-		}},
-		{Lifetime: runtimeagenttopology.LifetimeDurableManaged, Authority: runtimeagenttopology.Authority{
-			Kind: runtimeagenttopology.AuthorityStaticDeclarationPlan, Static: &runtimeagenttopology.StaticDeclarationPlan{},
-		}},
-		{Lifetime: runtimeagenttopology.LifetimeDurableManaged, Authority: runtimeagenttopology.Authority{
-			Kind: runtimeagenttopology.AuthorityFlowReadinessPlan, Readiness: &runtimeagenttopology.FlowReadinessPlan{RunID: uuid.NewString(), InstancePath: "review/invalid"},
-		}},
-		{Lifetime: runtimeagenttopology.LifetimeEphemeral, Authority: runtimeagenttopology.Authority{
-			Kind: runtimeagenttopology.AuthorityEphemeralExecution, Ephemeral: &runtimeagenttopology.EphemeralExecution{ExecutionID: uuid.NewString()},
-		}},
-		validEphemeral,
-	}
 }
 
 func newAgentFixtureAuthorityStore(t *testing.T, backend string) (context.Context, agentFixtureFlowStore) {

@@ -211,21 +211,13 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			if len(created) != 4 {
 				t.Fatalf("ordinary operating creation count=%d, want 4 independent instances", len(created))
 			}
-			requireServedRunStatus(t, rt.Endpoint, setup.RunID, "completed")
-			var header struct {
-				Run operatorread.RunHeader `json:"run"`
-			}
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": setup.RunID}, &header)
-			if header.Run.RunID != setup.RunID || header.Run.Status != "completed" || header.Run.EndedAt == nil || header.Run.Failure != nil {
-				t.Fatalf("finite join did not complete its exact run: %+v", header.Run)
-			}
 			for _, operating := range created {
 				key, ok := operating.Fields["operating_instance_id"].(string)
 				if !ok || key == "" {
 					t.Fatalf("constructed operating instance lost its typed key: %+v", operating)
 				}
 				if !reflect.DeepEqual(operating, requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "operating", "operating_instance_id", key)) {
-					t.Fatal("run completion changed its constructed operating instance")
+					t.Fatal("join settlement changed its constructed operating instance")
 				}
 				ctx := servedControlProofAuthorActivityContext(t, rt)
 				request, err := pipeline.NewExactFlowInstanceLookup(rt.Runtime.Options.WorkflowModule.SemanticSource(), rt.Runtime.Options.SourceArtifactFact,

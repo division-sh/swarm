@@ -29,6 +29,7 @@ func newRetryDecisionFixture(t *testing.T, backend string, store authorActivityR
 	t.Helper()
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	runID := uuid.NewString()
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, runID, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC))
 	event := eventtest.PersistedProjection(uuid.NewString(), "retry.decision", "gateway", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 	route := testEntitylessNodeDeliveryRoute("retry-decision")

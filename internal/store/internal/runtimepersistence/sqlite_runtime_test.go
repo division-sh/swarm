@@ -249,6 +249,7 @@ func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t 
 	ctx := testAuthorActivityContext()
 	dbPath := filepath.Join(t.TempDir(), "notice-reopen.db")
 	store := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	noticeID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		FromAgent: "reviewer", Type: runtimetools.NotifyHumanMailboxItemType,
 		Priority: "normal", Status: "pending", Summary: "strong match found",
@@ -1113,6 +1114,7 @@ func assertFixtureActivationVariables(t *testing.T, plan runtimepipeline.FlowIns
 func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = storeTestOriginalProcessContext(t, ctx, store)
 	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

@@ -1106,6 +1106,11 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	}
 	sourceArtifactFact := conformanceSourceArtifactFact(t, module.source)
 	ctx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	if original, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), pg); err != nil {
+		t.Fatal(err)
+	} else {
+		ctx = original
+	}
 	storetest.RequireBundleDataCatalog(t, ctx, pg, bundle)
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	eventStore := conformanceRecoveryFailureEventStore{
