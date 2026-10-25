@@ -24,7 +24,7 @@ func TestCollectionItemSemanticsAdmitsEverySupportedSourceForm(t *testing.T) {
 		},
 		{
 			name:    "entity table",
-			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Entities: "items", Select: []string{"id", "status"}}},
+			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Entities: "state", Select: []string{"id", "status"}}},
 		},
 		{
 			name:    "standalone grouping",
@@ -137,15 +137,15 @@ func TestCollectionItemSemanticsRejectsRootOnlyPathsWithoutPanic(t *testing.T) {
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
 		{name: "query payload", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload"}}},
-		{name: "query entity", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "entity"}}},
+		{name: "query state", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "state"}}},
 		{name: "filter payload", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{ItemsFrom: "payload", Condition: "true"}}},
-		{name: "filter entity", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{ItemsFrom: "entity", Condition: "true"}}},
+		{name: "filter state", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{ItemsFrom: "state", Condition: "true"}}},
 		{name: "group payload", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "payload", Key: "status"}}},
-		{name: "group entity", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "entity", Key: "status"}}},
+		{name: "group state", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "state", Key: "status"}}},
 		{name: "reduce payload", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{ItemsFrom: "payload", Operation: "sum"}}},
-		{name: "reduce entity", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{ItemsFrom: "entity", Operation: "sum"}}},
+		{name: "reduce state", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{ItemsFrom: "state", Operation: "sum"}}},
 		{name: "count payload", handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "payload"}}},
-		{name: "count entity", handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "entity"}}},
+		{name: "count state", handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "state"}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -169,7 +169,7 @@ func collectionItemSemanticsSource(handler runtimecontracts.SystemNodeEventHandl
 			}},
 		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"items": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"work.received": {Payload: runtimecontracts.EventPayloadSpec{

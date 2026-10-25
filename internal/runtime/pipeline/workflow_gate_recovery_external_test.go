@@ -456,8 +456,7 @@ func testApprovedActivityFrozenInputBothStores(t *testing.T, method, terminalOut
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "drafting", StageDefined: true,
 					Mode:           bundle.RootSchema.EffectiveMode(),
 					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-					Fields:     map[string]any{},
-					EntityType: "test_entity",
+					Fields: map[string]any{},
 				}, construction430At)
 				if err != nil {
 					t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -915,8 +914,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "drafting", StageDefined: true,
 					Mode:           bundle.RootSchema.EffectiveMode(),
 					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-					Fields:     map[string]any{},
-					EntityType: "test_entity",
+					Fields: map[string]any{},
 				}, construction852At)
 				if err != nil {
 					t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1204,8 +1202,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), StageDefined: true,
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", EnteredStageAt: at,
-			Fields:     map[string]any{},
-			EntityType: "test_entity",
+			Fields: map[string]any{},
 		}, construction1118At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1348,8 +1345,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", StageDefined: true, EnteredStageAt: enteredAt,
-			Fields:     map[string]any{},
-			EntityType: "test_entity",
+			Fields: map[string]any{},
 		}, construction1236At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1469,8 +1465,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), StageDefined: true,
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
-			Fields:     map[string]any{},
-			EntityType: "test_entity",
+			Fields: map[string]any{},
 		}, construction1336At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1616,9 +1611,9 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
 func proposedEffectProofBundleForMethod(t *testing.T, serverURL string, queueAfterProposal bool, method string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":   "name: support\nstages:\n  drafting: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "support.reply_drafted:\n  chat_id: text\n  text: text\n",
+		"schema.yaml": "name: support\nstages:\n  drafting: {}\n",
+
+		"events.yaml": "support.reply_drafted:\n  chat_id: text\n  text: text\n",
 		"nodes.yaml": `support:
   execution_type: system_node
   subscribes_to: [support.reply_drafted, send_support_reply.revision_requested, send_support_reply.rejected]
@@ -1783,7 +1778,6 @@ stages:
       outcomes:
         approve:
 ` + outcome,
-		"entities.yaml": "test_entity: {}\n",
 	}
 	if !terminal {
 		files["events.yaml"] = "launch.approved:\n"

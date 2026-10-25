@@ -12,7 +12,7 @@ flows:
   - validator (template)
     events:
       - validation.started (fields: candidate, validation_case_id)
-    primary entity: validation_case
+    primary entity: state
     instance: field=validation_case_id identity=run + flow + instance_key
     constructor: validation.requested key=validation_case_id supplied=[]
 routing topology: routing-topology/v1
@@ -36,4 +36,4 @@ routing topology: routing-topology/v1
     - validator/validation.started: validator.validator-node -> output validator.validation.started
     - producer/validation.requested: producer.producer-node -> output producer.validation.requested
 diagnostics:
-  - [INFO] entity_reader_coverage @ validator/schema.yaml: flow validator entity_type validation_case declares field validation_case_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ validator/schema.yaml: flow validator entity_type state declares field validation_case_id with no detected internal reader coverage

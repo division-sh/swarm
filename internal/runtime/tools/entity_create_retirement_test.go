@@ -17,7 +17,9 @@ func TestRetiredCreateEntityCannotMutateEitherStore(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Role: "operator", Tools: []string{"create_entity"}}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			bundle := loadWave1EntityToolBundle(t, actor, "review", "account", "", "account:\n  status: text\n")
+			bundle := loadWave1EntityToolBundle(t, actor, "review", "state", "", `
+status: text
+`)
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
 				selected = newSQLiteRuntimeToolStoreForTest(t)
@@ -33,7 +35,7 @@ func TestRetiredCreateEntityCannotMutateEitherStore(t *testing.T) {
 					for _, input := range []map[string]any{
 						{"flow_instance": "review/one", "fields": map[string]any{"status": "open"}},
 						{"flow_instance": "review/one", "entity_id": uuid.NewString()},
-						{"flow_instance": "review/one", "entity_type": "account"},
+						{"flow_instance": "review/one", "entity_type": "state"},
 						{"flow_instance": "review/one", "subject_id": uuid.NewString()},
 						{"flow_instance": "missing/one"},
 					} {

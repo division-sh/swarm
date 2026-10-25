@@ -44,10 +44,7 @@ pins:
   inputs:
     - opco.product_initialization_requested
 `,
-		"operating/entities.yaml": `operating:
-  operating_id:
-    type: uuid
-    immutable: true
+		"operating/state.yaml": `operating_id: uuid
 `,
 		"operating/events.yaml": `opco.product_initialization_requested:
   topic: text?
@@ -58,7 +55,7 @@ pins:
   event_handlers:
     opco.product_initialization_requested:
       guard:
-        check: _entity.id != ""
+        check: instance.id != ""
 `,
 	}
 	for relative, source := range files {
@@ -105,7 +102,7 @@ pins:
     root.ready:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `)
 	return root
 }
@@ -129,7 +126,7 @@ func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
     root.ready:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `)
 	return root
 }
@@ -219,7 +216,7 @@ connect:
     scout.completed:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, scoutPath, `name: scout
 pins:
@@ -262,7 +259,7 @@ connect:
     work.pong:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `)
 	writeLegacyInstanceFlow(t, root, "boomerang", `name: boomerang
 pins:
@@ -270,14 +267,14 @@ pins:
     - work.ping
   outputs:
     - work.pong
-`, "work.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
+`, "work.pong:\n  turn: integer\n", "turn: integer\n", `boomerang-worker:
   execution_type: system_node
   subscribes_to: [work.ping]
   event_handlers:
     work.ping:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `)
 	return root
 }

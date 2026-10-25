@@ -60,11 +60,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 	}
 	if opts.Flow != "" {
 		n := add(opts.Flow)
-		where = append(where, fmt.Sprintf("(es.flow_instance = $%d OR es.flow_instance LIKE $%d || '/%%')", n, n))
-	}
-	if opts.Type != "" {
-		n := add(opts.Type)
-		where = append(where, fmt.Sprintf("es.entity_type = $%d", n))
+		where = append(where, fmt.Sprintf("(fi.flow_template = $%d OR fi.flow_template LIKE $%d || '/%%')", n, n))
 	}
 	if opts.CurrentState != "" {
 		n := add(opts.CurrentState)
@@ -161,11 +157,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 	if opts.Flow != "" {
 		add(opts.Flow)
 		add(opts.Flow + "/%")
-		where = append(where, "(es.flow_instance = ? OR es.flow_instance LIKE ?)")
-	}
-	if opts.Type != "" {
-		add(opts.Type)
-		where = append(where, "es.entity_type = ?")
+		where = append(where, "(fi.flow_template = ? OR fi.flow_template LIKE ?)")
 	}
 	if opts.CurrentState != "" {
 		add(opts.CurrentState)
@@ -358,10 +350,6 @@ func (s *EntityPostgres) AggregateOperatorEntities(ctx context.Context, opts ope
 		n := add(opts.RunID)
 		where = append(where, fmt.Sprintf("es.run_id = $%d::uuid", n))
 	}
-	if opts.Type != "" {
-		n := add(opts.Type)
-		where = append(where, fmt.Sprintf("es.entity_type = $%d", n))
-	}
 	group, err := operatorEntityAggregateGroup(opts.GroupBy, add)
 	if err != nil {
 		return operatorread.OperatorEntityAggregateResult{}, err
@@ -402,10 +390,6 @@ func (s *EntitySQLite) AggregateOperatorEntities(ctx context.Context, opts opera
 	if opts.RunID != "" {
 		args = append(args, opts.RunID)
 		where = append(where, "es.run_id = ?")
-	}
-	if opts.Type != "" {
-		args = append(args, opts.Type)
-		where = append(where, "es.entity_type = ?")
 	}
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT grouped.*, COUNT(*) OVER (PARTITION BY bucket) AS bucket_count
@@ -488,7 +472,6 @@ func defaultOperatorEntityListOptions(opts operatorread.OperatorEntityListOption
 	opts.RunID = strings.TrimSpace(opts.RunID)
 	opts.EntityID = strings.TrimSpace(opts.EntityID)
 	opts.Flow = strings.Trim(strings.TrimSpace(opts.Flow), "/")
-	opts.Type = strings.TrimSpace(opts.Type)
 	opts.CurrentState = strings.TrimSpace(opts.CurrentState)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.RunID != "" {
@@ -512,7 +495,6 @@ func defaultOperatorEntityListOptions(opts operatorread.OperatorEntityListOption
 
 func defaultOperatorEntityAggregateOptions(opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateOptions, error) {
 	opts.RunID = strings.TrimSpace(opts.RunID)
-	opts.Type = strings.TrimSpace(opts.Type)
 	opts.GroupBy = strings.TrimSpace(opts.GroupBy)
 	if opts.GroupBy == "" {
 		opts.GroupBy = "current_state"
@@ -539,8 +521,6 @@ func operatorEntityAggregateGroup(groupBy string, add func(any) int) (entityAggr
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.config->>'workflow_version', '')",
 		}, nil
-	case "type", "entity_type":
-		return entityAggregateGroup{Expr: "NULLIF(es.entity_type, '')"}, nil
 	case "slug":
 		return entityAggregateGroup{Expr: "NULLIF(es.slug, '')"}, nil
 	case "name":
@@ -568,8 +548,6 @@ func sqliteOperatorEntityAggregateGroup(groupBy string, add func(any) int) (enti
 		return entityAggregateGroup{
 			Expr: "NULLIF(CAST(json_extract(COALESCE(fi.config, '{}'), '$.workflow_version') AS TEXT), '')",
 		}, nil
-	case "type", "entity_type":
-		return entityAggregateGroup{Expr: "NULLIF(es.entity_type, '')"}, nil
 	case "slug":
 		return entityAggregateGroup{Expr: "NULLIF(es.slug, '')"}, nil
 	case "name":

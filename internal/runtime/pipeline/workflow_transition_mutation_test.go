@@ -23,9 +23,9 @@ import (
 func transitionMutationSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: transition-proof\nstages:\n  ready: {}\n  other: {}\n  done: {final: true}\n",
-		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "advance:\nforeign:\n",
+		"schema.yaml": "name: transition-proof\nstages:\n  ready: {}\n  other: {}\n  done: {final: true}\n",
+		"state.yaml":  "marker: text\n",
+		"events.yaml": "advance:\nforeign:\n",
 		"nodes.yaml": `router:
   event_handlers:
     advance:
@@ -162,7 +162,7 @@ func VerifyPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStoresFor
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: contracts.FlowModeStatic,
-		CurrentState: "ready", Fields: map[string]any{"marker": "unchanged"}, EntityType: "test_entity",
+		CurrentState: "ready", Fields: map[string]any{"marker": "unchanged"}, EntityType: "state",
 	})
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatal(err)

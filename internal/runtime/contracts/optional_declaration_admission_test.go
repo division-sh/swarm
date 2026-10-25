@@ -30,7 +30,7 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			},
 		},
 		{
-			name: "entities", fileName: "entities.yaml", valid: "item: {}\n", merged: "<<: &declarations\n  item: {}\n", blank: "\"\": {}\n", collide: "item: {}\n\" item \": {}\n",
+			name: "entities", fileName: "state.yaml", valid: "item: text\n", merged: "<<: &declarations\n  item: text\n", blank: "\"\": text\n", collide: "item: text\n\" item \": text\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalEntityDeclarations(path)
 				return len(value), err
@@ -193,8 +193,8 @@ func assertMergedDeclarationIdentity(t *testing.T, role, path string) {
 		}
 	case "entities":
 		value, err := loadOptionalEntityDeclarations(path)
-		_, hasDeclaration := value["item"]
-		_, hasPseudoKey := value["<<"]
+		_, hasDeclaration := value[stateEntityType].Fields["item"]
+		_, hasPseudoKey := value[stateEntityType].Fields["<<"]
 		if err != nil || !hasDeclaration || hasPseudoKey {
 			t.Fatalf("merged entities = %#v, %v", value, err)
 		}
@@ -391,10 +391,10 @@ func TestMergeOnlyCustomDocumentsFailBeforeBundlePublicationAtEverySupportedScop
 		name   string
 		target func(string) string
 	}{
-		{name: "root/entities", target: func(root string) string { return filepath.Join(root, "entities.yaml") }},
+		{name: "root/entities", target: func(root string) string { return filepath.Join(root, "state.yaml") }},
 		{name: "root/types", target: func(root string) string { return filepath.Join(root, "types.yaml") }},
 		{name: "root/policy", target: func(root string) string { return filepath.Join(root, "policy.yaml") }},
-		{name: "child/entities", target: func(root string) string { return filepath.Join(root, "child", "entities.yaml") }},
+		{name: "child/entities", target: func(root string) string { return filepath.Join(root, "child", "state.yaml") }},
 		{name: "child/types", target: func(root string) string { return filepath.Join(root, "child", "types.yaml") }},
 		{name: "child/policy", target: func(root string) string { return filepath.Join(root, "child", "policy.yaml") }},
 	} {
@@ -449,7 +449,8 @@ func assertMergedBundleIdentity(t *testing.T, role string, bundle *WorkflowContr
 	case "agents":
 		assertRegistryIdentity(t, bundle.Agents, "worker")
 	case "entities":
-		assertRegistryIdentity(t, bundle.RootEntities, "item")
+		assertRegistryIdentity(t, bundle.RootEntities, stateEntityType)
+		assertRegistryIdentity(t, bundle.RootEntities[stateEntityType].Fields, "item")
 	case "events":
 		assertRegistryIdentity(t, bundle.Events, "item.created")
 	case "nodes":

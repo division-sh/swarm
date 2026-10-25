@@ -10,7 +10,7 @@ expect:
     include:
       - work.completed
   entities:
-    - type: work
+    - flow: .
       current_state: done
       fields:
         business_brief: Validated customer need

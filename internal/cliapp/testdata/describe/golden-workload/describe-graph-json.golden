@@ -12,7 +12,7 @@
     ],
     "source_files": {
       "schema": "schema.yaml",
-      "entities": "entities.yaml"
+      "entities": "state.yaml"
     },
     "events": [
       {
@@ -42,12 +42,12 @@
       "agents": []
     },
     "primary_entity": {
-      "type": "search_batch",
+      "type": "state",
       "fields": {
         "batch_id": "text",
         "candidate_ids": "[text]"
       },
-      "source_file": "entities.yaml"
+      "source_file": "state.yaml"
     }
   },
   "flows": [
@@ -64,7 +64,7 @@
       "mode": "template",
       "source_files": {
         "schema": "candidate/schema.yaml",
-        "entities": "candidate/entities.yaml",
+        "entities": "candidate/state.yaml",
         "nodes": "candidate/nodes.yaml",
         "events": "candidate/events.yaml",
         "agents": "candidate/agents.yaml"
@@ -140,15 +140,15 @@
         ]
       },
       "primary_entity": {
-        "type": "candidate_analysis",
+        "type": "state",
         "fields": {
           "candidate_id": "text"
         },
-        "source_file": "candidate/entities.yaml"
+        "source_file": "candidate/state.yaml"
       },
       "template_instance": {
         "field": "candidate_id",
-        "primary_entity": "candidate_analysis",
+        "primary_entity": "state",
         "identity": "run + flow + instance_key",
         "source_file": "candidate/schema.yaml"
       },
@@ -189,7 +189,7 @@
       "mode": "static",
       "source_files": {
         "schema": "scout/schema.yaml",
-        "entities": "scout/entities.yaml",
+        "entities": "scout/state.yaml",
         "nodes": "scout/nodes.yaml",
         "events": "scout/events.yaml",
         "agents": "scout/agents.yaml"
@@ -256,14 +256,14 @@
         ]
       },
       "primary_entity": {
-        "type": "scout_task",
+        "type": "state",
         "fields": {
           "candidate_ids": "[text]"
         },
-        "source_file": "scout/entities.yaml"
+        "source_file": "scout/state.yaml"
       },
       "singleton_coordinator": {
-        "primary_entity": "scout_task",
+        "primary_entity": "state",
         "contained_state": [
           {
             "name": "candidate_ids",
@@ -2010,21 +2010,21 @@
       "severity": "lint_evidence",
       "location": "candidate",
       "authored_location": "candidate/schema.yaml",
-      "message": "flow candidate entity_type candidate_analysis declares field candidate_id with no detected internal reader coverage"
+      "message": "flow candidate entity_type state declares field candidate_id with no detected internal reader coverage"
     },
     {
       "check_id": "entity_reader_coverage",
       "severity": "lint_evidence",
       "location": "root",
       "authored_location": "schema.yaml",
-      "message": "flow root entity_type search_batch declares field batch_id with no detected internal reader coverage"
+      "message": "flow root entity_type state declares field batch_id with no detected internal reader coverage"
     },
     {
       "check_id": "entity_reader_coverage",
       "severity": "lint_evidence",
       "location": "scout",
       "authored_location": "scout/schema.yaml",
-      "message": "flow scout entity_type scout_task declares field candidate_ids with no detected internal reader coverage"
+      "message": "flow scout entity_type state declares field candidate_ids with no detected internal reader coverage"
     }
   ],
   "equivalence": {

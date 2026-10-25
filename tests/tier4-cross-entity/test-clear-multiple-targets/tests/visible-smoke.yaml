@@ -2,7 +2,7 @@ name: test-clear-multiple-targets setup visible smoke
 setup:
   entities:
   - as: entity
-    type: test_entity
+    type: state
     fields:
       accumulated_count: 10
       dedup_key: abc123

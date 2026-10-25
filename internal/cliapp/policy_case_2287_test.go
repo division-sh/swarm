@@ -28,7 +28,6 @@ func TestRunVerifyPolicyCaseShapes2287(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: case-shape\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [requested]\n  outputs: [completed]\n")
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "case: {}\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "requested:\n  mode: text\n  target: text\n  ready: boolean\n  count: integer\ncompleted:\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "router:\n  execution_type: system_node\n  subscribes_to: [requested]\n  produces: [completed]\n  event_handlers:\n    requested:\n      rules:\n        - case: {"+tc.row+"}\n          advances_to: done\n          emit: completed\n        - advances_to: done\n          emit: completed\n")
 			var stdout, stderr bytes.Buffer

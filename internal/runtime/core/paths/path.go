@@ -33,9 +33,9 @@ func (r PathRoot) String() string {
 	case RootEvent:
 		return "event"
 	case RootEntity:
-		return "entity"
+		return "state"
 	case RootPlatformEntity:
-		return "_entity"
+		return "instance"
 	case RootPolicy:
 		return "policy"
 	case RootMetadata:
@@ -113,6 +113,10 @@ func ParseStrictRelative(text string) (Path, error) {
 	if root := parseRoot(segments[0]); root != RootUnknown {
 		return Path{}, fmt.Errorf("relative dotted path %q must not use runtime namespace %q", raw, segments[0])
 	}
+	switch segments[0] {
+	case "entity", "_entity":
+		return Path{}, fmt.Errorf("relative dotted path %q uses a retired root; use state.<declared field> or instance.id, instance.stage, instance.path in expressions", raw)
+	}
 	return Path{Root: RootUnknown, Segments: segments, Raw: raw}, nil
 }
 
@@ -122,9 +126,9 @@ func parseRoot(text string) PathRoot {
 		return RootPayload
 	case "event":
 		return RootEvent
-	case "entity":
+	case "state":
 		return RootEntity
-	case "_entity":
+	case "instance":
 		return RootPlatformEntity
 	case "policy":
 		return RootPolicy

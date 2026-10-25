@@ -1,3 +1,0 @@
-test_entity:
-  accumulated_count: integer?
-  accumulated_total: integer?

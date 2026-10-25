@@ -22,39 +22,39 @@ func TestExecutableReaderCensusClassifiesEveryHandlerAndRuleField(t *testing.T) 
 }
 
 func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
-	entityRef := runtimecontracts.RefExpression("entity.verticals")
-	entityCEL := runtimecontracts.CELExpression("entity.verticals")
+	entityRef := runtimecontracts.RefExpression("state.verticals")
+	entityCEL := runtimecontracts.CELExpression("state.verticals")
 	tests := []struct {
 		name    string
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
 		{name: "activity input", handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}},
 		{name: "emit field", handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{"value": entityCEL}}}},
-		{name: "guard", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "size(entity.verticals) > 0"}}},
-		{name: "direct write source", handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{SourceField: "entity.verticals", TargetRef: "metadata.copy"}}}}},
+		{name: "guard", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "size(state.verticals) > 0"}}},
+		{name: "direct write source", handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{SourceField: "state.verticals", TargetRef: "metadata.copy"}}}}},
 		{name: "direct write ref value", handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetRef: "metadata.copy", Value: entityRef}}}}},
-		{name: "condition", handler: runtimecontracts.SystemNodeEventHandler{Condition: "size(entity.verticals) > 0"}},
-		{name: "logic", handler: runtimecontracts.SystemNodeEventHandler{Logic: "entity.verticals"}},
+		{name: "condition", handler: runtimecontracts.SystemNodeEventHandler{Condition: "size(state.verticals) > 0"}},
+		{name: "logic", handler: runtimecontracts.SystemNodeEventHandler{Logic: "state.verticals"}},
 		{name: "rule activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{ID: "executable_reader_probe", Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}}}},
-		{name: "accumulate source", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{From: "entity.verticals"}}},
-		{name: "accumulate key", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Key: "entity.verticals"}}},
-		{name: "join members by", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{Members: runtimecontracts.JoinMembersSpec{By: "entity.verticals"}}}},
+		{name: "accumulate source", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{From: "state.verticals"}}},
+		{name: "accumulate key", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Key: "state.verticals"}}},
+		{name: "join members by", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{Members: runtimecontracts.JoinMembersSpec{By: "state.verticals"}}}},
 		{name: "join membership", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{Members: runtimecontracts.JoinMembersSpec{From: "state.verticals"}}}},
 		{name: "join completion", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{OnComplete: runtimecontracts.HandlerRuleEntry{Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{"value": entityCEL}}}}}},
-		{name: "compute lookup", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"entity.verticals"}}}}},
-		{name: "compute validation", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Validation: &runtimecontracts.ComputeValidationSpec{Input: map[string]string{"value": "entity.verticals"}}}}},
-		{name: "compute module", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Module: &runtimecontracts.ComputeModuleSpec{Input: map[string]string{"value": "entity.verticals"}}}}},
-		{name: "query source", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "entity.verticals"}}},
+		{name: "compute lookup", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"state.verticals"}}}}},
+		{name: "compute validation", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Validation: &runtimecontracts.ComputeValidationSpec{Input: map[string]string{"value": "state.verticals"}}}}},
+		{name: "compute module", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Module: &runtimecontracts.ComputeModuleSpec{Input: map[string]string{"value": "state.verticals"}}}}},
+		{name: "query source", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "state.verticals"}}},
 		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
-			ItemsFrom: "entity.verticals", As: "vertical", Identity: "vertical.id",
+			ItemsFrom: "state.verticals", As: "vertical", Identity: "vertical.id",
 			Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
 				"line_item_id": runtimecontracts.CELExpression("vertical.id"),
 			}},
 		}}},
-		{name: "group by source", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "entity.verticals", Key: "status"}}},
-		{name: "filter", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.verticals"}}},
-		{name: "reduce source", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "entity.verticals"}}},
-		{name: "count", handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "entity.verticals"}}},
+		{name: "group by source", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "state.verticals", Key: "status"}}},
+		{name: "filter", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "state.verticals"}}},
+		{name: "reduce source", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "state.verticals"}}},
+		{name: "count", handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "state.verticals"}}},
 	}
 
 	for _, tc := range tests {
@@ -64,11 +64,11 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 				readers = canonicalFanOutExecutableReaders(t, tc.handler)
 			}
 			for _, reader := range readers {
-				if reader.Expression == "entity.verticals" || reader.Expression == "size(entity.verticals) > 0" {
+				if reader.Expression == "state.verticals" || reader.Expression == "size(state.verticals) > 0" {
 					return
 				}
 			}
-			t.Fatalf("reader census omitted entity.verticals: %#v", readers)
+			t.Fatalf("reader census omitted state.verticals: %#v", readers)
 		})
 	}
 }
@@ -85,18 +85,18 @@ func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
 		{
 			name: "activity approval decision",
 			handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
-				Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "entity.release"},
+				Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "state.release"},
 			}},
 		},
 		{
 			name: "on complete activity input",
 			handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
-				Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.verticals")}},
+				Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("state.verticals")}},
 			}}},
 		},
 		{
 			name:    "loop source stage",
-			handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{From: "entity.verticals"}},
+			handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{From: "state.verticals"}},
 		},
 	}
 
@@ -117,17 +117,17 @@ func TestExecutableReaderCensusHonorsItemsFromPrecedence(t *testing.T) {
 	}{
 		{
 			name:     "filter",
-			handler:  runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.verticals", ItemsFrom: "payload.items"}},
+			handler:  runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "state.verticals", ItemsFrom: "payload.items"}},
 			wantKind: "filter.items_from",
 		},
 		{
 			name:     "reduce",
-			handler:  runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "entity.verticals", ItemsFrom: "payload.items"}},
+			handler:  runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "state.verticals", ItemsFrom: "payload.items"}},
 			wantKind: "reduce.items_from",
 		},
 		{
 			name:     "count",
-			handler:  runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{Source: "entity.verticals", ItemsFrom: "payload.items"}},
+			handler:  runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{Source: "state.verticals", ItemsFrom: "payload.items"}},
 			wantKind: "count.items_from",
 		},
 	}
@@ -144,7 +144,7 @@ func TestExecutableReaderCensusHonorsItemsFromPrecedence(t *testing.T) {
 
 func TestExecutableReaderCensusHonorsGuardChecksPrecedence(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
-		Check:  "entity.verticals",
+		Check:  "state.verticals",
 		Checks: []runtimecontracts.GuardCheck{{ID: "ready", Check: "payload.ready"}},
 	}}
 	readers := handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler)
@@ -192,10 +192,10 @@ func TestExecutableReaderCensusAssignsEveryConditionCompilerDisposition(t *testi
 func TestExecutableReaderCensusTreatsQuerySelectAsLiteralFields(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 		Source: "payload.items",
-		Select: []string{"entity.status"},
+		Select: []string{"state.status"},
 	}}
 	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler) {
-		if reader.Expression == "entity.status" || strings.HasPrefix(reader.Kind, "query.select") {
+		if reader.Expression == "state.status" || strings.HasPrefix(reader.Kind, "query.select") {
 			t.Fatalf("query select literal entered executable reader census: %#v", reader)
 		}
 	}
@@ -203,16 +203,16 @@ func TestExecutableReaderCensusTreatsQuerySelectAsLiteralFields(t *testing.T) {
 
 func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{From: "entity.status", Key: "payload.key"},
-		GroupBy:    &runtimecontracts.GroupBySpec{ItemsFrom: "entity.items", Key: "status"},
-		Compute:    &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"entity.status"}}},
+		Accumulate: &runtimecontracts.AccumulateSpec{From: "state.status", Key: "payload.key"},
+		GroupBy:    &runtimecontracts.GroupBySpec{ItemsFrom: "state.items", Key: "status"},
+		Compute:    &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"state.status"}}},
 		FanOut: &runtimecontracts.FanOutSpec{
-			ItemsFrom: "entity.items", As: "line_item", Identity: "line_item.id",
+			ItemsFrom: "state.items", As: "line_item", Identity: "line_item.id",
 			Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
 				"line_item_id": runtimecontracts.CELExpression("line_item.id"),
 			}},
 		},
-		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "entity.status == 'done'"}},
+		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "state.status == 'done'"}},
 	}
 	want := map[string]runtimepipeline.WorkflowEntityFieldLifecyclePhase{
 		"accumulate.from":      runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
@@ -220,7 +220,7 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 		"group_by.items_from":  runtimepipeline.WorkflowEntityFieldLifecycleGroupBy,
 		"compute.lookup.on[0]": runtimepipeline.WorkflowEntityFieldLifecycleCompute,
 		"fan_out.items_from":   runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
-		"on_complete[0]: condition entity.status == 'done'.condition": runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
+		"on_complete[0]: condition state.status == 'done'.condition": runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
 	}
 	for _, reader := range canonicalFanOutExecutableReaders(t, handler) {
 		phase, ok := want[reader.Kind]
@@ -243,10 +243,10 @@ func canonicalFanOutExecutableReaders(t testing.TB, handler runtimecontracts.Sys
 		t.Fatal("canonical fan-out reader fixture requires a fan-out site")
 	}
 	bundle := fanOutValidationBundle(*handler.FanOut)
-	field := strings.TrimPrefix(strings.TrimSpace(handler.FanOut.ItemsFrom), "entity.")
+	field := strings.TrimPrefix(strings.TrimSpace(handler.FanOut.ItemsFrom), "state.")
 	if field != handler.FanOut.ItemsFrom {
 		bundle.RootEntities = runtimecontracts.EntityContractsDocument{
-			"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{field: {Type: "[LineItem]"}}},
+			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{field: {Type: "[LineItem]"}}},
 		}
 	}
 	node := bundle.Nodes["dispatcher"]
@@ -276,7 +276,7 @@ func TestRun_CompleteReaderCensusOwnsEntityReferenceValidation(t *testing.T) {
 			handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
 					TargetRef: "metadata.copy",
-					Value:     runtimecontracts.RefExpression("entity.missing"),
+					Value:     runtimecontracts.RefExpression("state.missing"),
 				}},
 			}},
 			wantKind: "data_accumulation.writes[0].value.ref",
@@ -285,7 +285,7 @@ func TestRun_CompleteReaderCensusOwnsEntityReferenceValidation(t *testing.T) {
 			name: "accumulate source",
 			handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
 				Into: "items",
-				From: "entity.missing",
+				From: "state.missing",
 			}},
 			wantKind: "accumulate.from",
 		},
@@ -294,8 +294,8 @@ func TestRun_CompleteReaderCensusOwnsEntityReferenceValidation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			report := Run(context.Background(), semanticview.Wrap(handBuiltScopedReaderBundle(tc.handler)), Options{})
-			if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "entity.missing", tc.wantKind, "root-reader") {
-				t.Fatalf("expression reference findings = %#v, want entity.missing in %s at root-reader", report.Errors(), tc.wantKind)
+			if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "state.missing", tc.wantKind, "root-reader") {
+				t.Fatalf("expression reference findings = %#v, want state.missing in %s at root-reader", report.Errors(), tc.wantKind)
 			}
 		})
 	}
@@ -311,7 +311,7 @@ shared-node:
   event_handlers:
     item.received:
       guard:
-        check: entity.missing == 'x'
+        check: state.missing == 'x'
         on_fail: discard
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -320,45 +320,45 @@ shared-node:
 	}
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "flow a", "shared-node", "guard.check", "entity.missing") {
+	if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "flow a", "shared-node", "guard.check", "state.missing") {
 		t.Fatalf("expression reference findings = %#v, want exact flow a shared-node guard failure", report.Errors())
 	}
 }
 
 func TestHandBuiltScopedNodeRecordsReachReaderAndWriteConsumers(t *testing.T) {
 	bundle := handBuiltScopedReaderBundle(runtimecontracts.SystemNodeEventHandler{
-		Condition: "entity.status == 'ready'",
+		Condition: "state.status == 'ready'",
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 			{
 				Operation: runtimecontracts.WorkflowDataOperationDelete,
-				TargetRef: "entity.items",
+				TargetRef: "state.items",
 				Key:       runtimecontracts.LiteralExpression("expired"),
 			},
-			{SourceField: "status", TargetRef: "entity.status"},
+			{SourceField: "status", TargetRef: "state.status"},
 		}},
 	})
 	source := semanticview.Wrap(bundle)
-	if _, _, err := wave1ResolveEntityPathWithOwner(source, ".", "entity.status"); err != nil {
-		t.Fatalf("resolve root entity.status: %v", err)
+	if _, _, err := wave1ResolveEntityPathWithOwner(source, ".", "state.status"); err != nil {
+		t.Fatalf("resolve root state.status: %v", err)
 	}
 
 	coverage := wave1EntityReaderCoverageByFlow(source)
 	if _, ok := coverage["."]["status"]; !ok {
-		t.Fatalf("entity reader coverage = %#v, want root entity.status", coverage)
+		t.Fatalf("entity reader coverage = %#v, want root state.status", coverage)
 	}
 	operations := wave1ContainedStateOperations(source)
-	if len(operations) != 1 || operations[0].Node.FlowPath() != "." || operations[0].Node.NodeID() != "root-reader" || operations[0].SourceFile != "root/nodes.yaml" || operations[0].Write.Target() != "entity.items" {
+	if len(operations) != 1 || operations[0].Node.FlowPath() != "." || operations[0].Node.NodeID() != "root-reader" || operations[0].SourceFile != "root/nodes.yaml" || operations[0].Write.Target() != "state.items" {
 		t.Fatalf("contained operations = %#v, want exact hand-built root scope", operations)
 	}
 	writes := wave1AllEntityWriteTargets(source)
 	foundDirectWrite := false
 	for _, write := range writes {
-		if write.Node.FlowPath() == "." && write.Node.NodeID() == "root-reader" && write.SourceFile == "root/nodes.yaml" && write.Target == "entity.status" {
+		if write.Node.FlowPath() == "." && write.Node.NodeID() == "root-reader" && write.SourceFile == "root/nodes.yaml" && write.Target == "state.status" {
 			foundDirectWrite = true
 		}
 	}
 	if !foundDirectWrite {
-		t.Fatalf("entity writes = %#v, want exact hand-built root entity.status write", writes)
+		t.Fatalf("entity writes = %#v, want exact hand-built root state.status write", writes)
 	}
 }
 

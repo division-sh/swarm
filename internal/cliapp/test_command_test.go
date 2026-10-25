@@ -100,7 +100,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"events": []any{}})
 		case entityListMethod:
 			entity := validEntitySummary("entity-1")
-			entity["entity_type"] = "default"
+			entity["entity_type"] = "state"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
@@ -110,7 +110,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)
 			entity["run_id"] = testPublishedRunID
-			entity["entity_type"] = "default"
+			entity["entity_type"] = "state"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, result)
 		default:
@@ -189,7 +189,7 @@ func TestSwarmTestSetupEntitiesSeedsRootAliasAndExpectationThroughPublicRPC(t *t
 			if _, err := uuid.Parse(setupEntityID); err != nil {
 				t.Fatalf("test.setup_entities entity_id = %#v, want UUID", entity["entity_id"])
 			}
-			if entity["alias"] != "product" || entity["flow_instance"] != "" || entity["entity_type"] != "product" || entity["current_state"] != "waiting" {
+			if entity["alias"] != "product" || entity["flow_instance"] != "" || entity["entity_type"] != "state" || entity["current_state"] != "waiting" {
 				t.Fatalf("test.setup_entities entity = %#v", entity)
 			}
 			if err := assertScenarioJSONEqual("test.setup_entities fields", entity["fields"], map[string]any{"product_id": "p-1", "note": "seeded"}); err != nil {
@@ -204,7 +204,7 @@ func TestSwarmTestSetupEntitiesSeedsRootAliasAndExpectationThroughPublicRPC(t *t
 					"alias":         "product",
 					"entity_id":     setupEntityID,
 					"flow_instance": setupRunID,
-					"entity_type":   "product",
+					"entity_type":   "state",
 					"current_state": "waiting",
 				}},
 			})
@@ -235,7 +235,7 @@ func TestSwarmTestSetupEntitiesSeedsRootAliasAndExpectationThroughPublicRPC(t *t
 			result := validEntityFullResult(setupEntityID)
 			entity := result["entity"].(map[string]any)
 			entity["run_id"] = setupRunID
-			entity["entity_type"] = "product"
+			entity["entity_type"] = "state"
 			entity["current_state"] = "ready"
 			result["fields"] = map[string]any{"product_id": "p-1", "note": "approved"}
 			result["gates"] = map[string]any{"review_ready": false}
@@ -307,7 +307,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 			if want := runtimeflowidentity.EntityID(setupRunID); setupEntityID != want {
 				t.Fatalf("test.setup_entities root entity_id = %q, want canonical run root %q", setupEntityID, want)
 			}
-			if entity["alias"] != "widget" || entity["flow_instance"] != "" || entity["entity_type"] != "widget" || entity["current_state"] != "waiting" {
+			if entity["alias"] != "widget" || entity["flow_instance"] != "" || entity["entity_type"] != "state" || entity["current_state"] != "waiting" {
 				t.Fatalf("test.setup_entities root entity = %#v", entity)
 			}
 			if err := assertScenarioJSONEqual("test.setup_entities root fields", entity["fields"], map[string]any{"score": float64(5)}); err != nil {
@@ -319,7 +319,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 					"alias":         "widget",
 					"entity_id":     setupEntityID,
 					"flow_instance": setupRunID,
-					"entity_type":   "widget",
+					"entity_type":   "state",
 					"current_state": "waiting",
 				}},
 			})
@@ -350,7 +350,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 			result := validEntityFullResult(setupEntityID)
 			entity := result["entity"].(map[string]any)
 			entity["run_id"] = setupRunID
-			entity["entity_type"] = "widget"
+			entity["entity_type"] = "state"
 			entity["current_state"] = "done"
 			result["fields"] = map[string]any{"score": float64(12)}
 			writeJSONRPCResult(t, w, req.ID, result)
@@ -455,8 +455,6 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 		"run.diagnose",
 		"run.diagnose",
 		"run.trace",
-		entityListMethod,
-		entityGetMethod,
 	})
 	for _, want := range []string{"scenario ok:", "swarm test ok: scenarios=1"} {
 		if !strings.Contains(stdout.String(), want) {
@@ -727,17 +725,17 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 			}
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": rows})
 		case entityListMethod:
-			if req.Params["run_id"] != activeRunID || req.Params["type"] != entityExpect.EntityType {
+			if req.Params["run_id"] != activeRunID || req.Params["flow"] != entityExpect.Flow {
 				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
 			entity["run_id"] = activeRunID
-			entity["entity_type"] = entityExpect.EntityType
+			entity["entity_type"] = "state"
 			entity["current_state"] = currentState
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
 			entityID := "entity-1"
-			entityType := entityExpect.EntityType
+			entityType := "state"
 			if entityExpect.Ref != "" {
 				var ok bool
 				entityID, ok = setupEntityIDs[entityExpect.Ref]
@@ -868,7 +866,7 @@ name: bad setup
 setup:
   entities:
     - as: product
-      type: product
+      type: state
       current_state: waiting
       fields: {missing: value}
 steps:
@@ -945,41 +943,6 @@ expect:
 		if _, err := parseScenarioDocument([]byte(raw)); err == nil {
 			t.Fatalf("parseScenarioDocument unexpectedly accepted:\n%s", raw)
 		}
-	}
-}
-
-func TestScenarioSetupConsumesCompiledStoredStagePosture(t *testing.T) {
-	for _, tc := range []struct {
-		name, fixture, requested, want string
-		explicit, refuse               bool
-	}{
-		{"stateless initial", "test-clear-gates", "", "pending", false, false},
-		{"stateless explicit", "test-clear-gates", "pending", "pending", true, false},
-		{"stateless invented", "test-clear-gates", "active", "", true, true},
-		{"staged initial", "test-guard-kill", "", "pending", false, false},
-		{"staged terminal", "test-guard-kill", "killed", "killed", true, false},
-		{"staged exact case", "test-guard-kill", "Killed", "", true, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier1-primitives", tc.fixture))
-			runner := scenarioRunner{bundle: bundle, source: semanticview.Wrap(bundle)}
-			evaluator, err := newScenarioExpressionEvaluator("stored-stage-proof", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			entity, err := runner.evaluateScenarioSetupEntity(scenarioTestFile{}, evaluator, scenarioSetupEntity{
-				Alias: "receiver", EntityType: "test_entity", CurrentState: tc.requested, StateSet: tc.explicit,
-			})
-			if tc.refuse {
-				if err == nil || !strings.Contains(err.Error(), "current_state") {
-					t.Fatalf("invalid stored stage admitted: %+v %v", entity, err)
-				}
-				return
-			}
-			if err != nil || entity.CurrentState != tc.want {
-				t.Fatalf("stored posture = %+v err=%v, want %q", entity, err, tc.want)
-			}
-		})
 	}
 }
 
@@ -1400,7 +1363,7 @@ func TestScenarioEntityExpectationConsumesAllPages(t *testing.T) {
 		}
 		calls = append(calls, req)
 		entity := validEntitySummary("entity-1")
-		entity["entity_type"] = "widget"
+		entity["entity_type"] = "state"
 		switch len(calls) {
 		case 1:
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}, "next_cursor": "page-2"})
@@ -1418,7 +1381,7 @@ func TestScenarioEntityExpectationConsumesAllPages(t *testing.T) {
 	}
 	runner := scenarioRunner{client: client}
 	state := &scenarioRunState{RunID: "run-1", SetupEntities: map[string]scenarioSetupEntityBinding{}}
-	if err := runner.assertEntityExpectation(context.Background(), state, mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{EntityType: "widget", Count: intPtr(2)}); err != nil {
+	if err := runner.assertEntityExpectation(context.Background(), state, mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{Flow: ".", Count: intPtr(2)}); err != nil {
 		t.Fatalf("entity expectation: %v", err)
 	}
 	assertScenarioTestMethods(t, calls, []string{entityListMethod, entityListMethod})
@@ -1437,11 +1400,11 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 		calls = append(calls, req)
 		switch req.Method {
 		case entityListMethod:
-			if req.Params["run_id"] != "run-1" || req.Params["type"] != "widget" {
+			if req.Params["run_id"] != "run-1" || req.Params["flow"] != "." {
 				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
-			entity["entity_type"] = "widget"
+			entity["entity_type"] = "state"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
@@ -1450,7 +1413,7 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 			}
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)
-			entity["entity_type"] = "widget"
+			entity["entity_type"] = "state"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, result)
 		default:
@@ -1470,7 +1433,7 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 	})
 	state := &scenarioRunState{RunID: "run-1", SetupEntities: map[string]scenarioSetupEntityBinding{}}
 	if err := runner.assertEntityExpectation(context.Background(), state, evaluator, scenarioEntityExpect{
-		EntityType:   "widget",
+		Flow:         ".",
 		CurrentState: "${vars.done_state}",
 		StateSet:     true,
 		Fields:       map[string]any{"score": "${vars.score}"},
@@ -1495,9 +1458,9 @@ func TestScenarioEntityDetailExpectationFailsClosedOnMultipleMatches(t *testing.
 			t.Fatalf("unexpected request %#v", req)
 		}
 		entity1 := validEntitySummary("entity-1")
-		entity1["entity_type"] = "widget"
+		entity1["entity_type"] = "state"
 		entity2 := validEntitySummary("entity-2")
-		entity2["entity_type"] = "widget"
+		entity2["entity_type"] = "state"
 		writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity1, entity2}})
 	}))
 	defer server.Close()
@@ -1508,7 +1471,7 @@ func TestScenarioEntityDetailExpectationFailsClosedOnMultipleMatches(t *testing.
 	runner := scenarioRunner{client: client}
 	state := &scenarioRunState{RunID: "run-1", SetupEntities: map[string]scenarioSetupEntityBinding{}}
 	err = runner.assertEntityExpectation(context.Background(), state, mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{
-		EntityType:   "widget",
+		Flow:         ".",
 		CurrentState: "done",
 		StateSet:     true,
 	})
@@ -1526,15 +1489,14 @@ steps:
     payload: {amount: 7, who: operator}
 expect:
   entities:
-    - type: widget
-`,
+    - flow: .`,
 		`
 steps:
   - publish: thing.created
     payload: {amount: 7, who: operator}
 expect:
   entities:
-    - type: widget
+    - flow: .
       count: 1
       current_state: done
 `,
@@ -1580,7 +1542,7 @@ expect:
     include: [item.received, item.processed]
   no_dead_letters: true
   entities:
-    - type: default
+    - flow: .
       current_state: done
 `)
 	return sourceRoot

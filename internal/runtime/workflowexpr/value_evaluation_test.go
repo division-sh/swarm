@@ -36,7 +36,7 @@ func prepareScopedValue(t testing.TB, expression string, opts ValueExpressionOpt
 func TestValueEvaluationFailurePrecedence(t *testing.T) {
 	integer := rc.ResolvedCatalogType{Kind: rc.CatalogTypeInteger}
 	entity := rc.ResolvedCatalogType{Kind: rc.CatalogTypeObject, Fields: []rc.ResolvedCatalogField{{Name: "score", Type: integer}}}
-	missing := prepareScopedValue(t, "entity.score", ValueExpressionOptions{EntityType: &entity})
+	missing := prepareScopedValue(t, "state.score", ValueExpressionOptions{EntityType: &entity})
 	constant := prepareScopedValue(t, "1", ValueExpressionOptions{})
 	ctx := ValueContext{Entity: map[string]any{}, Payload: map[string]any{"unused": math.Inf(1)}}
 	evaluation := newScopedEvaluation(t, ctx)
@@ -59,7 +59,7 @@ func TestValueEvaluationFailurePrecedence(t *testing.T) {
 	if _, err := clean.Eval(constant); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := clean.Eval(missing); err == nil || !strings.Contains(err.Error(), "entity.score") {
+	if _, err := clean.Eval(missing); err == nil || !strings.Contains(err.Error(), "state.score") {
 		t.Fatalf("later field skipped its own missing-entity check: %v", err)
 	}
 }
@@ -204,7 +204,7 @@ func TestValueEvaluationTypedContainersRetainOrdinaryEvaluation(t *testing.T) {
 func TestValueEvaluationCycleDoesNotPreemptMissingEntity(t *testing.T) {
 	integer := rc.ResolvedCatalogType{Kind: rc.CatalogTypeInteger}
 	entity := rc.ResolvedCatalogType{Kind: rc.CatalogTypeObject, Fields: []rc.ResolvedCatalogField{{Name: "score", Type: integer}}}
-	p := prepareScopedValue(t, "entity.score", ValueExpressionOptions{EntityType: &entity})
+	p := prepareScopedValue(t, "state.score", ValueExpressionOptions{EntityType: &entity})
 	cyclic := map[string]any{}
 	cyclic["self"] = cyclic
 	slice := make([]any, 1)
@@ -214,7 +214,7 @@ func TestValueEvaluationCycleDoesNotPreemptMissingEntity(t *testing.T) {
 		if TryNewValueEvaluation(ctx) != nil {
 			t.Fatal("cyclic context should not be retained")
 		}
-		if _, err := p.Eval(ctx); err == nil || !strings.Contains(err.Error(), "entity.score") {
+		if _, err := p.Eval(ctx); err == nil || !strings.Contains(err.Error(), "state.score") {
 			t.Fatalf("missing-entity precedence changed: %v", err)
 		}
 	}
@@ -233,7 +233,7 @@ func BenchmarkValueEvaluationN64NineFields(b *testing.B) {
 	entity := rc.ResolvedCatalogType{Kind: rc.CatalogTypeObject, Fields: []rc.ResolvedCatalogField{{Name: "threshold", Type: integer}}}
 	opts := ValueExpressionOptions{EntityType: &entity, PayloadType: &payload, ItemAlias: "account", ItemType: &item}
 	var programs []*PreparedValueExpression
-	for _, expression := range []string{"payload.portfolio_id", "account.account_id", "account.eng_roles", "account.gem_score", "account.external_id", "entity.threshold >= 70", "fan_out.index", "fan_out.count", "entity.threshold"} {
+	for _, expression := range []string{"payload.portfolio_id", "account.account_id", "account.eng_roles", "account.gem_score", "account.external_id", "state.threshold >= 70", "fan_out.index", "fan_out.count", "state.threshold"} {
 		programs = append(programs, prepareScopedValue(b, expression, opts))
 	}
 	rows := make([]any, 64)

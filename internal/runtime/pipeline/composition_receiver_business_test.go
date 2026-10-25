@@ -14,9 +14,9 @@ import (
 
 func VerifyCompositionReceiverInitializationAndRepeatedBusinessWritesBothStoresForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: budget\nstages:\n  active: {}\n  done: {final: true}\n",
-		"entities.yaml": "budget:\n  spent_usd: {type: number, initial: 0}\n  status: {type: text, initial: pending}\n",
-		"events.yaml":   "spend.recorded:\n  amount_usd: number\n  business_key: text\n",
+		"schema.yaml": "name: budget\nstages:\n  active: {}\n  done: {final: true}\n",
+		"state.yaml":  "spent_usd: 0\nstatus: \"pending\"\n",
+		"events.yaml": "spend.recorded:\n  amount_usd: number\n  business_key: text\n",
 		"nodes.yaml": `budget-writer:
   execution_type: system_node
   subscribes_to: [spend.recorded]
@@ -52,7 +52,7 @@ func VerifyCompositionReceiverInitializationAndRepeatedBusinessWritesBothStoresF
 	at := time.Now().UTC()
 	if err := fixture.Construct(ctx, WorkflowInstance{
 		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: testPipelineRunID,
-		EntityType: "budget", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+		EntityType: "state", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 		CurrentState: "active", StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
 	}); err != nil {
 		t.Fatal(err)

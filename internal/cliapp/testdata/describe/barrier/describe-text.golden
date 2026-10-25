@@ -13,19 +13,19 @@ flows:
   - operating (template)
     events:
       - operating.reported (fields: operating_id, operating_instance_id, period_id, portfolio_id, revenue)
-    primary entity: operating_state
+    primary entity: state
     instance: field=operating_instance_id identity=run + flow + instance_key
     constructor: operating.report.requested key=operating_instance_id supplied=[]
   - portfolio (template)
     events:
       - period.reported (fields: operating_id, period_id, portfolio_id, revenue)
       - period.setup (fields: expected_operating_ids, period_id, portfolio_id)
-    primary entity: portfolio_context
+    primary entity: state
     instance: field=portfolio_id identity=run + flow + instance_key
     constructor: operating.reported key=portfolio_id supplied=[]
     constructor: portfolio.setup key=portfolio_id supplied=[]
   - portfolio/period (template)
-    primary entity: period_state
+    primary entity: state
     instance: field=period_id identity=run + flow + instance_key
     constructor: period.reported key=period_id supplied=[portfolio_id]
     constructor: period.setup key=period_id supplied=[expected_operating_ids, portfolio_id]
@@ -67,8 +67,8 @@ routing topology: routing-topology/v1
     - operating/operating.reported: operating.operating-node -> output operating.operating.reported
     - portfolio/period.reported: portfolio.portfolio-router -> output portfolio.period.reported
 diagnostics:
-  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.period_state; event portfolio.setup payload; consider extracting or reusing a named type if these represent the same concept
-  - [INFO] entity_reader_coverage @ operating/schema.yaml: flow operating entity_type operating_state declares field operating_instance_id with no detected internal reader coverage
-  - [INFO] entity_reader_coverage @ portfolio/schema.yaml: flow portfolio entity_type portfolio_context declares field portfolio_id with no detected internal reader coverage
-  - [INFO] entity_reader_coverage @ portfolio/period/schema.yaml: flow portfolio/period entity_type period_state declares field period_id with no detected internal reader coverage
-  - [INFO] entity_reader_coverage @ portfolio/period/schema.yaml: flow portfolio/period entity_type period_state declares field portfolio_id with no detected internal reader coverage
+  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.state; event portfolio.setup payload; consider extracting or reusing a named type if these represent the same concept
+  - [INFO] entity_reader_coverage @ operating/schema.yaml: flow operating entity_type state declares field operating_instance_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ portfolio/schema.yaml: flow portfolio entity_type state declares field portfolio_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ portfolio/period/schema.yaml: flow portfolio/period entity_type state declares field period_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ portfolio/period/schema.yaml: flow portfolio/period entity_type state declares field portfolio_id with no detected internal reader coverage

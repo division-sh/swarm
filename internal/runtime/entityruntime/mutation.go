@@ -221,7 +221,7 @@ func (p *MutationPlan) apply(next map[string]any, op Mutation) (string, error) {
 			parent[leaf] = value
 		}
 	} else {
-		target, err := ResolveContainedOperationTarget(p.contract, "entity."+path, op.Operation, op.HasKey, op.HasIndex)
+		target, err := ResolveContainedOperationTarget(p.contract, "state."+path, op.Operation, op.HasKey, op.HasIndex)
 		if err != nil {
 			return "", err
 		}

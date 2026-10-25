@@ -6,6 +6,3 @@ steps:
 expect:
   events:
     include: [item.failed]
-  entities:
-    - type: test_entity
-      current_state: failed

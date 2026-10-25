@@ -90,9 +90,9 @@ func TestJSONEntityOperationCapabilities(t *testing.T) {
 		t.Fatal("object accepts non-object")
 	}
 	for _, op := range []string{ContainedOperationSet, ContainedOperationMerge, ContainedOperationAppend, ContainedOperationUpdate} {
-		path, key, index := "entity.map", true, false
+		path, key, index := "state.map", true, false
 		if op == ContainedOperationAppend || op == ContainedOperationUpdate {
-			path, key, index = "entity.list", false, op == ContainedOperationUpdate
+			path, key, index = "state.list", false, op == ContainedOperationUpdate
 		}
 		target, err := ResolveContainedOperationTarget(contract, path, op, key, index)
 		if err != nil {

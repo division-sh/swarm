@@ -436,7 +436,7 @@ func projectEntityExpectations(value semanticvalue.Value) ([]EntityExpect, error
 }
 
 func projectEntityExpect(value semanticvalue.Value, label string) (EntityExpect, error) {
-	fields, err := mapping(value, label, "ref", "type", "count", "current_state", "fields", "gates")
+	fields, err := mapping(value, label, "ref", "flow", "count", "current_state", "fields", "gates")
 	if err != nil {
 		return EntityExpect{}, err
 	}
@@ -445,12 +445,12 @@ func projectEntityExpect(value semanticvalue.Value, label string) (EntityExpect,
 	if err != nil {
 		return out, err
 	}
-	out.EntityType, err = optionalText(fields, "type", label+".type", true)
+	out.Flow, err = optionalText(fields, "flow", label+".flow", true)
 	if err != nil {
 		return out, err
 	}
-	if out.EntityType == "" && out.Ref == "" {
-		return out, fmt.Errorf("%s.type is required", label)
+	if out.Flow == "" && out.Ref == "" {
+		return out, fmt.Errorf("%s.flow is required", label)
 	}
 	if v, ok := fields["count"]; ok {
 		n, valid := literal(v).(int64)

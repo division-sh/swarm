@@ -171,7 +171,7 @@ func constructNativeSingletonCoordinatorPilotForTest(t *testing.T, fixture *Pipe
 				map[string]any{"ref": "seed", "action": "seed"},
 			},
 		},
-		EntityType: "coordinator_state",
+		EntityType: "state",
 	})); err != nil {
 		t.Fatalf("seed singleton coordinator workflow instance: %v", err)
 	}

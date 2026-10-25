@@ -18,14 +18,14 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			for _, tc := range []struct {
-				name                   string
-				kind                   canonicalrouting.DeploymentFeedRoot
-				rows                   string
-				wantRows, wantEntities int
+				name                                  string
+				kind                                  canonicalrouting.DeploymentFeedRoot
+				rows                                  string
+				wantRows, wantEntities, wantInstances int
 			}{
-				{"connected-child", canonicalrouting.DeploymentFeedConnectedRoot, "{\"item_id\":\"one\"}\n{\"item_id\":\"two\"}\n", 2, 2},
-				{"same-flow", canonicalrouting.DeploymentFeedSameFlowRoot, "{\"item_id\":\"one\"}\n", 1, 1},
-				{"keyed-root-opening-event", canonicalrouting.DeploymentFeedKeyedRoot, "{\"item_id\":\"one\"}\n", 1, 1},
+				{"connected-child", canonicalrouting.DeploymentFeedConnectedRoot, "{\"item_id\":\"one\"}\n{\"item_id\":\"two\"}\n", 2, 2, 3},
+				{"same-flow", canonicalrouting.DeploymentFeedSameFlowRoot, "{\"item_id\":\"one\"}\n", 1, 0, 1},
+				{"keyed-root-opening-event", canonicalrouting.DeploymentFeedKeyedRoot, "{\"item_id\":\"one\"}\n", 1, 1, 1},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					_, rt := startServedBoundaryFixture(t, backend, canonicalrouting.CopyRootInputFeed(t, tc.kind))
@@ -92,6 +92,18 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 					for _, entity := range entities.Entities {
 						if entity.CurrentState == nil || *entity.CurrentState != "done" || entity.RunID != runID {
 							t.Fatalf("feed receiver did not reach its lawful final state: %+v", entity)
+						}
+					}
+					var report struct {
+						Instances []operatorread.RunInstanceOperationalStatus `json:"instances"`
+					}
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &report)
+					if len(report.Instances) != tc.wantInstances {
+						t.Fatalf("feed instance census=%+v, want %d", report.Instances, tc.wantInstances)
+					}
+					for _, instance := range report.Instances {
+						if instance.Stage != "done" {
+							t.Fatalf("feed instance did not reach its lawful final state: %+v", instance)
 						}
 					}
 					before, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), owner)

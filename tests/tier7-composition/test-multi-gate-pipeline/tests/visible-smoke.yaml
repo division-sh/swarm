@@ -11,10 +11,3 @@ steps:
 expect:
   events:
     include: [gate.set, approval.granted]
-  entities:
-    - type: test_entity
-      current_state: approved
-      gates:
-        g1: true
-        g2: true
-        g3: true

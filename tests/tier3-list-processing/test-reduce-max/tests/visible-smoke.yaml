@@ -12,7 +12,7 @@ expect:
   events:
     include: [values.reduced]
   entities:
-    - type: core
+    - flow: .
       current_state: done
       fields:
         maximum: 20

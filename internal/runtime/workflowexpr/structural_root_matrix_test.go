@@ -19,7 +19,7 @@ func TestStructuralPresenceRootShapeAndDecisionMatrix(t *testing.T) {
 		{Name: "children", Type: rc.ResolvedCatalogType{Kind: rc.CatalogTypeList, Element: &leaf}},
 		{Name: "labels", Type: dictionary},
 	}}
-	for _, root := range []string{"payload", "entity", "item", "join"} {
+	for _, root := range []string{"payload", "state", "item", "join"} {
 		for _, tc := range []struct {
 			name, expression string
 			reject           bool
@@ -62,7 +62,7 @@ func TestStructuralPresenceRootShapeAndDecisionMatrix(t *testing.T) {
 				case "payload":
 					opts.PayloadType = &record
 					ctx.Payload = value
-				case "entity":
+				case "state":
 					opts.EntityType = &record
 					ctx.Entity = value
 				case "item":

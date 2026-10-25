@@ -33,7 +33,7 @@ func TestRun_ReportsEntityReaderCoverageWithoutUnusedReaderReason(t *testing.T) 
 
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
-	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type ticket declares field resolution with no detected internal reader coverage") {
+	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type state declares field resolution with no detected internal reader coverage") {
 		t.Fatalf("expected reader coverage lint without _unused_reader_reason, got %#v", report.LintEvidence())
 	}
 }
@@ -64,7 +64,7 @@ func TestRun_GateContextCountsAsEntityReaderCoverage(t *testing.T) {
 		Stage:    "review",
 		Decision: "review_gate",
 		Context: map[string]runtimecontracts.ExpressionValue{
-			"resolution": {Kind: runtimecontracts.ExpressionKindCEL, CEL: "entity.resolution"},
+			"resolution": {Kind: runtimecontracts.ExpressionKindCEL, CEL: "state.resolution"},
 		},
 	}}
 
@@ -91,7 +91,7 @@ func TestRun_GateContextLiteralDoesNotCountAsEntityReaderCoverage(t *testing.T) 
 
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
-	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type ticket declares field resolution with no detected internal reader coverage") {
+	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type state declares field resolution with no detected internal reader coverage") {
 		t.Fatalf("expected reader coverage lint when the gate context is not an entity reference, got %#v", report.LintEvidence())
 	}
 }
@@ -99,7 +99,7 @@ func TestRun_GateContextLiteralDoesNotCountAsEntityReaderCoverage(t *testing.T) 
 func entityReaderCoverageBundle(field runtimecontracts.EntityFieldDecl) *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"ticket": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"resolution": field,
 				},

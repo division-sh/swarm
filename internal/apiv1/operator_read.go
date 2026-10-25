@@ -1215,15 +1215,15 @@ func OperatorObservabilityHandlers(opts ObservabilityHandlerOptions) map[string]
 }
 
 func operatorEntityListOptionsFromParams(params map[string]any) (operatorread.OperatorEntityListOptions, error) {
+	if _, retired := params["type"]; retired {
+		return operatorread.OperatorEntityListOptions{}, NewInvalidParamsError(map[string]any{"field": "type", "reason": "entity type filters are retired; use flow"})
+	}
 	out := operatorread.OperatorEntityListOptions{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
 		return operatorread.OperatorEntityListOptions{}, err
 	}
 	if out.Flow, _, err = optionalStringParam(params, "flow"); err != nil {
-		return operatorread.OperatorEntityListOptions{}, err
-	}
-	if out.Type, _, err = optionalStringParam(params, "type"); err != nil {
 		return operatorread.OperatorEntityListOptions{}, err
 	}
 	if out.CurrentState, _, err = optionalStringParam(params, "current_state"); err != nil {
@@ -1243,15 +1243,15 @@ func operatorEntityListOptionsFromParams(params map[string]any) (operatorread.Op
 }
 
 func operatorEntityAggregateOptionsFromParams(params map[string]any) (operatorread.OperatorEntityAggregateOptions, error) {
+	if _, retired := params["type"]; retired {
+		return operatorread.OperatorEntityAggregateOptions{}, NewInvalidParamsError(map[string]any{"field": "type", "reason": "entity type filters are retired; use group_by flow"})
+	}
 	out := operatorread.OperatorEntityAggregateOptions{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
 		return operatorread.OperatorEntityAggregateOptions{}, err
 	}
 	if out.GroupBy, _, err = optionalStringParam(params, "group_by"); err != nil {
-		return operatorread.OperatorEntityAggregateOptions{}, err
-	}
-	if out.Type, _, err = optionalStringParam(params, "type"); err != nil {
 		return operatorread.OperatorEntityAggregateOptions{}, err
 	}
 	return out, nil

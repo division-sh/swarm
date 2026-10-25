@@ -1,3 +1,0 @@
-worker_state:
-  member_id: text
-  values: [integer]

@@ -10,7 +10,7 @@ expect:
   events:
     include: [stage.two_start, stage.complete]
   entities:
-    - type: core
+    - flow: .
       current_state: complete
       fields:
         stage_one_result: pass

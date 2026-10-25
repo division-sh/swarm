@@ -128,7 +128,7 @@ func TestA2SourceProjectionRetainsExactRevisionAndRangeFences(t *testing.T) {
 	r := a2SourceProjectionRequest(t)
 	r.Source = SourceRef{Kind: SourceEntityField, RunID: r.Key.RunID, EntityID: r.Key.RunID, Field: "items"}
 	r.Capsule.EntityID = r.Key.RunID
-	r.Capsule.SourceProjection.ItemsFrom = "entity.items"
+	r.Capsule.SourceProjection.ItemsFrom = "state.items"
 	r.Capsule.SourceProjection.SourceAfterWrites = true
 	var err error
 	r.PlanRef.SemanticDigest, err = canonicaljson.Hash(r.Capsule.SourceProjection)

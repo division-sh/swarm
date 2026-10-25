@@ -281,7 +281,7 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 		return op, binding, err
 	}
 	if op.State == StateBound && (op.ProofStatus == ProofPending || op.ProofStatus == ProofFailed) {
-		if err := s.materializeProof(ctx, ProofResponsibility{Operation: op, Binding: binding, Proof: proofFromOperation(op, binding)}, now); err != nil {
+		if err := s.materializeProof(ctx, ProofResponsibility{Operation: op, Binding: binding}, now); err != nil {
 			return op, binding, err
 		}
 		op.ProofStatus = ProofActive
@@ -428,11 +428,7 @@ func validatedResponsibilityProof(responsibility ProofResponsibility) (VerifiedP
 		!binding.UpdatedAt.Equal(operation.CompletedAt) {
 		return VerifiedProof{}, fmt.Errorf("%w: proof responsibility contradicts its committed operation or binding", ErrRevisionConflict)
 	}
-	proof := proofFromOperation(operation, binding)
-	if !immutableProofFactsMatch(responsibility.Proof, proof) {
-		return VerifiedProof{}, fmt.Errorf("%w: durable proof projection contradicts its committed operation or binding", ErrRevisionConflict)
-	}
-	return proof, nil
+	return proofFromOperation(operation), nil
 }
 
 func proofMatchesResponsibility(existing, responsibility VerifiedProof) bool {
@@ -474,7 +470,7 @@ func equalConsentScopes(left, right []ConsentScope) bool {
 	return true
 }
 
-func proofFromOperation(op Operation, binding Binding) VerifiedProof {
+func proofFromOperation(op Operation) VerifiedProof {
 	return VerifiedProof{
 		Format: ProofFormat, ProofID: op.ProofID, Revision: op.ProofRevision, Status: ProofActive,
 		Interface: op.Interface, ExternalAccountRef: op.ExternalAccountRef, ConversationRef: op.ConversationRef,

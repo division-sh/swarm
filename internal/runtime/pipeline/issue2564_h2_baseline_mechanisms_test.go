@@ -183,22 +183,22 @@ func VerifyIssue2564H2BaselineMechanismsForTest(t *testing.T, factory WorkflowTi
 		for _, mechanism := range []string{"H2a_timer_CAS_stranding", "H2b_timer_carrier_revert", "H2c_handler_stale_stage_entry"} {
 			t.Run(backend+"/"+mechanism, func(t *testing.T) {
 				bundle := loadWorkflowTempBundle(t, map[string]string{
-					"schema.yaml":   "name: h2-mechanism-equivalent\nstages:\n  s1:\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {final: true}\n",
-					"entities.yaml": "hub:\n  count: integer\n  c1: integer\n  c2: integer\n",
-					"events.yaml":   "hub.bump: {n: integer}\n",
+					"schema.yaml": "name: h2-mechanism-equivalent\nstages:\n  s1:\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {final: true}\n",
+					"state.yaml":  "count: integer\nc1: integer\nc2: integer\n",
+					"events.yaml": "hub.bump: {n: integer}\n",
 					"nodes.yaml": `hub-node:
   execution_type: system_node
   subscribes_to: [hub.bump]
   event_handlers:
     hub.bump:
       data_accumulation:
-        writes: [{target_field: count, value: entity.count + 1}]
+        writes: [{target_field: count, value: state.count + 1}]
       rules:
-        - when: _entity.current_state == 's1'
+        - when: instance.stage == 's1'
           data_accumulation:
-            writes: [{target_field: c1, value: entity.c1 + 1}]
+            writes: [{target_field: c1, value: state.c1 + 1}]
         - data_accumulation:
-            writes: [{target_field: c2, value: entity.c2 + 1}]
+            writes: [{target_field: c2, value: state.c2 + 1}]
 `,
 				})
 				fixture := factory(t, backend, bundle)
@@ -206,7 +206,7 @@ func VerifyIssue2564H2BaselineMechanismsForTest(t *testing.T, factory WorkflowTi
 				run := correlation.RunIDFromContext(ctx)
 				owner := testRunScopedWorkflowInstanceFromContext(ctx, run)
 				at := canonicalWorkflowTimerTime(time.Now().Add(-2 * time.Second))
-				fixture.CommitConstruction(ctx, owner, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(), Mode: "static", EntityType: "hub", CurrentState: "s1", StageDefined: true, Fields: map[string]any{"count": 0, "c1": 0, "c2": 0}, CreatedAt: at, EnteredStageAt: at}, at)
+				fixture.CommitConstruction(ctx, owner, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(), Mode: "static", EntityType: "state", CurrentState: "s1", StageDefined: true, Fields: map[string]any{"count": 0, "c1": 0, "c2": 0}, CreatedAt: at, EnteredStageAt: at}, at)
 				rows := listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, run)
 				if len(rows) != 1 || rows[0].FireAt.Sub(rows[0].CreatedAt) != time.Second {
 					t.Fatalf("H2 did not create its real one-second initial entry: %+v", rows)

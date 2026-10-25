@@ -17,10 +17,10 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 	for _, consumer := range []string{"guard", "rule", "write", "emit", "filter"} {
 		for _, safe := range []bool{false, true} {
 			name := consumer + "/unsafe"
-			value := `entity.profile.note`
+			value := `state.profile.note`
 			if safe {
 				name = consumer + "/decision"
-				value = `entity.profile.?note.orValue("fallback")`
+				value = `state.profile.?note.orValue("fallback")`
 			}
 			t.Run(name, func(t *testing.T) {
 				handler := rc.SystemNodeEventHandler{}
@@ -38,7 +38,7 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 				}
 				bundle := &rc.WorkflowContractBundle{
 					RootTypes:    rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}},
-					RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}, "captured": {Type: "text"}}}},
+					RootEntities: rc.EntityContractsDocument{"state": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}, "captured": {Type: "text"}}}},
 					Events: map[string]rc.EventCatalogEntry{
 						"work.received": {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"items": {Type: "[text]"}}, Required: []string{"items"}}},
 						"work.result":   {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"note": {Type: "text"}}, Required: []string{"note"}}},
@@ -58,7 +58,7 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 				if safe && err != nil {
 					t.Fatal(err)
 				}
-				if !safe && (err == nil || (!strings.Contains(err.Error(), "presence decision") && !strings.Contains(err.Error(), "entity.profile.note"))) {
+				if !safe && (err == nil || (!strings.Contains(err.Error(), "presence decision") && !strings.Contains(err.Error(), "state.profile.note"))) {
 					t.Fatalf("unsafe read error=%v", err)
 				}
 			})

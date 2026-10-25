@@ -43,14 +43,7 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	out.AuthoredFields = cloneBoolMap(in.AuthoredFields)
 	out.EffectiveFieldSources = cloneStringMap(in.EffectiveFieldSources)
 	out.DataAccess = append([]DurableDataAccessRef(nil), in.DataAccess...)
-	if len(in.EntityWrites) > 0 {
-		out.EntityWrites = make(map[string]AgentEntityWriteDecl, len(in.EntityWrites))
-		for key, value := range in.EntityWrites {
-			value.Create.Fields = append([]string(nil), value.Create.Fields...)
-			value.Save.Fields = append([]string(nil), value.Save.Fields...)
-			out.EntityWrites[key] = value
-		}
-	}
+	out.Writes.Fields = append([]string(nil), in.Writes.Fields...)
 	if len(in.NativeTools) > 0 {
 		out.NativeTools = make(map[string]any, len(in.NativeTools))
 		for key, value := range in.NativeTools {

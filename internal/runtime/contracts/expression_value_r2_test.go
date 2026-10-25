@@ -73,8 +73,8 @@ func TestExpressionValueR2DataWriteAliasOperands(t *testing.T) {
 		source string
 		want   any
 	}{
-		{"op: set\ntarget: entity.name\nkey: &label \"abc\"\nvalue: *label\n", "abc"},
-		{"op: set\ntarget: entity.details\nkey: details\nvalue: {a: &v 1, b: *v}\n", map[string]any{"a": 1, "b": 1}},
+		{"op: set\ntarget: state.name\nkey: &label \"abc\"\nvalue: *label\n", "abc"},
+		{"op: set\ntarget: state.details\nkey: details\nvalue: {a: &v 1, b: *v}\n", map[string]any{"a": 1, "b": 1}},
 	} {
 		var write WorkflowDataWrite
 		if err := decodeNodeTestYAML([]byte(tc.source), &write); err != nil {
@@ -119,18 +119,13 @@ func TestExpressionValueR2SharedAuthoringSurfaces(t *testing.T) {
 		}},
 		{"activity.input", func(source string) (ExpressionValue, error) {
 			var spec ActivitySpec
-			err := decodeNodeTestYAML([]byte("tool: record\ninput:\n  value: "+source+"\n"), &spec)
+			err := decodeNodeTestYAML([]byte("id: record\ntool: record\ninput:\n  value: "+source+"\n"), &spec)
 			return spec.Input["value"], err
 		}},
 		{"stage gate context", func(source string) (ExpressionValue, error) {
 			var spec FlowStageGateDeclaration
 			err := decodeNodeTestYAML([]byte("decision: review\ncontext:\n  value: "+source+"\noutcomes:\n  accepted: {advances_to: done}\n"), &spec)
 			return spec.Context["value"], err
-		}},
-		{"guard escalation", func(source string) (ExpressionValue, error) {
-			var spec GuardSpec
-			err := decodeNodeTestYAML([]byte("check: false\non_fail:\n  escalate:\n    event: review.failed\n    fields:\n      value: "+source+"\n"), &spec)
-			return spec.OnFailSpec.Escalation.Fields["value"], err
 		}},
 		{"data write value", func(source string) (ExpressionValue, error) {
 			var write WorkflowDataWrite
@@ -139,12 +134,12 @@ func TestExpressionValueR2SharedAuthoringSurfaces(t *testing.T) {
 		}},
 		{"data write key", func(source string) (ExpressionValue, error) {
 			var write WorkflowDataWrite
-			err := decodeNodeTestYAML([]byte("op: append\ntarget: entity.by_id.items\nkey: "+source+"\nvalue: 1\n"), &write)
+			err := decodeNodeTestYAML([]byte("op: append\ntarget: state.by_id.items\nkey: "+source+"\nvalue: 1\n"), &write)
 			return write.Key, err
 		}},
 		{"data write index", func(source string) (ExpressionValue, error) {
 			var write WorkflowDataWrite
-			err := decodeNodeTestYAML([]byte("op: update\ntarget: entity.items\nindex: "+source+"\nvalue: 1\n"), &write)
+			err := decodeNodeTestYAML([]byte("op: update\ntarget: state.items\nindex: "+source+"\nvalue: 1\n"), &write)
 			return write.Index, err
 		}},
 	}
@@ -252,7 +247,7 @@ func TestExpressionValueR2RejectsRetiredAndMalformedForms(t *testing.T) {
 
 func TestExpressionValueR2DataWritePreservesAuthoredNull(t *testing.T) {
 	var write WorkflowDataWrite
-	if err := decodeNodeTestYAML([]byte("op: set\ntarget: entity.items\nkey: null\nvalue: null\n"), &write); err != nil {
+	if err := decodeNodeTestYAML([]byte("op: set\ntarget: state.items\nkey: null\nvalue: null\n"), &write); err != nil {
 		t.Fatal(err)
 	}
 	if !write.Key.HasLiteralValue() || !write.Value.HasLiteralValue() || !reflect.DeepEqual(write.Key.Literal, nil) || !reflect.DeepEqual(write.Value.Literal, nil) {

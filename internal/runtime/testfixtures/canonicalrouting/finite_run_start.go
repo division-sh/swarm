@@ -24,25 +24,24 @@ const (
 func CopyRootInputFeed(t testing.TB, kind DeploymentFeedRoot) string {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":            "stages: {done: {final: true}}\npins:\n  inputs: [item.registered]\nconnect:\n  - {event: item.registered, from: ., to: registry, resolution: create}\n",
-		"events.yaml":            "item.registered:\n  key: item_id\n  item_id: text\n",
-		"registry/schema.yaml":   "instance: item_id\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [item.registered]\n",
-		"registry/entities.yaml": "Item:\n  item_id: text\n",
-		"registry/nodes.yaml":    "register:\n  event_handlers:\n    item.registered: {advances_to: done}\n",
+		"schema.yaml":          "stages: {done: {final: true}}\npins:\n  inputs: [item.registered]\nconnect:\n  - {event: item.registered, from: ., to: registry, resolution: create}\n",
+		"events.yaml":          "item.registered:\n  key: item_id\n  item_id: text\n",
+		"registry/schema.yaml": "instance: item_id\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [item.registered]\n",
+		"registry/state.yaml":  "item_id: text\n",
+		"registry/nodes.yaml":  "register:\n  event_handlers:\n    item.registered: {advances_to: done}\n",
 	}
 	switch kind {
 	case DeploymentFeedConnectedRoot:
 	case DeploymentFeedSameFlowRoot, DeploymentFeedKeyedRoot:
 		delete(files, "registry/schema.yaml")
-		delete(files, "registry/entities.yaml")
+		delete(files, "registry/state.yaml")
 		delete(files, "registry/nodes.yaml")
 		files["schema.yaml"] = "stages: {pending: {}, done: {final: true}}\npins:\n  inputs: [item.registered]\n"
-		files["entities.yaml"] = "Item: {}\n"
 		files["nodes.yaml"] = "register:\n  event_handlers:\n    item.registered: {advances_to: done}\n"
 		if kind == DeploymentFeedKeyedRoot {
 			files["schema.yaml"] = "instance: account_id\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [account.opened, item.registered]\n"
 			files["events.yaml"] += "account.opened:\n  account_id: text\n"
-			files["entities.yaml"] = "Account:\n  account_id: text\n"
+			files["state.yaml"] = "account_id: text\n"
 			files["nodes.yaml"] += "open:\n  event_handlers:\n    account.opened: {}\n"
 		}
 	case DeploymentFeedOutputOnlyRoot:
@@ -75,14 +74,14 @@ func CopyDeploymentRunStart(t testing.TB) string {
 	// Only data-created templates receive work; an empty feed constructs the
 	// ended root, not an eager worker that would strand completion.
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":             "name: deployment\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n",
-		"events.yaml":             "scan.requested:\n  topic: text\nscore.observed:\n  key: label\n  label: text\nportfolio.opened:\n  topic: text\n",
-		"discovery/schema.yaml":   "instance: topic\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [scan.requested]\n",
-		"discovery/entities.yaml": "Scan:\n  topic: text\n",
-		"discovery/nodes.yaml":    "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: done\n",
-		"scores/schema.yaml":      "instance: label\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [score.observed]\n",
-		"scores/entities.yaml":    "Score:\n  label: text\n",
-		"scores/nodes.yaml":       "scorer:\n  event_handlers:\n    score.observed: {advances_to: done}\n",
+		"schema.yaml":           "name: deployment\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n",
+		"events.yaml":           "scan.requested:\n  topic: text\nscore.observed:\n  key: label\n  label: text\nportfolio.opened:\n  topic: text\n",
+		"discovery/schema.yaml": "instance: topic\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [scan.requested]\n",
+		"discovery/state.yaml":  "topic: text\n",
+		"discovery/nodes.yaml":  "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: done\n",
+		"scores/schema.yaml":    "instance: label\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [score.observed]\n",
+		"scores/state.yaml":     "label: text\n",
+		"scores/nodes.yaml":     "scorer:\n  event_handlers:\n    score.observed: {advances_to: done}\n",
 	})
 }
 
@@ -106,7 +105,7 @@ func CopyPublicCompletionFeedOnly(t testing.TB) string {
 func CopyPublicCompletionFeedOnlyActivation(t testing.TB) string {
 	t.Helper()
 	root := CopyPublicCompletionInitiation(t)
-	writeClosedVariantFile(t, root, "entities.yaml", "Deployment:\n  topic: {type: 'text?', _unused_reason: public completion attachment proof}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "topic: text?\n")
 	return root
 }
 
@@ -140,9 +139,9 @@ func CopyFiniteStatelessContainer(t testing.TB) string {
 func CopyFiniteDormantTemplate(t testing.TB) string {
 	t.Helper()
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":           "stages: {done: {final: true}}\n",
-		"dormant/schema.yaml":   "instance: item_id\nstages: {waiting: {}}\n",
-		"dormant/entities.yaml": "Item:\n  item_id: {type: text, _unused_reason: dormant constructor}\n",
+		"schema.yaml":         "stages: {done: {final: true}}\n",
+		"dormant/schema.yaml": "instance: item_id\nstages: {waiting: {}}\n",
+		"dormant/state.yaml":  "item_id: text\n",
 	})
 }
 
@@ -153,7 +152,7 @@ func CopyFiniteConnectedClosure(t testing.TB, offender FiniteClosureOffender) st
 		"schema.yaml":                "stages: {active: {}, done: {final: true}}\npins:\n  inputs: [work.requested]\n  outputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: worker, resolution: create}\n",
 		"events.yaml":                "work.requested:\n  worker_id: text\n",
 		"worker/schema.yaml":         "instance: worker_id\n" + worker + "pins:\n  inputs: [work.requested]\n",
-		"worker/entities.yaml":       "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
+		"worker/state.yaml":          "worker_id: text\n",
 		"worker/nodes.yaml":          "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
 		"worker/support/schema.yaml": child,
 	})
@@ -170,13 +169,13 @@ func CopyFiniteConstructorControl(t testing.TB) string {
 func CopyFiniteNestedServiceFeed(t testing.TB) string {
 	t.Helper()
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":            "stages: {done: {final: true}}\nconnect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n",
-		"producer/schema.yaml":   "instance: producer_id\nstages: {done: {final: true}}\npins:\n  outputs: [work.requested]\n",
-		"producer/entities.yaml": "Producer:\n  producer_id: {type: text, _unused_reason: dormant identity}\n",
-		"producer/events.yaml":   "work.requested:\n  worker_id: text\n",
-		"worker/schema.yaml":     "instance: worker_id\nstages: {active: {}}\npins:\n  inputs: [work.requested]\n",
-		"worker/entities.yaml":   "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-		"worker/nodes.yaml":      "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
+		"schema.yaml":          "stages: {done: {final: true}}\nconnect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n",
+		"producer/schema.yaml": "instance: producer_id\nstages: {done: {final: true}}\npins:\n  outputs: [work.requested]\n",
+		"producer/state.yaml":  "producer_id: text\n",
+		"producer/events.yaml": "work.requested:\n  worker_id: text\n",
+		"worker/schema.yaml":   "instance: worker_id\nstages: {active: {}}\npins:\n  inputs: [work.requested]\n",
+		"worker/state.yaml":    "worker_id: text\n",
+		"worker/nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
 	})
 }
 
@@ -217,16 +216,16 @@ func finiteClosureStages(t testing.TB, offender FiniteClosureOffender) (worker, 
 
 func finiteSelectedFeedFiles(rootStages, producerStages, workerStages string) map[string]string {
 	return map[string]string{
-		"schema.yaml":            rootStages + "connect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n  - {event: work.safe, from: producer, to: safe, resolution: create}\n",
-		"producer/schema.yaml":   "instance: producer_id\n" + producerStages + "pins:\n  outputs: [work.requested, work.safe]\n",
-		"producer/entities.yaml": "Producer:\n  producer_id: {type: text, _unused_reason: dormant identity}\n",
-		"producer/events.yaml":   "work.requested:\n  worker_id: text\nwork.safe:\n  worker_id: text\n",
-		"worker/schema.yaml":     "instance: worker_id\n" + workerStages + "pins:\n  inputs: [work.requested]\n",
-		"worker/entities.yaml":   "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-		"worker/nodes.yaml":      "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
-		"safe/schema.yaml":       "instance: worker_id\nstages: {done: {final: true}}\npins:\n  inputs: [work.safe]\n",
-		"safe/entities.yaml":     "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-		"safe/nodes.yaml":        "worker:\n  execution_type: system_node\n  event_handlers:\n    work.safe: {}\n",
+		"schema.yaml":          rootStages + "connect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n  - {event: work.safe, from: producer, to: safe, resolution: create}\n",
+		"producer/schema.yaml": "instance: producer_id\n" + producerStages + "pins:\n  outputs: [work.requested, work.safe]\n",
+		"producer/state.yaml":  "producer_id: text\n",
+		"producer/events.yaml": "work.requested:\n  worker_id: text\nwork.safe:\n  worker_id: text\n",
+		"worker/schema.yaml":   "instance: worker_id\n" + workerStages + "pins:\n  inputs: [work.requested]\n",
+		"worker/state.yaml":    "worker_id: text\n",
+		"worker/nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
+		"safe/schema.yaml":     "instance: worker_id\nstages: {done: {final: true}}\npins:\n  inputs: [work.safe]\n",
+		"safe/state.yaml":      "worker_id: text\n",
+		"safe/nodes.yaml":      "worker:\n  execution_type: system_node\n  event_handlers:\n    work.safe: {}\n",
 	}
 }
 

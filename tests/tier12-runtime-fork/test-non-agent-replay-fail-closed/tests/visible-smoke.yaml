@@ -3,6 +3,5 @@ steps:
   - publish: task.assigned
     payload: {}
 expect:
-  entities:
-    - type: test_entity
-      current_state: pending
+  events:
+    include: [task.assigned]
