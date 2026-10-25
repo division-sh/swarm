@@ -864,13 +864,11 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 
 func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID string) {
 	t.Helper()
-	var waitingEntities, deliveredEvents int
+	var waitingInstances, deliveredEvents int
 	var executionState string
 	err := db.QueryRowContext(context.Background(), `
 			SELECT
-					(SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
-					 ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
-					 WHERE es.run_id=$1 AND fi.current_state='waiting'),
+					(SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND current_state='waiting'),
 				(SELECT COUNT(*)
 				 FROM events e
 				 JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
@@ -881,9 +879,9 @@ func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID strin
 				(SELECT state
 				 FROM run_fork_selected_contract_runtime_executions
 					 WHERE fork_run_id=$1)
-		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&waitingEntities, &deliveredEvents, &executionState)
-	if err != nil || waitingEntities != 1 || deliveredEvents != 1 || executionState != "closed" {
-		t.Fatalf("stopped replay for %s = waiting entities:%d deliveries:%d execution:%q err:%v", forkRunID, waitingEntities, deliveredEvents, executionState, err)
+		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&waitingInstances, &deliveredEvents, &executionState)
+	if err != nil || waitingInstances != 1 || deliveredEvents != 1 || executionState != "closed" {
+		t.Fatalf("stopped replay for %s = waiting instances:%d deliveries:%d execution:%q err:%v", forkRunID, waitingInstances, deliveredEvents, executionState, err)
 	}
 }
 
@@ -2878,7 +2876,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 			map[string]any{
 				"alias":         "subject",
 				"entity_id":     entityID,
-				"entity_type":   "widget",
+				"entity_type":   "state",
 				"current_state": "waiting",
 				"fields":        map[string]any{"score": 5},
 			},
@@ -2899,7 +2897,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 		t.Fatalf("%s test.setup_entities result = %#v, want run %s and one entity", rt.Backend, result, runID)
 	}
 	entity := result.Entities[0]
-	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != runID || entity.EntityType != "widget" || entity.CurrentState == nil || *entity.CurrentState != "waiting" {
+	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != runID || entity.EntityType != "state" || entity.CurrentState == nil || *entity.CurrentState != "waiting" {
 		t.Fatalf("%s test.setup_entities entity result = %#v", rt.Backend, entity)
 	}
 	requireServedTestSetupPersistence(t, rt, runID, entityID)
@@ -3007,7 +3005,7 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 
 	record, instance := requireReceiverTargetState(t, rt.ReceiverStateReader, runID, ".", runID, entityID)
 	flow, typ, state, score := record.State.FlowInstance, record.State.EntityType, instance.CurrentState, instance.Fields["score"]
-	if flow != runID || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
+	if flow != runID || typ != "state" || state != "waiting" || !jsonScalarInt(score, 5) {
 		t.Fatalf("%s setup entity row = flow:%q type:%q state:%q score:%#v", backend, flow, typ, state, score)
 	}
 	var snapshot map[string]storetest.SelectedForkStorageTableSnapshot
@@ -3048,7 +3046,7 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 		}
 	}
 	dataDiagnostic, headerDiagnostic := diagnostics["entity_state"], diagnostics["flow_instances"]
-	if !strings.Contains(dataDiagnostic, entityID) || !strings.Contains(dataDiagnostic, "widget") || !strings.Contains(dataDiagnostic, "score") {
+	if !strings.Contains(dataDiagnostic, entityID) || !strings.Contains(dataDiagnostic, "state") || !strings.Contains(dataDiagnostic, "score") {
 		t.Fatalf("%s data diagnostic lost the independent field row: %s", backend, dataDiagnostic)
 	}
 	if !strings.Contains(headerDiagnostic, entityID) || !strings.Contains(headerDiagnostic, "waiting") {
