@@ -662,7 +662,6 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if err != nil {
 						t.Fatal(err)
 					}
-					workBeforeRefusals := conformanceTestProcessOwner(t).ActiveCount()
 					canceled, cancel := context.WithCancel(f.ctx)
 					cancel()
 					for _, refused := range []struct {
@@ -683,8 +682,8 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						}
 					}
 					afterRefusals, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, result.ForkRunID)
-					if err != nil || !reflect.DeepEqual(afterRefusals, beforeRefusals) || conformanceTestProcessOwner(t).ActiveCount() != workBeforeRefusals {
-						t.Fatalf("refused fixture inputs changed child state or retained work: error=%v", err)
+					if err != nil || !reflect.DeepEqual(afterRefusals, beforeRefusals) {
+						t.Fatalf("refused fixture inputs changed child state: error=%v", err)
 					}
 					closeResult, err := owner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID,
 						runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})

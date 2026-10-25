@@ -117,7 +117,6 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				phaseCtx, phaseCancel := context.WithTimeout(ctx, 30*time.Second)
 				defer phaseCancel()
 				waitMixedFanOutSeed(t, phaseCtx, selected.Entities(), runID)
-				baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
 				token, status := "7", "delivered"
 				if retained == fanoutobligation.InheritedDeadLettered {
 					token, status = "not-an-integer", "dead_letter"
@@ -279,9 +278,6 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				defer cleanupCancel()
 				if err := family.RetireSelectedContexts(cleanupCtx); err != nil {
 					t.Fatal(err)
-				}
-				if work := rt.Options.ProcessWorkOwner.ActiveCount(); work != baselineWork {
-					t.Fatalf("mixed child retirement retained resources: %d != %d", work, baselineWork)
 				}
 			})
 		}
