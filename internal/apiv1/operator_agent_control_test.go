@@ -30,7 +30,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                func() time.Time { return time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC) },
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
@@ -100,7 +100,7 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
@@ -154,7 +154,7 @@ func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) 
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{errs: map[string]error{
@@ -202,7 +202,7 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 	terminalRunID := "00000000-0000-0000-0000-000000000405"
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
@@ -286,7 +286,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Idempotency:        pg,
 			AgentConversations: pg,
 			AgentControl:       manager,
@@ -365,7 +365,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Idempotency:        pg,
 			AgentConversations: pg,
 			AgentControl:       manager,
@@ -439,7 +439,7 @@ func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *t
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
@@ -472,7 +472,7 @@ func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *t
 func TestOperatorAgentControlHandlersRequireOwner(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers:   testOperatorHandlers(testOperatorCapabilities{}),
+		Handlers:   testOperatorHandlers(t, testOperatorCapabilities{}),
 	})
 	resp := rpcCall(t, handler, agentControlBody("agent.restart", "agent-1", ""))
 	if resp.Error == nil {

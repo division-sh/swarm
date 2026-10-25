@@ -40,7 +40,7 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			handlers := testOperatorHandlers(testOperatorCapabilities{
+			handlers := testOperatorHandlers(t, testOperatorCapabilities{
 				Runs: selected, Observability: selected, Idempotency: selected, Events: bus, Source: source,
 				RunBundleContext: selected.(RunBundleContextStore), Entities: selected.(EntityReadStore),
 				Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},

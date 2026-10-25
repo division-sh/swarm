@@ -51,7 +51,7 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 				t.Fatalf("clock admission: %#v, %v", committed, err)
 			}
 			activation := committed.Result.Activation
-			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Runs: selected})})
+			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Runs: selected})})
 			for _, status := range []string{"active", "cancelled"} {
 				for _, method := range []string{"run.get", "run.diagnose"} {
 					response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"clock","method":%q,"params":{"run_id":%q}}`, method, runID))

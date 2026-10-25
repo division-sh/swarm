@@ -50,7 +50,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			handler := testHandlerWithOriginalContext(t, Options{
 				OperatorPrincipalID: principal.ID,
 				AuthTokens:          []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					Now: func() time.Time { return now.Add(time.Minute) }, Ready: func() bool { return true }, Database: fakePinger{},
 					Mailbox: mailbox, DecisionCards: cardStore, DecisionAuthority: authority,
 					Idempotency: idempotency,

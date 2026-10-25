@@ -2150,7 +2150,7 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 	entities, _ := runs.(EntityReadStore)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return time.Now().UTC() },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},

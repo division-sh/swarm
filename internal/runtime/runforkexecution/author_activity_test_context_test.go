@@ -117,15 +117,20 @@ func runForkOriginalContextForTest(t testing.TB, ctx context.Context, capability
 	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return ctx
 }
 
 func nativeRunForkTestContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if process, found := worklifetime.ProcessFromContext(ctx); found {
-		if _, bound := process.OriginalProcess(); bound {
-			return ctx
+	if startupownership.HasMutationAuthority(ctx) {
+		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
 		}
+		return ctx
 	}
 	owner, ok := selected.(startupownership.Store)
 	if !ok {

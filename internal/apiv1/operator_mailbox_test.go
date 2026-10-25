@@ -19,7 +19,7 @@ import (
 
 func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	state := newMutatingRuntimeProbeState(t, "mailbox.decide")
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(state.options(t))})
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, state.options(t))})
 
 	listed := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"mailbox.list","params":{}}`)
 	if listed.Error != nil {
@@ -136,7 +136,7 @@ func TestOperatorMailboxProjectsProposedEffectAuthorizationAndDispatchSeparately
 		"approve": {Verdict: "approve"}, "revise": {Verdict: "revise"}, "reject": {Verdict: "reject"},
 	})
 	state.decisionCards.card.EffectContentHash = "sha256:" + strings.Repeat("e", 64)
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(state.options(t))})
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, state.options(t))})
 
 	for _, method := range []string{"mailbox.list", "mailbox.get"} {
 		params := `{}`
@@ -184,7 +184,7 @@ func TestMailboxDecideAdmitsEveryCanonicalGateInputType(t *testing.T) {
 		InputOrder: []string{"text_value", "integer_value", "numeric_value", "boolean_value", "timestamp_value", "uuid_value"},
 	}})
 	state.decisionCards.card.Snapshot.Outcomes["typed"] = typed.Outcomes["typed"]
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(state.options(t))})
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, state.options(t))})
 	response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"typed","method":"mailbox.decide","params":{"card_id":"card-1","verdict":"typed","observed_content_hash":"content-1","idempotency_key":"typed-inputs","fields":{"text_value":"reason","integer_value":7,"numeric_value":7.5,"boolean_value":true,"timestamp_value":"2026-07-13T01:02:03Z","uuid_value":"00000000-0000-0000-0000-000000000123"}}}`)
 	if response.Error != nil || asMap(t, response.Result)["status"] != decisioncard.StatusDecided {
 		t.Fatalf("typed mailbox.decide = result %#v error %#v", response.Result, response.Error)

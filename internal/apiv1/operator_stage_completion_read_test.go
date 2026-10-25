@@ -49,7 +49,7 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 				t.Cleanup(cleanup)
 				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
 			}
-			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Runs: selected})})
+			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Runs: selected})})
 			for _, tc := range []struct {
 				stage, status string
 			}{{"ready", "running"}, {"Ready", "completed"}} {

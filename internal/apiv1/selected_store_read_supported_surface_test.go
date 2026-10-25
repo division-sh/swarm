@@ -39,7 +39,7 @@ func TestSelectedStoreRunReadHandlersExecuteAcrossBackends(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := context.Background()
 			selected, runID := backend.open(t, ctx)
-			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Runs: selected})})
+			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Runs: selected})})
 			for _, tc := range []struct {
 				method string
 				params string
@@ -107,7 +107,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		t.Fatalf("direct postgres agent list: %v", err)
 	}
 
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 		AgentConversations:     selected,
 		AgentDeliveryLifecycle: selected,
 		AgentUsage:             selected,

@@ -80,7 +80,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	bus.SetRunDispatchGate(controller)
 	handler := testHandlerWithOriginalContext(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:         func() time.Time { return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC) },
 			Ready:       func() bool { return true },
 			Database:    fakePinger{},
@@ -175,7 +175,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	}
 	controller := runtimeruncontrol.NewController(pg, bus, runtimeruncontrol.Options{})
 	bus.SetRunDispatchGate(controller)
-	handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Idempotency: pg, RunControl: controller})}, ctx)
+	handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Idempotency: pg, RunControl: controller})}, ctx)
 	missingRunID := uuid.NewString()
 	for _, method := range []string{"run.stop", "run.pause", "run.continue"} {
 		resp := rpcCall(t, handler, runControlBody(method, missingRunID, ""))

@@ -175,15 +175,11 @@ func bindAPITestHandlerOriginalProcess(t testing.TB, handler *Handler, ctx conte
 			return method(requestCtx, request)
 		}
 	}
-	process, found := worklifetime.ProcessFromContext(ctx)
-	if !found {
-		t.Fatal("native API handler fixture requires its original process")
+	original, err := startupownership.CaptureMutationAuthority(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	stamp, bound := process.OriginalProcess()
-	if !bound {
-		t.Fatal("native API handler fixture process has no original acquisition")
-	}
-	if err := handler.workOwner.BindOriginalProcess(stamp); err != nil {
+	if err := handler.workOwner.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
 }

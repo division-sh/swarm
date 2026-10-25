@@ -376,7 +376,7 @@ func runForkTestHandler(t *testing.T, availability RunForkAvailabilityStore, exe
 	}
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: availability,
 			RunForkOperations:   operations,
