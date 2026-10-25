@@ -57,7 +57,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 				t.Fatalf("first turn lacks acknowledged native creation: %+v", receipt)
 			}
 			initial := receipt.RunCreation.EventID
-			requireServedFinalInstancesSettled(t, rt.Endpoint, started.RunID, map[string]string{".": "done"})
+			requireServedFinalInstancesSettled(t, rt.Endpoint, started.RunID, map[string]string{started.RunID: "done"})
 			waitServedRunDeliveryQuiescence(t, deliveries, started.RunID)
 			if err := waitExactOriginPublications(t.Context(), publication, initial); err != nil {
 				t.Fatal(err)
@@ -114,7 +114,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 					t.Logf("original-start child failure: %s", diagnosis)
 				}
 			})
-			requireServedFinalInstancesSettled(t, rt.Endpoint, child, map[string]string{".": "done"})
+			requireServedFinalInstancesSettled(t, rt.Endpoint, child, map[string]string{child: "done"})
 			waitServedRunDeliveryQuiescence(t, deliveries, child)
 			_, childHeader := requireReceiverTargetState(t, rt.ReceiverStateReader, child, ".", child, child)
 			if childHeader.CurrentState != "done" {
@@ -217,7 +217,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			if _, err := freshFamily.Execute(freshContext, coldTamper); err == nil || !strings.Contains(err.Error(), "original invocation semantics") {
 				t.Fatalf("reopened process admitted changed operation semantics or hit the wrong refusal: %v", err)
 			}
-			requireServedFinalInstancesSettled(t, rt.Endpoint, persisted.ForkRunID, map[string]string{".": "done"})
+			requireServedFinalInstancesSettled(t, rt.Endpoint, persisted.ForkRunID, map[string]string{persisted.ForkRunID: "done"})
 			_, restoredHeader := requireReceiverTargetState(t, rt.ReceiverStateReader, persisted.ForkRunID, ".", persisted.ForkRunID, persisted.ForkRunID)
 			if !reflect.DeepEqual(restoredHeader, childHeader) {
 				t.Fatalf("cold replay changed the exact completed receiver: before=%+v after=%+v", childHeader, restoredHeader)
