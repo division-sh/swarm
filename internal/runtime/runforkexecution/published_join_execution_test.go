@@ -240,7 +240,8 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 	if committedParent.Plan.Identity != root || committedParent.Plan.Readiness.Identity != root {
 		t.Fatalf("source parent construction lost its complete identity/readiness: %+v", committedParent.Plan)
 	}
-	identity, err := flowidentity.KeyedChild(loaded.Source, committedParent.Plan.Identity, "orders", uuid.NewString())
+	orderKey := uuid.NewString()
+	identity, err := flowidentity.KeyedChild(loaded.Source, committedParent.Plan.Identity, "orders", orderKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,8 +257,20 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 	if !declaration.HasSchema || !authoredSchema || declaration.FlowID != "orders" || declaration.EventKey() == "item.completed" {
 		t.Fatalf("orders creating input lacks its canonical scoped declaration: %+v", declaration)
 	}
+	payload := event.Payload()
+	if !declaration.IsAuthored(loaded.Source) {
+		var fields map[string]any
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatal(err)
+		}
+		fields["order_id"] = orderKey
+		payload, err = json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	event = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(event.ID(), events.EventType(declaration.EventKey()), "source-runtime", "",
-		event.Payload(), 0, root.InstancePath, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+		payload, 0, root.InstancePath, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, event, "orders")
 	if err != nil {
 		t.Fatal(err)

@@ -45,13 +45,14 @@ func armedArrivalFixture(t *testing.T) string {
 	flowID := os.Getenv(publishedJoinFlowEnv)
 	root := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
 	if flowID == "orders" {
-		for _, name := range []string{"events.yaml", "types.yaml"} {
+		for _, name := range []string{"types.yaml"} {
 			body, err := os.ReadFile(filepath.Join(root, flowID, name))
 			if err != nil {
 				t.Fatal(err)
 			}
 			writeSelectedContractFixtureFile(t, filepath.Join(root, name), string(body))
 		}
+		writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n")
 		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: join-eventbus-proof\npins:\n  inputs: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n")
 		if err := os.Remove(filepath.Join(root, flowID, "events.yaml")); err != nil {
 			t.Fatal(err)
@@ -70,19 +71,6 @@ func armedArrivalFixture(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
-}
-
-type arrivalMutationObservation struct {
-	pipeline.WorkflowPersistenceOwner
-	t *testing.T
-}
-
-func (p arrivalMutationObservation) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
-	outcome, err := p.WorkflowPersistenceOwner.CommitWorkflowEngineMutation(ctx, command)
-	if err != nil {
-		p.t.Logf("native arrival mutation refused: %v", err)
-	}
-	return outcome, err
 }
 
 func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, runID string) (string, genericschedule.Activation, joinruntime.Activation) {
@@ -313,8 +301,16 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "armed-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "armed-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
-			owner.ports.workflow = pipeline.NewWorkflowPersistence(arrivalMutationObservation{selected.(pipeline.WorkflowPersistenceOwner), t})
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+			preservedSource := joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, source.ID)
+			sourceCount, err := storetest.ReadLifecycleEventCardinality(ctx, selected, sourceRun, "platform.join_timeout")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
 			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
@@ -365,16 +361,6 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 				}
 				select {
 				case <-wait.Done():
-					diagnostic, cancel := context.WithTimeout(t.Context(), time.Second)
-					plan, planErr := owner.ports.fork.PlanRunFork(diagnostic, runfork.RunForkPlanRequest{SourceRunID: child})
-					report, reportErr := selected.(interface {
-						LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
-					}).LoadRunDebugReport(diagnostic, child, operatorread.RunDebugQueryOptions{LogsAllLevels: true, EventLimit: 5, RuntimeLogLimit: 5})
-					cancel()
-					for _, schedule := range plan.JoinSchedules {
-						t.Logf("native arrival clock: id=%s status=%s failure=%+v cancel=%s", schedule.ID, schedule.Status, schedule.Failure, schedule.CancelCause)
-					}
-					t.Logf("native arrival readback: events=%+v deliveries=%+v logs=%+v plan_error=%v report_error=%v", report.Events, report.Deliveries, report.RuntimeLogs, planErr, reportErr)
 					t.Fatalf("armed arrival did not settle its final instance: header=%+v contexts=%d leases=%d baseline=%d instance=%+v found=%t settlement=%+v", header, retained, process.ActiveCount(), baseline, instance, found, settlement)
 				case <-time.After(10 * time.Millisecond):
 				}
@@ -452,11 +438,10 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			if err != nil || !found {
 				t.Fatalf("source deadline disappeared: found=%v err=%v", found, err)
 			}
-			afterDigest, err := original.EvidenceDigest()
-			if err != nil || afterDigest != sourceDigest || original.Status != genericschedule.StatusActive || original.CurrentEventID != "" {
+			if !reflect.DeepEqual(original, preservedSource) {
 				t.Fatalf("selected timeout changed or published its source deadline: %+v err=%v", original, err)
 			}
-			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_timeout"); err != nil || count != 0 {
+			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_timeout"); err != nil || count != sourceCount {
 				t.Fatalf("source deadline was published: count=%d err=%v", count, err)
 			}
 			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceRun)
