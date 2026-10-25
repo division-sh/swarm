@@ -29,7 +29,6 @@ var manualGoSources = map[string]bool{
 }
 
 var inlineGoSources = []string{
-	"internal/runtime/accprojection/resolver_test.go",
 	"internal/runtime/authoringview/view_test.go",
 	"internal/runtime/bootverify/report_test.go",
 	"internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go",

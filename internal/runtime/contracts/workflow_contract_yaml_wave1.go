@@ -566,19 +566,12 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 	}
 	for name, target := range map[string]*string{
 		"_unused_reason": &field.UnusedReason, "_unused_reader_reason": &field.UnusedReaderReason,
-		"materialize_from": &field.MaterializeFrom,
 	} {
 		if candidate, ok := byName[name]; ok {
 			*target, err = optionalScalarString(candidate.Value, opts.Context+" "+name)
 			if err != nil {
 				return wave1ParsedFieldNode{}, err
 			}
-		}
-	}
-	if candidate, ok := byName["project"]; ok {
-		field.Project, err = decodeProjectionMapValue(candidate.Value)
-		if err != nil {
-			return wave1ParsedFieldNode{}, err
 		}
 	}
 	if opts.AllowUnusedReason && field.UnusedReason != "" && len(field.UnusedReason) < 10 {
@@ -616,12 +609,6 @@ func wave1FieldNodeAllowedKeys(opts wave1FieldNodeOptions) map[string]struct{} {
 	}
 	if opts.AllowUnusedReaderReason {
 		allowed["_unused_reader_reason"] = struct{}{}
-	}
-	if opts.AllowMaterializeFrom {
-		allowed["materialize_from"] = struct{}{}
-	}
-	if opts.AllowProject {
-		allowed["project"] = struct{}{}
 	}
 	if opts.AllowCitation {
 		allowed["citation"] = struct{}{}
@@ -749,20 +736,6 @@ func decodeSchemaRangeRefinementValue(value yamlsource.Value) (SchemaRangeRefine
 	return out, nil
 }
 
-func decodeProjectionMapValue(value yamlsource.Value) (map[string]any, error) {
-	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-		return nil, fmt.Errorf("entity field project must be a mapping")
-	}
-	if err := value.ValidateUniqueMappings(); err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if err := value.Project(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func validateWave1TypeRef(raw, context string) error {
 	raw = strings.TrimSpace(raw)
 	if err := retiredCatalogListSpelling(raw); err != nil {
@@ -838,8 +811,6 @@ type wave1FieldNodeOptions struct {
 	AllowIndexed            bool
 	AllowUnusedReason       bool
 	AllowUnusedReaderReason bool
-	AllowMaterializeFrom    bool
-	AllowProject            bool
 	AllowCitation           bool
 }
 
@@ -854,8 +825,6 @@ type wave1ParsedFieldNode struct {
 	Description        string
 	Refinements        SchemaRefinements
 	Citation           CriteriaCitation
-	MaterializeFrom    string
-	Project            map[string]any
 	UnusedReason       string
 	UnusedReaderReason string
 }

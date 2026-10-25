@@ -106,9 +106,13 @@ func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 		} {
 			t.Run(field.file+"/"+form.name, func(t *testing.T) {
 				root := t.TempDir()
+				declaration := form.declaration
+				if field.file == "state.yaml" && form.name == "explicit_type" {
+					declaration = "{type: [T], indexed: true}"
+				}
 				for file, body := range listRetirementPublicSource() {
 					if file == field.file {
-						body = strings.Replace(body, field.original, field.prefix+strings.ReplaceAll(form.declaration, "T", field.element), 1)
+						body = strings.Replace(body, field.original, field.prefix+strings.ReplaceAll(declaration, "T", field.element), 1)
 					}
 					write2376SourceFile(t, root, file, body)
 				}

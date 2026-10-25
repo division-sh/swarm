@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -585,11 +586,14 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			}
 			id = row.ID
 		} else {
-			row, exists := sourceRows[path]
-			if !exists || row.Type != "state" || len(row.Fields) != 0 {
-				t.Fatalf("optional empty contract lacks its exact initialized field companion: %+v", sourceRows)
+			if _, exists := sourceRows[path]; exists {
+				t.Fatalf("fieldless optional receiver acquired a field companion: %+v", sourceRows)
 			}
-			id = row.ID
+			header := requireReceiverConstructionStorage(t, rt.ReceiverStateReader, seed.RunID, path, flowidentity.EntityID(path), "")
+			if header.Template != path || header.FieldRows != 0 || header.EntityTypePresent {
+				t.Fatalf("fieldless optional receiver lost its exact header: %+v", header)
+			}
+			id = header.EntityID
 		}
 		for _, occurrence := range frontiers {
 			sourceRoutes[path] = requireEffect(t, rt, seed.RunID, occurrence, path, receiver.Path, kind, id)

@@ -284,7 +284,7 @@ dispatcher:
     scan.corpus_dispatch:
       emit:
         event: market_research.scan_assigned
-        from: entity
+        from: state
         fields:
           geography: payload.geography
 `)

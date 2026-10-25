@@ -37,9 +37,6 @@ func (pc *PipelineCoordinator) ApplyEntityFieldMutation(ctx context.Context, com
 	if command.Writer.Type != "agent" || command.Writer.ID == "" || command.Writer.HandlerStep != "save_entity_field" {
 		return EntityFieldMutationResult{}, fmt.Errorf("entity field mutation requires exact agent attribution")
 	}
-	if command.Mutation.ProjectionSource != "" {
-		return EntityFieldMutationResult{}, fmt.Errorf("agent mutation cannot claim materialized projection authority")
-	}
 	if err := validateAgentEntityFieldOperation(command.Mutation); err != nil {
 		return EntityFieldMutationResult{}, err
 	}

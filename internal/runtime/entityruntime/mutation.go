@@ -13,14 +13,13 @@ import (
 // An empty Operation is field assignment; named operations are the authored
 // collection operations or clear. These are not additional agent tools.
 type Mutation struct {
-	Operation        string
-	Target           string
-	Value            any
-	Key              any
-	HasKey           bool
-	Index            any
-	HasIndex         bool
-	ProjectionSource string
+	Operation string
+	Target    string
+	Value     any
+	Key       any
+	HasKey    bool
+	Index     any
+	HasIndex  bool
 }
 
 const MutationClear = "clear"
@@ -45,9 +44,6 @@ func ValidateClearTarget(contract Contract, target string) error {
 	decl, err := FieldDecl(contract, root)
 	if err != nil {
 		return err
-	}
-	if decl.MaterializeFrom != "" {
-		return fmt.Errorf("field %s is owned by materialize_from %q", root, decl.MaterializeFrom)
 	}
 	if !field.IsOptional {
 		return fmt.Errorf("cannot clear bare entity field %s", path)
@@ -185,12 +181,6 @@ func (p *MutationPlan) apply(next map[string]any, op Mutation) (string, error) {
 	decl, err := FieldDecl(p.contract, root)
 	if err != nil {
 		return "", err
-	}
-	if decl.MaterializeFrom != op.ProjectionSource {
-		return "", fmt.Errorf("field %s is owned by materialize_from %q, not %q", root, decl.MaterializeFrom, op.ProjectionSource)
-	}
-	if op.ProjectionSource != "" && (op.Operation != "" || path != root) {
-		return "", fmt.Errorf("projection must replace its declared root field %s", root)
 	}
 	if op.Operation == "" || op.Operation == MutationClear {
 		if op.HasKey || op.HasIndex {
