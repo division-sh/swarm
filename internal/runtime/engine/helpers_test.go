@@ -16,7 +16,7 @@ import (
 func TestResolveRefRequiresExplicitScope(t *testing.T) {
 	base := BaseContext{
 		Entity:         values.Wrap(map[string]any{"status": "ready"}),
-		PlatformEntity: values.Wrap(map[string]any{"current_state": "reviewing"}),
+		PlatformEntity: values.Wrap(map[string]any{"stage": "reviewing"}),
 		Metadata:       values.Wrap(map[string]any{"status": "ready"}),
 		Payload:        values.Wrap(map[string]any{"score": 7, "nested": map[string]any{"value": "x"}}),
 		Policy:         values.Wrap(map[string]any{"mode": "strict"}),
@@ -53,7 +53,7 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 		{Name: "score", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
 	}}
 	base := BaseContext{
-		PlatformEntity: values.Wrap(map[string]any{"current_state": "researching"}),
+		PlatformEntity: values.Wrap(map[string]any{"stage": "researching"}),
 		Payload:        values.Wrap(map[string]any{"score": 9}),
 		Computed:       values.Wrap(map[string]any{"template_path": "templates/service/go"}),
 	}

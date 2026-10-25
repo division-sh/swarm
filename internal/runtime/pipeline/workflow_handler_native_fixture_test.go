@@ -128,7 +128,7 @@ func nativeHandlerEngineExistingEntityWithModuleForTest(t *testing.T, open func(
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 		InstanceID: run, StorageRef: run, EntityID: entityID, WorkflowName: ".",
 		WorkflowVersion: pc.SemanticSource().WorkflowVersion(), CurrentState: "queued",
-		Fields: cloneMap(fields), EntityType: "test_entity",
+		Fields: cloneMap(fields), EntityType: "state",
 	})); err != nil {
 		t.Fatal(err)
 	}

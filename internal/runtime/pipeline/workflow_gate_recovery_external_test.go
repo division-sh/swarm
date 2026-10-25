@@ -455,7 +455,7 @@ func testApprovedActivityFrozenInputBothStores(t *testing.T, method, terminalOut
 					Mode:           bundle.RootSchema.EffectiveMode(),
 					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 					Fields:     map[string]any{},
-					EntityType: "test_entity",
+					EntityType: "state",
 				}, construction430At)
 				if err != nil {
 					t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -914,7 +914,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 					Mode:           bundle.RootSchema.EffectiveMode(),
 					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 					Fields:     map[string]any{},
-					EntityType: "test_entity",
+					EntityType: "state",
 				}, construction852At)
 				if err != nil {
 					t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1203,7 +1203,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", EnteredStageAt: at,
 			Fields:     map[string]any{},
-			EntityType: "test_entity",
+			EntityType: "state",
 		}, construction1118At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1346,7 +1346,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", StageDefined: true, EnteredStageAt: enteredAt,
 			Fields:     map[string]any{},
-			EntityType: "test_entity",
+			EntityType: "state",
 		}, construction1236At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -1467,7 +1467,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
 			Fields:     map[string]any{},
-			EntityType: "test_entity",
+			EntityType: "state",
 		}, construction1336At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)

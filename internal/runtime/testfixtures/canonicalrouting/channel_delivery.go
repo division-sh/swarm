@@ -154,6 +154,6 @@ ingress:
   alias: objects
   providers: [{provider: mock, signing_secret: webhook_signing.mock}]
 `)
-	writeClosedVariantFile(t, root, "ingress/state.yaml", "")
+	removeClosedVariantFiles(t, root, "ingress/state.yaml")
 	return root
 }

@@ -12,7 +12,7 @@ func CopyWorkflowStateDiagnostic(t testing.TB, stage string) string {
 	}
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", "name: workflow-state-diagnostic\nstages:\n  '"+stage+"': {}\n  done: {final: true}\npins:\n  inputs: [work.completed]\n")
-	writeClosedVariantFile(t, root, "state.yaml", "")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "events.yaml", "work.completed:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "controller:\n  work.completed:\n    advances_to: done\n")
 	return root
@@ -113,7 +113,7 @@ func CopyReceiverMixedPolicies(t testing.TB, optionalFirst bool) string {
 	}
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), creating, edges)
 	writeClosedVariantFile(t, root, optionalScope+"/schema.yaml", "name: "+optionalScope+"\ninputs: [work.completed]\n")
-	writeClosedVariantFile(t, root, optionalScope+"/state.yaml", "")
+	removeClosedVariantFiles(t, root, optionalScope+"/state.yaml")
 	writeClosedVariantFile(t, root, optionalScope+"/nodes.yaml", "collector:\n  work.completed: {}\n")
 	return root
 }

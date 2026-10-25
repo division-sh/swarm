@@ -122,7 +122,7 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			now := time.Now().UTC()
 			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-				CurrentState: "dispatching", EntityType: "join_state", Fields: map[string]any{"expected": []any{"a", "b"}},
+				CurrentState: "dispatching", EntityType: "state", Fields: map[string]any{"expected": []any{"a", "b"}},
 			}, now)
 			load := func() runtimepipeline.WorkflowInstance {
 				t.Helper()

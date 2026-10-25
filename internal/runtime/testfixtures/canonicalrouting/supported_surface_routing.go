@@ -86,7 +86,7 @@ inputs:
       output: payload.result
       on_complete: {advances_to: ready}
       deadline: {after: ` + timeout + `, from: stage_entry}
-        on_deadline: {advances_to: attention}
+      on_deadline: {advances_to: attention}
 `
 
 	switch flowID {
@@ -100,7 +100,7 @@ inputs:
 		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
 		removeClosedVariantFiles(t, root, "state.yaml", "events.yaml", "nodes.yaml")
 		writeLegacyInstanceFlow(t, root, "orders", "instance: order_id\n"+joinSchema,
-			joinEvents, joinEntities+"  order_id: {type: text, _unused_reason: receiver instance identity}\n", joinNodes)
+			joinEvents, joinEntities+"order_id: text\n", joinNodes)
 		writeClosedVariantFile(t, root, "orders/types.yaml", joinTypes)
 	default:
 		t.Fatalf("unsupported exact join flow %q", flowID)
@@ -124,7 +124,7 @@ inputs:
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel:
 `)
-	writeClosedVariantFile(t, root, "state.yaml", "")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   timer.cancel:
     advances_to: done
@@ -148,7 +148,7 @@ connect:
     from: producer
     to: .
 `)
-	writeClosedVariantFile(t, root, "state.yaml", "")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
   deploy.done:
     guard: instance.id != ""

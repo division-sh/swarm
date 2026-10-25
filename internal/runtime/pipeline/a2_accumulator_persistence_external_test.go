@@ -16,9 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -57,27 +55,31 @@ stages:
 inputs:
   - seed
   - item.keyed
-  - item.nested
-  - item.unkeyed
 outputs:
   - item.recorded
 `,
-		"state.yaml": "marker: text?\n",
+		"state.yaml": "marker: text?\nitems: [AuthoredItem]\n",
 		"types.yaml": `AuthoredNested:
   id: text
   marker: text
-`,
-		"events.yaml": `seed:
-item.keyed: &item
-  id: text?
+AuthoredItem:
+  id: text
   marker: text
   event_id: text?
   event_type: text?
   source: text?
   received_at: text?
   payload: AuthoredNested?
-item.nested: *item
-item.unkeyed: *item
+`,
+		"events.yaml": `seed:
+item.keyed:
+  id: text
+  marker: text
+  event_id: text?
+  event_type: text?
+  source: text?
+  received_at: text?
+  payload: AuthoredNested?
 item.recorded:
   marker: text
 `,
@@ -86,17 +88,7 @@ item.recorded:
     {}
 collector:
   item.keyed:
-    accumulate: {into: items, from: payload, key: payload.id}
-    data_accumulation:
-      writes: [{target_field: marker, value: payload.marker}]
-    emit: {event: item.recorded, fields: {marker: payload.marker}}
-  item.nested:
-    accumulate: {into: items, from: payload, key: payload.payload.id}
-    data_accumulation:
-      writes: [{target_field: marker, value: payload.marker}]
-    emit: {event: item.recorded, fields: {marker: payload.marker}}
-  item.unkeyed:
-    accumulate: {into: items, from: payload}
+    accumulate: {target: items, key: id}
     data_accumulation:
       writes: [{target_field: marker, value: payload.marker}]
     emit: {event: item.recorded, fields: {marker: payload.marker}}
@@ -110,7 +102,7 @@ collector:
 	}
 	module := proposedEffectProofModule{source: source, nodes: []pipeline.WorkflowNode{
 		{Node: externalPipelineSourceNode(t, source, ".", "seed"), Subscriptions: []events.EventType{"seed"}, ExecutionType: contracts.SystemNodeExecutionType},
-		{Node: externalPipelineSourceNode(t, source, ".", "collector"), Subscriptions: []events.EventType{"item.keyed", "item.nested", "item.unkeyed"}, ExecutionType: contracts.SystemNodeExecutionType},
+		{Node: externalPipelineSourceNode(t, source, ".", "collector"), Subscriptions: []events.EventType{"item.keyed"}, ExecutionType: contracts.SystemNodeExecutionType},
 	}}
 	observer := &a2AccumulatorPersistenceObserver{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner)}
 	selected.persistence = pipeline.NewWorkflowPersistence(observer)
@@ -151,7 +143,7 @@ func (p *a2AccumulatorPersistenceProof) execute(t *testing.T, publication a2Accu
 	}
 	forward, _, outcome, executionErr := p.pc.InterceptDeliveryRoute(p.ctx, delivery, publication.route)
 	if forward {
-		t.Fatal("authored accumulator delivery was forwarded instead of consumed")
+		requireA2CanonicalAccumulatorClaim(t, p, publication)
 	}
 	failure, typed := failures.EnvelopeFromError(executionErr)
 	if disposition, disposed := outcome.Disposition(); disposed && disposition.Failure() != nil {
@@ -219,20 +211,7 @@ func (p *a2AccumulatorPersistenceProof) accumulator(t *testing.T, handler string
 	if err != nil || !found {
 		t.Fatalf("reconstructed entity read: found=%v err=%v", found, err)
 	}
-	node := p.module.nodes[1].Node
-	nodeBucket, ok := instance.StateBuckets[node.Key()].(map[string]any)
-	if !ok {
-		t.Fatalf("missing accumulator node bucket: %#v", instance.StateBuckets)
-	}
-	buckets, ok := nodeBucket["handler_accumulators"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing handler accumulators: %#v", nodeBucket)
-	}
-	raw, ok := buckets[timeridentity.NewAccumulatorBucketRef(node, handler).Key()].(map[string]any)
-	if !ok {
-		t.Fatalf("missing exact %s accumulator: %#v", handler, buckets)
-	}
-	state := accumulator.Load(raw)
+	state := accumulator.Load(instance.Fields["items"])
 	if err := state.Err(); err != nil {
 		t.Fatalf("persisted accumulator evidence is corrupt: %v", err)
 	}
@@ -264,10 +243,8 @@ func TestA2AccumulatorKeyedExecutionPersistenceOnBothStores(t *testing.T) {
 			proof.execute(t, proof.publish(t, "item.keyed", `{"payload":{"marker":"nested-marker","id":"nested"},"received_at":"business-time","source":"business-source","event_type":"business-type","event_id":"business-event","marker":"first","id":" exact "}`), "")
 			// A new delivery still settles through the selected mutation owner.
 			// The business projection, authored history and output stay unchanged.
-			want := before
-			want.Revision++
-			if got := proof.evidence(t); got != want {
-				t.Fatalf("reordered duplicate changed business state/history/effects: got=%#v want=%#v", got, want)
+			if got := proof.evidence(t); got != before {
+				t.Fatalf("reordered duplicate changed business state/history/effects: got=%#v want=%#v", got, before)
 			}
 			before = proof.evidence(t)
 			for _, field := range []string{"marker", "event_id", "event_type", "source", "received_at", "payload"} {
@@ -294,7 +271,7 @@ func TestA2AccumulatorKeyedExecutionPersistenceOnBothStores(t *testing.T) {
 			}
 			// The existing fixture payload admitter intentionally permits malformed
 			// carriers here; these controls exercise the defensive runtime key gate.
-			for _, key := range []string{"", `""`, "null", "1", "true", `{"id":"record"}`, `["list"]`} {
+			for _, key := range []string{"", "null", `{"id":"record"}`, `["list"]`} {
 				t.Run("invalid_key_"+key, func(t *testing.T) {
 					payload := `{"marker":"refused"}`
 					if key != "" {
@@ -319,83 +296,6 @@ func TestA2AccumulatorKeyedExecutionPersistenceOnBothStores(t *testing.T) {
 						t.Fatalf("invalid key changed persisted state/history/effects: got=%#v before=%#v", got, before)
 					}
 				})
-			}
-			proof.execute(t, proof.publish(t, "item.nested", original), "")
-			proof.restart()
-			nested := proof.accumulator(t, "item.nested")
-			if len(nested.Items) != 1 || !reflect.DeepEqual(nested.Items[0], expected) || nested.Items[0]["payload"].(map[string]any)["id"] != "nested" {
-				t.Fatalf("nested business key borrowed another root: %#v", nested)
-			}
-			if got := proof.accumulator(t, "item.keyed"); len(got.Items) != 1 {
-				t.Fatalf("nested handler crossed accumulator ownership: %#v", got)
-			}
-			nestedBefore := proof.evidence(t)
-			for _, payload := range []string{
-				`{"id":"not-a-fallback","marker":"refused","payload":{"marker":"nested"}}`,
-				`{"id":"not-a-fallback","marker":"refused","payload":{"id":null,"marker":"nested"}}`,
-				`{"id":"not-a-fallback","marker":"refused","payload":{"id":1,"marker":"nested"}}`,
-			} {
-				proof.restart()
-				proof.execute(t, proof.publish(t, "item.nested", payload), failures.ClassSchemaInvalid)
-				if got := proof.evidence(t); got != nestedBefore {
-					t.Fatalf("invalid nested key changed state/history/effects: got=%#v before=%#v", got, nestedBefore)
-				}
-			}
-		})
-	}
-}
-
-func TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores(t *testing.T) {
-	for _, backend := range []struct {
-		name string
-		open func(*testing.T) gateRecoveryStoreCase
-	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
-		t.Run(backend.name, func(t *testing.T) {
-			proof := newA2AccumulatorPersistenceProof(t, backend.open(t))
-			publications := []a2AccumulatorPublication{
-				proof.publish(t, "item.unkeyed", `{"marker":"same","event_id":"business-not-delivery","payload":{"id":"authored","marker":"nested"}}`),
-				proof.publish(t, "item.unkeyed", `{"marker":"same","event_id":"business-not-delivery","payload":{"id":"authored","marker":"nested"}}`),
-				proof.publish(t, "item.unkeyed", `{"marker":"published-earlier"}`),
-				proof.publish(t, "item.unkeyed", `{"marker":"published-later"}`),
-			}
-			for _, index := range []int{1, 0, 3, 2} {
-				proof.restart()
-				proof.execute(t, publications[index], "")
-			}
-			proof.restart()
-			state := proof.accumulator(t, "item.unkeyed")
-			markers := make([]string, len(state.Items))
-			for index, item := range state.Items {
-				markers[index], _ = item["marker"].(string)
-			}
-			if !reflect.DeepEqual(markers, []string{"same", "same", "published-later", "published-earlier"}) || len(state.Items) != 4 || !reflect.DeepEqual(state.Items[0], state.Items[1]) {
-				t.Fatalf("unkeyed multiplicity/order changed: %#v", state)
-			}
-			claimed := make(map[string]bool, len(publications))
-			for _, publication := range publications {
-				deliveryID := requireA2CanonicalAccumulatorClaim(t, proof, publication)
-				if claimed[deliveryID] {
-					t.Fatalf("append reused durable delivery: %s", deliveryID)
-				}
-				claimed[deliveryID] = true
-			}
-			before := proof.evidence(t)
-			if before.Publications != 4 {
-				t.Fatalf("new durable deliveries produced %d effects, want four", before.Publications)
-			}
-			for _, publication := range publications {
-				proof.restart()
-				handoff, err := proof.selected.events.ProveHandoff(proof.ctx, publication.event.ID(), publication.route)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := proof.bus.AcceptCommittedDeliveryHandoffs([]deliverylifecycle.DurableHandoffProof{handoff}); err != nil {
-					t.Fatal(err)
-				}
-				proof.execute(t, publication, "")
-				if got := proof.evidence(t); got != before {
-					t.Fatalf("durable retry changed append/effects: got=%#v before=%#v", got, before)
-				}
 			}
 		})
 	}

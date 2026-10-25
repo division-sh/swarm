@@ -37,7 +37,7 @@ func (composedConstructorSchemaSource) ResolveFlowEventStructuralType(string, st
 }
 
 func TestFlowConstructorConsumesEffectiveSchema(t *testing.T) {
-	source := composedConstructorSchemaSource{constructorFixture(t, "  brief: text\n", "  brief: text\n")}
+	source := composedConstructorSchemaSource{constructorFixture(t, "brief: text\n", "  brief: text\n")}
 	constructor, err := pipeline.CompileFlowConstructor(source, "consumer", "deploy.done")
 	if err != nil || !constructor.Eligible() {
 		t.Fatalf("effective-schema constructor: %+v %v", constructor.Refusals(), err)
@@ -54,7 +54,7 @@ func TestFlowConstructorCatalogSupplyAdmission(t *testing.T) {
 		valid                           bool
 	}{
 		{"map", "", "map[text]text", "map[text]text", true},
-		{"nested map", "", "{type: \"[map[text]text]\"}", "{type: \"[map[text]text]\"}", true},
+		{"nested map", "", "{type: '[map[text]text]', indexed: true}", "{type: \"[map[text]text]\"}", true},
 		{"map value mismatch", "", "map[text]integer", "map[text]text", false},
 		{"enum", "Mode: [\"low\", \"high\"]\n", "Mode", "Mode", true},
 		{"unbounded enum supply", "Mode: [\"low\", \"high\"]\n", "Mode", "text", false},
@@ -63,7 +63,7 @@ func TestFlowConstructorCatalogSupplyAdmission(t *testing.T) {
 		{"record", "Brief:\n  detail: text\n", "Brief", "Brief", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := constructorCatalogFixture(t, "  brief: "+tc.target+"\n", "  brief: "+tc.supplied+"\n", "", tc.catalog)
+			source := constructorCatalogFixture(t, "brief: "+tc.target+"\n", "  brief: "+tc.supplied+"\n", "", tc.catalog)
 			_, err := engine.BuildConstructorAssignmentAnalysis(source, "consumer", "deploy.done")
 			if (err == nil) != tc.valid {
 				t.Fatalf("supply %s -> %s: valid=%v err=%v", tc.supplied, tc.target, tc.valid, err)
@@ -85,7 +85,7 @@ func TestFlowConstructorEligibilityUsesAssignmentChecker(t *testing.T) {
 		{"explicit optional presence", "  brief: text?\n", "      guard: >-\n        !has(state.brief) || state.brief != \"\"\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := constructorReaderFixture(t, "  brief: text\n  copy: text\n", tc.payload, tc.handler)
+			source := constructorReaderFixture(t, "brief: text\ncopy: text\n", tc.payload, tc.handler)
 			constructor, err := pipeline.CompileFlowConstructor(source, "consumer", "deploy.done")
 			if err != nil {
 				t.Fatal(err)
@@ -107,7 +107,7 @@ func TestFlowConstructorSuppliedInitialFacts(t *testing.T) {
 		{"absent", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := constructorFixture(t, "  brief: text\n  count: {type: integer, initial: 0}\n", tc.payload)
+			source := constructorFixture(t, "brief: text\ncount: 0\n", tc.payload)
 			analysis, err := engine.BuildConstructorAssignmentAnalysis(source, "consumer", "deploy.done")
 			if err != nil {
 				t.Fatal(err)
@@ -127,12 +127,8 @@ func TestFlowConstructorProjectionAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		name, fields, payload, refusal string
 	}{
-		{"internal collision", "  count: {type: integer, initial: 0}\n", "  count: integer\n", "collides with internal"},
-		{"incompatible", "  brief: text\n", "  brief: integer\n", "incompatible"},
-		{"unconstrained to pattern", "  brief: {type: text, pattern: '^[A-Z]+$'}\n", "  brief: text\n", "incompatible"},
-		{"matching pattern", "  brief: {type: text, pattern: '^[A-Z]+$'}\n", "  brief: {type: text, pattern: '^[A-Z]+$'}\n", ""},
-		{"weaker length", "  brief: {type: text, length: {min: 4}}\n", "  brief: {type: text, length: {min: 2}}\n", "incompatible"},
-		{"stronger length", "  brief: {type: text, length: {min: 2}}\n", "  brief: {type: text, length: {min: 4}}\n", ""},
+		{"internal collision", "count: 0\n", "  count: integer\n", "collides with internal"},
+		{"incompatible", "brief: text\n", "  brief: integer\n", "incompatible"},
 		{"message only", "", "  message: text\n", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,7 +146,7 @@ func TestFlowConstructorProjectionAdmission(t *testing.T) {
 }
 
 func TestFlowConstructorRuntimeProjection(t *testing.T) {
-	source := constructorFixture(t, "  brief: text\n  note: text?\n  count: {type: integer, initial: 0}\n", "  brief: text\n  message: text?\n")
+	source := constructorFixture(t, "brief: text\nnote: text?\ncount: 0\n", "  brief: text\n  message: text?\n")
 	constructor, err := pipeline.CompileFlowConstructor(source, "consumer", "deploy.done")
 	if err != nil {
 		t.Fatal(err)
@@ -199,10 +195,10 @@ func TestFlowConstructorVerificationConsumesContract(t *testing.T) {
 		name, fields, payload, handler string
 		valid                          bool
 	}{
-		{"supplied initial read", "  brief: text\n", "  brief: text\n", "      guard: state.brief != ''\n", true},
-		{"no eligible input", "  brief: text\n", "", "      guard: state.brief != ''\n", false},
-		{"internal collision", "  count: {type: integer, initial: 0}\n", "  count: integer\n", "", false},
-		{"incompatible supply", "  brief: text\n", "  brief: integer\n", "", false},
+		{"supplied initial read", "brief: text\n", "  brief: text\n", "      guard: state.brief != ''\n", true},
+		{"no eligible input", "brief: text\n", "", "      guard: state.brief != ''\n", false},
+		{"internal collision", "count: 0\n", "  count: integer\n", "", false},
+		{"incompatible supply", "brief: text\n", "  brief: integer\n", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := constructorReaderFixture(t, tc.fields, tc.payload, tc.handler)
@@ -271,9 +267,9 @@ func TestFlowConstructorCreationEdgesConsumeConnectionPolicy(t *testing.T) {
 
 func TestFlowConstructorReconstructedSourceParity(t *testing.T) {
 	for _, tc := range []struct{ name, fields, payload string }{
-		{"required", "  brief: text\n", "  brief: text\n"},
-		{"optional", "  brief: text\n", "  brief: text?\n"},
-		{"collision", "  count: {type: integer, initial: 0}\n", "  count: integer\n"},
+		{"required", "brief: text\n", "  brief: text\n"},
+		{"optional", "brief: text\n", "  brief: text?\n"},
+		{"collision", "count: 0\n", "  count: integer\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := constructorFixture(t, tc.fields, tc.payload)

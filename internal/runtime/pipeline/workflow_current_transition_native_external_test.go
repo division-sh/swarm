@@ -60,7 +60,7 @@ func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *test
 			constructionCopies := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 			plan := commitA2FixtureConstruction(t, coordinator, selected, ctx, owner, pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
-				EntityType: "test_entity", CurrentState: "left", Fields: map[string]any{"marker": "initial"},
+				EntityType: "state", CurrentState: "left", Fields: map[string]any{"marker": "initial"},
 			}, at)
 			currentTransitionCopyReceipt(t, constructionCopies, "construction")
 			admitAttachment, _ := newTimerReplayAttachmentOwner(t, ctx, selected)

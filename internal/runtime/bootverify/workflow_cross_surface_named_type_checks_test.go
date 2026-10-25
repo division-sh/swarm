@@ -22,7 +22,7 @@ func TestRun_ReportsCrossSurfaceExactDuplicateShapesAsLintEvidence(t *testing.T)
 	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "event proposal.created payload") {
 		t.Fatalf("expected event payload surface in lint evidence, got %#v", lint)
 	}
-	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "entity root.proposal") {
+	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "entity root.state") {
 		t.Fatalf("expected entity contract surface in lint evidence, got %#v", lint)
 	}
 	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "policy flow . permission_bundles.coordinator") {

@@ -24,7 +24,7 @@ func constructNativeQueryEntitiesGuardInstanceForTest(t *testing.T, fixture *Pip
 		StageDefined:    true,
 		CurrentState:    "queued",
 		Fields:          map[string]any{"validation_id": entityID, "request_id": requestID},
-		EntityType:      "validation_request",
+		EntityType:      "state",
 	})
 	instance.InitialFieldValues = cloneStringAnyMap(instance.Fields)
 	if err := fixture.Construct(ctx, instance); err != nil {

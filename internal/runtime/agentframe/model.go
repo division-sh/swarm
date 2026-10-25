@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -590,24 +589,6 @@ func projectCapabilityPlan(surface managedcapabilities.Surface) (CapabilityPlan,
 		})
 	}
 	return CapabilityPlan{SurfaceID: surface.ID, PlanFingerprint: fingerprint, Candidates: candidates}, nil
-}
-
-func canonicalStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	slices.Sort(out)
-	return out
 }
 
 func (f Frame) canonicalContent() ([]byte, error) {

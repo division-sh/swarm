@@ -20,17 +20,17 @@ func TestToolDefinitionsForActor_DeriveRoleScopedEntitySchemasFromActorContract(
 		Role:  "analyzer",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "review_subject", `metadata:
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `metadata:
   region: text
   score_band: score_band
 score_band: ["low", "medium", "high"]
 `, `
-review_subject:
-  status: text
-  priority: integer
-  active: boolean
-  metadata: metadata
-`)
+status: text
+priority: integer
+active: boolean
+metadata: metadata
+`,
+	)
 
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		WorkflowSource: semanticview.Wrap(bundle),
@@ -60,7 +60,7 @@ review_subject:
 		}
 	}
 
-	readSchema := defByName["read_review_subject"]
+	readSchema := defByName["read_state"]
 	if readSchema == nil {
 		t.Fatalf("expected read_review_subject definition, got %v", toolDefinitionNames(defs))
 	}
@@ -69,7 +69,7 @@ review_subject:
 		t.Fatalf("read_review_subject should not accept selector/entity_id input, got schema %#v", readSchema)
 	}
 
-	metadataSchema := defByName["read_review_subject_metadata"]
+	metadataSchema := defByName["read_state_metadata"]
 	if metadataSchema == nil {
 		t.Fatalf("expected read_review_subject_metadata definition, got %v", toolDefinitionNames(defs))
 	}
@@ -111,8 +111,13 @@ func TestToolDefinitionsForActor_ExcludeForeignReadTargets(t *testing.T) {
 			t.Fatalf("legacy query tool %q remained visible in %#v", legacy, toolDefinitionNames(defs))
 		}
 	}
-	if _, ok := defByName["read_campaign"]; !ok {
-		t.Fatalf("expected read_campaign role-scoped definition, got %#v", toolDefinitionNames(defs))
+	if _, ok := defByName["read_state"]; !ok {
+		t.Fatalf("expected read_state role-scoped definition, got %#v", toolDefinitionNames(defs))
+	}
+	for _, foreign := range []string{"read_state_signal_strength", "read_state_processed"} {
+		if _, ok := defByName[foreign]; ok {
+			t.Fatalf("foreign field tool %s leaked into owning flow: %v", foreign, toolDefinitionNames(defs))
+		}
 	}
 }
 
@@ -174,9 +179,9 @@ get_entity:
 		},
 		"validation": {
 			EntitiesYAML: `
-validation_case:
-  status: text
+status: text
 `,
+
 			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "validator", Role: "validator"}),
 		},
 	})

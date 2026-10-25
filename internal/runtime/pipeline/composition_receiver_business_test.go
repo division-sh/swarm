@@ -49,7 +49,7 @@ func VerifyCompositionReceiverInitializationAndRepeatedBusinessWritesBothStoresF
 	at := time.Now().UTC()
 	if err := fixture.Construct(ctx, WorkflowInstance{
 		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: testPipelineRunID,
-		EntityType: "budget", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+		EntityType: "state", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 		CurrentState: "active", StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
 	}); err != nil {
 		t.Fatal(err)

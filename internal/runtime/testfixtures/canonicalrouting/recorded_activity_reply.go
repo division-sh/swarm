@@ -18,7 +18,7 @@ stages:
 inputs: [provider.requested]
 outputs: [provider.replied]
 `)
-	writeClosedVariantFile(t, root, "provider/state.yaml", "")
+	removeClosedVariantFiles(t, root, "provider/state.yaml")
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
   provider.requested:
     advances_to: working

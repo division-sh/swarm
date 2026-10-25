@@ -45,7 +45,7 @@ func VerifyNativeExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandlerForTest(t *tes
 				WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState:    "waiting",
 				Fields:          map[string]any{},
-				EntityType:      "test_entity",
+				EntityType:      "state",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -129,7 +129,7 @@ func VerifyNativeExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransition
 				WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState:    "ready",
 				Fields:          map[string]any{},
-				EntityType:      "test_entity",
+				EntityType:      "state",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -270,7 +270,7 @@ func VerifyNativePipelineIntercept_HandlesChildFlowOutputForRootListenerForTest(
 				WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState:    "ready",
 				Fields:          map[string]any{},
-				EntityType:      "test_entity",
+				EntityType:      "state",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}

@@ -74,7 +74,7 @@ func TestA2UntilAndFinalArrivalHaveOneDurableCloseWinnerOnBothStores(t *testing.
 			owner := testRunScopedWorkflowInstanceForRun(runID, runID)
 			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-				CurrentState: "awaiting", EntityType: "count_state", Fields: map[string]any{
+				CurrentState: "awaiting", EntityType: "state", Fields: map[string]any{
 					"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": "",
 				},
 			}, time.Now().UTC())

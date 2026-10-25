@@ -90,7 +90,7 @@ func newCompiledLoopEvidenceHarness(t *testing.T, storeCase workflowJoinStoreCas
 	now := canonicalWorkflowTimerTime(time.Now().UTC())
 	instance := materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
-		CurrentState: "waiting", CreatedAt: now, EnteredStageAt: now, EntityType: "test_entity", Fields: map[string]any{},
+		CurrentState: "waiting", CreatedAt: now, EnteredStageAt: now, EntityType: "state", Fields: map[string]any{},
 	})
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatal(err)

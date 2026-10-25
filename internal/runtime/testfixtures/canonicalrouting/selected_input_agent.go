@@ -84,7 +84,7 @@ func copySelectedNestedConstructedAgentInput(t testing.TB, fields, observer bool
 			if fields {
 				writeClosedVariantFile(t, root, filepath.Join(path, "state.yaml"), "value: \"retained\"\n")
 			} else {
-				writeClosedVariantFile(t, root, filepath.Join(path, "state.yaml"), "")
+				removeClosedVariantFiles(t, root, filepath.Join(path, "state.yaml"))
 			}
 		}
 	}

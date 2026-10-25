@@ -243,18 +243,32 @@ func wave1DeclaredEntityContracts(source semanticview.Source) []wave1EntityContr
 
 func wave1EntityWriterCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
 	out := map[string]map[string]struct{}{}
-	for _, target := range wave1AllEntityWriteTargets(source) {
-		if !target.Entity || wave1SpecialClearTarget(target.Field) {
-			continue
-		}
-		_, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(source, target)
+	for _, record := range wave1ScopedNodeRecords(source) {
+		node, err := record.Identity()
 		if err != nil {
 			continue
 		}
-		if out[ownerFlowID] == nil {
-			out[ownerFlowID] = map[string]struct{}{}
+		if out[node.FlowPath()] == nil {
+			out[node.FlowPath()] = map[string]struct{}{}
 		}
-		out[ownerFlowID][rootField] = struct{}{}
+		for event, handler := range record.Entry.EventHandlers {
+			if handler.Accumulate != nil {
+				out[node.FlowPath()][strings.TrimSpace(handler.Accumulate.Target)] = struct{}{}
+			}
+			for _, target := range wave1HandlerWriteTargets(node, strings.TrimSpace(event), handler) {
+				if !target.Entity || wave1SpecialClearTarget(target.Field) {
+					continue
+				}
+				_, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(source, target)
+				if err != nil {
+					continue
+				}
+				if out[ownerFlowID] == nil {
+					out[ownerFlowID] = map[string]struct{}{}
+				}
+				out[ownerFlowID][rootField] = struct{}{}
+			}
+		}
 	}
 	for flowID, fields := range wave1AgentExplicitEntityWriteCoverageByFlow(source) {
 		if out[flowID] == nil {

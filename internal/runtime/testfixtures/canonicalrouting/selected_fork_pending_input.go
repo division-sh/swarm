@@ -77,7 +77,7 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 	}
 	if variant == PendingInputMixedCompletion {
 		writeClosedVariantFile(t, root, "a_finished/schema.yaml", "name: finished\nstages:\n  ready: {}\n  done: {final: true}\ninputs:\n  - work.seeded\n  - work.first\n")
-		writeClosedVariantFile(t, root, "a_finished/state.yaml", "")
+		removeClosedVariantFiles(t, root, "a_finished/state.yaml")
 		writeClosedVariantFile(t, root, "a_finished/nodes.yaml", "controller:\n  work.seeded:\n    advances_to: ready\n  work.first:\n    advances_to: done\n")
 	}
 	if variant == PendingInputConnectedSiblings {

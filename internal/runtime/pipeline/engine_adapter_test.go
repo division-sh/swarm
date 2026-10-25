@@ -105,13 +105,13 @@ func applyMaterializedEngineStateMutationForTest(
 }
 
 func TestApplyEngineStateMutationUsesOnlyCanonicalEntityFields(t *testing.T) {
-	source := testRootEntityContractSource("root", "test_entity")
+	source := testRootEntityContractSource("root", "state")
 	bundle, _ := semanticview.Bundle(source)
 	bundle.RootEntities["state"].Fields["research_context"] = runtimecontracts.EntityFieldDecl{Type: "json"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"research_context": map[string]any{"summary": "done"}},
 		StateBuckets: map[string]any{},
-		EntityType:   "test_entity",
+		EntityType:   "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"research_context": map[string]any{"summary": "done"},
@@ -180,7 +180,7 @@ request.received:
 			"request_id": "req-existing",
 			"flow_path":  "child/existing",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	})); err != nil {
 		t.Fatalf("seed child workflow instance: %v", err)
 	}
@@ -204,7 +204,7 @@ request.received:
 }
 
 func authoredControlCollisionSource() semanticview.Source {
-	source := testRootEntityContractSource("root", "test_entity")
+	source := testRootEntityContractSource("root", "state")
 	bundle, _ := semanticview.Bundle(source)
 	for _, name := range []string{"business_status", "parent_flow_id", "parent_flow_instance", "parent_entity_id"} {
 		bundle.RootEntities["state"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "text"}
@@ -228,7 +228,7 @@ func TestApplyEngineStateMutationPreservesTypedControlAcrossAuthoredCollisions(t
 			"parent_entity_id": "authored-parent",
 			"business_status":  "old",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"parent_flow_id":       "wrong",
@@ -267,7 +267,7 @@ func TestApplyEngineStateMutationDoesNotPromoteAuthoredParentRouteNames(t *testi
 		Fields: map[string]any{
 			"business_status": "old",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"business_status":      "new",
@@ -299,7 +299,7 @@ func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) 
 			"parent_entity_id": "legacy-parent",
 			"business_status":  "old",
 		},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"business_status":      "new",
@@ -366,7 +366,7 @@ func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
 }
 
 func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(t *testing.T) {
-	source := testRootEntityContractSource("root", "test_entity")
+	source := testRootEntityContractSource("root", "state")
 	bundle, _ := semanticview.Bundle(source)
 	bundle.RootEntities["state"].Fields["composite_score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
 	bundle.RootEntities["state"].Fields["scoring_rubric"] = runtimecontracts.EntityFieldDecl{Type: "text"}
@@ -374,7 +374,7 @@ func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(
 		Fields:       map[string]any{"composite_score": 0},
 		Gates:        map[string]bool{"g_ready": true},
 		StateBuckets: map[string]any{},
-		EntityType:   "test_entity",
+		EntityType:   "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"composite_score": 71,
@@ -398,7 +398,7 @@ func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(
 }
 
 func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.T) {
-	instance := &WorkflowInstance{EntityType: "test_entity"}
+	instance := &WorkflowInstance{EntityType: "state"}
 	mutation := testEngineStateMutation(map[string]any{}, nil, nil)
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, "")
@@ -458,7 +458,7 @@ func VerifyPipelineEngineMutationOwnerRejectsForeignFlowWriteForTest(t *testing.
 		WorkflowVersion: source.WorkflowVersion(),
 		CurrentState:    "pending",
 		Fields:          map[string]any{},
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("upsert flow-a entity: %v", err)
 	}
@@ -500,7 +500,7 @@ func VerifyPipelineEngineMutationOwnerRejectsWrongRunRootAddressBeforeMutationOn
 	entityID := eventtest.UUID("wrong-run-root-engine-" + backend)
 	address := testEngineStateAddress(".", wrongRunID, entityID)
 	mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
-	mutation.StateCarrier.Control.EntityType = "test_entity"
+	mutation.StateCarrier.Control.EntityType = "state"
 	mutation.TriggeredAt = time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
 
 	repo := pipelineEngineStateRepo{coordinator: coordinator}
@@ -554,7 +554,7 @@ func VerifyWorkflowEngineMutationRejectsEntityContractDriftOnBothStoresForTest(t
 	}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
 		Address: address, EvaluatedState: evaluated, State: mutation,
 	})
-	if err == nil || !strings.Contains(err.Error(), `entity_type "wrong_entity" disagrees with canonical contract "test_entity"`) {
+	if err == nil || !strings.Contains(err.Error(), `entity_type "wrong_entity" disagrees with canonical contract "state"`) {
 		t.Fatalf("entity contract drift mutation error = %v", err)
 	}
 	stored, found, loadErr := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID))
@@ -678,7 +678,7 @@ func VerifyPipelineEngineMutationOwnerRoundTripsTypedCarrierForTest(t *testing.T
 		CurrentState:    "pending",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -730,7 +730,7 @@ func VerifyPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrierForTe
 			StateBuckets: map[string]any{
 				"evidence": "bad",
 			},
-			EntityType: "test_entity",
+			EntityType: "state",
 		})); err != nil {
 			t.Fatalf("upsert malformed state bucket instance: %v", err)
 		}
@@ -752,33 +752,6 @@ func VerifyAccumulatorAppend_ReturnsWorkflowStoreMutationErrorForTest(t *testing
 	}
 	if err.Error() != closedErr.Error() {
 		t.Fatalf("accumulator append did not propagate original closed-owner read: got=%v want=%v", err, closedErr)
-	}
-}
-
-func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {
-	eval := pipelineEngineEvaluator{evaluator: newWorkflowExpressionEvaluator()}
-	ok, err := eval.EvalBool(
-		`accumulated.filter(d, d.score >= 70 && d.tier == 1).size() >= 2`,
-		runtimeengine.BaseContext{
-			Entity:  values.Wrap(map[string]any{}),
-			Payload: values.Wrap(map[string]any{}),
-			Policy:  values.Wrap(map[string]any{}),
-			Accumulated: values.Wrap(map[string]any{
-				"items": []any{
-					map[string]any{"dimension": "build_complexity", "score": 74, "tier": 1},
-					map[string]any{"dimension": "automation_completeness", "score": 72, "tier": 1},
-					map[string]any{"dimension": "retention_architecture", "score": 68, "tier": 3},
-				},
-				"received_count": 3,
-			}),
-		},
-		workflowexpr.ValueExpressionOptions{},
-	)
-	if err != nil {
-		t.Fatalf("EvalBool error = %v", err)
-	}
-	if !ok {
-		t.Fatal("expected CEL accumulated scope to expose the accumulated item list explicitly")
 	}
 }
 

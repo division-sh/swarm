@@ -32,10 +32,10 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 	}
 	writeClosedVariantFile(t, root, "events.yaml", eventsYAML+DeploymentFixtureCloseDeclaration)
 	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-singleton-connect\nstages: {active: {}, done: {final: true}}\ninputs: [root.ready, fixture.close.requested]\noutputs:\n  - root.ready\n  - fixture.close.requested\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n  - event: fixture.close.requested\n    from: .\n    to: consumer\n")
-	writeClosedVariantFile(t, root, "state.yaml", "")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "nodes.yaml", "close-fixture:\n  fixture.close.requested: {advances_to: done}\n")
 	writeClosedVariantFile(t, root, "consumer/schema.yaml", "name: consumer\nstages: {active: {}, done: {final: true}}\ninputs: [root.ready, fixture.close.requested]\n")
-	writeClosedVariantFile(t, root, "consumer/state.yaml", "")
+	removeClosedVariantFiles(t, root, "consumer/state.yaml")
 	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  root.ready: {}\n  fixture.close.requested: {advances_to: done}\n")
 	switch route {
 	case "singleton":

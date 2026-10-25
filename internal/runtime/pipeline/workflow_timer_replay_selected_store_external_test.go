@@ -76,7 +76,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 				at := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 				instance := runtimepipeline.WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
-					CurrentState: "waiting", EntityType: "test_entity", CreatedAt: at, EnteredStageAt: at,
+					CurrentState: "waiting", EntityType: "state", CreatedAt: at, EnteredStageAt: at,
 				}
 				initialized, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, identity, instance, at)
 				if err != nil {

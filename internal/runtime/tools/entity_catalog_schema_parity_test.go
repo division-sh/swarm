@@ -47,14 +47,14 @@ func TestEntityOperationCatalogSchemaAliasAndMapKeyParity(t *testing.T) {
 		{"list/alias-range", "[Entry]", rc.SchemaRefinements{}, []any{entry}, map[string]any{"op": "update", "index": int64(0), "value": badRange}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			contract := entityruntime.Contract{EntityType: "case", Types: catalog, Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"field": {Type: tc.typeRef, Refinements: tc.refinements}}}}
+			contract := entityruntime.Contract{EntityType: "state", Types: catalog, Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"field": {Type: tc.typeRef, Refinements: tc.refinements}}}}
 			assertEntityCatalogSchemaRuntimeParity(t, contract, tc.initial, tc.input, tc.valid)
 		})
 	}
 	for _, keyType := range []string{"Label", "Status", "Identifier"} {
 		goodKey := map[string]string{"Label": " business key ", "Status": "open", "Identifier": "d9428888-122b-11e1-b85c-61cd3cbb3210"}[keyType]
 		badKey := map[string]string{"Label": "", "Status": "unknown", "Identifier": "not-a-uuid"}[keyType]
-		contract := entityruntime.Contract{EntityType: "case", Types: catalog, Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"field": {Type: "map[" + keyType + "]Entry"}}}}
+		contract := entityruntime.Contract{EntityType: "state", Types: catalog, Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"field": {Type: "map[" + keyType + "]Entry"}}}}
 		for _, tc := range []struct {
 			name  string
 			key   string
@@ -117,7 +117,7 @@ func assertEntityCatalogSchemaRuntimeParity(t *testing.T, contract entityruntime
 	t.Helper()
 	entry := roleScopedEntityToolSchemaEntry(contract, roleScopedEntityToolSpec{Kind: roleScopedEntityToolSaveField, Field: "field"})
 	schema := entry.InputSchema
-	execution, err := admitBuiltinExecutionTool("save_case_field", entry)
+	execution, err := admitBuiltinExecutionTool("save_state_field", entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func assertEntityCatalogSchemaRuntimeParity(t *testing.T, contract entityruntime
 		candidates = append(candidates, closeGeneratedJSONSchema(schema))
 	}
 	for _, candidate := range candidates {
-		if err := llm.ValidateProviderToolSchema("save_case_field", candidate); err != nil {
+		if err := llm.ValidateProviderToolSchema("save_state_field", candidate); err != nil {
 			t.Fatal(err)
 		}
 		if err := ValidatePayloadAgainstSchema(candidate, input); (err == nil) != valid {

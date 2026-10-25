@@ -4232,9 +4232,9 @@ handler_specification:
         computed:
           shape: '{target_field: entity_key, value: CEL_expression}'
           meaning: 'The unquoted expression is evaluated against handler context → state.entity_key.'
-          context: 'The value expression is evaluated against: entity, payload, policy, fan_out. The fan_out
-            namespace is available when the handler includes a fan_out step (e.g., fan_out.count).
-            accumulated is available after the current open-stream arrival has been admitted.'
+          context: 'The value expression reads state, payload, policy, and earlier computed values. Handler writes
+            precede fan_out and cannot read its count; selected-rule writes after fan_out may read fan_out.count.
+            Read collected items from the declared state list, for example state.items.size(); accumulated is retired.'
           example: "- target_field: revision_count\n  value: state.revision_count + 1"
           note: 'Use the same value key for literals and computed values; YAML quote style selects text versus expressions.'
         contained_operation:
@@ -5362,15 +5362,6 @@ handler_specification:
           path: Current concrete flow-instance path.
           unsupported_fields: 'instance.current_state, instance.flow_instance, instance.gates, instance.entity_id, instance.entity_type, instance.workflow_name, instance.workflow_version, instance.run_id, instance.fields, instance.accumulator, instance.entered_state_at, instance.revision, instance.created_at, instance.updated_at, and instance.name are not exposed. revision, created_at, and updated_at must not remain readable through undeclared state.* platform fallback.'
         write_model: Read-only. Handler writes and entity tools may not target instance. Emit payload construction may read instance; these values cannot authorize another receiver. The former entity, _entity and gates expression roots are retired.
-      accumulated:
-        resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
-          representing one admitted business payload in the current instance-scoped stream bucket. Available to supported
-          per-arrival filter, reduce, count, compute, and rules processing after stream admission.'
-        usage: 'accumulated.filter(d, <condition>) — filter items by predicate. accumulated.size() — count items.
-          accumulated.map(d, d.field) — extract field values. Item fields match the inbound event payload fields
-          (e.g., d.dimension, d.score, d.tier for score.dimension_complete).'
-        not_available_in: 'guard — guards run before accumulation. handler-level on_complete is prohibited on
-          accumulate handlers and cannot recreate finite completion.'
       fan_out:
         resolves_to: 'Handler context produced while creating the durable fan_out obligation. fan_out.count is the
           immutable source cardinality owed by that obligation, not publications committed, deliveries settled,
@@ -9392,7 +9383,7 @@ engine:
       loop: Only id, activation_id, revision_id, attempt, and max_attempts are authored members. Join on_complete/on_deadline
         reads the captured generation through its owning activation, including after restart or supported fork remapping;
         it never borrows the current replacement attempt. Non-loop joins have no loop context.
-      accumulated: Available to supported per-arrival filter/reduce/count/compute/rules processing after stream admission
+      state: Declared state fields, including the accumulate target list after admission; use state.<field>.size() to count collected items. The accumulated namespace is retired and refuses before execution.
     ambient_time: >
       CEL guard/rule/filter/on_complete conditions must not call ambient time functions such as `now()` or
       `timestamp()`. Time-driven behavior is authored with stage timers so fire_at is evaluated once and persisted.
@@ -10286,8 +10277,8 @@ engine:
       severity: error
       scope: per-node
       trigger: A guard is not a nonempty scalar predicate. Or a CEL condition is syntactically
-        invalid (parse failure). Or a condition string lacks a required context prefix (state., payload., policy., accumulated.,
-        fan_out.).
+        invalid (parse failure). Or a condition reads the retired accumulated namespace instead of the declared
+        state list (state.<field>.size()), or lacks a supported context prefix.
       when: boot-only
     - id: event_runtime_wiring_validation
       severity: error

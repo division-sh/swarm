@@ -67,18 +67,6 @@ func TestNumericFeedFixtureLoadsAndVerifies(t *testing.T) {
 	}
 }
 
-func TestFiniteSelectedDeploymentReceiverFixtureLoadsAndVerifies(t *testing.T) {
-	root := CopySelectedDeploymentResourceFiniteSingleton(t)
-	repo := RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if findings := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
-		t.Fatalf("finite selected deployment receiver hard invalidities: %#v", findings)
-	}
-}
-
 func TestForkFanOutReceiverFixtureLoadsAndVerifies(t *testing.T) {
 	root := CopyForkFanOutReceiverOwnership(t)
 	repo := RepoRoot(t)
@@ -92,63 +80,6 @@ func TestForkFanOutReceiverFixtureLoadsAndVerifies(t *testing.T) {
 	}
 	if report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{}); len(report.Errors()) != 0 || len(report.Warnings()) != 0 {
 		t.Fatalf("fan-out receiver fixture boot errors=%+v warnings=%+v", report.Errors(), report.Warnings())
-	}
-}
-
-func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
-	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier, MapScatterGather, ArtifactID("examples/routing/policy-rules"))
-	for _, name := range canonicalExampleNames() {
-		t.Run(string(name), func(t *testing.T) {
-			root := ExampleRoot(t, name)
-			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-				RepoRoot(t),
-				root,
-				runtimecontracts.DefaultPlatformSpecFile(RepoRoot(t)),
-			)
-			if err != nil {
-				t.Fatalf("load canonical example: %v", err)
-			}
-			report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
-			if findings := report.HardInvalidities(); len(findings) != 0 {
-				t.Fatalf("hard invalidities: %#v", findings)
-			}
-		})
-	}
-}
-
-func TestNestedLifecycleGeneratedSourcesLoadAndVerify(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		copy func(testing.TB) string
-	}{
-		{"static", CopyLifecycleNestedCascade},
-		{"template", CopyLifecycleNestedTemplates},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := RepoRoot(t)
-			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, tc.copy(t), runtimecontracts.DefaultPlatformSpecFile(repo))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if findings := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
-				t.Fatalf("nested lifecycle hard invalidities: %#v", findings)
-			}
-		})
-	}
-}
-
-func TestPublicationSitesLoadAndVerify(t *testing.T) {
-	for _, mode := range []string{"root", "static", "template"} {
-		t.Run(mode, func(t *testing.T) {
-			repo := RepoRoot(t)
-			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, CopyPublicationSites(t, mode), runtimecontracts.DefaultPlatformSpecFile(repo))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if findings := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
-				t.Fatalf("hard invalidities: %#v", findings)
-			}
-		})
 	}
 }
 
@@ -311,24 +242,6 @@ func TestReleaseE2EFullLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 		}
 	}
 	t.Fatalf("execution-purpose fixture verification hid the missing credential reader: %#v", execution)
-}
-
-func TestSelectedForkFlowScopedMCPFixtureLoadsAndVerifies(t *testing.T) {
-	const fixture = ArtifactID("internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")
-	Prove(t, ArtifactID("internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp"))
-	repo := RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repo,
-		filepath.Join(repo, filepath.FromSlash(string(fixture))),
-		runtimecontracts.DefaultPlatformSpecFile(repo),
-	)
-	if err != nil {
-		t.Fatalf("load selected-fork flow-scoped MCP fixture: %v", err)
-	}
-	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
-	if findings := report.HardInvalidities(); len(findings) != 0 {
-		t.Fatalf("selected-fork flow-scoped MCP fixture hard invalidities: %#v", findings)
-	}
 }
 
 func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {

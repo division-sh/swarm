@@ -15,7 +15,7 @@ import (
 )
 
 func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
+	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 
 	scopeKey := strings.TrimSpace(workflowScopeKey(source, "child"))
 	if scopeKey != "child" {
@@ -137,7 +137,7 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 
 	instance := WorkflowInstance{
 		WorkflowName: grandchild.TemplateID, StorageRef: grandchild.InstancePath,
-		InstanceID: grandchild.InstanceID, EntityID: grandchild.EntityID, EntityType: "test_entity",
+		InstanceID: grandchild.InstanceID, EntityID: grandchild.EntityID, EntityType: "state",
 		ParentFlowID: grandchild.ParentRoute.FlowID, ParentFlowInstance: grandchild.ParentRoute.FlowInstance, ParentEntityID: grandchild.ParentEntityID,
 	}
 
@@ -206,7 +206,7 @@ func TestRequireWorkflowInstanceIdentityRejectsMissingAndMismatchedFacts(t *test
 		StorageRef: "review/instance-1",
 		InstanceID: "instance-1",
 		EntityID:   entityID.String(),
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, valid); err != nil {
 		t.Fatalf("exact identity rejected: %v", err)

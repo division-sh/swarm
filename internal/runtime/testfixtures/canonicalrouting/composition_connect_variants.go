@@ -94,7 +94,7 @@ deploy.done:
 	entities := ""
 	if opts.consumerTemplateInstance {
 		instance = "instance: vertical_id\n"
-		entities = "deployment:\n  vertical_id:\n    type: string\n    _unused_reason: composition connect route-key proof field\n"
+		entities = "vertical_id: string\n"
 	}
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
 `+instance+`stages:

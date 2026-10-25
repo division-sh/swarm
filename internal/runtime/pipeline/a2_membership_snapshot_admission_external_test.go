@@ -67,7 +67,7 @@ func TestA2MembershipSnapshotValidationOnBothStores(t *testing.T) {
 				f := newA2MembershipAdmission(t, selected, source, runID, pipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, EntityID: flowidentity.EntityID(path),
 					WorkflowName: "orders", WorkflowVersion: source.WorkflowVersion(), CurrentState: "dispatching",
-					EntityType: "order_state", Fields: map[string]any{"order_id": instanceID, "expected": membership},
+					EntityType: "state", Fields: map[string]any{"order_id": instanceID, "expected": membership},
 				})
 				before := f.load(t)
 				entry, found, err := workflowlifecycle.LoadStageEntry(before.Bookkeeping)
@@ -137,7 +137,7 @@ func TestA2MembershipSnapshotValidationOnBothStores(t *testing.T) {
 			source, runID := semanticview.Wrap(bundle), uuid.NewString()
 			f := newA2MembershipAdmission(t, selected, source, runID, pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(),
-				WorkflowVersion: source.WorkflowVersion(), CurrentState: "pending", EntityType: "root", Fields: map[string]any{},
+				WorkflowVersion: source.WorkflowVersion(), CurrentState: "pending", EntityType: "state", Fields: map[string]any{},
 			})
 			before, footprint, commits := f.load(t), f.footprint(t), f.observer.witnesses()
 			entry, found, err := workflowlifecycle.LoadStageEntry(before.Bookkeeping)

@@ -145,7 +145,7 @@ func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Gates: []byte(`{}`), Fields: []byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
 		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
-		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
+		FlowInstance: "review/inst-1", EntityType: "state", CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatalf("decode persisted workflow state: %v", err)
@@ -171,7 +171,7 @@ func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
 func TestWorkflowStateWriterPreservesNativeWholeDoubleForCELArithmetic(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-		StorageRef: "review/inst-1", EntityType: "review_subject",
+		StorageRef: "review/inst-1", EntityType: "state",
 		WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active",
 		Fields: map[string]any{
 			"integer": int64(75),
@@ -215,7 +215,7 @@ func TestPersistedWorkflowStateRejectsUnsafeIntegerBeforeReadback(t *testing.T) 
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Gates: []byte(`{}`), Fields: []byte(`{"score":9007199254740992}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
 		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
-		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
+		FlowInstance: "review/inst-1", EntityType: "state", CreatedAt: now, UpdatedAt: now,
 	})
 	if err == nil || !strings.Contains(err.Error(), "$.score") || !strings.Contains(err.Error(), "declare the field as string") {
 		t.Fatalf("unsafe persisted workflow-state error = %v, want typed $.score remediation", err)
@@ -246,7 +246,7 @@ func VerifyWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalStateForTe
 		InstanceID:         "inst-1",
 		StorageRef:         storageRef,
 		EntityID:           entityID,
-		EntityType:         "workflow_subject",
+		EntityType:         "state",
 		Slug:               "projection",
 		Name:               "Projection Flow",
 		InstanceKind:       "materialized",
@@ -362,7 +362,7 @@ func VerifyWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityFie
 		InstanceID:      "inst-1",
 		StorageRef:      storageRef,
 		EntityID:        entityID,
-		EntityType:      "workflow_subject",
+		EntityType:      "state",
 		Slug:            "projection",
 		Name:            "Projection Flow",
 		WorkflowName:    "projection-flow",
@@ -424,7 +424,7 @@ func VerifyWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjectionF
 		WorkflowName:    "review",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-		EntityType:      "workflow_subject",
+		EntityType:      "state",
 		Fields:          map[string]any{"business_brief": "first", "name": "alpha"},
 		StateBuckets: map[string]any{
 			"score": map[string]any{"value": float64(1)},
@@ -497,7 +497,7 @@ func VerifyWorkflowInstanceStoreProjection_StaticRowsPersistCanonicalFlowPathOnR
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})
 
 	if err := fixture.Construct(ctx, instance); err != nil {
@@ -597,7 +597,7 @@ func VerifyWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapesForTes
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "inst-1", StorageRef: storageRef, EntityID: entityID,
 				WorkflowName: "projection-flow", WorkflowVersion: "1.0.0", CurrentState: "queued",
-				Fields: map[string]any{}, StateBuckets: map[string]any{}, EntityType: "test_entity",
+				Fields: map[string]any{}, StateBuckets: map[string]any{}, EntityType: "state",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}

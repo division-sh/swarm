@@ -90,7 +90,7 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 					if generation == 0 {
 						plan := commitA2FixtureConstruction(t, pc, selected, ctx, identity, pipeline.WorkflowInstance{
 							InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1.0.0",
-							CurrentState: "done", CreatedAt: createdAt, EnteredStageAt: createdAt, EntityType: "test_entity",
+							CurrentState: "done", CreatedAt: createdAt, EnteredStageAt: createdAt, EntityType: "state",
 						}, createdAt)
 						readiness = plan.Readiness
 					}

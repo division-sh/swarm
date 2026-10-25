@@ -61,7 +61,7 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 			if err := loopruntime.Store(buckets, activation); err != nil {
 				t.Fatal(err)
 			}
-			instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work", CurrentState: "review", CreatedAt: time.Now().UTC(), EnteredStageAt: time.Now().UTC(), Fields: map[string]any{}, StateBuckets: engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()})
+			instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "state", CurrentState: "review", CreatedAt: time.Now().UTC(), EnteredStageAt: time.Now().UTC(), Fields: map[string]any{}, StateBuckets: engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()})
 			if err := fixture.Construct(ctx, instance); err != nil {
 				t.Fatal(err)
 			}

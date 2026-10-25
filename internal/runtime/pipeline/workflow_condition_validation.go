@@ -46,7 +46,6 @@ func ValidateConditionCELWithOptions(expression string, context WorkflowConditio
 	}
 	opts.RequireBool = true
 	opts.AllowBareItem = context == WorkflowConditionContextFilter || context == WorkflowConditionContextCount || context == WorkflowConditionContextQueryFilter
-	opts.AllowAccumulated = context == WorkflowConditionContextOnComplete || opts.AllowBareItem
 	return workflowexpr.ValidateValueExpressionWithOptions(normalized, opts)
 }
 
@@ -156,10 +155,8 @@ func workflowConditionRecognizedRoots(context WorkflowConditionContext) []string
 		roots = append(roots, "computed")
 	}
 	switch context {
-	case WorkflowConditionContextOnComplete:
-		roots = append(roots, "accumulated")
 	case WorkflowConditionContextFilter, WorkflowConditionContextCount, WorkflowConditionContextQueryFilter:
-		roots = append(roots, "accumulated", "item")
+		roots = append(roots, "item")
 	}
 	return roots
 }

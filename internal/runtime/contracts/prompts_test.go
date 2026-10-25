@@ -96,15 +96,6 @@ func TestResolvedAgentIntent_InlineExactBytes(t *testing.T) {
 	}
 }
 
-func resolvedInlineIntentForTest(t testing.TB, provenance, content string) runtimeagentintent.Resolved {
-	t.Helper()
-	resolved, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", provenance, content)
-	if err != nil {
-		t.Fatalf("resolve test intent: %v", err)
-	}
-	return resolved
-}
-
 func TestAgentIntentSourceUnion_FailsClosed(t *testing.T) {
 	for _, tc := range []struct {
 		name string

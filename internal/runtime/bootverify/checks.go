@@ -1233,13 +1233,6 @@ func agentPermissionWarnings(source semanticview.Source, flowID, scopeLabel, age
 	return out
 }
 
-func stringValueLocal(v any) string {
-	if typed, ok := v.(string); ok {
-		return typed
-	}
-	return ""
-}
-
 func handlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {
 	return len(handler.Rules) > 0 && handlerHasOnComplete(handler)
 }

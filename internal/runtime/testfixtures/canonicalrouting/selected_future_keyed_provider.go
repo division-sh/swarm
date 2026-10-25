@@ -47,10 +47,9 @@ connect:
 `
 		workSchema = "name: work\ninstance: case_id\nstages:\n  pending: {}\n  done: {final: true}\ninputs: [work.assigned]\noutputs: [work.finished]\n"
 
-		workEntity = `job:
-  case_id: text
-  work_id: text
-  result: text
+		workEntity = `case_id: text
+work_id: text
+result: text
 `
 	}
 	for path, body := range map[string]string{

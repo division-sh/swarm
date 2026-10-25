@@ -28,7 +28,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 		if variant == ArrivalJoinBoundReplyObserver {
 			files["schema.yaml"] += "  - {event: provider.replied, from: provider, to: observer, resolution: select}\n"
 			files["schema.yaml"] += "  - {event: provider.notified, from: provider, to: observer, resolution: select}\n"
-			files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "    - provider.replied\n", "    - provider.replied\n    - provider.notified\n", 1)
+			files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "  - provider.replied\n", "  - provider.replied\n  - provider.notified\n", 1)
 			files["provider/events.yaml"] += "ordinary.requested:\n  order_id: text\n  member_id: text\n  result: JoinResult\nprovider.notified:\n  order_id: text\n  member_id: text\n  result: JoinResult\n"
 			files["provider/nodes.yaml"] += `  ordinary.requested:
     emit:
@@ -39,9 +39,9 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
         result: payload.result
 `
 			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
-			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    - provider.requested\n", "", 1)
-			files["observer/schema.yaml"] += "    - provider.notified\n"
-			files["observer/state.yaml"] = files["requester/state.yaml"] + "  ordinary_result: JoinResult\n"
+			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "outputs:\n  - provider.requested\n", "", 1)
+			files["observer/schema.yaml"] += "  - provider.notified\n"
+			files["observer/state.yaml"] = files["requester/state.yaml"] + "ordinary_result: JoinResult\n"
 			start := strings.Index(files["requester/nodes.yaml"], "collector:\n")
 			end := strings.Index(files["requester/nodes.yaml"], "dispatcher:\n")
 			files["observer/nodes.yaml"] = files["requester/nodes.yaml"][start:end] + `  provider.notified:
@@ -231,11 +231,10 @@ stages:
   dispatching: {}
   ready: {final: true}
   attention: {final: true}
-pins:
-  inputs:
-    - halt.requested
+inputs:
+  - halt.requested
 `, flow)
-		files[flow+"/state.yaml"] = "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n  halt_count: {type: integer, initial: 0}\n"
+		files[flow+"/state.yaml"] = "order_id: {type: text, indexed: true}\nexpected: [text]\nhalt_count: 0\n"
 		files[flow+"/events.yaml"] = "manual.abort:\ndispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\nalternate.completed:\n  member_id: text\n  result: JoinResult\nhalt.observed:\n  order_id: text\n  count: integer\n"
 		for _, name := range []string{"first.closed", "second.closed"} {
 			files[flow+"/events.yaml"] += name + ":\n  expected: integer\n  completed: integer\n  missing: [text]\n  results: [JoinResult]\n  timed_out: boolean\n  close_reason: text\n"

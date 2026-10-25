@@ -59,7 +59,7 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
 				at := time.Now().UTC()
 				if err := fixture.Construct(ctx, WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID,
-					EntityType: "work", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+					EntityType: "state", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 					CurrentState: "active", StageDefined: true, Status: "active", Fields: fields, CreatedAt: at, EnteredStageAt: at, UpdatedAt: at,
 				}); err != nil {
 					t.Fatal(err)

@@ -35,7 +35,7 @@ func nativeWorkflowTimerSourceActivationForTest(t *testing.T, backend string, bu
 	instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 		InstanceID: entityID, StorageRef: entityID, EntityID: entityID, WorkflowName: ".",
 		WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting", EnteredStageAt: createdAt,
-		CreatedAt: createdAt, EntityType: "test_entity",
+		CreatedAt: createdAt, EntityType: "state",
 	})
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatal(err)

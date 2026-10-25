@@ -31,7 +31,7 @@ stages:
 inputs:
   - flow.started
 `)
-	writeClosedVariantFile(t, root, "discovery/state.yaml", ``)
+	removeClosedVariantFiles(t, root, "discovery/state.yaml")
 	writeClosedVariantFile(t, root, "events.yaml", `
 flow.started:
   entity_id:

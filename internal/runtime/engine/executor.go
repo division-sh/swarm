@@ -91,21 +91,20 @@ type Executor struct {
 }
 
 type executionFrame struct {
-	ctx                       context.Context
-	req                       ExecutionRequest
-	fanOutEmission            *fanoutobligation.OrdinalEmission
-	base                      BaseContext
-	state                     ExecutionState
-	result                    ExecutionResult
-	rule                      *runtimecontracts.HandlerRuleEntry
-	payloadType               *runtimecontracts.ResolvedCatalogType
-	entityType                *runtimecontracts.ResolvedCatalogType
-	ruleSource                handlerRuleSource
-	ruleIndex                 int
-	loopEscaped               bool
-	payload                   map[string]any
-	accumulatorBucketRef      timeridentity.AccumulatorBucketRef
-	hasAccumulatorBucketRef   bool
+	ctx            context.Context
+	req            ExecutionRequest
+	fanOutEmission *fanoutobligation.OrdinalEmission
+	base           BaseContext
+	state          ExecutionState
+	result         ExecutionResult
+	rule           *runtimecontracts.HandlerRuleEntry
+	payloadType    *runtimecontracts.ResolvedCatalogType
+	entityType     *runtimecontracts.ResolvedCatalogType
+	ruleSource     handlerRuleSource
+	ruleIndex      int
+	loopEscaped    bool
+	payload        map[string]any
+
 	topLevelDataAccumulation  runtimecontracts.WorkflowDataAccumulation
 	topLevelDataWritesApplied bool
 	ruleDataWritesApplied     bool
@@ -2289,29 +2288,6 @@ func (e *Executor) joinPlan(req ExecutionRequest) (runtimecontracts.WorkflowJoin
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	return semanticview.WorkflowJoinPlanForRef(e.deps.Source, req.JoinDeclaration)
-}
-
-func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, bool, error) {
-	if frame == nil {
-		return timeridentity.AccumulatorBucketRef{}, false, nil
-	}
-	if frame.hasAccumulatorBucketRef {
-		return frame.accumulatorBucketRef, true, nil
-	}
-	bucketRef := handlerAccumulatorBucketRef(frame.req)
-	if frame.loopActivation != nil {
-		generation := frame.loopActivation.Generation()
-		if !generation.Valid() {
-			return timeridentity.AccumulatorBucketRef{}, false, failures.New(failures.ClassLifecycleConflict, "accumulator_scope_invalid", "accumulator", "admit", nil)
-		}
-		bucketRef = timeridentity.NewAccumulatorBucketRefForGeneration(frame.req.Node, string(handlerAccumulatorEventType(frame.req)), generation)
-	}
-	if !bucketRef.Valid() {
-		return timeridentity.AccumulatorBucketRef{}, false, failures.New(failures.ClassLifecycleConflict, "accumulator_scope_invalid", "accumulator", "admit", nil)
-	}
-	frame.accumulatorBucketRef = bucketRef
-	frame.hasAccumulatorBucketRef = true
-	return bucketRef, true, nil
 }
 
 func (e *Executor) effectiveAccumulatorSpec(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (*runtimecontracts.AccumulateSpec, error) {

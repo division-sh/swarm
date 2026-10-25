@@ -25,7 +25,7 @@ func Test2293SelectedFanOutRetainsEvaluationSourceAcrossRuleWriteBothStores(t *t
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
-		for _, after := range []string{"equal_length", "shorter", "longer", "removed"} {
+		for _, after := range []string{"equal_length", "shorter", "longer", "empty"} {
 			t.Run(backend.name+"/"+after, func(t *testing.T) {
 				original := make([]any, fanoutobligation.MaxChunkSize+1)
 				for i := range original {
@@ -39,10 +39,13 @@ func Test2293SelectedFanOutRetainsEvaluationSourceAcrossRuleWriteBothStores(t *t
 				if after == "longer" {
 					final = append(final, "extra")
 				}
+				if after == "empty" {
+					final = []any{}
+				}
 				files := a2MapFanOutFiles(false)
 				files["events.yaml"] += "\nhistory.cut:\n"
-				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "    - seed\n", "    - seed\n    - history.cut\n", 1)
-				files["state.yaml"] = "work:\n  items:\n    type: '[text]?'\n    initial: " + a2OrderYAMLJSON(t, original) + "\n"
+				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  - seed\n", "  - seed\n  - history.cut\n", 1)
+				files["state.yaml"] = "items: " + a2OrderYAMLJSON(t, original) + "\n"
 				files["nodes.yaml"] = `writer:
   seed: {}
   batch.ready:
@@ -60,11 +63,7 @@ func Test2293SelectedFanOutRetainsEvaluationSourceAcrossRuleWriteBothStores(t *t
               result: >-
                 [7]
 `
-				if after == "removed" {
-					files["nodes.yaml"] += "          data_accumulation:\n            writes:\n              - op: clear\n                target: state.items\n"
-				} else {
-					files["nodes.yaml"] += "          data_accumulation:\n            writes:\n              - target_field: items\n                value: " + a2OrderYAMLJSON(t, final) + "\n"
-				}
+				files["nodes.yaml"] += "        data_accumulation:\n          writes:\n            - target_field: items\n              value: " + a2OrderYAMLJSON(t, final) + "\n"
 				p := newA2MapFanOutExecutionFromFiles(t, backend.open(t), false, files)
 				reader := p.selected.events.(interface {
 					InspectRunMutationDrift(context.Context, string) (mutationlog.DriftReport, error)
@@ -78,11 +77,7 @@ func Test2293SelectedFanOutRetainsEvaluationSourceAcrossRuleWriteBothStores(t *t
 				if err != nil || len(afterReport.Rows) != 0 {
 					t.Errorf("fan-out introduced mutation drift: %+v error=%v", afterReport, err)
 				}
-				if got, present := p.instance(t).Fields["items"]; after == "removed" {
-					if present {
-						t.Fatalf("clear left business source: %v", got)
-					}
-				} else if !reflect.DeepEqual(got, final) {
+				if got := p.instance(t).Fields["items"]; !reflect.DeepEqual(got, final) {
 					t.Fatalf("final state=%v want=%v", got, final)
 				}
 				r := p.compositeReceipt(t, trigger, "writer", original)
@@ -179,11 +174,11 @@ func Test2293HandlerAndSelectedEntityFanOutKeepIndependentHistoryBothStores(t *t
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
 		t.Run(backend.name, func(t *testing.T) {
 			files := a2MapFanOutFiles(false)
-			files["state.yaml"] = "work:\n  items: {type: '[text]?', initial: [first]}\n  other_items: {type: '[text]', initial: [second]}\n"
+			files["state.yaml"] = "items: ['first']\nother_items: ['second']\n"
 			files["nodes.yaml"] = `writer:
   seed: {}
   batch.ready:
-    guard: {id: source_present, check: has(state.items), on_fail: reject}
+    guard: has(state.items)
     fan_out:
       items_from: state.items
       as: key
@@ -210,8 +205,8 @@ func Test2293HandlerAndSelectedEntityFanOutKeepIndependentHistoryBothStores(t *t
                 [7]
         data_accumulation:
           writes:
-            - op: clear
-              target: state.items
+            - target_field: items
+              value: []
             - target_field: other_items
               value: ["final"]
 `
@@ -269,7 +264,7 @@ func Test2293HandlerAndSelectedEntityFanOutKeepIndependentHistoryBothStores(t *t
 			if len(outputs) != 2 || !seen["first"] || !seen["second"] {
 				t.Fatalf("composed source observations were rebound: %+v", outputs)
 			}
-			if fields := p.instance(t).Fields; len(fields) != 1 || !reflect.DeepEqual(fields["other_items"], []any{"final"}) {
+			if fields := p.instance(t).Fields; len(fields) != 2 || !reflect.DeepEqual(fields["items"], []any{}) || !reflect.DeepEqual(fields["other_items"], []any{"final"}) {
 				t.Fatalf("composed source changed final business fields: %+v", fields)
 			}
 			settled, err := reader.InspectRunMutationDrift(p.ctx, p.runID)

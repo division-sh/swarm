@@ -38,7 +38,6 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 			{"double", "double", contracts.CatalogTypeNumber, float64(1.25), float64(2.75), float64(3.5)},
 			{"numeric", "numeric", contracts.CatalogTypeNumber, float64(4.25), float64(5.75), float64(6.5)},
 			{"boolean", "boolean", contracts.CatalogTypeBoolean, true, false, false},
-			{"named_scalar", "Score", contracts.CatalogTypeInteger, int64(7), int64(9), int64(8)},
 			{"enum", "Decision", contracts.CatalogTypeText, "yes", "no", "maybe"},
 			{"named_record", "JoinResult", contracts.CatalogTypeObject,
 				map[string]any{"label": "first", "rank": int64(1), "weight": float64(1.25), "accepted": true, "decision": "yes"},
@@ -85,7 +84,7 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 				owner := testRunScopedWorkflowInstanceForRun(runID, runID)
 				commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-					CurrentState: "awaiting", EntityType: "result_state", Fields: map[string]any{
+					CurrentState: "awaiting", EntityType: "state", Fields: map[string]any{
 						"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": "",
 					},
 				}, time.Now().UTC())
@@ -220,20 +219,14 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 func a2JoinResultTypeFiles(resultType string) map[string]string {
 	return map[string]string{
 		"schema.yaml": "name: a2-result-types\nstages:\n  awaiting: {}\n  ready: {final: true}\ninputs:\n  - item.completed\n  - halt.requested\n",
-		"state.yaml":  fmt.Sprintf("result_state:\n  final_expected: integer\n  final_completed: integer\n  final_results: [%s]\n  final_reason: text\n", resultType),
-		"types.yaml": `scalars:
-  Score: integer
-enums:
-  Decision:
-    values: [yes, no, maybe]
-    default: yes
-types:
-  JoinResult:
-    label: text
-    rank: integer
-    weight: double
-    accepted: boolean
-    decision: Decision
+		"state.yaml":  fmt.Sprintf("final_expected: integer\nfinal_completed: integer\nfinal_results: [%s]\nfinal_reason: text\n", resultType),
+		"types.yaml": `Decision: ['yes', 'no', 'maybe']
+JoinResult:
+  label: text
+  rank: integer
+  weight: numeric
+  accepted: boolean
+  decision: Decision
 `,
 		"events.yaml": fmt.Sprintf("item.completed:\n  member_id: text\n  result: %s\nhalt.requested:\n", resultType),
 		"nodes.yaml": `collector:

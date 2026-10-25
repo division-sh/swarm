@@ -47,7 +47,7 @@ stages:
       - when: has(payload.item_id) && payload.item_id == 'review'
         advances_to: done
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.received\n", "    - item.received\n    - item.processed\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - item.received\n", "  - item.received\n  - item.processed\n")
 	return root
 }
 
@@ -93,7 +93,7 @@ func CopyRootIngressServedExternalEvent(t testing.TB) string {
   item_id: text?
 external.observed:
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - external.observed\n  outputs: [external.observed]\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - item.processed\n", "  - item.processed\n  - external.observed\noutputs: [external.observed]\n")
 	return root
 }
 
@@ -114,7 +114,7 @@ inputs:
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - external.observed\n", "    - external.observed\n    - fork.source_message\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [external.observed]\n", "outputs: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
-	writeClosedVariantFile(t, root, "fork-source/state.yaml", "")
+	removeClosedVariantFiles(t, root, "fork-source/state.yaml")
 	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  fork.source_message:\n    advances_to: active\n  item.processed:\n    advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "external.observed:\n", "external.observed:\nfork.source_message:\n  note: text\n")
 	writeClosedVariantFile(t, root, "fork-source/agents.yaml", `fork-source-agent:
@@ -158,8 +158,8 @@ inputs:
   - item.agent_hold
   - item.processed
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - item.agent_hold\n  outputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
-	writeClosedVariantFile(t, root, "hold/state.yaml", "")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - item.processed\n", "  - item.processed\n  - item.agent_hold\noutputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
+	removeClosedVariantFiles(t, root, "hold/state.yaml")
 	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  item.agent_hold:\n    advances_to: active\n  item.processed:\n    advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n", "item.agent_hold:\n  note: text\nitem.processed:\n")
 	writeClosedVariantFile(t, root, "hold/agents.yaml", `load-agent:
@@ -241,14 +241,14 @@ lifecycle-orchestrator:
           target_field: note
     advances_to: ready
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `    - opco.spinup_requested
-  outputs:
-    - opco.create_requested
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `  - opco.spinup_requested
+outputs:
+  - opco.create_requested
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
-`, `    - opco.spinup_requested
-    - opco.product_review_requested
-  outputs: [opco.create_requested, opco.product_review_requested]
+`, `  - opco.spinup_requested
+  - opco.product_review_requested
+outputs: [opco.create_requested, opco.product_review_requested]
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
   - {event: opco.product_review_requested, from: ., to: operating, resolution: select}

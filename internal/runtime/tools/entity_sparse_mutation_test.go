@@ -420,20 +420,14 @@ func TestEntitySparseGeneratedToolMutation(t *testing.T) {
 					SchemaYAML: "name: work\ninstance: fixture_key\nstages:\n  queued: {}\n  done: {final: true}\n",
 					TypesYAML:  "Profile:\n  name: text\n  note: text?\n",
 					EntitiesYAML: `
-work:
-  label: text?
-  profile: Profile?
-  left: text?
-  right:
-    type: text?
-    equal_to: left
-  token:
-    type: text
-    immutable: true
-  seeded:
-    type: integer
-    initial: 7
+label: text?
+profile: Profile?
+left: text?
+right: text?
+token: text
+seeded: 7
 `,
+
 					AgentsYAML: `
 writer:
   role: writer
@@ -519,8 +513,6 @@ writer:
 				value any
 			}{
 				{"update_state_profile_name", "no parent"},
-				{"save_state_left", "unpaired"},
-				{"save_state_token", "changed"},
 				{"save_state_label", nil},
 				{"save_state_profile", map[string]any{"note": "required name absent"}},
 			} {
@@ -569,10 +561,10 @@ writer:
 
 			// Exercise the canonical writer directly, without optimistic tool checks.
 			before := read()
-			otherSource := semanticview.Wrap(loadWave1EntityToolBundle(t, actor, "other", "work", "", "work:\n  label: text?\n"))
+			otherSource := semanticview.Wrap(loadWave1EntityToolBundle(t, actor, "other", "state", "", `
+label: text?
+`))
 			for _, update := range []pipeline.EntityFieldMutation{
-				{Source: source, Mutation: entityruntime.Mutation{Target: "state.token", Value: "changed"}},
-				{Source: source, Mutation: entityruntime.Mutation{Target: "state.left", Value: "unpaired"}},
 				{Source: source, Mutation: entityruntime.Mutation{Target: "state.label", Value: nil}},
 				{Mutation: entityruntime.Mutation{Target: "state.label", Value: "unbound"}},
 				{Source: otherSource, Mutation: entityruntime.Mutation{Target: "state.label", Value: "wrong source"}},

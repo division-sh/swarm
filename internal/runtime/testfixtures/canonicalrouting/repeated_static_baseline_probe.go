@@ -20,7 +20,7 @@ connect:
   - {event: work.ready, from: producer, to: consumer}
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "parent.seeded:\n  work_id: text\nwork.requested:\n  work_id: text\n")
-	writeClosedVariantFile(t, root, "state.yaml", "")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "nodes.yaml", `parent-node:
   parent.seeded:
     advances_to: active

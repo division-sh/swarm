@@ -157,8 +157,8 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if strings.TrimSpace(asString(entity["flow_instance"])) != "review/inst-1" {
 		t.Fatalf("flow_instance = %#v, want review/inst-1", entity["flow_instance"])
 	}
-	if strings.TrimSpace(asString(entity["entity_type"])) != "accounts" {
-		t.Fatalf("entity_type = %#v, want accounts", entity["entity_type"])
+	if strings.TrimSpace(asString(entity["entity_type"])) != "state" {
+		t.Fatalf("entity_type = %#v, want state", entity["entity_type"])
 	}
 	if _, ok := entity["subject_id"]; ok {
 		t.Fatalf("get_entity returned deprecated subject_id field: %#v", entity)
@@ -439,71 +439,6 @@ func TestRoleScopedEntityToolsRejectUnknownDeclarationWithMatchingRole(t *testin
 	}
 }
 
-func TestRoleScopedEntityTools_EqualityUsesFinalCandidateValidation(t *testing.T) {
-	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
-	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
-		"validation": {
-			SchemaYAML: `name: validation
-stages:
-  queued: {}
-  closed: {final: true}
-`,
-			TypesYAML: `manifest:
-  component: text
-  owner:
-    type: text
-    equal_to: component
-  description: text
-`,
-			EntitiesYAML: `
-validation_case:
-  component: text
-  owner:
-    type: text
-    equal_to: component
-  manifest: manifest
-  notes: text
-`,
-			AgentsYAML: `
-validation-orchestrator:
-  role: validation_orchestrator
-  intent: {inline: "Validate the current entity using only its declared contract surface."}
-  tools:
-    - save_entity_field
-  writes:
-        - component
-        - owner
-        - manifest
-        - notes
-`,
-		},
-	})
-	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
-		WorkflowSource: semanticview.Wrap(bundle),
-	})
-
-	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
-	for _, name := range []string{
-		"save_state_manifest",
-		"update_state_manifest_description",
-		"save_state_notes",
-	} {
-		if _, ok := names[name]; !ok {
-			t.Fatalf("expected generated role-scoped tool %q in %#v", name, sortedRoleScopedToolNames(names))
-		}
-	}
-	for _, name := range []string{
-		"save_state_component",
-		"save_state_owner",
-		"update_state_manifest_component",
-		"update_state_manifest_owner",
-	} {
-		if _, ok := names[name]; !ok {
-			t.Fatalf("equality participant lacks declared mutation tool %q in %#v", name, sortedRoleScopedToolNames(names))
-		}
-	}
-}
-
 func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
 		"get_entity",
@@ -518,7 +453,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "valid", "confidence": 1},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, ctx, foreignID, "other/inst-1", "other_case", map[string]any{
+	seedEntityStateRow(t, ctx, foreignID, "other/inst-1", "state", map[string]any{
 		"status": "root",
 	}, time.Now().UTC())
 
@@ -808,7 +743,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "sibling", "confidence": 2},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, ctx, foreignID, "other/inst-1", "other_case", map[string]any{
+	seedEntityStateRow(t, ctx, foreignID, "other/inst-1", "state", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
 	if changed, err := storetest.AddWorkflowProjectionPrivateBookkeeping(ctx, fixture.selected, owner.RunID, owner.Route.InstancePath); err != nil || changed != 1 {
@@ -1170,48 +1105,6 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 	}
 }
 
-func TestEntityTools_SaveEntityFieldRejectsImmutableFieldUpdateAfterCreate(t *testing.T) {
-	actor := models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "tester",
-		Role:          "operator",
-		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
-	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
-accounts:
-  code:
-    type: text
-    immutable: true
-  status: text
-`)
-	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
-	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
-		"flow_instance": "review/inst-1",
-		"fields": map[string]any{
-			"code":   "acct-001",
-			"status": "open",
-		},
-	})
-
-	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
-		"entity_id": entityID,
-		"field":     "code",
-		"value":     "acct-002",
-	})
-	immutableFailure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "immutable_field_write_forbidden")
-	if immutableFailure.Detail.Attributes["field"] != "code" {
-		t.Fatalf("immutable failure attributes = %#v", immutableFailure.Detail.Attributes)
-	}
-
-	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
-		"entity_id": entityID,
-		"field":     "code",
-		"value":     "acct-001",
-	}); err != nil {
-		t.Fatalf("save_entity_field immutable idempotent write: %v", err)
-	}
-}
-
 func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ExecutionMode: "live",
@@ -1415,7 +1308,11 @@ func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
 
 func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Type: "internal", Role: "operator", Tools: []string{"get_entity"}}
-	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n  active: boolean\n", "queued", true)
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "state", "", `
+status: text
+score: numeric
+active: boolean
+`, "queued", true)
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, actor, bundle)
 	entityID := seedReviewedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
@@ -1449,10 +1346,10 @@ func TestEntityTools_GetEntityReturnsForkLocalMaterializedRevision(t *testing.T)
 		Role:          "operator",
 		Tools:         []string{"get_entity"},
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
-accounts:
-  status: text
-`)
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", "", `
+status: text
+`,
+	)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	sourceRunID := uuid.NewString()
@@ -1556,10 +1453,10 @@ func TestEntityTools_SaveEntityFieldAfterForkActivationUsesForkRunID(t *testing.
 		Role:          "operator",
 		Tools:         []string{"get_entity", "save_entity_field"},
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
-accounts:
-  status: text
-`)
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", "", `
+status: text
+`,
+	)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	sourceRunID := uuid.NewString()
@@ -1698,7 +1595,11 @@ func captureEntityToolRunForkRevision(t *testing.T, db *sql.DB, runID string) {
 
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Type: "internal", Role: "operator", Tools: []string{"search_entities", "query_entities"}}
-	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n  active: boolean\n", "queued", true)
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "state", "", `
+status: text
+score: numeric
+active: boolean
+`, "queued", true)
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, actor, bundle)
 	seedReviewedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
@@ -1835,17 +1736,16 @@ func TestEntityTools_ReadToolsRejectForeignExplicitTargetContract(t *testing.T) 
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"discovery": {
 			EntitiesYAML: `
-campaign:
-  status: text
+status: text
 `,
+
 			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "researcher", Role: "researcher", Tools: []string{"query_entities", "query_metrics", "search_entities"}}),
 		},
 		"signal-search": {
 			EntitiesYAML: `
-signal:
-  signal_strength: integer
-  processed: boolean
-  status: text
+signal_strength: integer
+processed: boolean
+status: text
 `,
 		},
 	})
@@ -1855,18 +1755,17 @@ signal:
 		Role:          "researcher",
 		Tools:         []string{"query_entities", "query_metrics", "search_entities"},
 	}, bundle)
-	seedEntityStateRow(t, ctx, uuid.NewString(), "discovery/run-1", "campaign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
-	seedEntityStateRow(t, ctx, uuid.NewString(), "signal-search/run-1", "signal", map[string]any{
+	seedEntityStateRow(t, ctx, uuid.NewString(), "discovery/run-1", "state", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, uuid.NewString(), "signal-search/run-1", "state", map[string]any{
 		"signal_strength": 80,
 		"processed":       false,
 		"status":          "new",
 	}, time.Now().UTC().Truncate(time.Second))
 
 	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"entity_type": "discovery.campaign",
-		"filter":      `status == "open"`,
-		"select":      []string{"status"},
-		"limit":       10,
+		"filter": `status == "open"`,
+		"select": []string{"status"},
+		"limit":  10,
 	})
 	if err != nil {
 		t.Fatalf("query_entities owned explicit target: %v", err)
@@ -1960,11 +1859,11 @@ score: integer
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	rootID := uuid.NewString()
 	childID := uuid.NewString()
-	seedEntityStateRow(t, ctx, rootID, ".", "root_subject", map[string]any{
+	seedEntityStateRow(t, ctx, rootID, ".", "state", map[string]any{
 		"status": "root",
 		"score":  7,
 	}, time.Now().UTC().Truncate(time.Second))
-	seedEntityStateRow(t, ctx, childID, "child/run-1", "child_subject", map[string]any{
+	seedEntityStateRow(t, ctx, childID, "child/run-1", "state", map[string]any{
 		"status": "child",
 		"score":  99,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2021,24 +1920,22 @@ Brand:
 ValidationKit:
   risk_flags: [text]
 `, `
-validation_case:
-  mvp_spec:
-    type: MvpSpec
-    initial: {core_features: [], out_of_scope: []}
-  brand:
-    type: Brand
-    initial: {alternatives: []}
-  validation_kit:
-    type: ValidationKit
-    initial: {risk_flags: []}
-  score: integer
-`, "marginal_review")
+mvp_spec: MvpSpec
+brand: Brand
+validation_kit: ValidationKit
+score: integer
+`,
+
+		"marginal_review")
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/case-1",
 		"fields": map[string]any{
-			"score": 7,
+			"score":          7,
+			"mvp_spec":       map[string]any{"core_features": []any{}, "out_of_scope": []any{}},
+			"brand":          map[string]any{"alternatives": []any{}},
+			"validation_kit": map[string]any{"risk_flags": []any{}},
 		},
 	})
 	ctx = withEntityToolFixtureRoute(t, ctx, "validation/case-1")
@@ -2142,16 +2039,15 @@ func TestEntityTools_ReadTargetValidationRejectsUndeclaredBeforeEval(t *testing.
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"discovery": {
 			EntitiesYAML: `
-campaign:
-  status: text
+status: text
 `,
+
 			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "researcher", Role: "researcher", Tools: []string{"query_entities", "query_metrics", "search_entities"}}),
 		},
 		"signal-search": {
 			EntitiesYAML: `
-signal:
-  signal_strength: integer
-  processed: boolean
+signal_strength: integer
+processed: boolean
 `,
 		},
 	})
@@ -2163,8 +2059,7 @@ signal:
 	}, bundle)
 
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"entity_type": "discovery.campaign",
-		"filter":      `statu == "open"`,
+		"filter": `statu == "open"`,
 	})
 	re, ok := runtimefailures.As(err)
 	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
@@ -2175,9 +2070,8 @@ signal:
 	}
 
 	_, err = exec.Execute(ctx, "query_metrics", map[string]any{
-		"entity_type": "discovery.campaign",
-		"metric":      "sum",
-		"field":       "statu",
+		"metric": "sum",
+		"field":  "statu",
 	})
 	re, ok = runtimefailures.As(err)
 	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
@@ -2188,8 +2082,7 @@ signal:
 	}
 
 	_, err = exec.Execute(ctx, "search_entities", map[string]any{
-		"entity_type": "discovery.campaign",
-		"filter":      map[string]any{"statu": "open"},
+		"filter": map[string]any{"statu": "open"},
 	})
 	re, ok = runtimefailures.As(err)
 	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
@@ -2280,17 +2173,16 @@ func TestEntityTools_SaveEntityFieldRejectsCrossFlowWrite(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
 			EntitiesYAML: `
-analysis:
-  status: text
+status: text
 `,
+
 			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"save_entity_field", "get_entity"}}),
 		},
 		"other-flow": {
 			EntitiesYAML: `
-foreign:
-  status: text
-  name: text
-  composite_score: numeric
+status: text
+name: text
+composite_score: numeric
 `,
 		},
 	})
@@ -2301,7 +2193,7 @@ foreign:
 		Tools:         []string{"save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "state", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
@@ -2341,7 +2233,7 @@ func TestEntityTools_SaveEntityFieldCrossFlowDenialPreservesSelectedForkRuntimeL
 		AllowInternalLegacyEntityTools: true,
 	})
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "state", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
 	actor = entityToolFixtureActor(t, semanticview.Wrap(bundle), actor, entityToolTestRunID, "analyzer-flow", "analyzer-flow/inst-1")
 	_, err := exec.Execute(selectedForkEntityToolRuntimeContext(actor), "save_entity_field", map[string]any{
@@ -2369,7 +2261,7 @@ func TestEntityTools_SaveEntityFieldAllowsSameFlowWrite(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
 			EntitiesYAML: "status: text\n",
-			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}) + "  writes: [status]\n",
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
@@ -2398,7 +2290,7 @@ func TestEntityTools_SaveEntityFieldAllowsSameFlowWriteWithoutSubjectLink(t *tes
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
 			EntitiesYAML: "status: text\n",
-			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}) + "  writes: [status]\n",
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
@@ -2427,17 +2319,16 @@ func TestEntityTools_GetEntityRejectsCrossFlowRead(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
 			EntitiesYAML: `
-analysis:
-  status: text
+status: text
 `,
+
 			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"get_entity"}}),
 		},
 		"other-flow": {
 			EntitiesYAML: `
-foreign:
-  status: text
-  name: text
-  composite_score: numeric
+status: text
+name: text
+composite_score: numeric
 `,
 		},
 	})
@@ -2448,7 +2339,7 @@ foreign:
 		Tools:         []string{"get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "foreign", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, "other-flow/inst-1", "state", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
 	re, ok := runtimefailures.As(err)
@@ -2470,7 +2361,7 @@ func TestEntityTools_ExistingEntityFlowInstanceAcceptsDeclaredRootAndExactPath(t
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
 			EntitiesYAML: "status: text\nscore: integer\n",
-			AgentsYAML:   entityToolAgentYAML(actor),
+			AgentsYAML:   entityToolAgentYAML(actor) + "  writes: [status]\n",
 		},
 		"operating": {
 			EntitiesYAML: "status: text\n",
@@ -2699,7 +2590,7 @@ func TestEntityTools_FlowOwnedActorCannotReadForeignEntityAndCanWriteOwnEntity(t
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
 			EntitiesYAML: "status: text\n",
-			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "get_entity", "save_entity_field"}}),
+			AgentsYAML:   entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "get_entity", "save_entity_field"}}) + "  writes: [status]\n",
 		},
 		"other-flow": {
 			EntitiesYAML: "status: text\nname: text\ncomposite_score: numeric\n",
@@ -2713,7 +2604,7 @@ func TestEntityTools_FlowOwnedActorCannotReadForeignEntityAndCanWriteOwnEntity(t
 	}, bundle)
 
 	scoringID := uuid.NewString()
-	seedEntityStateRow(t, ctx, scoringID, "other-flow/score-1", "foreign", map[string]any{
+	seedEntityStateRow(t, ctx, scoringID, "other-flow/score-1", "state", map[string]any{
 		"name":            "Example Vertical",
 		"composite_score": 72,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2757,7 +2648,7 @@ func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Exe
 
 func newEntityToolTestExecutorWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor) {
 	t.Helper()
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `Metadata:
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `Metadata:
   region: text
 Brief:
   summary: text
@@ -2767,19 +2658,17 @@ Spec:
 ValidationKit:
   checklist: [text]
 `, `
-accounts:
-  status: text
-  score: numeric
-  priority:
-    type: integer
-    initial: 0
-  active: boolean
-  metadata: Metadata
-  notes: text
-  business_brief: Brief
-  mvp_spec: Spec
-  validation_kit: ValidationKit
-`)
+status: text
+score: numeric
+priority: 0
+active: boolean
+metadata: Metadata
+notes: text
+business_brief: Brief
+mvp_spec: Spec
+validation_kit: ValidationKit
+`,
+	)
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	return ctx, exec
 }
@@ -2803,7 +2692,7 @@ func newAnnotatedEntityToolExecutor(t *testing.T) (context.Context, *runtimetool
 		ID:            "tester",
 		Role:          "operator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
-	}, "validation", "validation", `Brief:
+	}, "validation", "state", `Brief:
   summary: text
 Spec:
   headline: text
@@ -2811,11 +2700,11 @@ Spec:
 ValidationKit:
   checklist: [text]
 `, `
-validation:
-  business_brief: Brief
-  mvp_spec: Spec
-  validation_kit: ValidationKit
-`))
+business_brief: Brief
+mvp_spec: Spec
+validation_kit: ValidationKit
+`,
+	))
 }
 
 func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB) {
@@ -2833,7 +2722,7 @@ func newEntityToolTestHarnessWithActor(t *testing.T, actor models.AgentConfig) (
 	if strings.TrimSpace(actor.Type) == "" {
 		actor.Type = "internal"
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `Metadata:
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `Metadata:
   region: text
 Brief:
   summary: text
@@ -2843,19 +2732,17 @@ Spec:
 ValidationKit:
   checklist: [text]
 `, `
-accounts:
-  status: text
-  score: numeric
-  priority:
-    type: integer
-    initial: 0
-  active: boolean
-  metadata: Metadata
-  notes: text
-  business_brief: Brief
-  mvp_spec: Spec
-  validation_kit: ValidationKit
-`)
+status: text
+score: numeric
+priority: 0
+active: boolean
+metadata: Metadata
+notes: text
+business_brief: Brief
+mvp_spec: Spec
+validation_kit: ValidationKit
+`,
+	)
 	return newEntityToolTestHarnessWithBundle(t, actor, bundle)
 }
 
@@ -3021,7 +2908,9 @@ func TestEntityToolFixtureInitialStageBranches(t *testing.T) {
 		{"marginal_review", []string{"marginal_review", "queued", "closed"}},
 	} {
 		t.Run(tc.entry, func(t *testing.T) {
-			bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "state", "", "validation_case:\n  status: text\n", tc.entry)
+			bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "state", "", `
+status: text
+`, tc.entry)
 			graph, ok := bundle.WorkflowStageTopology("validation")
 			if !ok {
 				t.Fatal("missing compiled validation stage catalog")

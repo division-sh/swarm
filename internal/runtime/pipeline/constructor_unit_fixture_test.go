@@ -43,6 +43,8 @@ func materializedWorkflowInstanceForSource(t testing.TB, source semanticview.Sou
 		t.Fatal("component fixture requires its exact declared flow")
 	}
 	instance.Mode = schema.EffectiveMode()
+	contract, _ := entityruntime.ResolveForFlow(source, instance.WorkflowName)
+	instance.EntityType = contract.EntityType
 	graph, compiled := semanticview.WorkflowStageTopology(source, instance.WorkflowName)
 	if !compiled {
 		t.Fatal("component fixture requires its compiled stage topology")

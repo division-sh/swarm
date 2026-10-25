@@ -13,7 +13,7 @@ import (
 
 func entityOperationParserContract() entityruntime.Contract {
 	return entityruntime.Contract{
-		EntityType: "case",
+		EntityType: "state",
 		Entity: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{
 			"status": {Type: "text"},
 			"items":  {Type: "[text]"},

@@ -2835,7 +2835,7 @@ func TestRun_ReportsEmitFromLoweringErrorsAsPayloadCompletenessFailures(t *testi
 
 	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "emit.from entity cannot fill required emitted payload field missing_required") {
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "emit.from state cannot fill required emitted payload field missing_required") {
 		t.Fatalf("expected emit.from missing source field error, got %#v", report.Errors())
 	}
 }
@@ -3729,7 +3729,7 @@ func TestRun_DoesNotAttributePrivateReaderToParentContract(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type case declares field priority") {
+	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type state declares field priority") {
 		t.Fatalf("private child read credited parent state: %#v", report.LintEvidence())
 	}
 	if !reportContains(report.Errors(), "expression_field_reference_validation", "priority") {
@@ -3792,10 +3792,10 @@ writer:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "entity_writer_coverage", "flow alpha entity_type case declares field business_brief") {
+	if reportContains(report.Errors(), "entity_writer_coverage", "flow alpha entity_type state declares field business_brief") {
 		t.Fatalf("unexpected alpha entity_writer_coverage error, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "entity_writer_coverage", "flow beta entity_type case declares field business_brief") {
+	if reportContains(report.Errors(), "entity_writer_coverage", "flow beta entity_type state declares field business_brief") {
 		t.Fatalf("unexpected beta entity_writer_coverage error, got %#v", report.Errors())
 	}
 }
@@ -3885,7 +3885,9 @@ func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesField
 }
 
 func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *testing.T) {
-	bundle := loadWave1ExpressionFixtureBundle(t)
+	root := writeWave1ExpressionFixture(t)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "retry_count: 0\nrevision_count: 0\nexpected_count: 1\n")
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	clearWave1ExpressionStaticCreateEntity(t, bundle, flowID, nodeID)
 	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
@@ -5729,7 +5731,7 @@ stages:
   review: {}
   done: {final: true}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "state.yaml"), ``)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 ticket.opened:
   entity_id: string
@@ -5766,7 +5768,7 @@ func writeStagedLifecycleFixture(t *testing.T, schema string) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: staged-lifecycle\n")
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), schema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "state.yaml"), ``)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 ticket.opened:
   entity_id: string

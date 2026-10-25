@@ -210,7 +210,7 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeBootVerification(t
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"]`) {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["inputs"]`) {
 				t.Fatalf("bundle load error = %v, want canonical rejection before boot verification", err)
 			}
 		})
@@ -308,7 +308,7 @@ func TestRun_KeyedPortfolioStreamUsesOrdinaryConnectAndAccumulator(t *testing.T)
 	}
 	assertOrdinaryPortfolioInput(t, source, "portfolio", "operating.reported", "period_id", runtimecontracts.FlowInputResolutionModeSelectOrCreate)
 	handler, ok := source.ExecutableNodeEventHandler(identitytest.FlowNode(t, "portfolio", "portfolio-collector"), "operating.reported")
-	if !ok || handler.Accumulate == nil || handler.Accumulate.Into != "operating_reports" || handler.Accumulate.From != "payload" || handler.Accumulate.Key != "payload.operating_id" || handler.Join != nil {
+	if !ok || handler.Accumulate == nil || handler.Accumulate.Target != "operating_reports" || handler.Accumulate.Key != "operating_id" || handler.Join != nil {
 		t.Fatalf("stream must retain its own keyed accumulator, not a pin aggregation variant: %#v", handler)
 	}
 	if plans := source.WorkflowJoins(); len(plans) != 0 {
@@ -376,7 +376,7 @@ func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
 		repoRoot := repoRootForBootverifyTest(t)
 		root := canonicalrouting.CopyRetiredFanInPin(t)
 		_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-		if err == nil || !strings.Contains(err.Error(), "portfolio/schema.yaml") || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"]`) {
+		if err == nil || !strings.Contains(err.Error(), "portfolio/schema.yaml") || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["inputs"]`) {
 			t.Fatalf("retired canonical pin reached boot verification: %v", err)
 		}
 	})

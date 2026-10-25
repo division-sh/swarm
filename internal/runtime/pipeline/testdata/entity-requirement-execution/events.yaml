@@ -1,4 +1,5 @@
 work.ready:
+  item_id: text
 work.emitted:
 work.clear:
 work.kill:

@@ -117,7 +117,7 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 				"schema.yaml": "name: typed-instance-key\ninstance: item_id\ninputs:\n  - item.created\n",
-				"state.yaml":  "item:\n  item_id: " + test.fieldType + "\n",
+				"state.yaml":  "item_id: " + test.fieldType + "\n",
 				"events.yaml": "item.created:\n  item_id: " + test.fieldType + "\n",
 			})
 			material, err := AdmitFlowInstanceKey(source, ".", test.value)
