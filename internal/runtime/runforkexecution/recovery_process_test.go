@@ -276,7 +276,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	} else if armedJoinCut {
 		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
 	} else {
-		seedSelectedLiveOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+		seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID, true)
 	}
 	var liveRuntime *rootruntime.Runtime
 	var liveContexts *rootruntime.RuntimeContextManager

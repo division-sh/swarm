@@ -110,16 +110,10 @@ func validateFlowReadinessSuccessorTx(ctx context.Context, tx *sql.Tx, req manag
 		req.Topology.Authority.Kind != agenttopology.AuthorityFlowReadinessPlan || previous.Topology.Authority.Kind != agenttopology.AuthoritySelectedForkDeclarationPlan {
 		return validateFlowReadinessSuccessor(req, previous, exists, instanceRebind)
 	}
-	old, next := previous.Topology.Authority.Selected, req.Topology.Authority.Readiness
-	if old == nil || next == nil || previous.Topology.Validate() != nil ||
-		previous.Phase != manager.AgentLifecycleRegistered || previous.RunMode != manager.AgentRunModeStopped ||
-		req.Identity.Normalize() != previous.Identity.Normalize() || req.ConfigRevision != previous.ConfigRevision ||
-		req.TargetGeneration != previous.Generation+1 ||
-		old.RunID != req.Identity.RunID || next.RunID != old.RunID || old.BundleHash != req.ProcessBinding.BundleHash ||
-		previous.ProcessBinding.BundleHash != old.BundleHash || previous.Topology.Lifetime != req.Topology.Lifetime ||
-		previous.ProcessBinding.GenerationGrantID == req.ProcessBinding.GenerationGrantID {
+	if !retiredSelectedReadinessSuccessorShape(req, previous) {
 		return topologyConflict(req, "selected_readiness_successor_changed_retired_actor")
 	}
+	old := previous.Topology.Authority.Selected
 	handedOff, err := sourceadmission.ObserveLiveHandoff(ctx, tx, old.RunID, old.BundleHash)
 	if err != nil {
 		return err
@@ -128,7 +122,9 @@ func validateFlowReadinessSuccessorTx(ctx context.Context, tx *sql.Tx, req manag
 		return topologyConflict(req, "selected_readiness_successor_missing_live_handoff")
 	}
 	var grantRaw, declarationRaw []byte
-	err = tx.QueryRowContext(ctx, `SELECT predecessor.snapshot, execution.declaration_plan
+	var executionID, bindingID string
+	var executionGeneration uint64
+	err = tx.QueryRowContext(ctx, `SELECT predecessor.snapshot, execution.declaration_plan, execution.execution_id, execution.binding_id, execution.generation
 		FROM runtime_generation_grants AS predecessor
 		JOIN run_fork_selected_contract_runtime_executions AS execution ON execution.execution_id=predecessor.selected_execution_id
 		JOIN runtime_generation_grants AS successor ON successor.grant_id=$4
@@ -138,7 +134,7 @@ func validateFlowReadinessSuccessorTx(ctx context.Context, tx *sql.Tx, req manag
 		AND successor.state='admitted' AND successor.selected_execution_id IS NULL
 		AND execution.state='closed' AND execution.failure IS NULL AND execution.lease_expires_at IS NULL AND execution.terminal_at IS NOT NULL
 		AND execution.generation=(SELECT MAX(current.generation) FROM run_fork_selected_contract_runtime_executions current WHERE current.fork_run_id=execution.fork_run_id)`,
-		previous.ProcessBinding.GenerationGrantID, old.RunID, old.PlanFingerprint, req.ProcessBinding.GenerationGrantID).Scan(&grantRaw, &declarationRaw)
+		previous.ProcessBinding.GenerationGrantID, old.RunID, old.PlanFingerprint, req.ProcessBinding.GenerationGrantID).Scan(&grantRaw, &declarationRaw, &executionID, &bindingID, &executionGeneration)
 	if err != nil {
 		return err
 	}
@@ -152,6 +148,7 @@ func validateFlowReadinessSuccessorTx(ctx context.Context, tx *sql.Tx, req manag
 	}
 	if predecessor.Validate() != nil || declaration.Validate() != nil || predecessor.SelectedFork == nil ||
 		!previous.ProcessBinding.Equal(processBindingForGrant(predecessor)) || predecessor.SelectedFork.ForkRunID != old.RunID ||
+		predecessor.SelectedFork.ExecutionID != executionID || predecessor.SelectedFork.BindingID != bindingID || predecessor.SelectedFork.ExecutionGeneration != executionGeneration ||
 		predecessor.SelectedFork.DeclarationPlanFingerprint != old.PlanFingerprint || declaration.Revision != old.PlanFingerprint || declaration.BundleHash != old.BundleHash {
 		return topologyConflict(req, "selected_readiness_successor_declaration_mismatch")
 	}
@@ -165,6 +162,17 @@ func validateFlowReadinessSuccessorTx(ctx context.Context, tx *sql.Tx, req manag
 		}
 	}
 	return topologyConflict(req, "selected_readiness_successor_actor_not_declared")
+}
+
+func retiredSelectedReadinessSuccessorShape(req manager.AgentLifecycleTransition, previous manager.AgentLifecycleState) bool {
+	old, next := previous.Topology.Authority.Selected, req.Topology.Authority.Readiness
+	return old != nil && next != nil && previous.Topology.Validate() == nil &&
+		previous.Phase == manager.AgentLifecycleRegistered && previous.RunMode == manager.AgentRunModeStopped &&
+		req.Identity.Normalize() == previous.Identity.Normalize() && req.ConfigRevision == previous.ConfigRevision &&
+		req.TargetGeneration == previous.Generation+1 &&
+		old.RunID == req.Identity.RunID && next.RunID == old.RunID && old.BundleHash == req.ProcessBinding.BundleHash &&
+		previous.ProcessBinding.BundleHash == old.BundleHash && previous.Topology.Lifetime == req.Topology.Lifetime &&
+		previous.ProcessBinding.GenerationGrantID != req.ProcessBinding.GenerationGrantID
 }
 
 func verifyFlowReadinessRebindCensusTx(ctx context.Context, tx *sql.Tx, req manager.FlowReadinessSourceSetRebindRequest) error {
