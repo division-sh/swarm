@@ -248,7 +248,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			var entities int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&entities); err != nil {
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, runID).Scan(&entities); err != nil {
 				t.Fatal(err)
 			}
 			if entities != 6 {
