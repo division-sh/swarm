@@ -99,7 +99,7 @@ func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner Sel
 	process, _ := worklifetime.ProcessFromContext(ctx)
 	p := owner.ports
 	rt, err := rootruntime.NewRuntime(ctx, rootruntime.RuntimeDeps{
-		Config: &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4}, LLM: config.LLMConfig{Backend: "anthropic"}},
+		Config: &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4, RecoveryOnStartup: live}, LLM: config.LLMConfig{Backend: "anthropic"}},
 		Options: rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 			SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
 			WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}},
@@ -221,6 +221,17 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 	controlCtx := correlation.WithRuntimeInstanceID(use.WorkContext(), rt.Options.RuntimeInstanceID)
 	controlCtx = correlation.WithSourceArtifactFact(controlCtx, rt.Options.SourceArtifactFact)
 	controlCtx = authoractivity.WithScope(controlCtx, authoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.SourceArtifactFact.BundleHash()))
+	availability, err := owner.ports.fork.LoadRunBundleAvailability(controlCtx, sourceRunID)
+	if err != nil || !availability.Available() || availability.BundleHash != loaded.SourceArtifactFact.BundleHash() {
+		_ = use.Done()
+		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
+	}
+	if availability.Status == "paused" {
+		if err := use.Done(); err != nil {
+			t.Fatal(err)
+		}
+		return rt, contexts
+	}
 	result, err := rt.RunControl.Pause(controlCtx, runcontrol.TransitionRequest{RunID: sourceRunID, Reason: "retained fork source", ControlledBy: "native fixture"})
 	if doneErr := use.Done(); err != nil || doneErr != nil || result.Status != runcontrol.StatusPaused {
 		t.Fatalf("park retained native source: result=%+v err=%v join=%v", result, err, doneErr)

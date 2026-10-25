@@ -209,14 +209,21 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 	ordinaryCtx := correlation.WithRuntimeInstanceID(use.WorkContext(), use.Runtime().Options.RuntimeInstanceID)
 	ordinaryCtx = correlation.WithSourceArtifactFact(ordinaryCtx, use.Runtime().Options.SourceArtifactFact)
 	ordinaryCtx = authoractivity.WithScope(ordinaryCtx, authoractivity.BundleScope(use.Runtime().Options.RuntimeInstanceID, use.Runtime().Options.SourceArtifactFact.BundleHash()))
-	quiescence, cancelQuiescence := context.WithDeadline(ordinaryCtx, deadline)
-	defer cancelQuiescence()
-	if err := use.Runtime().Manager.WaitForQuiescence(quiescence); err != nil {
-		t.Fatalf("join the ordinary receiver before the replay baseline: %v", err)
+	parkCtx, cancelPark := context.WithDeadline(ordinaryCtx, deadline)
+	defer cancelPark()
+	scope, err := request.LiveRuns.LoadRunLiveScope(parkCtx, materialized.ForkRunID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := use.Runtime().Bus.WaitForQuiescence(quiescence); err != nil {
-		t.Fatalf("join actual receiver/publication work before the replay baseline: %v", err)
+	live, found, err := request.LiveRuns.LoadLiveRun(parkCtx, scope)
+	if err != nil || !found || live.RunID != materialized.ForkRunID || !live.Source.Matches(loaded.SourceArtifactFact) {
+		t.Fatalf("pin replay lost its exact live flow: %+v found=%v error=%v", live, found, err)
 	}
+	_, release, err := use.Runtime().ParkLiveRun(parkCtx, live)
+	if err != nil {
+		t.Fatalf("join exact run work before the replay baseline: %v", err)
+	}
+	defer release()
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, loader.Store)
 	if err != nil {
 		t.Fatal(err)
