@@ -1923,9 +1923,13 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scen
 		}
 		return r.assertEntityDetailExpectation(ctx, runID, binding.EntityID, binding.EntityType, evaluator, expect)
 	}
+	flow := expect.Flow
+	if flow == "." {
+		flow = runID
+	}
 	params := map[string]any{
 		"run_id": runID,
-		"flow":   expect.Flow,
+		"flow":   flow,
 		"limit":  500,
 	}
 	entities := []entitySummary{}
