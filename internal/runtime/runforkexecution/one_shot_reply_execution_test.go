@@ -25,10 +25,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -77,9 +79,9 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 			bundle, _ := semanticview.Bundle(loaded.Source)
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
-			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(),
+			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
 				Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
-			rt, closeServing := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+			rt, liveContexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
 				Instance: flowidentity.Stored(loaded.Source, ".", runID, runID, "", ""), OccurredAt: at})
@@ -161,12 +163,25 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "one-shot-proof", IdempotencyKey: "own-return",
 				TransportHash: "one-shot-proof-transport", SourceRunID: runID, ForkEventID: page.Events[0].EventID,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: contractSelection}
+			observeSource := func(phase string) {
+				projection, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, loaded.SourceArtifactFact)
+				t.Logf("ONE_SHOT_SOURCE %s readiness=%+v err=%v", phase, projection, err)
+				for _, actor := range rt.Manager.ListAgentConfigs() {
+					if actor.Identity.RunID == runID {
+						state, found, err := selected.(runtimemanager.AgentLifecycleStateReader).LoadAgentLifecycleState(ctx, actor.Identity)
+						t.Logf("ONE_SHOT_SOURCE %s actor=%+v state=%+v found=%t err=%v", phase, actor.Identity, state, found, err)
+					}
+				}
+			}
+			observeSource("before")
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: page.Events[0].EventID, AllowSourceFreeze: true,
+				LiveRuntime: rt, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				Owner: owner, SourceLoader: loader, ForkOperation: operation, ContractSelection: contractSelection, AgentRuntime: SelectedContractAgentRuntimeOptions{
 					ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability, Workspace: manager,
 					Config: &config.Config{LLM: config.LLMConfig{Backend: selection.BackendClaudeCLI}},
 				}})
 			if err != nil || !result.Activation.Activated {
+				observeSource("refused")
 				t.Fatalf("one-shot child projection/activation: %+v error=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID
@@ -227,7 +242,6 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			if err := clock.Stop(cleanup); err != nil {
 				t.Fatal(err)
 			}
-			closeServing()
 			if err := rt.Shutdown(); err != nil {
 				t.Fatal(err)
 			}

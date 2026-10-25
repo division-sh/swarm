@@ -39,7 +39,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -82,7 +81,7 @@ func publishedJoinFixture(t *testing.T) string {
 	t.Helper()
 	// The existing crash subprocess inherits this test-scoped fixture selection.
 	flowID := os.Getenv(publishedJoinFlowEnv)
-	root := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
+	root := supportedArrivalJoinFixture(t, flowID)
 	path := filepath.Join(root, flowID, "nodes.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -93,6 +92,15 @@ func publishedJoinFixture(t *testing.T) string {
 		t.Fatal("published join fixture lost its exact deadline variant")
 	}
 	data = []byte(strings.ReplaceAll(string(data), deadline, ""))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path = filepath.Join(root, flowID, "schema.yaml")
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "  attention:\n    final: true\n", "", 1))
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +131,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	}
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID,
-		Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
+		Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.completed", "source-runtime", "",
 		[]byte(`{"member_id":"source","result":{"value":"source"}}`), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	identity := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")

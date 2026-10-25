@@ -231,15 +231,6 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
-	if timerCut {
-		eventID = seedIssue642TimerCrashSource(t, ctx, selected, owner, loaded, sourceRun)
-	} else if joinCut {
-		eventID, _ = seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
-	} else if armedJoinCut {
-		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
-	} else {
-		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
-	}
 	checkpointWithSchedule := func(forkRun, scheduleID string) {
 		pipe := os.NewFile(3, "selected-checkpoint")
 		if err := json.NewEncoder(pipe).Encode(selectedForkCrashCheckpoint{SourceRun: sourceRun, ForkRun: forkRun, ScheduleID: scheduleID}); err != nil {
@@ -261,7 +252,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
 	} else if cut == "retained_armed_join_after_activation" {
-		owner.ports.fork = armedArrivalCrashActivationStore{SelectedContractForkLifecycle: owner.ports.fork, schedules: owner.ports.genericSchedules, checkpoint: checkpointWithSchedule}
+		owner.ports.fork = armedArrivalCrashActivationStore{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpointWithSchedule}
 	} else if cut == "retained_after_activation" || cut == "retained_timer_after_activation" || cut == "retained_join_after_activation" {
 		owner.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpoint}
 	} else if cut == "retained_armed_join_occurrence_committed" {
@@ -275,7 +266,25 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
 	}
+	if timerCut {
+		eventID = seedIssue642TimerCrashSource(t, ctx, selected, owner, loaded, sourceRun)
+	} else if joinCut {
+		eventID, _ = seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
+	} else if armedJoinCut {
+		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
+	} else {
+		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+	}
+	liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+	if armedJoinCut {
+		plan, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
+		if err != nil || len(plan.JoinSchedules) != 1 {
+			t.Fatalf("original crash fixture clock: %+v err=%v", plan, err)
+		}
+		joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, plan.JoinSchedules[0].ID)
+	}
 	request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
+		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source), AgentRuntime: options}
 	if strings.HasPrefix(cut, "retained_") {
 		request.ForkOperation = &runfork.ForkOperationRequest{

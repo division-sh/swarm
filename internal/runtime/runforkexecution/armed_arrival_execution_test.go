@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -43,6 +44,24 @@ import (
 func armedArrivalFixture(t *testing.T) string {
 	t.Helper()
 	flowID := os.Getenv(publishedJoinFlowEnv)
+	root := supportedArrivalJoinFixture(t, flowID)
+	path := filepath.Join(root, flowID, "entities.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "    initial: []\n") != 1 {
+		t.Fatal("armed arrival fixture lost its exact membership initializer")
+	}
+	data = []byte(strings.Replace(string(data), "    initial: []\n", "    initial: [member-a]\n", 1))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func supportedArrivalJoinFixture(t *testing.T, flowID string) string {
+	t.Helper()
 	root := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
 	if flowID == "orders" {
 		for _, name := range []string{"types.yaml"} {
@@ -57,18 +76,6 @@ func armedArrivalFixture(t *testing.T) string {
 		if err := os.Remove(filepath.Join(root, flowID, "events.yaml")); err != nil {
 			t.Fatal(err)
 		}
-	}
-	path := filepath.Join(root, flowID, "entities.yaml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(data), "    initial: []\n") != 1 {
-		t.Fatal("armed arrival fixture lost its exact membership initializer")
-	}
-	data = []byte(strings.Replace(string(data), "    initial: []\n", "    initial: [member-a]\n", 1))
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
 	}
 	return root
 }
@@ -433,6 +440,21 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			settlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, child)
 			if err != nil || settlement.Total != 1 || settlement.Delivered != 1 {
 				t.Fatalf("child did not settle exactly one timeout obligation: %+v err=%v", settlement, err)
+			}
+			evidence, err := liveRuntime.CurrentStartupGrantEvidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			processOnly := originalSelectedFixtureContext(t, correlation.WithRunID(ctx, child), selected)
+			copied := startupownership.WithGenerationGrantEvidence(processOnly, evidence)
+			if _, err := selected.(genericschedule.Store).CancelGenericScheduleOutcome(copied, genericschedule.CancelCommand{
+				ActivationID: actual.ID, Cause: "copied_grant_refused", CancelledAt: time.Now().UTC(),
+			}); !errors.Is(err, runlifecycle.ErrRunExecutionAuthority) {
+				t.Fatalf("copied ordinary grant replaced original mutation custody: %v", err)
+			}
+			unchanged, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(wait, actual.ID)
+			if err != nil || !found || !reflect.DeepEqual(unchanged, actual) {
+				t.Fatalf("refused copied-grant cancellation changed the original child clock: %+v err=%v", unchanged, err)
 			}
 			original, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(correlation.WithRunID(ctx, sourceRun), source.ID)
 			if err != nil || !found {
