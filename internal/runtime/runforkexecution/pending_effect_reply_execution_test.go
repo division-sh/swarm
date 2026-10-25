@@ -210,21 +210,6 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 	}
 }
 
-func requirePendingReplySourceFreeze(t *testing.T, ctx context.Context, store pendingReplyExecutionStore, original decisioncard.Card) decisioncard.Card {
-	t.Helper()
-	run, err := store.LoadRunLifecycleSnapshot(ctx, original.RunID)
-	if err != nil || run.Status != runfork.RunForkSourceFrozenStatus || run.EndedAt == nil {
-		t.Fatalf("source freeze lacks its exact lifecycle settlement: %+v error=%v", run, err)
-	}
-	expected := original
-	expected.Status, expected.SupersededReason, expected.UpdatedAt = decisioncard.StatusSuperseded, "run_forked", *run.EndedAt
-	actual, err := store.GetDecisionCard(ctx, original.CardID)
-	if err != nil || !reflect.DeepEqual(expected, actual) {
-		t.Fatalf("source freeze changed more than its exact card settlement: expected=%+v actual=%+v error=%v", expected, actual, err)
-	}
-	return actual
-}
-
 func publishPendingReplyInput(t *testing.T, ctx context.Context, eventBus *bus.EventBus, runID, name string, payload []byte) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
