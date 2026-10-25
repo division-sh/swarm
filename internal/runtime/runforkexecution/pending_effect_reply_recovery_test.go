@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/operatorread"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -46,12 +47,12 @@ const pendingReplyBeforeJournalCrashCut = "retained_pending_effect_before_journa
 
 type pendingReplyStartupReconciliation struct {
 	SelectedContractForkLifecycle
-	entered chan struct{}
+	entered chan context.Context
 	release <-chan struct{}
 }
 
 func (p pendingReplyStartupReconciliation) ReconcileSelectedSuccessorDeliveryAuthority(ctx context.Context, predecessor string, successor deliverylifecycle.ExecutionAuthority) error {
-	close(p.entered)
+	p.entered <- ctx
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -277,7 +278,7 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			}
 			rows := requirePendingReplyBeforeJournal(t, read, selected, checkpoint.ForkRun, pending)
 			operation := loadPendingReplyRecoveryOperation(t, read, selected, checkpoint.ForkRun)
-			if operation.Request.SourceRunID != checkpoint.SourceRun || !operation.Request.AtStart || operation.Request.ResolvedPoint == nil {
+			if operation.Status != runfork.ForkOperationMaterialized || operation.Result != nil || operation.Request.SourceRunID != checkpoint.SourceRun || !operation.Request.AtStart || operation.Request.ResolvedPoint == nil {
 				t.Fatalf("pending-card crash lost the permanent context-only start cut: %+v", operation)
 			}
 			state, err := storetest.ReadSelectedExecutionStorage(read, selected, checkpoint.ForkRun)
@@ -354,7 +355,7 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			})
 			claims := make(chan effects.Authority, 4)
 			owner.ports.runtimeExecution = selectedActivitySuccessorClaim{owner.ports.runtimeExecution, claims}
-			startupEntered, releaseStartup := make(chan struct{}), make(chan struct{})
+			startupEntered, releaseStartup := make(chan context.Context, 1), make(chan struct{})
 			releaseReconciliation := sync.OnceFunc(func() { close(releaseStartup) })
 			defer releaseReconciliation()
 			owner.ports.fork = pendingReplyStartupReconciliation{owner.ports.fork, startupEntered, releaseStartup}
@@ -397,8 +398,9 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 				})
 				done <- recoveryOutcome{entries, err}
 			}()
+			var selectedContext context.Context
 			select {
-			case <-startupEntered:
+			case selectedContext = <-startupEntered:
 			case outcome := <-done:
 				joined = true
 				t.Fatalf("native recovery missed its startup cut: %+v error=%v", outcome.entries, outcome.err)
@@ -410,6 +412,31 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 					_ = use.Close()
 				}
 				t.Fatalf("decision acquired before startup reconciliation: selected=%t error=%v", selected, err)
+			}
+			var current effects.Authority
+			select {
+			case current = <-claims:
+			case <-wait.Done():
+				t.Fatal("pending-card recovery never claimed its current successor")
+			}
+			if len(claims) != 0 || !current.Valid() || current.SelectedFork.ForkRunID != checkpoint.ForkRun ||
+				current.ID == previous.Authority.ID || current.SelectedFork.Generation <= previous.Authority.SelectedFork.Generation {
+				t.Fatalf("pending-card recovery retained old executor: old=%+v current=%+v", previous.Authority, current)
+			}
+			if err := owner.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(selectedContext, current, time.Minute); err != nil {
+				t.Fatalf("pre-ACK pending successor lacks native authority: %v", err)
+			}
+			if err := owner.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(selectedContext, previous.Authority, time.Minute); err == nil {
+				t.Fatal("SIGKILL predecessor retained native execution authority")
+			}
+			principal, err := store.EnsureOperatorPrincipal(wait, time.Now().UTC())
+			if err != nil || principal.ID != previous.PrincipalID {
+				t.Fatalf("recovery changed its durable operator principal: %+v error=%v", principal, err)
+			}
+			requirePendingReplyRecoveryRefusals(t, selectedContext, selected, store, card, principal.ID, previous, current)
+			requirePendingReplyBeforeJournal(t, wait, selected, checkpoint.ForkRun, pending)
+			if calls.Load() != 0 {
+				t.Fatalf("recovery/refusal executed an unapproved provider: calls=%d", calls.Load())
 			}
 			releaseReconciliation()
 			outcome := <-done
@@ -423,7 +450,7 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 				if entry.RunID == checkpoint.ForkRun {
 					matched++
 					if entry.Disposition != runfork.SelectedForkRecoveryResume || entry.Operation == nil || !reflect.DeepEqual(operation, *entry.Operation) {
-						t.Fatalf("pending child did not resume its original acknowledgment: %+v", entry)
+						t.Fatalf("pending child did not resume its original operation: %+v", entry)
 					}
 				} else if entry.RunID != checkpoint.SourceRun || entry.Disposition != runfork.SelectedForkRecoveryStaged || entry.ExecutionID != "" || entry.Continuation != nil {
 					t.Fatalf("recovery changed the unexecuted context-only source: %+v", entry)
@@ -432,32 +459,31 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			if matched != 1 {
 				t.Fatalf("pending-card recovery did not resume exactly one child: %+v", recovered)
 			}
-			var current effects.Authority
-			select {
-			case current = <-claims:
-			case <-wait.Done():
-				t.Fatal("pending-card recovery never claimed its current successor")
+			use, lookup, _, err := liveContexts.AcquireRun(wait, card.RunID)
+			if err != nil || !lookup.Loaded() || use == nil || use.Runtime() != ordinary {
+				if use != nil {
+					_ = use.Done()
+				}
+				t.Fatalf("recovered child lacks its exact ordinary runtime: loaded=%t error=%v", lookup.Loaded(), err)
 			}
-			if len(claims) != 0 || !current.Valid() || current.SelectedFork.ForkRunID != checkpoint.ForkRun ||
-				current.ID == previous.Authority.ID || current.SelectedFork.Generation <= previous.Authority.SelectedFork.Generation {
-				t.Fatalf("pending-card recovery retained old executor: old=%+v current=%+v", previous.Authority, current)
+			defer use.Done()
+			owned := correlation.WithRunID(correlation.WithSourceArtifactFact(use.WorkContext(), use.Context.SourceArtifactFact), card.RunID)
+			owned = authoractivity.WithScope(owned, authoractivity.BundleScope(ordinary.Options.RuntimeInstanceID, use.Context.SourceArtifactFact.BundleHash()))
+			if err := owner.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(owned, current, time.Minute); err == nil {
+				t.Fatal("live handoff retained selected execution authority")
 			}
-			if err := owner.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(wait, current, time.Minute); err != nil {
-				t.Fatalf("current pending successor lacks native authority: %v", err)
+			requirePendingReplyBeforeJournal(t, wait, selected, card.RunID, pending)
+			at, decisionID := time.Now().UTC(), uuid.NewString()
+			request := apiidempotency.Request{Method: "mailbox.decide", Actor: apiidempotency.PrincipalActor(principal.ID), ResourceID: card.CardID,
+				RequestHash: "pending-reply-" + decisionID, IdempotencyKey: uuid.NewString(), Now: at, TTL: time.Hour}
+			mutation := pipeline.NewDecisionCardDecision(decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: principal.ID,
+				ObservedContentHash: card.CardContentHash, Fields: semanticvalue.EmptyObject(), DecisionEventID: decisionID, Now: at})
+			if _, replayed, err := ordinary.Pipeline.CommitDecisionCardMutation(owned, request, mutation); err != nil || replayed {
+				t.Fatalf("approve only the live child's pending effect: replay=%t error=%v", replayed, err)
 			}
-			if err := owner.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(wait, previous.Authority, time.Minute); err == nil {
-				t.Fatal("SIGKILL predecessor retained native execution authority")
+			if err := use.Done(); err != nil {
+				t.Fatal(err)
 			}
-			principal, err := store.EnsureOperatorPrincipal(wait, time.Now().UTC())
-			if err != nil || principal.ID != previous.PrincipalID {
-				t.Fatalf("recovery changed its durable operator principal: %+v error=%v", principal, err)
-			}
-			requirePendingReplyRecoveryRefusals(t, wait, selected, store, owner, card, principal.ID, previous, current)
-			requirePendingReplyBeforeJournal(t, wait, selected, checkpoint.ForkRun, pending)
-			if calls.Load() != 0 {
-				t.Fatalf("recovery/refusal executed an unapproved provider: calls=%d", calls.Load())
-			}
-			approvePendingReplyCard(t, wait, store, owner, card)
 			waitPendingReplyReturn(t, wait, selected, store, checkpoint.ForkRun, rows)
 			decided, err := store.GetDecisionCard(wait, card.CardID)
 			if err != nil || decided.Status != decisioncard.StatusDecided || decided.Verdict != "approve" || decided.DecidedBy != principal.ID || decided.DecisionEventID == "" {
@@ -491,8 +517,9 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			}
 			waitPendingReplyReturn(t, read, selected, store, checkpoint.ForkRun, rows)
 			requirePendingReplyRecoveryResult(t, read, selected, store, pending, decided, rows)
-			if actual := loadPendingReplyRecoveryOperation(t, read, selected, checkpoint.ForkRun); !reflect.DeepEqual(operation, actual) {
-				t.Fatal("pending-card recovery changed its permanent activation acknowledgment")
+			if actual := loadPendingReplyRecoveryOperation(t, read, selected, checkpoint.ForkRun); actual.Status != runfork.ForkOperationActivated || actual.Result == nil ||
+				actual.BindingID != operation.BindingID || actual.SemanticHash != operation.SemanticHash || !reflect.DeepEqual(operation.Request, actual.Request) {
+				t.Fatal("pending-card handoff changed its original operation, binding or cut")
 			}
 			for i, sourceRun := range sourceRuns {
 				after, domainErr := storetest.ReadSelectedForkSourceDomain(read, selected, sourceRun)
@@ -705,26 +732,27 @@ func loadPendingReplyRecoveryOperation(t *testing.T, ctx context.Context, select
 	operation, found, err := selected.(interface {
 		LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 	}).LoadForkOperation(ctx, "pending-reply-crash", "before-journal", "pending-reply-crash-transport")
-	if err != nil || !found || operation.Status != runfork.ForkOperationMaterialized || operation.Result != nil || operation.ForkRunID != child {
-		t.Fatalf("pending-card crash lost its unacknowledged permanent operation: %+v found=%t error=%v", operation, found, err)
+	materialized := operation.Status == runfork.ForkOperationMaterialized && operation.Result == nil
+	activated := operation.Status == runfork.ForkOperationActivated && operation.Result != nil && operation.Result.ForkRunID == child
+	if err != nil || !found || (!materialized && !activated) || operation.ForkRunID != child {
+		t.Fatalf("pending-card journey lost its exact permanent operation: %+v found=%t error=%v", operation, found, err)
 	}
 	return operation
 }
 
-func requirePendingReplyRecoveryRefusals(t *testing.T, ctx context.Context, selected any, store pendingReplyExecutionStore, owner SelectedContractExecutionOwner,
+func requirePendingReplyRecoveryRefusals(t *testing.T, ctx context.Context, selected any, store pendingReplyExecutionStore,
 	card decisioncard.Card, principal string, previous pendingReplyCrashEvidence, current effects.Authority) {
 	t.Helper()
-	waitSelectedRuntimeStartup(t, ctx, owner, card.RunID)
 	before, err := store.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
-	use, isSelected, err := owner.AcquireSelectedDecisionCardControl(ctx, card.RunID, runfork.ControlMailboxDecide)
-	if err != nil || !isSelected || use == nil {
-		t.Fatalf("pending successor lacks its current decision control: selected=%t error=%v", isSelected, err)
+	owned := ctx
+	authority, hasAuthority := effects.AuthorityFromContext(owned)
+	admission, hasAdmission := managedexecution.FromContext(owned)
+	if !hasAuthority || !hasAdmission || authority.ID != current.ID || !admission.AuthorizesSelected(current.ID, card.RunID, current.SelectedFork.Generation) {
+		t.Fatal("startup barrier lost the exact selected successor context")
 	}
-	defer use.Close()
-	owned := use.WorkContext()
 	grant, present := startupownership.GenerationGrantEvidenceFromContext(owned)
 	if !present || grant.SelectedFork == nil || grant.SelectedFork.ExecutionID != current.ID || grant.ProcessAuthorityID == previous.Grant.ProcessAuthorityID {
 		t.Fatalf("pending decision did not acquire its fresh process grant: %+v", grant)
@@ -749,9 +777,6 @@ func requirePendingReplyRecoveryRefusals(t *testing.T, ctx context.Context, sele
 		if err == nil || !strings.Contains(err.Error(), "run execution generation grant is no longer current") {
 			t.Fatalf("%s did not refuse before approval: %v", refused.name, err)
 		}
-	}
-	if err := use.Close(); err != nil {
-		t.Fatal(err)
 	}
 	after, err := store.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 100})
 	actual, cardErr := store.GetDecisionCard(ctx, card.CardID)
