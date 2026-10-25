@@ -1,7 +1,6 @@
 package cliapp
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,29 +79,6 @@ func TestResolveLocalRuntimeStateRejectsLegacySQLiteOrphan(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported project SQLite store exists") || !strings.Contains(err.Error(), ".swarm/stores/dev.db") {
 		t.Fatalf("ResolveLocalRuntimeState error = %v, want legacy sqlite orphan rejection", err)
-	}
-}
-
-func TestRunStartLocalLiveProjectRefusal(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	projectRoot, sourceRoot := writeLocalRuntimeStateProject(t)
-	canonicalProjectRoot, status := canonicalizeDoctorTargetPath(projectRoot)
-	if status != "resolved" {
-		t.Fatalf("canonicalize project root status = %s", status)
-	}
-	swarmDir := t.TempDir()
-	registry := newLocalContextRegistry(swarmDir)
-	server := startCLIAPIRuntimeIdentityServer(t, "runtime-live")
-	writeCLIAPITestContext(t, registry, localProjectContextName(canonicalProjectRoot), "runtime-live", server.URL, canonicalProjectRoot)
-
-	apiOptions := defaultRootCommandOptions()
-	apiOptions.rootFlags = &rootCommandFlagState{swarmDir: swarmDir, swarmDirSet: true}
-	_, err := prepareLocalRunProjectClaim(context.Background(), projectRoot, runCommandOptions{
-		apiOptions: apiOptions,
-		sourceRoot: sourceRoot,
-	}, CLISourcePaths{SourceRoot: sourceRoot})
-	if err == nil || !strings.Contains(err.Error(), "local swarm run start requires exclusive project runtime") || !strings.Contains(err.Error(), "--connect") {
-		t.Fatalf("prepareLocalRunProjectClaim error = %v, want live project runtime conflict", err)
 	}
 }
 

@@ -717,11 +717,9 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.workflowInitialStoredStageForFlow::call internal/runtime/semanticview.WorkflowStageTopology":                                        1,
 		"internal/runtime/pipeline.workflowInitialStoredStageForFlow::graph metadata":                                                                                  1,
 
-		// New timer arms and finite-start admission consume the same catalog;
-		// neither changes accepted work or supplies transition evidence.
+		// New timer arms consume the catalog without changing accepted work
+		// or supplying transition evidence.
 		"internal/runtime/pipeline.workflowTimerMayArmAtStage::call internal/runtime/semanticview.WorkflowStageTopology": 1,
-		"internal/runtime/runstart.ValidateFinite::call internal/runtime/semanticview.WorkflowStageTopology":             1,
-		"internal/runtime/runstart.ValidateFinite::graph metadata":                                                       1,
 		"internal/runtime/runbundle.upgradeCheck.instance::call internal/runtime/semanticview.WorkflowStageTopology":     1,
 
 		"internal/runtime.Runtime.standingTargetsMutation::call internal/runtime/semanticview.WorkflowStageTopology": 1,

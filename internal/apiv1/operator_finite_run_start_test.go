@@ -25,55 +25,6 @@ func finiteRunStartLoadedSource(t *testing.T, finite bool) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
-func TestFiniteRunStartRefusesServiceBeforeMutationBothStores(t *testing.T) {
-	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		source := finiteRunStartLoadedSource(t, false)
-		bundle, _ := semanticview.Bundle(source)
-		catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
-		if err != nil {
-			t.Fatal(err)
-		}
-		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
-		if err != nil {
-			t.Fatal(err)
-		}
-		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
-		ref, err := durabledata.ParseDeclarationRef(".", "scan.requested")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, form := range []string{"event", "event_and_data", "feed"} {
-			t.Run(form, func(t *testing.T) {
-				params := map[string]any{"run_id": uuid.NewString(), "bundle_hash": runStartTestBundleHashForSource(source), "idempotency_key": uuid.NewString()}
-				if form != "feed" {
-					params["event_name"], params["payload"] = "scan.requested", map[string]any{"topic": "business intent"}
-				}
-				if form != "event" {
-					params["data"] = map[string]any{"imports": []any{dataRunFusedImport(uuid.NewString(), ref, durabledata.AbsentHead(), []byte("{\"topic\":\"one\"}\n"))}, "pins": []any{}}
-				}
-				body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": form, "method": "run.start", "params": params})
-				if err != nil {
-					t.Fatal(err)
-				}
-				before := finiteRunStartDurableCounts(t, fixture)
-				for attempt := 0; attempt < 2; attempt++ {
-					response := rpcCall(t, handler, string(body))
-					if response.Error == nil || asMap(t, response.Error.Data)["code"] != RunNeverCompletesCode {
-						t.Fatalf("service finite refusal = %#v", response)
-					}
-					details := asMap(t, asMap(t, response.Error.Data)["details"])
-					if details["flow_id"] != "." || details["detail"] != "flow .: this flow never completes; use `serve`, or mark its end stages `final`" {
-						t.Fatalf("wrong exact-flow diagnostic: %#v", details)
-					}
-					if after := finiteRunStartDurableCounts(t, fixture); !reflect.DeepEqual(before, after) {
-						t.Fatalf("refusal created durable effects: before=%v after=%v", before, after)
-					}
-				}
-			})
-		}
-	})
-}
-
 func TestFiniteRunStartPayloadAdmissionPrecedesEligibilityBothStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
 		for _, finite := range []bool{false, true} {
@@ -159,7 +110,7 @@ func TestFiniteRunStartDoesNotVetoOrdinaryServicePublicationBothStores(t *testin
 
 func TestFiniteRunStartReceiptReplayAndConflictBothStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		source := finiteRunStartLoadedSource(t, true)
+		source := finiteRunStartLoadedSource(t, false)
 		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -169,7 +120,7 @@ func TestFiniteRunStartReceiptReplayAndConflictBothStores(t *testing.T) {
 		body := runStartBodyWithBundleHash(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"finite"}`, key)
 		first := rpcCall(t, handler, body)
 		if first.Error != nil {
-			t.Fatalf("finite initiation: %#v", first)
+			t.Fatalf("persistent-flow initiation: %#v", first)
 		}
 		scope, err := fixture.reconstructed.(runlifecycle.LiveRunReader).LoadRunLiveScope(context.Background(), runID)
 		if err != nil {
@@ -182,7 +133,7 @@ func TestFiniteRunStartReceiptReplayAndConflictBothStores(t *testing.T) {
 		}
 		conflict := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"changed"}`, key))
 		if conflict.Error == nil || asMap(t, conflict.Error.Data)["code"] != IdempotencyConflictCode {
-			t.Fatalf("finite admission replaced committed request conflict: %#v", conflict)
+			t.Fatalf("run admission replaced committed request conflict: %#v", conflict)
 		}
 		if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 1 {
 			t.Fatalf("replay/conflict persisted %d events, want 1", got)

@@ -433,14 +433,13 @@ units:
     budget_class: full
   local-serveapp-canaries:
     packages: [github.com/division-sh/swarm/internal/serveapp]
-    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores|TestServedParityHarnessRunControlLifecycle|TestServedParityHarnessStandingServiceLifecycle|TestPausedMixedRunsStartupBothStores|TestPausedAcceptedTimerAndDecisionPublicBothStores|TestEdgeOwnedConnectionPoliciesSharingInputBothStores|TestEdgeOwnedMixedConnectionProjectionsBothStores|TestReceiverCompositionRestartBothStores|TestReleaseReceiverInitializationBothStores|TestProviderSelectedRootStandingBootBothStores)$'
+    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores|TestServedParityHarnessRunControlLifecycle|TestPausedMixedRunsStartupBothStores|TestPausedAcceptedTimerAndDecisionPublicBothStores|TestEdgeOwnedConnectionPoliciesSharingInputBothStores|TestEdgeOwnedMixedConnectionProjectionsBothStores|TestReceiverCompositionRestartBothStores|TestReleaseReceiverInitializationBothStores|TestProviderSelectedRootStandingBootBothStores)$'
     required_children:
       TestMockAgentSupportedSurfaceSQLitePostgres: [sqlite, postgres]
       TestServedResetRetainClearAndHistoricalReplayBothStores: [default_sqlite/clear=false, default_sqlite/clear=true, explicit_postgres/clear=false, explicit_postgres/clear=true]
       TestSelectedForkPublicChangedTargetExecutionBothStores: [default_sqlite, explicit_postgres]
       TestIssue2394ServedStopTwentyBothStores: [default_sqlite, explicit_postgres]
       TestServedParityHarnessRunControlLifecycle: [default_sqlite, explicit_postgres]
-      TestServedParityHarnessStandingServiceLifecycle: [default_sqlite, explicit_postgres]
       TestPausedMixedRunsStartupBothStores: [sqlite, postgres]
       TestPausedAcceptedTimerAndDecisionPublicBothStores: [default_sqlite/timer, default_sqlite/decision, explicit_postgres/timer, explicit_postgres/decision]
       TestEdgeOwnedConnectionPoliciesSharingInputBothStores: [sqlite/forward, sqlite/reverse, postgres/forward, postgres/reverse]
@@ -455,14 +454,13 @@ units:
   # The channel unit retains the receiver restart's two backend obligations.
   local-serveapp-canaries-without-channel:
     packages: [github.com/division-sh/swarm/internal/serveapp]
-    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores|TestServedParityHarnessRunControlLifecycle|TestServedParityHarnessStandingServiceLifecycle|TestPausedMixedRunsStartupBothStores|TestPausedAcceptedTimerAndDecisionPublicBothStores|TestEdgeOwnedConnectionPoliciesSharingInputBothStores|TestEdgeOwnedMixedConnectionProjectionsBothStores|TestReleaseReceiverInitializationBothStores|TestProviderSelectedRootStandingBootBothStores)$'
+    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores|TestServedParityHarnessRunControlLifecycle|TestPausedMixedRunsStartupBothStores|TestPausedAcceptedTimerAndDecisionPublicBothStores|TestEdgeOwnedConnectionPoliciesSharingInputBothStores|TestEdgeOwnedMixedConnectionProjectionsBothStores|TestReleaseReceiverInitializationBothStores|TestProviderSelectedRootStandingBootBothStores)$'
     required_children:
       TestMockAgentSupportedSurfaceSQLitePostgres: [sqlite, postgres]
       TestServedResetRetainClearAndHistoricalReplayBothStores: [default_sqlite/clear=false, default_sqlite/clear=true, explicit_postgres/clear=false, explicit_postgres/clear=true]
       TestSelectedForkPublicChangedTargetExecutionBothStores: [default_sqlite, explicit_postgres]
       TestIssue2394ServedStopTwentyBothStores: [default_sqlite, explicit_postgres]
       TestServedParityHarnessRunControlLifecycle: [default_sqlite, explicit_postgres]
-      TestServedParityHarnessStandingServiceLifecycle: [default_sqlite, explicit_postgres]
       TestPausedMixedRunsStartupBothStores: [sqlite, postgres]
       TestPausedAcceptedTimerAndDecisionPublicBothStores: [default_sqlite/timer, default_sqlite/decision, explicit_postgres/timer, explicit_postgres/decision]
       TestEdgeOwnedConnectionPoliciesSharingInputBothStores: [sqlite/forward, sqlite/reverse, postgres/forward, postgres/reverse]

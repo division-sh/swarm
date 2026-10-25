@@ -641,7 +641,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -1114,7 +1114,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -1369,7 +1369,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -1516,7 +1516,7 @@
           }
         },
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4253,7 +4253,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32064,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4291,7 +4291,7 @@
           }
         },
         {
-          "code": -32066,
+          "code": -32065,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4831,7 +4831,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32064,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4869,7 +4869,7 @@
           }
         },
         {
-          "code": -32066,
+          "code": -32065,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5017,7 +5017,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32064,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6428,7 +6428,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -6672,7 +6672,7 @@
           }
         },
         {
-          "code": -32067,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -6888,7 +6888,7 @@
           }
         },
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7498,7 +7498,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -8239,7 +8239,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -8600,7 +8600,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -8877,7 +8877,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -9276,7 +9276,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -9788,7 +9788,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -9855,7 +9855,7 @@
           }
         },
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9893,7 +9893,7 @@
           }
         },
         {
-          "code": -32063,
+          "code": -32062,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -10067,7 +10067,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10162,7 +10162,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10367,7 +10367,7 @@
           }
         },
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10726,7 +10726,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10867,7 +10867,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32063,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -10934,7 +10934,7 @@
           }
         },
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -11114,7 +11114,7 @@
     },
     {
       "name": "run.start",
-      "description": "Starts a run with exactly one event, one or more selected data feeds, or both. Event-backed initiation requires event_name and payload together. Feed-only initiation requires data and a canonical run_id; it creates a deployment-origin run without a synthetic event. Every selected pin creates one feed obligation atomically with the run, imports, pins, canonical no-argument root tree and permanent receipt. Feed-only initiation refuses a root without an eligible no-argument constructor before mutation. The selected bundle_hash must identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext; an existing run cannot acquire new run-creation data.\nAfter exact source/input/feed admission, including canonical event payload preflight, and before either atomic creation owner, require an explicit final stage for the selected root, eagerly constructed keyless descendants, and possible compiled routing receivers/templates and their constructor children. Independently selected nested imports and pins seed this closure with the exact receivers matched by their already-admitted declaration/routing evidence; they do not instantiate the source producer or select its unrelated output routes. Unknown or contradictory catalog evidence fails closed. Do not infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or treat stateless instances as exempt containers. A no-final service is structurally valid but refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow. Malformed event payloads fail PAYLOAD_VALIDATION_FAILED before this finite-eligibility check; a valid payload cannot waive the no-final refusal. Committed idempotency replay/conflicts retain their existing owners; existing-run event.publish and standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event, resource, feed and permanent-receipt effects.\nBoth initiation variants reserve the same process-wide public-completion capacity before construction and mutation. Feed-only replay/conflict also precedes fresh source/feed admission; a completed exact key does not require the original bundle to remain loaded. Eventless starts retain their exact run/root/feed activation responsibility without inventing an event or claim. First/replay returns the native recorded method result, not mutable run/feed reconstruction. An acknowledged feed-only commit with an invalid returned receipt fails closed to the caller, while the original accepted owner retains activation and joined disposition responsibility. The invalid projection cannot authorize a success response or erase the committed obligation.\n",
+      "description": "Starts a run with exactly one event, one or more selected data feeds, or both. Event-backed initiation requires event_name and payload together. Feed-only initiation requires data and a canonical run_id; it creates a deployment-origin run without a synthetic event. Every selected pin creates one feed obligation atomically with the run, imports, pins, canonical no-argument root tree and permanent receipt. Feed-only initiation refuses a root without an eligible no-argument constructor before mutation. The selected bundle_hash must identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext; an existing run cannot acquire new run-creation data.\nSource/input/feed admission, including canonical event payload preflight, precedes either atomic creation owner. A final stage is not an initiation prerequisite: persistent flows accept inputs without a finite-completion refusal. Malformed payloads still fail PAYLOAD_VALIDATION_FAILED before run, event, resource, feed and permanent-receipt effects. Committed idempotency replay/conflicts and exact constructor/routing admission retain their existing owners.\nBoth initiation variants reserve the same process-wide public-completion capacity before construction and mutation. Feed-only replay/conflict also precedes fresh source/feed admission; a completed exact key does not require the original bundle to remain loaded. Eventless starts retain their exact run/root/feed activation responsibility without inventing an event or claim. First/replay returns the native recorded method result, not mutable run/feed reconstruction. An acknowledged feed-only commit with an invalid returned receipt fails closed to the caller, while the original accepted owner retains activation and joined disposition responsibility. The invalid projection cannot authorize a success response or erase the committed obligation.\n",
       "params": [
         {
           "name": "bundle_hash",
@@ -11379,7 +11379,7 @@
           }
         },
         {
-          "code": -32067,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -12006,49 +12006,6 @@
             ],
             "type": "object"
           }
-        },
-        {
-          "code": -32061,
-          "message": "Application error: RUN_NEVER_COMPLETES",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "RUN_NEVER_COMPLETES",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "description": "Finite run.start requires an explicit final stage in every instance-bearing flow of its canonical constructor/routing closure. A no-final service remains valid for serve.",
-                "properties": {
-                  "detail": {
-                    "type": "string"
-                  },
-                  "flow_id": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "flow_id",
-                  "detail"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
         }
       ]
     },
@@ -12080,7 +12037,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12160,7 +12117,7 @@
           }
         },
         {
-          "code": -32063,
+          "code": -32062,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -12315,7 +12272,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12425,7 +12382,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -13355,7 +13312,7 @@
           }
         },
         {
-          "code": -32067,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -26519,51 +26476,8 @@
           "type": "object"
         }
       },
-      "RUN_NEVER_COMPLETES": {
-        "code": -32061,
-        "message": "Application error: RUN_NEVER_COMPLETES",
-        "data": {
-          "additionalProperties": false,
-          "properties": {
-            "code": {
-              "const": "RUN_NEVER_COMPLETES",
-              "type": "string"
-            },
-            "correlation_id": {
-              "type": "string"
-            },
-            "details": {
-              "additionalProperties": false,
-              "description": "Finite run.start requires an explicit final stage in every instance-bearing flow of its canonical constructor/routing closure. A no-final service remains valid for serve.",
-              "properties": {
-                "detail": {
-                  "type": "string"
-                },
-                "flow_id": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "flow_id",
-                "detail"
-              ],
-              "type": "object"
-            },
-            "retryable": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "code",
-            "details",
-            "retryable",
-            "correlation_id"
-          ],
-          "type": "object"
-        }
-      },
       "RUN_NOT_FOUND": {
-        "code": -32062,
+        "code": -32061,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -26601,7 +26515,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32063,
+        "code": -32062,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -26647,7 +26561,7 @@
         }
       },
       "SELECTED_FORK_CONTROL_UNSUPPORTED": {
-        "code": -32064,
+        "code": -32063,
         "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
         "data": {
           "additionalProperties": false,
@@ -26714,7 +26628,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32065,
+        "code": -32064,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -26752,7 +26666,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32066,
+        "code": -32065,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -26794,7 +26708,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH": {
-        "code": -32067,
+        "code": -32066,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
         "data": {
           "additionalProperties": false,
@@ -26829,7 +26743,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH_FORK": {
-        "code": -32068,
+        "code": -32067,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH_FORK",
         "data": {
           "additionalProperties": false,

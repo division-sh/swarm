@@ -434,12 +434,11 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	}
 	t.Run("loaded_callback_fence", assertManagedFence)
 	t.Run("suppressed_callback_fence", func(t *testing.T) {
-		transition, err := manager.BeginStandingServiceTransition(t.Context(), target.ServiceID)
-		if err != nil {
+		if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
 			t.Fatal(err)
 		}
 		defer func() {
-			if err := transition.Restore(context.Background()); err != nil {
+			if err := manager.RestoreStandingServiceTargets(target.ServiceID); err != nil {
 				t.Error(err)
 			}
 		}()

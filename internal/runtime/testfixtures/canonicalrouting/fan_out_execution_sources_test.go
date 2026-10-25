@@ -9,8 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"github.com/division-sh/swarm/internal/runtime/runstart"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
@@ -73,9 +71,6 @@ func TestServedReporterFiniteContractHasRealClosureCarriers(t *testing.T) {
 	repo := RepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := runstart.ValidateFinite(semanticview.Wrap(bundle), nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, stage := range []struct {
