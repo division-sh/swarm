@@ -121,6 +121,7 @@ func nativeRouteRecoveryFixtureForTest(t *testing.T, backend string, open pipeli
 		"schema.yaml": "name: native-route-recovery\nstages:\n  active: {}\n",
 
 		"review/schema.yaml": "name: review\nstages:\n  active: {}\n",
+		"review/state.yaml":  "marker: 'native-route'\n",
 	})
 	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 	instance := constructNativeRouteRecoveryInstanceForTest(t, fixture, pc, ctx)

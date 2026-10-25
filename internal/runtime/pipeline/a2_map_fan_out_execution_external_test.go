@@ -110,7 +110,7 @@ item.ready:
 		"nodes.yaml": `writer:
   seed:
     data_accumulation:
-      writes: [{target_field: items, value: "{'before': [999]}"}]
+      writes: [{target_field: items, value: {before: [999]}}]
   batch.ready:
     data_accumulation:
       writes: [{target_field: items, value: payload.items}]
@@ -959,11 +959,7 @@ func runA2MapFanOutCompiledImmutableSource(t *testing.T, selected gateRecoverySt
 	}
 	written, err := json.Marshal(p.instance(t).Fields["items"])
 	if err != nil || a2AccumulatorJSONHash(t, written) != a2AccumulatorJSONHash(t, wantWritten) {
-		var persisted []byte
-		if readErr := p.selected.db.QueryRowContext(p.ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, p.runID, p.runID).Scan(&persisted); readErr != nil {
-			t.Fatal(readErr)
-		}
-		t.Fatalf("compiled writer changed exact admitted map keys/values: %s; persisted=%s err=%v", written, persisted, err)
+		t.Fatalf("compiled writer changed exact admitted map keys/values: got=%s want=%s err=%v", written, wantWritten, err)
 	}
 	if len(p.outputs(t)) != 0 {
 		t.Fatal("compiled handler eagerly published fan-out outputs")
@@ -1000,7 +996,7 @@ func runA2MapFanOutCompiledImmutableSource(t *testing.T, selected gateRecoverySt
 	}
 	var frozen []byte
 	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT new_value FROM entity_mutations
-					WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
+					WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='fan_out_source' AND path=$4`,
 		intent.Source.MutationID, intent.Source.RunID, intent.Source.EntityID, intent.Source.Field).Scan(&frozen); err != nil {
 		t.Fatal(err)
 	}

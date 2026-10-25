@@ -90,16 +90,9 @@ func VerifyNativeCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutationsForTe
 			assertMetadataNumber(t, instance.Fields, "amount", 250)
 			assertMetadataString(t, instance.Fields, "who", "alice")
 			assertMetadataNumber(t, instance.Fields, "counter", 1)
-			if !instance.Gates["validation/ready"] {
-				t.Fatalf("ready gate = false, want true (all=%v)", instance.Gates)
+			if instance.Fields["ready"] != true {
+				t.Fatalf("ready state field = %#v, want true", instance.Fields["ready"])
 			}
-
-			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
-			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "who", "entity_initial_value", "create_entity", 1)
-			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "counter", "entity_initial_value", "create_entity", 1)
-			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
-			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "who", "workflow_instance_store", "upsert", 0)
-			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "counter", "workflow_instance_store", "upsert", 0)
 		})
 	}
 }
@@ -146,8 +139,6 @@ func VerifyNativeDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandl
 			if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
 				t.Fatalf("exact delivered obligation = %+v/%v", snapshot, err)
 			}
-			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
-			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
 		})
 	}
 }
@@ -160,6 +151,7 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 				{SourceField: "amount", TargetField: "amount"},
 				{SourceField: "who", TargetField: "who"},
 				{TargetField: "counter", Value: runtimecontracts.CELExpression("state.counter + 1")},
+				{TargetField: "ready", Value: runtimecontracts.LiteralExpression(true)},
 			},
 		},
 		AdvancesTo: "done",

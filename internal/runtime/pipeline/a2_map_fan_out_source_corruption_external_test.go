@@ -81,7 +81,7 @@ func (f *a2CorruptMapSource) readRaw(t *testing.T) []byte {
 	var raw []byte
 	source := f.intent.Source
 	if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT new_value FROM entity_mutations
-		WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
+		WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='fan_out_source' AND path=$4`,
 		source.MutationID, source.RunID, source.EntityID, source.Field).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func (f *a2CorruptMapSource) writeRaw(raw []byte) error {
 	// Intent identity, capsule, cardinality, outcomes and live entity state stay untouched.
 	source := f.intent.Source
 	result, err := f.p.selected.db.ExecContext(f.p.ctx, `UPDATE entity_mutations SET new_value=$1
-		WHERE mutation_id=$2 AND run_id=$3 AND entity_id=$4 AND domain='authored_field' AND path=$5`,
+		WHERE mutation_id=$2 AND run_id=$3 AND entity_id=$4 AND domain='fan_out_source' AND path=$5`,
 		string(raw), source.MutationID, source.RunID, source.EntityID, source.Field)
 	if err != nil {
 		return err

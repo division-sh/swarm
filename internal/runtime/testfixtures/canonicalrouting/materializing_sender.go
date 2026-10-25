@@ -40,7 +40,7 @@ func CopyProspectiveTerminalSender(t testing.TB) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodes := strings.Replace(string(raw), "    start:\n", "    start:\n      advances_to: done\n", 1)
+	nodes := strings.Replace(string(raw), "  start:\n", "  start:\n    advances_to: done\n", 1)
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes)
 	return root
 }

@@ -489,7 +489,7 @@ func VerifyNativePipelineCompiledJoinTransitionEvidenceOnBothStoresForTest(t *te
 					t.Fatalf("join evidence changed its authored source/target: %#v", edge)
 				}
 				if strings.HasSuffix(outcome, "timeout") {
-					if edge.EventType != "platform.join_timeout" || string(event.Type()) != "platform.join_timeout" || !edge.Timed || edge.After != "1h" || edge.TimerID != "awaiting" || edge.AdvanceCarrier != runtimecontracts.HandlerAdvanceCarrierJoinOnDeadline {
+					if edge.EventType != "platform.join_timeout" || string(event.Type()) != "platform.join_timeout" || !edge.Timed || edge.After != "1h" || edge.TimerID != "item.completed" || edge.AdvanceCarrier != runtimecontracts.HandlerAdvanceCarrierJoinOnDeadline {
 						t.Fatalf("join timeout lost its protocol/timer carrier: %#v", edge)
 					}
 				} else if edge.EventType != "item.completed" || edge.Timed || edge.TimerID != "" || edge.AdvanceCarrier != runtimecontracts.HandlerAdvanceCarrierJoinOnComplete {
