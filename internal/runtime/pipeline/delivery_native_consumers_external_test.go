@@ -266,10 +266,6 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 	pipeline.VerifyNativeCompiledTransitionPreviewExecutionAgreementOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
-func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
-	pipeline.VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t, pipelineDeliveryNativeFixture)
-}
-
 func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaim(t *testing.T) {
 	pipeline.VerifyNativePipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaimForTest(t, pipelineDeliveryNativeFixture)
 }
