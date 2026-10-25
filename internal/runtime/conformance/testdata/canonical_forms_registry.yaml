@@ -753,7 +753,7 @@ decode_bypasses:
     # Its lexical admission consumes yamlsource and existing shared schema leaves.
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 2, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 9, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 8, direct_decode_roots: 0}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
     internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, direct_decode_roots: 5}
     internal/testplanning/execution.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
