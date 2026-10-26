@@ -32,12 +32,13 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			publication := newExactOriginPublicationProbe(t)
 			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 			applicationSnapshot := func() map[string][]string { return snapshotForkReceiverApplication(t, rt) }
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-seed",
 			})
+			requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,

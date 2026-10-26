@@ -18,6 +18,7 @@ func TestMailboxMutationAdmissionRollbackBothStores(t *testing.T) {
 				t.Run(string(kind), func(t *testing.T) {
 					f := mailboxCompletionFixtureInRuntime(t, rt, owner)
 					card := mailboxCompletionAnchorCard(t, f, kind)
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": f.base.RunID, "idempotency_key": "admission-card-pause-" + f.base.RunID})
 					foreign := mailboxCompletionFixtureInRuntime(t, rt, owner)
 					var foreignDraft map[string]any
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{"card_id": foreign.base.CardID, "verdict": "reject", "observed_content_hash": foreign.base.CardContentHash}, &foreignDraft)
