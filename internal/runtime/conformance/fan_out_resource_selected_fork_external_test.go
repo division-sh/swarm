@@ -95,6 +95,7 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 		Executor: apiv1.SelectedContractRunForkExecutor{
 			ExecuteSelectedContractRunFork: func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 				req.Owner = owner
+				req = deploymentLiveForkRequest(t, f, req)
 				result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 				if err != nil {
 					t.Logf("selected external executor error: %+v materialization=%+v activation=%+v", err, result.Materialization, result.Activation)

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -55,6 +56,39 @@ type forkEngineObservation struct {
 type forkEngineAcknowledgment struct {
 	result runforkexecution.SelectedContractExecutionResult
 	err    error
+}
+
+func forkEngineLiveRequest(t *testing.T, rt *swarmruntime.Runtime, selected *storeselected.Owner, request runforkexecution.SelectedContractExecutionRequest) runforkexecution.SelectedContractExecutionRequest {
+	t.Helper()
+	source := rt.Options.WorkflowModule.SemanticSource()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("fork engine fixture requires its admitted source bundle")
+	}
+	projection, err := packadmission.FromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contexts, err := swarmruntime.NewRuntimeContextManager(selected.RunBundleAvailability(), swarmruntime.BundleContext{
+		SourceArtifactFact: rt.Options.SourceArtifactFact, Source: source, Runtime: rt, WorkOwner: rt.WorkOccurrence(),
+		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: projection.ProviderTriggers.Generation(), InstalledTriggerSubjects: subjects,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.ForkOperation == nil {
+		request.ForkOperation = &runfork.ForkOperationRequest{
+			OperationID: uuid.NewString(), Actor: "pipeline:" + t.Name(), IdempotencyKey: uuid.NewString(), TransportHash: "pipeline-live-fork",
+			SourceRunID: request.SourceRunID, ForkEventID: request.At, AtStart: request.AtStart,
+			TargetBundleHash: request.ExpectedBundleHash, ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
+		}
+	}
+	request.LiveRuntime, request.LiveRuns, request.LiveContexts = rt, selected.LiveRuns(), contexts
+	return request
 }
 
 type forkEngineProbe struct {

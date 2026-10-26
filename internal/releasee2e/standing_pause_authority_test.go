@@ -84,7 +84,7 @@ func TestStandingPauseAuthorityPublicBothStores(t *testing.T) {
 					t.Fatalf("failed %s changed predecessor public facts", command)
 				}
 			}
-			assertRollback("suspend", standing.RunID, "running", "failed-active-suspend")
+			assertRollback("suspend", standing.RunID, "live", "failed-active-suspend")
 			result := cli("standing", "suspend", standing.Origin.ServiceID, "--reason", "operator-custom-suspension", "--idempotency-key", "standing-suspend")
 			if result.err != nil || !strings.Contains(result.output, "state=suspended run="+standing.RunID) {
 				t.Fatalf("compiled standing suspend: %v\n%s", result.err, result.output)
@@ -114,7 +114,7 @@ func TestStandingPauseAuthorityPublicBothStores(t *testing.T) {
 			assertFreshNoop := func(command, runID, key string) {
 				t.Helper()
 				before := captureFullLifecycleEvidence(t, p.rpc, runID)
-				beforeRun := waitForFullLifecycleRunStatus(t, p.rpc, runID, map[string]string{"suspend": "paused", "resume": "running"}[command])
+				beforeRun := waitForFullLifecycleRunStatus(t, p.rpc, runID, map[string]string{"suspend": "paused", "resume": "live"}[command])
 				result := cli("standing", command, standing.Origin.ServiceID, "--idempotency-key", key+"-cli")
 				if result.err != nil || !strings.Contains(result.output, "run="+runID) {
 					t.Fatalf("fresh compiled %s: %v\n%s", command, result.err, result.output)
@@ -184,7 +184,7 @@ func TestStandingPauseAuthorityPublicBothStores(t *testing.T) {
 			if result.err != nil || !strings.Contains(result.output, "state=active run="+reset.RunID) {
 				t.Fatalf("compiled standing resume: %v\n%s", result.err, result.output)
 			}
-			resumed := waitForFullLifecycleRunStatus(t, p.rpc, reset.RunID, "running")
+			resumed := waitForFullLifecycleRunStatus(t, p.rpc, reset.RunID, "live")
 			if resumed.Origin != restored.Origin || !resumed.StartedAt.Equal(restored.StartedAt) {
 				t.Fatalf("standing resume replaced generation identity: before=%+v after=%+v", restored, resumed)
 			}

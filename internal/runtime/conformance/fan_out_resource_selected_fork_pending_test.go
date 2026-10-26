@@ -233,7 +233,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 					t.Fatalf("R3b requires settled pipeline, stamped handoff and unclaimed receiver at T: delivery=%q status=%q receipt=%d handoff=%t attempts=%d deferred=%d", deliveryID, deliveryStatus, pipelineReceipts, handoffStamped, attempts, gate.deferred.Load())
 				}
 				point := assertDeploymentForkPendingCandidate(t, f, runfork.RunForkPlanRequest{SourceRunID: sourceRunID}, pointEventID, deliveryID, runfork.RunForkDeploymentPendingReceiver)
-				if point.Kind != runfork.RunForkPointDeploymentRevision {
+				if point.Kind != runfork.RunForkPointStateRevision {
 					t.Fatalf("R3b did not select the post-handoff deployment revision: %+v", point)
 				}
 				t.Logf("R3b exact T: delivery=%s status=%s receipt=%d handoff=%t attempts=%d deferred_claims=%d", deliveryID, deliveryStatus, pipelineReceipts, handoffStamped, attempts, gate.deferred.Load())
@@ -271,7 +271,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				if result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || result.DataPins[0].VersionID != wantVersion.VersionID {
 					t.Fatalf("fixed-T fork did not bind the exact pin: %+v", result)
 				}
-				if result.ForkPointKind != string(runfork.RunForkPointDeploymentRevision) || result.ForkRevision != point.Revision || result.ForkEventID != "" {
+				if result.ForkPointKind != string(runfork.RunForkPointStateRevision) || result.ForkRevision != point.Revision || result.ForkEventID != "" {
 					t.Fatalf("R3b fork changed its fixed post-handoff cut: %+v", result)
 				}
 				defer func() {

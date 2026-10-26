@@ -320,7 +320,7 @@ func decodeNumericFeedPage(body []byte, runID, status string) (numericFeedReadba
 	if page.RunID != runID || page.ObservedAt.IsZero() || page.Order != "intent_identity_asc" || len(page.Intents) != 1 || page.NextCursor != "" || (status != "" && page.RunStatus != status) {
 		return feed, fmt.Errorf("numeric feed requires one exact public intent page: %s", body)
 	}
-	if page.RunStatus != "running" && page.RunStatus != "paused" {
+	if page.RunStatus != "live" && page.RunStatus != "paused" {
 		return feed, fmt.Errorf("numeric active-run readback changed status: %s", page.RunStatus)
 	}
 	if err := json.Unmarshal(page.Intents[0], &feed); err != nil {

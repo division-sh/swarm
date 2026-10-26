@@ -83,9 +83,9 @@ func requireHistoricalPublicationFreshBusReplay(t *testing.T, ctx context.Contex
 	}
 	for _, original := range []deliverylifecycle.Snapshot{node, agent} {
 		claim, err := selected.ClaimDelivery(ctx, original.Authority, publication.Event.Event(), original.Route)
-		// A settled obligation is observable without reacquiring the closed
-		// execution or granting another delivery attempt.
-		if err != nil || !claim.Acknowledged || claim.Disposition != deliverylifecycle.ClaimTerminal || !reflect.DeepEqual(claim.Snapshot, original) {
+		// The handoff retired selected authority; the exact settled row remains
+		// observable, but that historical authority grants no new claim.
+		if err != nil || !claim.Acknowledged || claim.Disposition != deliverylifecycle.ClaimWrongAuthority || !reflect.DeepEqual(claim.Snapshot, original) {
 			t.Fatalf("closed historical execution changed a settled claim: %+v %v", claim, err)
 		}
 	}

@@ -77,7 +77,7 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 				t.Fatalf("project staged operation: request=%+v err=%v", request.ForkOperation, err)
 			}
 			point := request.Preparation.ForkPoint
-			if point.Kind != runfork.RunForkPointDeploymentRevision || point.Validate() != nil || *request.ForkOperation.ResolvedPoint != point || operation.ResolvedPoint != nil {
+			if point.Kind != runfork.RunForkPointStateRevision || point.Validate() != nil || *request.ForkOperation.ResolvedPoint != point || operation.ResolvedPoint != nil {
 				t.Fatal("preparation did not bind its own operation without mutating the caller")
 			}
 			operation.Actor = "changed caller"

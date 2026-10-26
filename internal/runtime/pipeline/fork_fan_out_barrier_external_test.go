@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -28,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -90,9 +92,13 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("barrier journey requires the canonical fork owner")
 				}
-				seed := eventtest.RunCreatingRootIngress(uuid.NewString(), "start.seeded", "barrier-proof", "", []byte(`{"token":"seed"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+				seed := eventtest.RunCreatingRootIngressWithMode(uuid.NewString(), "start.seeded", "barrier-proof", "", []byte(`{"token":"seed"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), executionmode.Live)
 				if err := rt.Bus.PublishAndWait(ctx, seed); err != nil {
 					t.Fatal(err)
+				}
+				rootEvent := storetest.LoadCanonicalEventRecord(t, ctx, selected.RuntimeDeps().EventStore, seed.ID())
+				if rootEvent.ExecutionMode() != executionmode.Live || rt.ExecutionPosture.RootMode() != executionmode.Live {
+					t.Fatal("barrier handoff fixture lost its actual live root")
 				}
 				baseline := rt.Options.ProcessWorkOwner.ActiveCount()
 				phase, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -133,6 +139,10 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				if plan.FanOutObligations[0].Barrier == nil || plan.FanOutObligations[0].Barrier.Status != fanoutbarrier.StatusArmed {
 					t.Fatalf("cut lacks its real open barrier: %+v", plan.FanOutObligations[0].Barrier)
 				}
+				// Preserve the unfinished historical cut, then join the source's
+				// deliberately held claim before requesting its live replacement.
+				sourceRelease.Do(func() { close(sourceProbe.resume) })
+				waitForkEngineCompletion(t, storetest.DatabaseForTest(selected.RuntimeDeps().EventStore), runID)
 				sourceRoot := mixedFanOutEntity(t, plan, runID)
 				beforeSource, err := selected.Entities().LoadOperatorEntity(phase, sourceRoot.EntityID, runID)
 				if err != nil {
@@ -148,13 +158,13 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				probe := &forkBarrierCompletionProbe{Probe: lifecycleprobe.New(), completed: make(chan string, 1), claimed: make(chan forkEngineObservation, 1)}
-				result, err := family.Execute(phase, runforkexecution.SelectedContractExecutionRequest{
+				result, err := family.Execute(phase, forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 						AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: probe}},
-				})
+				}))
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
 					t.Fatalf("barrier child did not acknowledge activation: %+v err=%v", result, err)
 				}

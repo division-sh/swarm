@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -47,6 +48,7 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -100,6 +102,7 @@ type notifyAllChildrenRuntime struct {
 }
 
 type notifyAllChildrenRuntimeOptions struct {
+	ordinaryContext        bool
 	diagnosticOverlap      bool
 	executionPosture       executionposture.Posture
 	realMockAgents         bool
@@ -2236,7 +2239,50 @@ func newNotifyAllChildrenRuntime(
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
-	workOwner := conformanceTestRuntimeOccurrence(t, sourceArtifactFact.BundleHash())
+	var contextRuntime *runtimepkg.Runtime
+	var workOwner *worklifetime.RuntimeOccurrence
+	if opts.ordinaryContext {
+		projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle.PackAdmission = projection
+		nodes, err := runtimepipeline.LoadWorkflowNodes(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps := runtimepkg.RuntimeDeps{
+			Config: &config.Config{LLM: config.LLMConfig{Backend: "anthropic"}},
+			Options: runtimepkg.RuntimeOptions{
+				ExecutionPosture: posture, SourceArtifactFact: sourceArtifactFact,
+				RuntimeInstanceID: authorActivityTestRuntimeInstanceID, ProcessWorkOwner: conformanceTestProcessOwner(t),
+				WorkflowModule: conformanceLoadedWorkflowModule{source: source, nodes: nodes, guards: runtimepipeline.NewContractGuardRegistry(source)},
+				LLMRuntime:     conformanceNoopLLMRuntime{},
+			},
+		}
+		switch selected := backend.(type) {
+		case *store.PostgresStore:
+			deps = stageLifecycleIdentityPostgresDeps(deps, selected)
+		case *store.SQLiteRuntimeStore:
+			deps = stageLifecycleIdentitySQLiteDeps(deps, selected)
+		default:
+			t.Fatalf("ordinary context requires its native store, got %T", backend)
+		}
+		contextRuntime, err = runtimepkg.NewRuntime(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), deps)
+		if err != nil {
+			t.Fatalf("construct ordinary fixture context: %v", err)
+		}
+		workOwner = contextRuntime.WorkOccurrence()
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := workOwner.RetireAndWait(ctx); err != nil {
+				t.Errorf("join ordinary fixture context: %v", err)
+			}
+		})
+	} else {
+		workOwner = conformanceTestRuntimeOccurrence(t, sourceArtifactFact.BundleHash())
+	}
 	var runtimeControlEvents []string
 	if opts.enableGenericSchedules {
 		runtimeControlEvents = append(runtimeControlEvents, "platform.join_complete")
@@ -2471,7 +2517,14 @@ func newNotifyAllChildrenRuntime(
 		PersistenceRoles:     roles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
-	contextRuntime := &runtimepkg.Runtime{Bus: eventBus, Manager: manager, ExecutionPosture: posture}
+	if contextRuntime == nil {
+		contextRuntime = &runtimepkg.Runtime{ExecutionPosture: posture}
+	}
+	contextRuntime.Bus, contextRuntime.Manager = eventBus, manager
+	contextRuntime.Pipeline, contextRuntime.GenericSchedules = coordinator, genericSchedules
+	if opts.ordinaryContext {
+		contextRuntime.RunControl = runcontrol.NewController(backend.(runcontrol.Store), eventBus, runcontrol.Options{TimerCancellations: coordinator.TimerCancellationReconciler()})
+	}
 	contextRuntime.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	contextRuntime.Options.SourceArtifactFact = sourceArtifactFact
 	contextRuntime.Options.ProcessWorkOwner = conformanceTestProcessOwner(t)

@@ -165,8 +165,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSelectedContractForkSourceIsolation(t, h.db, sourceRunID, forkRunID, sourceEventID, forkEventID)
 	assertRunCountsUnchanged(t, sourceBefore, selectedContractSourceRunCounts(t, h.db, sourceRunID), "source run after selected execution")
 	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after selected execution")
-	if result.Activation.SourceFrozen || !result.Activation.SourceAdvancedAfterFork || result.Activation.BranchDivergence == nil ||
-		!containsTier12String(result.Activation.BranchDivergence.SourceAdvancedFacts, "source_events_advanced_after_fork_point") {
+	if result.Activation.SourceFrozen || !result.Activation.SourceAdvancedAfterFork || result.Activation.SourceRunStatus != "paused" || result.Activation.ForkRunStatus != "live" {
 		t.Fatalf("selected-contract source-advanced branch activation = %#v", result.Activation)
 	}
 	assertSourceRunLifecycle(t, h.pg, sourceRunID, "paused", false)

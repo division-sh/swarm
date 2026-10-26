@@ -124,19 +124,16 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 			if err := sourceSettled[0].ValidateContinuationFrom(sourceRows[0], sourceRows[0].CreatedAt); err != nil {
 				t.Fatalf("source settlement changed its original reply binding: %v", err)
 			}
-			// Durable quiescence does not join the source's process-wide fan-out
-			// observer. Join it before measuring only the selected child's work.
-			if err := h.rt.Shutdown(); err != nil {
-				t.Fatalf("join completed source runtime before selected activation: %v", err)
+			// The ordinary target must retain its original admitted generation.
+			// Join accepted source turns without retiring that runtime.
+			if err := h.rt.Manager.WaitForQuiescence(sourceDone); err != nil {
+				t.Fatalf("join settled source turns before live handoff: %v", err)
 			}
 			before, err := storetest.ReadSelectedForkSourceDomain(sourceDone, selected, catalogRuntimeRunID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			baseline := h.processOwner.ActiveCount()
-			if baseline != 0 {
-				t.Fatalf("completed source retained process work before selected activation: %d", baseline)
-			}
 			executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: selection, AgentRuntime: options,

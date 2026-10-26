@@ -28,6 +28,7 @@ func TestServedParityHarnessRunStartDeploymentFeedLifecycle(t *testing.T) {
 		server := fixture.operatorServer(t)
 		firstRun := startDeploymentResourceRun(t, fixture, server, "--data", selectedDeploymentEvent+"="+file)
 		assertSelectedDeploymentRows(t, fixture, server, firstRun, "root", string(compiled.VersionID), input)
+		pauseDeploymentFixtureRun(t, fixture, firstRun)
 		secondRun := startDeploymentResourceRun(t, fixture, server, "--pin", selectedDeploymentEvent+"@head")
 		if secondRun == firstRun {
 			t.Fatal("a new run.start trigger reused the first feed intent")

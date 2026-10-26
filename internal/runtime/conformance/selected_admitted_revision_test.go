@@ -86,7 +86,7 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			}
 			before, after := probe.point, probe.current
 			before.Revision, after.Revision = 0, 0
-			if probe.point.Kind != runfork.RunForkPointDeploymentRevision || probe.current.Revision <= probe.point.Revision || before != after {
+			if probe.point.Kind != runfork.RunForkPointStateRevision || probe.current.Revision <= probe.point.Revision || before != after {
 				t.Fatalf("source advance did not isolate the revision: prepared=%+v current=%+v", probe.point, probe.current)
 			}
 			if probe.result.ForkPoint != probe.point || result.ForkEventID != probe.point.EventID || result.ForkRunID != probe.result.ForkRunID {

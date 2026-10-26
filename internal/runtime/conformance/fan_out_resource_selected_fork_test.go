@@ -18,6 +18,8 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -117,6 +120,7 @@ func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route st
 			deliveryLifecycle = wrapDelivery(f.selected)
 		}
 		f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+			ordinaryContext: true,
 			processTopology: f.topology, testLifecycleProbe: probe, deliveryLifecycle: deliveryLifecycle,
 			fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 				executor := startupownership.FanOutExecutor(deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t})
@@ -165,6 +169,7 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 		Executor: apiv1.SelectedContractRunForkExecutor{
 			ExecuteSelectedContractRunFork: func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 				req.Owner = owner
+				req = deploymentLiveForkRequest(t, f, req)
 				result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 				if err != nil {
 					t.Logf("selected fork executor diagnosis: %v", err)
@@ -193,6 +198,51 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+func deploymentLiveForkRequest(t *testing.T, f *deploymentResourceFixture, req runforkexecution.SelectedContractExecutionRequest) runforkexecution.SelectedContractExecutionRequest {
+	t.Helper()
+	selected, ok := f.selected.(interface {
+		runtimepkg.RunBundleAvailabilityReader
+		runlifecycle.LiveRunReader
+	})
+	if !ok {
+		t.Fatalf("selected store %T lacks live-run custody", f.selected)
+	}
+	if f.liveContexts == nil {
+		bundle, ok := semanticview.Bundle(f.source)
+		if !ok {
+			t.Fatal("live deployment fixture requires its admitted source bundle")
+		}
+		projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle.PackAdmission = projection
+		subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.liveContexts, err = runtimepkg.NewRuntimeContextManager(selected, runtimepkg.BundleContext{
+			SourceArtifactFact: f.runtime.sourceArtifactFact, Source: f.source,
+			Runtime: f.runtime.contextRuntime, WorkOwner: f.runtime.workOwner,
+			PackInventoryDigest:       bundle.PackInventory.Digest(),
+			ProviderTriggerGeneration: projection.ProviderTriggers.Generation(), InstalledTriggerSubjects: subjects,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	req.LiveRuntime = f.runtime.contextRuntime
+	req.LiveContexts, req.LiveRuns = f.liveContexts, selected
+	req.AcquireLiveRuntime = func(ctx context.Context, hash string) (*runtimepkg.RuntimeContextUse, error) {
+		use, lookup, err := f.liveContexts.AcquireBundleHash(ctx, hash)
+		if err == nil && !lookup.Loaded() {
+			return nil, fmt.Errorf("deployment fork target %s is not its registered ordinary runtime", hash)
+		}
+		return use, err
+	}
+	return req
 }
 
 func logSelectedDeploymentForkFailure(t *testing.T, selected any, forkRunID string) {
@@ -570,7 +620,7 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 }
 
 func TestDeploymentSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) {
-	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointDeploymentRevision)
+	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointStateRevision)
 }
 
 func TestEventSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) {
@@ -654,11 +704,21 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					assertForkRows := func() {
 						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
 						lifecycle, err := storetest.ReadRuntimeLogRunSnapshot(f.ctx, f.selected, result.ForkRunID)
-						if err != nil || lifecycle.RunID != result.ForkRunID || lifecycle.State != "completed" || lifecycle.EndedAt == nil || lifecycle.Failure != nil {
-							t.Fatalf("selected fixture did not complete successfully: %+v error=%v", lifecycle, err)
+						instances, instanceErr := f.selected.ListWorkflowInstances(f.ctx, result.ForkRunID)
+						finals := 0
+						for _, instance := range instances {
+							if instance.StageDefined {
+								if instance.CurrentState != "done" {
+									t.Fatalf("closed fixture retained a nonfinal instance: %+v", instance)
+								}
+								finals++
+							}
+						}
+						if err != nil || instanceErr != nil || finals == 0 || lifecycle.RunID != result.ForkRunID || lifecycle.State != "live" || lifecycle.EndedAt != nil || lifecycle.Failure != nil {
+							t.Fatalf("selected fixture did not retain live/final/settled facts: %+v instances=%+v errors=%v/%v", lifecycle, instances, err, instanceErr)
 						}
 					}
-					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 0)
+					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
 					beforeRefusals, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, result.ForkRunID)
 					if err != nil {
 						t.Fatal(err)
@@ -686,14 +746,11 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if err != nil || !reflect.DeepEqual(afterRefusals, beforeRefusals) {
 						t.Fatalf("refused fixture inputs changed child state: error=%v", err)
 					}
-					closeResult, err := owner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID,
-						runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})
-					if err != nil {
-						t.Fatalf("close settled selected fixture through retained child: %v", err)
+					var executionID string
+					if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(execution_id AS TEXT) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed' AND generation=1`, result.ForkRunID).Scan(&executionID); err != nil || executionID == "" {
+						t.Fatalf("fixture lost its closed selected predecessor: execution=%s error=%v", executionID, err)
 					}
-					if closeResult.RunID != result.ForkRunID || closeResult.BindingID == "" || closeResult.ExecutionID == "" || closeResult.Generation != 1 || closeResult.EventID == "" {
-						t.Fatalf("fixture close lost retained execution evidence: %+v", closeResult)
-					}
+					publishNotifyAllChildrenEvent(t, f.ctx, f.runtime, f.source, result.ForkRunID, "fixture.close.requested", map[string]any{"account_id": "changed"})
 					assertForkRows()
 					if closes, err := storetest.CountRunEventNameStorage(f.ctx, f.selected, result.ForkRunID, "fixture.close.requested"); err != nil || closes != 1 {
 						t.Fatalf("selected fixture close publication count=%d, want one: %v", closes, err)
@@ -782,7 +839,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					for _, entry := range recovery {
 						if entry.RunID == result.ForkRunID {
 							matched++
-							if entry.Disposition != runfork.SelectedForkRecoveryTerminal || entry.ExecutionID != closeResult.ExecutionID || entry.Continuation != nil || len(entry.PendingCancellations) != 0 ||
+							if entry.Disposition != runfork.SelectedForkRecoveryControlOnly || entry.ExecutionID != executionID || entry.Continuation != nil || len(entry.PendingCancellations) != 0 ||
 								entry.Operation == nil || entry.Operation.Status != runfork.ForkOperationActivated || entry.Operation.ForkRunID != result.ForkRunID || entry.Operation.Result == nil {
 								t.Fatalf("completed child lost its exact terminal recovery and activated result: %+v", entry)
 							}

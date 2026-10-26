@@ -62,7 +62,9 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	if materialized.ForkRunID == "" || materialized.SelectedContractBinding == nil || !materialized.DeliveryResumeBlocked {
 		t.Fatalf("materialization = %#v", materialized)
 	}
-	replayed, err := pg.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, request)
+	readback := request
+	readback.ForkOperation = nil
+	replayed, err := pg.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, readback)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution exact replay: %v", err)
 	}
@@ -437,13 +439,10 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 		t.Fatalf("active coupling plan blockers = %#v err = %v", plan.UnsupportedBlockers, err)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	_, err = prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) ||
 		!strings.Contains(err.Error(), runfork.RunForkBlockerActiveTurnHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want active session/turn blocker", err)
-	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite active coupling: %#v", materialized)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
@@ -536,16 +535,14 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	_, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want conversation history blocked by unrelated active delivery", err)
 	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite unrelated active coupling: %#v", materialized)
-	}
-	if !runForkTestHasMaterializationBlocker(materialized, runfork.RunForkBlockerSessionHistoryUnproven) ||
-		!runForkTestHasMaterializationBlocker(materialized, runfork.RunForkBlockerActiveTurnHistoryUnproven) {
-		t.Fatalf("materialization blockers = %#v, want conversation blockers", materialized.UnsupportedBlockers)
+	plan, planErr := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID})
+	if planErr != nil || !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerSessionHistoryUnproven) ||
+		!runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerActiveTurnHistoryUnproven) {
+		t.Fatalf("native plan blockers = %#v, want conversation blockers: %v", plan.UnsupportedBlockers, planErr)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
@@ -573,15 +570,13 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	_, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerDeliveryHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want unrelated active delivery blocker", err)
 	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite unrelated active delivery: %#v", materialized)
-	}
-	if !runForkTestHasMaterializationBlocker(materialized, runfork.RunForkBlockerDeliveryHistoryUnproven) {
-		t.Fatalf("materialization blockers = %#v, want delivery history blocker", materialized.UnsupportedBlockers)
+	plan, planErr := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID})
+	if planErr != nil || !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerDeliveryHistoryUnproven) {
+		t.Fatalf("native plan blockers = %#v, want delivery history blocker: %v", plan.UnsupportedBlockers, planErr)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }

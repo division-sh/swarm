@@ -26,7 +26,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyReceiverMaterializationWithAgent(t, "renamed-observer")
-			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			h := newLiveForkCatalogHarness(t, root, backend)
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 			selected := runScopedCatalogStore(t, h)
 			if !publicationFrontier {
@@ -69,7 +69,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
 			executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h, lifecycle)
-			result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
+			result, err := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
 				Owner: executionOwner, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),

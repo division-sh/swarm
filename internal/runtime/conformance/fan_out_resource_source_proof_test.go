@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -49,13 +50,14 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 }
 
 type deploymentResourceFixture struct {
-	selected    notifyAllChildrenStore
-	db          *sql.DB
-	postgresDSN string
-	source      semanticview.Source
-	runtime     notifyAllChildrenRuntime
-	topology    *notifyAllChildrenProcessTopology
-	ctx         context.Context
+	selected     notifyAllChildrenStore
+	db           *sql.DB
+	postgresDSN  string
+	source       semanticview.Source
+	runtime      notifyAllChildrenRuntime
+	topology     *notifyAllChildrenProcessTopology
+	ctx          context.Context
+	liveContexts *runtimepkg.RuntimeContextManager
 }
 
 type deploymentFanOutDiagnostic struct {
@@ -102,7 +104,9 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 
 func (f *deploymentResourceFixture) boot(t *testing.T) {
 	t.Helper()
+	f.liveContexts = nil
 	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+		ordinaryContext: true,
 		processTopology: f.topology,
 		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}

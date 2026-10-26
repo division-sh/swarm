@@ -148,8 +148,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	for _, want := range []string{
 		"run started:",
 		"trace ",
-		"run terminal:",
-		"status=completed",
+		"run settled:",
 	} {
 		if !strings.Contains(run.output, want) {
 			t.Fatalf("release foreground output missing %q:\n%s", want, run.output)
