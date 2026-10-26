@@ -60,7 +60,7 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 				t.Fatal(err)
 			}
 			probe := &issue642ServedBarrierProbe{Probe: lifecycleprobe.New(), producer: producer.Key(), claims: make(chan issue642ServedBarrierClaim, 4), resume: make(chan struct{})}
-			opts, start := issue2564ServeHarness(t, backend, canonicalrouting.CopyForkFanOutBarrierReceiver(t), false)
+			opts, start := issue2564LiveServeHarness(t, backend, canonicalrouting.CopyForkFanOutBarrierReceiver(t), "")
 			opts.TestLifecycleProbe = probe
 			process, rt := start()
 			var release sync.Once
@@ -80,6 +80,7 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			defer cancel()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "seed"}, "idempotency_key": "served-published-barrier-seed"})
+			requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 			issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.requested", "run_id": seed.RunID,
 				"payload": map[string]any{"token": "7", "tokens": []string{"7"}}, "idempotency_key": "served-published-barrier-trigger"})
@@ -104,12 +105,11 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": original.event,
 				"allow_source_freeze": true, "idempotency_key": "served-published-barrier-fork"}, &fork)
-			// The permanent response is sealed at activation, before asynchronous
-			// publication/execution. Actual progress is proved below, not inferred
-			// from that activation-point counter.
+			// The handoff ACK follows selected execution; ordinary final-consumer
+			// progress remains independently checked below.
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == seed.RunID || fork.ForkRunID == "" ||
-				fork.Owner != runfork.RunForkSelectedContractExecutionOwner || fork.ForkEventID != original.event || fork.ForkRunStatus != "running" ||
-				fork.ForkRevision != plan.ForkPoint.Revision || fork.ExecutedEventCount != 0 {
+				fork.Owner != runfork.RunForkSelectedContractExecutionOwner || fork.ForkEventID != original.event || fork.ForkRunStatus != "live" ||
+				fork.ForkRevision != plan.ForkPoint.Revision || fork.ExecutedEventCount != 1 {
 				t.Fatalf("public fork lost exact activation/cut acknowledgment: %+v", fork)
 			}
 			childID := activityidentity.ForkLineageEventID(fork.ForkRunID, original.event)
@@ -159,8 +159,8 @@ func issue642RequireServedBarrierGrandchild(t *testing.T, rt issue2564ServedFixt
 	grandchild := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{"source_run_id": parent.ForkRunID, "fork_event_id": inherited.EventID,
 		"allow_source_freeze": true, "idempotency_key": "served-published-barrier-grandchild"})
 	if grandchild.SourceRunID != parent.ForkRunID || grandchild.ForkRunID == "" || grandchild.ForkRunID == parent.ForkRunID || grandchild.ForkRunID == parent.SourceRunID ||
-		grandchild.ForkEventID != inherited.EventID || grandchild.ForkRevision != plan.ForkPoint.Revision || grandchild.ForkRunStatus != "running" ||
-		grandchild.Owner != runfork.RunForkSelectedContractExecutionOwner || grandchild.ExecutedEventCount != 0 {
+		grandchild.ForkEventID != inherited.EventID || grandchild.ForkRevision != plan.ForkPoint.Revision || grandchild.ForkRunStatus != "live" ||
+		grandchild.Owner != runfork.RunForkSelectedContractExecutionOwner || grandchild.ExecutedEventCount != 1 {
 		t.Fatalf("served grandchild changed the committed join cut or borrowed activation: %+v", grandchild)
 	}
 	publication := issue642WaitBarrierDeliveredEvent(t, phase, rt, activityidentity.ForkLineageEventID(grandchild.ForkRunID, inherited.EventID), producer)
