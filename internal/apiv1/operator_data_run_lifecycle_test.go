@@ -696,6 +696,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			})
 			amendedBus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &amended, runtimebus.EventBusOptions{
 				ContractBundle: amendedSource, SourceArtifactFact: mustAPITestSourceArtifactFact(amendedBundleHash),
+				WorkOwner: amendedWork,
 				MutationContext: func(work context.Context) (context.Context, error) {
 					return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
 				},

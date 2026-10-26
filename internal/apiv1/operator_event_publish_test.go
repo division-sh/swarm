@@ -2177,7 +2177,11 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 		}),
 	})
 	if selected, ok := runs.(agentfixture.Store); ok {
-		if _, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(context.Background(), handler.workOwner), selected); err != nil {
+		ctx := original
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if _, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, handler.workOwner), selected); err != nil {
 			t.Fatal(err)
 		}
 	}

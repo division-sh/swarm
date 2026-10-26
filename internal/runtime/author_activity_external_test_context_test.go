@@ -713,8 +713,11 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 	return newRuntimeTestEventBusWithOptions(t, store, opts)
 }
 
-func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions, held ...context.Context) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if len(held) > 1 {
+		return nil, fmt.Errorf("runtime bus fixture requires at most one held original context")
+	}
 	if opts.CarryMutationContext == nil {
 		opts.CarryMutationContext = runtimestartupownership.CarryMutationAuthority
 	}
@@ -747,6 +750,9 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		process := worklifetime.NewProcess()
 		if native, ok := store.(agentfixture.Store); ok {
 			ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), opts.RuntimeInstanceID)
+			if len(held) == 1 {
+				ctx = runtimestartupownership.CarryMutationAuthority(ctx, held[0])
+			}
 			if _, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, process), native); err != nil {
 				return nil, err
 			}

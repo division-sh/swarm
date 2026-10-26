@@ -16821,6 +16821,7 @@ platform_tables:
         - agent_sessions
         - entity_mutations
         - entity_state
+        - run_event_counts
         - workflow_instance_initial_materializations
         - workflow_publication_stage_receipts
         - workflow_handler_stage_receipts

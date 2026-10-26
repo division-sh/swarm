@@ -155,7 +155,7 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 		key := pin.Declaration.Key()
 		declaration := known[key]
 		declarationRef := declaration.Ref
-		version, found, err := o.loadStoredVersion(ctx, tx, declaration.Ref, pin.VersionID)
+		version, found, err := o.loadStoredVersion(ctx, tx, declaration.Ref, pin.VersionID, true)
 		if err != nil {
 			return RunCreationPlan{}, err
 		}

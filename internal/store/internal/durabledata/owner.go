@@ -1330,7 +1330,7 @@ func (o *Owner) LoadRunResourceAccess(ctx context.Context, runID string, declara
 			if err != nil {
 				return err
 			}
-			version, found, err := o.loadStoredVersion(txctx, tx, ref, versionID)
+			version, found, err := o.loadStoredVersion(txctx, tx, ref, versionID, false)
 			if err != nil {
 				return err
 			}
@@ -1481,8 +1481,8 @@ func scanVersionProvenance(row interface{ Scan(...any) error }, versionID runtim
 	return provenance, nil
 }
 
-func (o *Owner) loadStoredVersion(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, bool, error) {
-	version, found, err := o.loadStoredVersionPayload(ctx, tx, ref, versionID, true)
+func (o *Owner) loadStoredVersion(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID, lock bool) (runtimedata.Version, bool, error) {
+	version, found, err := o.loadStoredVersionPayload(ctx, tx, ref, versionID, lock)
 	if err != nil || !found {
 		return version, found, err
 	}
@@ -1614,7 +1614,7 @@ func (o *Owner) Prune(ctx context.Context, command runtimedata.PruneCommand) (ru
 			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource declaration %s has no head aggregate", command.Declaration.Key())
 		}
 		result.ObservedHead = head.Before
-		version, found, err := o.loadStoredVersion(txctx, tx, command.Declaration, command.VersionID)
+		version, found, err := o.loadStoredVersion(txctx, tx, command.Declaration, command.VersionID, true)
 		if err != nil {
 			return err
 		}
@@ -1625,7 +1625,7 @@ func (o *Owner) Prune(ctx context.Context, command runtimedata.PruneCommand) (ru
 			return o.insertPruneReceipt(txctx, tx, command, hash, requestJSON, result, nil)
 		}
 		if head.Before.State == "version" && head.Before.VersionID != command.VersionID {
-			current, currentFound, currentErr := o.loadStoredVersion(txctx, tx, command.Declaration, head.Before.VersionID)
+			current, currentFound, currentErr := o.loadStoredVersion(txctx, tx, command.Declaration, head.Before.VersionID, true)
 			if currentErr != nil {
 				return currentErr
 			}

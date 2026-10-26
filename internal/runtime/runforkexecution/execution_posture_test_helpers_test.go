@@ -22,7 +22,8 @@ type selectedRetainedExecutionObservation struct {
 	ForkEvents         []SelectedContractExecutionForkEvent
 }
 
-func retireQuiescentSelectedTestContext(ctx context.Context, owner SelectedContractExecutionOwner, child string) error {
+func retireQuiescentSelectedTestContext(t testing.TB, ctx context.Context, owner SelectedContractExecutionOwner, child string) error {
+	t.Helper()
 	contexts := owner.ports.contexts
 	contexts.mu.Lock()
 	var prepared *PreparedSelectedFork
@@ -55,6 +56,7 @@ func retireQuiescentSelectedTestContext(ctx context.Context, owner SelectedContr
 	if retainedContext == nil {
 		return errors.New("selected test shutdown lacks its original execution context")
 	}
+	retainedContext = runForkOriginalContextForTest(t, retainedContext, prepared.processOwner)
 	owned, cancel := bindSelectedDecisionCaller(ctx, retainedContext)
 	defer cancel()
 	_, authority, err := selectedContractManagedExecutionAuthority(owned)
@@ -91,7 +93,7 @@ func selectedTestInstanceSettled(t *testing.T, ctx context.Context, owner Select
 	if !found || header.CurrentState != state || pending != 0 {
 		return false
 	}
-	if err := retireQuiescentSelectedTestContext(ctx, owner, instance.RunID); err != nil {
+	if err := retireQuiescentSelectedTestContext(t, ctx, owner, instance.RunID); err != nil {
 		t.Fatalf("shutdown settled selected execution: %v", err)
 	}
 	return true
@@ -151,7 +153,7 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 			}
 		}
 		if storage.State == "running" {
-			outcome = retireQuiescentSelectedTestContext(wait, owner, child)
+			outcome = retireQuiescentSelectedTestContext(t, wait, owner, child)
 		}
 		contexts.mu.Lock()
 		outcome = errors.Join(outcome, retained.err)

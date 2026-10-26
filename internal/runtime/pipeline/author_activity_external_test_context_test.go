@@ -33,24 +33,14 @@ const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-11111111111
 
 func originalPipelineFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if startupownership.HasMutationAuthority(ctx) {
-		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
-			t.Fatal(err)
-		}
-		return ctx
-	}
-	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present {
+	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present && !startupownership.HasMutationAuthority(ctx) {
 		scope, found := runtimeauthoractivity.ScopeFromContext(ctx)
 		if !found || scope.RuntimeInstanceID == "" {
 			t.Fatal("pipeline fixture requires its declared runtime before process acquisition")
 		}
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}

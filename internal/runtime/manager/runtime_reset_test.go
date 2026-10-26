@@ -75,8 +75,9 @@ func (*resetTestRegistry) Rotate(context.Context, *sessions.Lease, sessions.Rota
 func (*resetTestRegistry) IncrementTurnOutcome(context.Context, *sessions.Lease) (sessions.TurnIncrementResult, error) {
 	return sessions.TurnIncrementResult{Acknowledged: true}, nil
 }
-func (r *resetTestRegistry) ResetAll(context.Context, sessions.ResetMetadata) (sessions.ResetSummary, error) {
-	return r.summary, nil
+func (r *resetTestRegistry) ResetAll(ctx context.Context, _ sessions.ResetMetadata) (sessions.ResetSummary, error) {
+	r.ctx = ctx
+	return r.summary, r.err
 }
 
 func TestResetRuntimeState_OnlyResetsOwnedTurnContextRegistry(t *testing.T) {

@@ -119,7 +119,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					_, err := runtimestartupownership.CaptureMutationAuthority(input)
 					return input, err
 				},
-			})
+			}, ctx)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}

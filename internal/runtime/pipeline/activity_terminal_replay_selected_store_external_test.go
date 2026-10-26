@@ -389,7 +389,7 @@ func activityJournalProofSource(t *testing.T, tools map[string]runtimecontracts.
 
 func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string, original ...startupownership.ProcessCapability) context.Context {
 	t.Helper()
-	ctx := activityReplayContext(t, selected, source, runID)
+	ctx := activityReplayContext(t, selected, source, runID, original...)
 	bundle, _ := semanticview.Bundle(source)
 	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
@@ -397,7 +397,7 @@ func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, sour
 	return ctx
 }
 
-func activityReplayContext(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string) context.Context {
+func activityReplayContext(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string, original ...startupownership.ProcessCapability) context.Context {
 	t.Helper()
 	bundle, found := semanticview.Bundle(source)
 	if !found || bundle.SourceArtifact == nil {
@@ -405,6 +405,16 @@ func activityReplayContext(t *testing.T, selected gateRecoveryStoreCase, source 
 	}
 	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
 	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(context.Background(), runID), fact))
+	if len(original) > 1 {
+		t.Fatal("activity fixture requires at most one original process")
+	}
+	if len(original) == 1 {
+		var err error
+		ctx, err = startupownership.WithProcessMutationAuthority(ctx, original[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	return originalPipelineFixtureContext(t, ctx, selected.events)
 }
 
@@ -451,15 +461,28 @@ func (b *activityJournalProofBus) Publish(ctx context.Context, event events.Even
 	return nil
 }
 
-func newActivityJournalProofBus(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source) *activityJournalProofBus {
+func newActivityJournalProofBus(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, held ...context.Context) *activityJournalProofBus {
 	t.Helper()
 	bundle, found := semanticview.Bundle(source)
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("activity publication bus requires its exact compiled artifact")
 	}
-	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+	opts := runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
-	},
+	}
+	if len(held) > 1 {
+		t.Fatal("activity bus fixture requires at most one held original context")
+	}
+	if len(held) == 1 {
+		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+			if !startupownership.HasMutationAuthority(ctx) {
+				ctx = startupownership.CarryMutationAuthority(ctx, held[0])
+			}
+			_, err := startupownership.CaptureMutationAuthority(ctx)
+			return ctx, err
+		}
+	}
+	bus, err := newScopedTestEventBus(t, selected.events, opts,
 		"research/entity-1/research.scanner_provider_write.succeeded", "research/entity-1/research.scanner_provider_write.failed",
 		"research/entity-1/channel.deliver.succeeded", "research/entity-1/channel.deliver.failed",
 		"research/entity-1/telegram.send_message.succeeded", "research/entity-1/telegram.send_message.failed")
