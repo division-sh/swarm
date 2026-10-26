@@ -275,6 +275,7 @@ func (s providerAliasScenario) receiver(alias string) string {
 
 func requireProviderAliasRootConnection(t *testing.T, rt servedWorkspaceProofRuntime, receiver string) {
 	t.Helper()
+	var runID string
 	for _, name := range []string{"inbound.telegram.text_message", "inbound.telegram.callback_action"} {
 		payload := map[string]any{
 			"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "41",
@@ -286,9 +287,14 @@ func requireProviderAliasRootConnection(t *testing.T, rt servedWorkspaceProofRun
 			payload["interaction_reference"] = "root-action"
 			payload["token"] = "opaque-action-token"
 		}
-		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		params := map[string]any{
 			"bundle_hash": rt.BundleHash, "event_name": name, "payload": payload, "idempotency_key": "root-" + name,
-		})
+		}
+		if runID != "" {
+			params["run_id"] = runID
+		}
+		published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+		runID = published.RunID
 		requireProviderAliasDeliveries(t, rt, published.EventID, ".", name, receiver, false, false, false)
 		// A public root event must not borrow the provider's authenticated
 		// declaring-flow source or acquire either standing provider's consumers.

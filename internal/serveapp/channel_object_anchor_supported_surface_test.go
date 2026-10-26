@@ -92,6 +92,9 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&count); err != nil || count != 1 {
 						t.Fatalf("duplicate/stale %s completion count=%d: %v", kind, count, err)
 					}
+					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+						"run_id": seed.RunID, "idempotency_key": "object-anchor-pause-" + string(kind),
+					})
 				})
 			}
 			p.mu.Lock()

@@ -220,6 +220,9 @@ func beginObjectInputCard(t *testing.T, h *channelOnboardingE2EHarness, db *sql.
 		}
 		waitObjectMessageControl(t, p, receipt, label)
 	}
+	requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+		"run_id": seed.RunID, "idempotency_key": fmt.Sprintf("input-card-pause-%d", index),
+	})
 	return card, receipt, waitObjectMessageControl(t, p, receipt, "reject")
 }
 
