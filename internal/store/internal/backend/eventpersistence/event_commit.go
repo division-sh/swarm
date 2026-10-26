@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -697,7 +698,7 @@ func commitValidatedPublicationSQL(
 }
 
 func publicationLiveScope(command runtimebus.PublicationCommand) runlifecycle.LiveRunScope {
-	if command.Commit.Event.RunDisposition() == events.AdmittedRunCreateAuthorized {
+	if command.Commit.Event.RunDisposition() == events.AdmittedRunCreateAuthorized && command.Commit.Event.Event().ExecutionMode() == executionmode.Live {
 		for _, activation := range command.Activations {
 			if activation.Identity.EntityID == command.Commit.Event.Event().RunID() {
 				return runlifecycle.LiveRunScope{FlowPath: activation.Identity.TemplateID}
