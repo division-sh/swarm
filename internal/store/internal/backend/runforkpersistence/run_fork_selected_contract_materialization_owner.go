@@ -443,7 +443,14 @@ func (s *RunForkPostgresOwner) InspectSelectedMaterializationReplay(ctx context.
 	if err := s.requireCurrent(); err != nil {
 		return nil, err
 	}
-	return inspectSelectedMaterializationReplay(plan)
+	blockers, err := inspectSelectedMaterializationReplay(plan)
+	if err != nil || len(blockers) != 0 {
+		return blockers, err
+	}
+	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return requireSelectedSourcePostCutCouplingAbsent(ctx, tx, postgresDeliveryAdapter, plan.SourceRunID, plan.ForkPoint.Revision)
+	})
+	return blockers, err
 }
 
 func (s *RunForkSQLiteOwner) InspectSelectedMaterializationReplay(ctx context.Context, plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
@@ -453,7 +460,14 @@ func (s *RunForkSQLiteOwner) InspectSelectedMaterializationReplay(ctx context.Co
 	if err := s.requireCurrent(); err != nil {
 		return nil, err
 	}
-	return inspectSelectedMaterializationReplay(plan)
+	blockers, err := inspectSelectedMaterializationReplay(plan)
+	if err != nil || len(blockers) != 0 {
+		return blockers, err
+	}
+	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return requireSelectedSourcePostCutCouplingAbsent(ctx, tx, sqliteDeliveryAdapter, plan.SourceRunID, plan.ForkPoint.Revision)
+	})
+	return blockers, err
 }
 
 func inspectSelectedMaterializationReplay(plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {

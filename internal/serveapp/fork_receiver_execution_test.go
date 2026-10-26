@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -27,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 type forkReceiverExecutionObservation struct {
@@ -79,6 +82,20 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
 				publication := newExactOriginPublicationProbe(t)
 				var selected *selectedStoreOwner
+				var publicExecutor apiv1.SelectedContractRunForkExecutor
+				previousCapabilities := buildSelectedAPICapabilities
+				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, request selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+					caps, err := previousCapabilities(owner, request)
+					if err == nil {
+						var exact bool
+						publicExecutor, exact = caps.RunFork.(apiv1.SelectedContractRunForkExecutor)
+						if !exact {
+							return caps, fmt.Errorf("receiver fixture lost its actual public fork executor: %T", caps.RunFork)
+						}
+					}
+					return caps, err
+				}
+				t.Cleanup(func() { buildSelectedAPICapabilities = previousCapabilities })
 				previous := projectRuntimePersistenceForServe
 				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 					selected = owner
@@ -161,8 +178,12 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 						RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 					},
-					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
-					AgentRuntime:      forkOptions,
+					ContractSelection:  runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
+					AgentRuntime:       forkOptions,
+					LiveRuntime:        rt.Runtime,
+					LiveContexts:       publicExecutor.RuntimeContexts,
+					LiveRuns:           publicExecutor.LiveRuns,
+					AcquireLiveRuntime: publicExecutor.AcquireLiveRuntime,
 				}
 				if declaredAgent {
 					target := loadWorkflowValidationBundleAt(t, targetRoot)
@@ -173,15 +194,31 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: fact.BundleHash()}
 					request.ExpectedBundleHash = fact.BundleHash()
 				}
-				execution, err := family.Execute(ctx, request)
-				if err != nil || execution.Materialization.ForkRunID == "" || execution.ExecutedEventCount != 0 || len(execution.ForkEvents) != 0 {
-					t.Fatalf("fork activation acknowledgment: %+v error=%v", execution, err)
+				request.ForkOperation = &runfork.ForkOperationRequest{
+					OperationID: uuid.NewString(), Actor: "receiver-settlement", IdempotencyKey: name, TransportHash: name,
+					SourceRunID: request.SourceRunID, ForkEventID: request.At, TargetBundleHash: request.ExpectedBundleHash,
+					ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
 				}
+				var execution runforkexecution.SelectedContractExecutionResult
+				var executionErr error
+				executed := make(chan struct{})
+				go func() {
+					defer close(executed)
+					execution, executionErr = family.Execute(ctx, request)
+				}()
+				defer func() {
+					resumeClaim()
+					resumeSettlement()
+					cancel()
+					<-executed
+				}()
 				await := func(ch <-chan forkReceiverExecutionObservation) forkReceiverExecutionObservation {
 					t.Helper()
 					select {
 					case observation := <-ch:
 						return observation
+					case <-executed:
+						t.Fatalf("fork ended before its real receiver boundary: %+v error=%v", execution, executionErr)
 					case <-ctx.Done():
 						t.Fatalf("fork receiver barrier: %v", ctx.Err())
 					}
@@ -266,6 +303,18 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 				}
 				resumeSettlement()
+				select {
+				case <-executed:
+				case <-ctx.Done():
+					t.Fatalf("fork did not join after its receiver barriers: %v", ctx.Err())
+				}
+				if unavailable {
+					if executionErr == nil || execution.Activation.Activated {
+						t.Fatalf("failed receiver acknowledged a live handoff: %+v error=%v", execution, executionErr)
+					}
+				} else if executionErr != nil || !execution.Activation.Activated || execution.ExecutedEventCount != 1 || len(execution.ForkEvents) != 1 {
+					t.Fatalf("settled receiver lacks its real live acknowledgment: %+v error=%v", execution, executionErr)
+				}
 				if execution.Materialization.ForkRunID != claim.RunID() {
 					t.Fatal("returned fork differs from actual receiver claim")
 				}
