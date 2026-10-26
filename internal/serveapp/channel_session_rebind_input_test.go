@@ -26,6 +26,7 @@ func TestServedWhatsAppIdentityRebindRejectsPendingInputBothStores(t *testing.T)
 			endpoint := process.endpoint(t) + "/v1/rpc"
 			peer.onACKTimeout = func(id string) { logServedNativeWait(t, endpoint, peer, "rebind_input_ack:"+id) }
 			original := requireServedNativeProcessPairing(t, endpoint, peer)
+			pauseServedNativePairingRun(t, endpoint, original.Operation.Coordinate.BundleHash)
 			originalConnection := readServedNativeConnectionID(t, backend, location, original.Operation.OperationID)
 			reader, err := storetest.OpenChannelObservation(backend, location)
 			if err != nil {

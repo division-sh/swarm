@@ -55,6 +55,7 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 			for i := 0; i < 3; i++ {
 				published := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "review.requested", "bundle_hash": bundle, "payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString()})
 				waitServedRunDeliveryQuiescence(t, deliveryReader, published.RunID)
+				requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": published.RunID, "idempotency_key": "cursor-pause-" + published.RunID})
 			}
 			var before, first cursorMailboxPage
 			requireServedJSONRPCResult(t, endpoint, "mailbox.list", map[string]any{}, &before)

@@ -114,6 +114,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 					t.Fatal("original publication diagnostic did not enter the barrier")
 				}
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "held-tree-pause"})
 				other := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "right.work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "other-tree-seed",

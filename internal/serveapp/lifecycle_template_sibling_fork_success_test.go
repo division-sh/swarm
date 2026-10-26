@@ -129,15 +129,15 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			postFreeze := readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)
 			frozenParents := requireTemplateForkFreezeDelta(t, preFreeze, postFreeze, sourceHeader, fork, siblings)
 			frozenSnapshot := lifecycleTemplateSnapshot(t, rt.ReceiverStateReader, runID)
-			if frozenSnapshot == before {
-				t.Fatal("acknowledged freeze did not change its two original pending gate headers")
+			if frozenSnapshot != before {
+				t.Fatal("live handoff changed the paused source's original pending gate headers")
 			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
 			if lifecycleTemplateSnapshot(t, rt.ReceiverStateReader, runID) != frozenSnapshot || !reflect.DeepEqual(postFreeze, readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)) {
 				t.Fatal("duplicate fork acknowledgment changed validated frozen source evidence")
 			}
 			if fork.ForkRunID == "" || fork.ForkRunID == runID || !reflect.DeepEqual(fork, duplicate) || fork.ExecutedEventCount != 0 ||
-				fork.ForkRunStatus != runfork.RunForkActivatedStatus || fork.ForkEventID != frontier.EventID || fork.ForkRevision != cut.Revision ||
+				fork.ForkRunStatus != "live" || fork.ForkEventID != frontier.EventID || fork.ForkRevision != cut.Revision ||
 				fork.ForkPointKind != string(cut.Kind) || fork.BundleHash != rt.BundleHash || fork.SourceRunID != runID {
 				t.Fatalf("template fork=%#v duplicate=%#v", fork, duplicate)
 			}
