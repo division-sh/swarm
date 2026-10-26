@@ -258,6 +258,36 @@ func TestFanOutDeliveryBarrierCandidateReturnsExactPostCommitScheduleActivationO
 			if got := result.GenericScheduleActivations[0].ID(); got != persistedActivationID {
 				t.Fatalf("committed activation handoff = %s, want persisted %s", got, persistedActivationID)
 			}
+			t.Run("live_prepared_occurrence", func(t *testing.T) {
+				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), owner)
+				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base, runtimerunlifecycle.LiveRunScope{FlowPath: "."})
+				seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
+				lifecycle := owner.(runtimerunlifecycle.OperationOwner)
+				if got, err := lifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(fixture.runID)); err != nil || got != runtimerunlifecycle.CandidateRetainedLive {
+					t.Fatalf("live closed fold=%s/%v", got, err)
+				}
+				schedules := owner.(runtimegenericschedule.Store)
+				active, err := schedules.ListActiveGenericScheduleActivations(ctx)
+				if err != nil || len(active) != 1 {
+					t.Fatalf("live barrier activation count=%d err=%v", len(active), err)
+				}
+				wakeup, err := runtimegenericschedule.NewWakeup(active[0].ID, active[0].CurrentDueAt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prepared, err := schedules.PrepareGenericScheduleOccurrence(ctx, wakeup)
+				if err != nil || !prepared.Acknowledged || prepared.Result.Outcome != runtimegenericschedule.PrepareReady || prepared.Result.Activation.Status != runtimegenericschedule.StatusActive {
+					t.Fatalf("prepare live barrier occurrence=%+v err=%v", prepared, err)
+				}
+				var events int
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id=$1`, prepared.Result.Occurrence.EventID).Scan(&events); err != nil || events != 0 {
+					t.Fatalf("prepared occurrence already published: count=%d err=%v", events, err)
+				}
+				if got, err := lifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(fixture.runID)); err != nil || got != runtimerunlifecycle.CandidateRetainedLive {
+					t.Fatalf("prepared, unpublished occurrence is not a terminal outcome: disposition=%s err=%v", got, err)
+				}
+			})
 		})
 	}
 }
