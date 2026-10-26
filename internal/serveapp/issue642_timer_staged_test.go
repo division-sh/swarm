@@ -96,7 +96,7 @@ func issue642StagedOrdinaryTimerFork(t *testing.T, backend string) {
 		t.Fatalf("staged timer marker lost its actual arm cause: %+v", marker)
 	}
 	rt.waitEntityStage(t, seed.RunID, seed.RunID, "checked")
-	sourceCompleted := issue2564H2CompletionWaitRun(t, rt, seed.RunID)
+	sourceCompleted := pauseIssue2564SettledSource(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	plan, sourceTimer := issue642TimerContinuationPlan(t, reader, seed.RunID, seed.EventID, marker.EventID)
@@ -114,11 +114,11 @@ func issue642StagedOrdinaryTimerFork(t *testing.T, backend string) {
 		SourceLoader: owners.executor.SourceLoader, AgentRuntime: owners.executor.AgentRuntime,
 	})
 	if err != nil || !activation.Activated || activation.ForkRunID != staged.ForkRunID || activation.ForkPoint != plan.ForkPoint ||
-		activation.SourceRunID != seed.RunID || activation.SourceRunStatus != "completed" || activation.SourceFrozen {
+		activation.SourceRunID != seed.RunID || activation.SourceRunStatus != "paused" || activation.SourceFrozen {
 		t.Fatalf("native staged activation did not acknowledge exact historical timer authority: activation=%+v err=%v", activation, err)
 	}
 	rt.waitEntityStage(t, staged.ForkRunID, staged.ForkRunID, "checked")
-	completed := issue2564H2CompletionWaitRun(t, rt, staged.ForkRunID)
+	completed := waitIssue2564LiveRunSettlement(t, rt, staged.ForkRunID)
 	rt.waitDeliveries(t, staged.ForkRunID)
 	issue642TimerContinuationReadback(t, rt, reader, sourceTimer, plan.ForkPoint, completed)
 	sourceAfter, err := storetest.ReadSelectedForkSourceDomain(ctx, rt.selected, seed.RunID)

@@ -65,7 +65,7 @@ func issue642RetainedRecurringTimerFork(t *testing.T, backend string) {
 		t.Fatal("recurring cut lost its real creating-handler cause")
 	}
 	rt.waitEntityStage(t, seed.RunID, seed.RunID, "checked")
-	sourceCompleted := issue2564H2CompletionWaitRun(t, rt, seed.RunID)
+	sourceCompleted := pauseIssue2564SettledSource(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	plan, sourceArm := issue642RecurringTimerPlan(t, reader, seed.RunID, marker.EventID)
@@ -85,11 +85,11 @@ func issue642RetainedRecurringTimerFork(t *testing.T, backend string) {
 		"allow_source_freeze": true, "idempotency_key": "issue642-retained-recurring-timer-fork",
 	}, &fork)
 	if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
-		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "completed" {
+		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "paused" {
 		t.Fatalf("recurring fork lost its exact retained active cut and independently completed source: %+v", fork)
 	}
 	rt.waitEntityStage(t, fork.ForkRunID, fork.ForkRunID, "checked")
-	completed := issue2564H2CompletionWaitRun(t, rt, fork.ForkRunID)
+	completed := waitIssue2564LiveRunSettlement(t, rt, fork.ForkRunID)
 	rt.waitDeliveries(t, fork.ForkRunID)
 	if !sourceArm.FireAt.Before(completed.StartedAt) {
 		t.Fatal("recurring proof requires the retained first due before child birth")
@@ -115,7 +115,7 @@ func issue642RetainedRecurringTimerFork(t *testing.T, backend string) {
 	if observed := storetest.ObserveWorkflowTimerReplayStorage(t, t.Context(), rt.selected, fork.ForkRunID, fork.ForkRunID); observed.Timers != 1 || observed.ActiveTimers != 0 {
 		t.Fatalf("recurring completion left an extra or live timer arm: %+v", observed)
 	}
-	if completed.BundleHash != rt.BundleHash || completed.Status != "completed" || completed.EndedAt == nil || completed.Failure != nil {
+	if completed.BundleHash != rt.BundleHash || completed.Status != "live" || completed.EndedAt != nil || completed.Failure != nil {
 		t.Fatalf("recurring checked receiver is not actual run completion: %+v", completed)
 	}
 	instance := issue2564H2CompletionWorkflow(t, rt, issue642TimerContinuationRoot(t, fork.ForkRunID))
@@ -140,10 +140,10 @@ func issue642RetainedRecurringTimerFork(t *testing.T, backend string) {
 	if err != nil || !reflect.DeepEqual(sourceCompleted, sourceAfterCompletion) {
 		t.Fatalf("recurring child changed source completion: %v", err)
 	}
-	t.Logf("ISSUE642_RECURRING_TIMER_CONTINUED backend=%s source=%s child=%s cut=%d timer=%s source_arm=%s first_due=%s cadence=%s occurrences=%d next_due=%s status=%s completed=%s",
+	t.Logf("ISSUE642_RECURRING_TIMER_CONTINUED backend=%s source=%s child=%s cut=%d timer=%s source_arm=%s first_due=%s cadence=%s occurrences=%d next_due=%s status=%s settled_run=%s",
 		backend, seed.RunID, fork.ForkRunID, plan.ForkPoint.Revision, actual.Ref.ActivationID,
 		actual.SourceArmedAt.Format(time.RFC3339Nano), sourceArm.FireAt.Format(time.RFC3339Nano), actual.RecurrenceInterval,
-		len(childOccurrences), actual.FireAt.Format(time.RFC3339Nano), actual.Status, completed.EndedAt.Format(time.RFC3339Nano))
+		len(childOccurrences), actual.FireAt.Format(time.RFC3339Nano), actual.Status, completed.RunID)
 }
 
 func issue642RecurringTimerPlan(t *testing.T, reader issue642TimerContinuationReaders, runID, markerID string) (runfork.RunForkPlan, pipeline.WorkflowTimerActivation) {
