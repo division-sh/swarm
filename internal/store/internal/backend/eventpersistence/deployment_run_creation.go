@@ -106,7 +106,7 @@ func commitDeploymentRunCreationTx(
 			LiveScope: runtimerunlifecycle.LiveRunScope{FlowPath: root.Plan.Identity.TemplateID},
 		})
 		if err != nil {
-			return err
+			return &publicationRunCreationFailure{cause: err}
 		}
 		if disposition != runtimerunlifecycle.MutationApplied {
 			return fmt.Errorf("deployment run creation found an existing run without its permanent receipt")
@@ -295,7 +295,7 @@ func (s *EventPostgresOwner) CommitDeploymentRunCreation(ctx context.Context, in
 	var acknowledged bool
 	result, acknowledged = outcome.Value()
 	if !acknowledged {
-		return result, outcome.Err()
+		return result, classifyRunCreationFailure(ctx, s, runtimerunlifecycle.LiveRunScope{FlowPath: input.Root.Plan.Identity.TemplateID}, command.RunID, outcome.Err())
 	}
 	result = acknowledgeDeploymentRunCreation(result)
 	return result, errors.Join(outcome.Err(), runtimedata.ValidateRunCreationReceiptForCommand(result.Record, command), s.publishChannelChanges(acknowledged, runtimepipeline.ChannelCardsChanged(result.Activations)))
@@ -344,7 +344,7 @@ func (s *EventSQLiteOwner) CommitDeploymentRunCreation(ctx context.Context, inpu
 	var acknowledged bool
 	result, acknowledged = outcome.Value()
 	if !acknowledged {
-		return result, outcome.Err()
+		return result, classifyRunCreationFailure(ctx, s, runtimerunlifecycle.LiveRunScope{FlowPath: input.Root.Plan.Identity.TemplateID}, command.RunID, outcome.Err())
 	}
 	result = acknowledgeDeploymentRunCreation(result)
 	return result, errors.Join(outcome.Err(), runtimedata.ValidateRunCreationReceiptForCommand(result.Record, command), s.publishChannelChanges(acknowledged, runtimepipeline.ChannelCardsChanged(result.Activations)))

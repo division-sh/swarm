@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -56,14 +57,6 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			registration.Release()
 		})
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
-		start := handler.handlers["run.start"]
-		handler.handlers["run.start"] = func(ctx context.Context, request Request) (any, error) {
-			result, err := start(ctx, request)
-			if err != nil {
-				t.Logf("feed-only native run.start cause: %v", err)
-			}
-			return result, err
-		}
 		versions := make(map[string]durabledata.VersionID)
 
 		for _, tc := range []struct {
@@ -152,7 +145,11 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 						if err != nil {
 							t.Fatalf("empty feed run readback: %v", err)
 						}
-						if header.Status == "completed" {
+						settled, err := fixture.reconstructed.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if header.Status == "live" && settled.TestQuiescence.Ready {
 							break
 						}
 						if time.Now().After(deadline) {
@@ -168,6 +165,25 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 						time.Sleep(10 * time.Millisecond)
 					}
 				}
+				if tc.rowCount > 0 {
+					before, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)
+					if err != nil {
+						t.Fatal(err)
+					}
+					blockedID := uuid.NewString()
+					pinData := map[string]any{"imports": []any{}, "pins": []any{map[string]any{
+						"declaration": dataRunDeclaration(ref), "version_id": sourceReceipt.Result.Candidate.VersionID,
+					}}}
+					blocked := rpcCall(t, handler, deploymentRunStartBody(blockedID, uuid.NewString(), bundleHash, pinData))
+					if blocked.Error == nil || asMap(t, blocked.Error.Data)["code"] != RunFlowAlreadyLiveCode {
+						t.Fatalf("conflicting feed-only start lacks its typed live-flow refusal: %+v", blocked.Error)
+					}
+					after, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)
+					if err != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("conflicting feed-only start changed durable rows: before=%+v after=%+v err=%v", before, after, err)
+					}
+				}
+				pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 			})
 		}
 		t.Run("multiple explicit pins create independent feeds", func(t *testing.T) {
@@ -189,6 +205,7 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 0 {
 				t.Fatalf("multi-pin run created %d initial events", got)
 			}
+			pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 		})
 		t.Run("one invalid pin rejects the whole run", func(t *testing.T) {
 			runID := uuid.NewString()
