@@ -340,7 +340,11 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if !unavailable {
 					checkBusiness(t, rt.Endpoint, claim.RunID(), claimed.signal.EventID, receiver.ID)
 				}
-				requireForkSourceSelfReleaseConservation(t, selected.RuntimeDeps().EventStore, seed.RunID, sourceBefore)
+				if name == "same_name_agent_control" {
+					requireForkSourceSelfReleaseConservation(t, selected.RuntimeDeps().EventStore, seed.RunID, sourceBefore)
+				} else if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
+					t.Fatal("fork receiver execution or settlement mutated source domain")
+				}
 				if !unavailable {
 					requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
 				}
