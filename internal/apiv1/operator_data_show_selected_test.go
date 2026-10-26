@@ -565,6 +565,7 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 					t.Fatal("accepted receipt has no pin")
 				}
 				secondRunID := uuid.NewString()
+				pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 				pinData := map[string]any{"imports": []any{}, "pins": []any{map[string]any{"declaration": dataRunDeclaration(scanRef), "version_id": pin.VersionID}}}
 				if response := rpcCall(t, publisher, dataRunEventPublishBody(secondRunID, uuid.NewString(), pinData)); response.Error != nil {
 					t.Fatalf("second real pin=%#v", response)

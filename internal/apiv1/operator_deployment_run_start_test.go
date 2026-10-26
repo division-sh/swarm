@@ -56,6 +56,14 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			registration.Release()
 		})
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+		start := handler.handlers["run.start"]
+		handler.handlers["run.start"] = func(ctx context.Context, request Request) (any, error) {
+			result, err := start(ctx, request)
+			if err != nil {
+				t.Logf("feed-only native run.start cause: %v", err)
+			}
+			return result, err
+		}
 		versions := make(map[string]durabledata.VersionID)
 
 		for _, tc := range []struct {

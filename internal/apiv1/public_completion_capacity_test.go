@@ -128,6 +128,7 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 		process := worklifetime.NewProcess()
 		var owners []*worklifetime.RuntimeOccurrence
 		var handlers []*Handler
+		var buses []*runtimebus.EventBus
 		t.Cleanup(func() {
 			cut.mu.Lock()
 			for _, release := range cut.keys {
@@ -162,6 +163,7 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			handlers = append(handlers, eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source))
+			buses = append(buses, bus)
 		}
 		seedRun, sourceID := uuid.NewString(), uuid.NewString()
 		seedData := map[string]any{"imports": []any{dataRunFusedImport(sourceID, ref, durabledata.AbsentHead(), []byte("{\"topic\":\"one\"}\n"))}, "pins": []any{}}
@@ -177,20 +179,23 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 		}
 		data := map[string]any{"imports": []any{}, "pins": []any{map[string]any{"declaration": dataRunDeclaration(ref), "version_id": receipt.Result.Candidate.VersionID}}}
 		bodies := make([]string, worklifetime.PublicCompletionLimit+1)
+		runIDs := make([]string, len(bodies))
 		responses := make([]chan publicCompletionObservedResponse, len(bodies))
 		keys := make([]string, len(bodies))
 		for index := range bodies {
+			runIDs[index] = uuid.NewString()
 			keys[index] = uuid.NewString()
 			cut.keys[keys[index]] = make(chan struct{})
 			switch index {
 			case 0:
+				runIDs[index] = seedRun
 				bodies[index] = dataRunEventPublishBodyForBundle(seedRun, keys[index], hash, nil)
 			case 1:
-				bodies[index] = dataRunEventPublishBodyForBundle(uuid.NewString(), keys[index], hash, data)
+				bodies[index] = dataRunEventPublishBodyForBundle(runIDs[index], keys[index], hash, data)
 			case 2:
-				bodies[index] = dataRunStartBodyForBundle(uuid.NewString(), keys[index], hash, data)
+				bodies[index] = dataRunStartBodyForBundle(runIDs[index], keys[index], hash, data)
 			default:
-				bodies[index] = deploymentRunStartBody(uuid.NewString(), keys[index], hash, data)
+				bodies[index] = deploymentRunStartBody(runIDs[index], keys[index], hash, data)
 			}
 			responses[index] = make(chan publicCompletionObservedResponse, 1)
 		}
@@ -208,6 +213,7 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatalf("reservation %d did not ACK; pool=%+v", index, storetest.ObserveSelectedPool(t, fixture.primary))
 			}
+			pauseAPITestLiveRun(t, buses[index%2], selected, runIDs[index])
 		}
 		if count := process.PublicCompletionCount(); count != worklifetime.PublicCompletionLimit {
 			t.Fatalf("shared process reservations=%d", count)

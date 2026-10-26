@@ -210,9 +210,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				}
 				checkSource("before fork")
 				wantExecuted := 1
-				if fieldless {
-					wantExecuted = 0
-				}
 				if surface == "admitted_http" {
 					params := map[string]any{"source_run_id": request.RunID, "fork_event_id": request.EventID, "allow_source_freeze": true, "idempotency_key": "receiver-fork"}
 					var fork, duplicate apiv1.RunForkExecutionResult
@@ -256,8 +253,8 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						if err != nil {
 							t.Fatalf("canonical admitted fork failed: %v", err)
 						}
-						if result.ExecutedEventCount != wantExecuted {
-							t.Fatalf("fork execution count: %d", result.ExecutedEventCount)
+						if result.ExecutedEventCount != wantExecuted || len(result.ForkEvents) != wantExecuted || result.ForkEvents[0].SourceEventID != forkPoint {
+							t.Fatalf("fork did not execute its exact captured input: count=%d events=%+v", result.ExecutedEventCount, result.ForkEvents)
 						}
 						forkRunID = result.Materialization.ForkRunID
 					} else {
@@ -268,6 +265,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						if err == nil || !strings.Contains(err.Error(), want) || result.Activation.Activated || result.Activation.SourceFrozen {
 							t.Fatalf("unsupported replay did not fail closed: %v activated=%t sourceFrozen=%t", err, result.Activation.Activated, result.Activation.SourceFrozen)
 						}
+						t.Logf("refused receiver fork cleanup: run=%s err=%v", result.Materialization.ForkRunID, err)
 						// The canonical discard retains completion evidence in a cancelled
 						// run tombstone, but removes executable fork state and deliveries.
 						var status string

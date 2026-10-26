@@ -143,6 +143,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 				t.Fatal("fixture has no readiness evidence")
 			}
 			var stopped any
+			requireServedJSONRPCResult(t, endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "audit2277-pause"}, &stopped)
 			requireServedJSONRPCResult(t, endpoint, "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "audit2277-stop"}, &stopped)
 			requireServedRunStatusWithDebug(t, endpoint, db, backend, seed.RunID, "cancelled")
 			before := repeatedStaticRunSnapshot(t, db, seed.RunID)
