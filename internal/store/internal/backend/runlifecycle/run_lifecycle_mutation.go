@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
@@ -439,7 +440,7 @@ func (m postgresRunLifecycleMutation) Create(
 	}
 	bundleHash := request.Source.BundleHash()
 	origin := request.Origin
-	status := creationState(request)
+	status := creationState(ctx, request)
 	var inserted bool
 	err := m.tx.QueryRowContext(ctx, `
 		INSERT INTO runs (
@@ -496,7 +497,7 @@ func (m sqliteRunLifecycleMutation) Create(
 	}
 	bundleHash := request.Source.BundleHash()
 	origin := request.Origin
-	status := creationState(request)
+	status := creationState(ctx, request)
 	result, err := m.tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
@@ -536,7 +537,10 @@ func (m sqliteRunLifecycleMutation) Create(
 	return runtimerunlifecycle.MutationApplied, nil
 }
 
-func creationState(request runtimerunlifecycle.CreateRequest) runtimerunlifecycle.State {
+func creationState(ctx context.Context, request runtimerunlifecycle.CreateRequest) runtimerunlifecycle.State {
+	if profile, admitted := scenarioexecution.AdmittedProfileFromContext(ctx); admitted && profile.EffectiveSourceIdentity().SourceArtifactFact().Matches(request.Source) {
+		return runtimerunlifecycle.StateRunning
+	}
 	if !request.LiveScope.Empty() {
 		return runtimerunlifecycle.StateLive
 	}

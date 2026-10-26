@@ -133,7 +133,7 @@ func mailboxCompletionFixtureInRuntime(t *testing.T, rt servedControlProofRuntim
 	var runs struct {
 		Runs []operatorread.RunHeader `json:"runs"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.list", map[string]any{"limit": 1000}, &runs)
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.list", map[string]any{"limit": 500}, &runs)
 	for _, run := range runs.Runs {
 		if run.BundleHash == rt.BundleHash && run.Status == "live" {
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, run.RunID)

@@ -2584,7 +2584,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		"run_id":          runID,
 		"idempotency_key": continueKey,
 	})
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "running", "live")
+	requireServedRunStatus(t, rt.Endpoint, runID, "live")
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
 		"run_id":          runID,

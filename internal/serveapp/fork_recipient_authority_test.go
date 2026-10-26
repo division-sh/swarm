@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -181,10 +182,12 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("served runtime has no selected fork owner")
 			}
-			var frontier string
-			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
-				t.Fatal(err)
+			var captured operatorread.OperatorEventListResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": seed.RunID, "event_name": "producer/work.ready"}, "limit": 2}, &captured)
+			if len(captured.Events) != 1 || captured.Events[0].RunID != seed.RunID || captured.Events[0].EventName != "producer/work.ready" || captured.Events[0].EventID == "" {
+				t.Fatalf("source lost its exact connected frontier: %+v", captured)
 			}
+			frontier := captured.Events[0].EventID
 			plan, err := planner.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 			if err != nil {
 				t.Fatal(err)

@@ -150,9 +150,14 @@ func TestRunForkPlannerSelectedStoreParity(t *testing.T) {
 			if explicitPoint.Input != fixture.eventID || latestPoint.Input != "" {
 				t.Fatalf("fork point selector echo = explicit:%q latest:%q", explicitPoint.Input, latestPoint.Input)
 			}
-			explicitPoint.Input, latestPoint.Input = "", ""
-			if latestPoint != explicitPoint {
-				t.Fatalf("latest fork point = %#v, want explicit latest point %#v", latest.ForkPoint, explicit.ForkPoint)
+			if explicitPoint.Kind != runfork.RunForkPointEvent || explicitPoint.EventID != fixture.eventID || explicitPoint.Validate() != nil ||
+				latestPoint.Kind != runfork.RunForkPointStateRevision || latestPoint.EventID != "" || latestPoint.Validate() != nil || latestPoint.Revision != explicitPoint.Revision {
+				t.Fatalf("committed head and exact event did not retain distinct selectors at the same revision: latest=%+v explicit=%+v", latestPoint, explicitPoint)
+			}
+			explicitState := explicit
+			explicitState.ForkPoint = latestPoint
+			if !reflect.DeepEqual(explicitState, latest) {
+				t.Fatalf("same-revision selectors changed captured state: latest=%+v explicit=%+v", latest, explicit)
 			}
 			plans[backend] = plannerProof{Explicit: explicit, Latest: latest}
 		})

@@ -43,10 +43,6 @@ func TestSelectedForkFanOutBarrierMaterializationBothStores(t *testing.T) {
 	testForkFanOutGenerationWriterEvaluatorBothStores(t, true, false)
 }
 
-func TestForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T) {
-	testForkFanOutGenerationWriterEvaluatorBothStores(t, true, false)
-}
-
 // Ordinary and selected activation retain their different authority contracts.
 func TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores(t *testing.T) {
 	testForkFanOutGenerationWriterEvaluatorBothStores(t, false, false)
@@ -219,6 +215,12 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						request, err := prepared.MaterializationRequest()
 						if err != nil {
 							t.Fatal(err)
+						}
+						fixed := request.Preparation.ForkPoint
+						request.ForkOperation = &runfork.ForkOperationRequest{
+							OperationID: uuid.NewString(), Actor: "selected-fanout-native-fixture", IdempotencyKey: uuid.NewString(),
+							TransportHash: "selected-fanout-native-fixture", SourceRunID: runID, ForkEventID: request.At,
+							ResolvedPoint: &fixed, TargetBundleHash: request.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
 						}
 						selectedRequest = request
 						materialize = func() (runfork.RunForkMaterialization, error) {

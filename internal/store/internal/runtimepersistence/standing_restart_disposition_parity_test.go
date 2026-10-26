@@ -121,7 +121,7 @@ func TestStandingReconciliationNormalizesRunPauseForActiveDeclarationParity(t *t
 			}
 			if reconciled.RunID != created.RunID || reconciled.Generation != created.Generation ||
 				reconciled.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartActiveIntrinsic ||
-				reconciled.RestartDisposition.RunState != string(runtimerunlifecycle.StateRunning) {
+				reconciled.RestartDisposition.RunState != string(runtimerunlifecycle.StateLive) {
 				t.Fatalf("operator-paused reconciliation = %#v", reconciled)
 			}
 			query := `SELECT status, reason, controlled_by FROM runs JOIN run_control_state USING (run_id) WHERE run_id=?`
@@ -133,7 +133,7 @@ func TestStandingReconciliationNormalizesRunPauseForActiveDeclarationParity(t *t
 			if err := fixture.db.QueryRowContext(ctx, query, args...).Scan(&status, &reason, &controlledBy); err != nil {
 				t.Fatalf("read operator-paused standing state: %v", err)
 			}
-			if status != string(runtimerunlifecycle.StateRunning) || reason != "standing_reconcile" || controlledBy != "runtime" {
+			if status != string(runtimerunlifecycle.StateLive) || reason != "standing_reconcile" || controlledBy != "runtime" {
 				t.Fatalf("active standing reconciliation did not normalize run pause: status=%s reason=%s controlled_by=%s", status, reason, controlledBy)
 			}
 		})
@@ -229,7 +229,7 @@ func TestInvalidStandingMemberDoesNotAbortOrMutateCompleteSetParity(t *testing.T
 				t.Fatalf("healthy sibling was not executable: %#v", results)
 			}
 			disposition := assertStandingDisposition(t, ctx, fixture, invalid.RunID, runtimerunlifecycle.StandingRestartInvalidCurrent)
-			if !disposition.DeclarationPresent || disposition.EffectiveState != "suspended" || disposition.OperatorOverride != "suspended" || disposition.RunState != "running" {
+			if !disposition.DeclarationPresent || disposition.EffectiveState != "suspended" || disposition.OperatorOverride != "suspended" || disposition.RunState != "live" {
 				t.Fatalf("invalid member was mutated during complete-set reconciliation: %#v", disposition)
 			}
 		})

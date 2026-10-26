@@ -141,8 +141,17 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 			}
 			ctx := servedControlProofAuthorActivityContext(t, rt)
 			var frontier string
-			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
-				t.Fatal(err)
+			for _, delivery := range live {
+				node, isNode := delivery.route.Recipient.Node()
+				if isNode && node.FlowPath() == "consumer" && !delivery.route.ConnectClaim.Empty() {
+					if frontier != "" && frontier != delivery.eventID {
+						t.Fatal("connected source has more than one consumer frontier")
+					}
+					frontier = delivery.eventID
+				}
+			}
+			if frontier == "" {
+				t.Fatal("connected source lost its exact consumer frontier")
 			}
 			plan, err := planner.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 			if err != nil {

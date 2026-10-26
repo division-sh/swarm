@@ -138,8 +138,8 @@ func TestSelectedForkLatestPreparationRetainsCapturedSelectorBothStores(t *testi
 			ctx, seeded := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
 			request := prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, seeded.SourceRunID, "", seeded.ContractSelection)
 			point := request.Preparation.ForkPoint
-			if point.EventID == "" || request.At != point.Input || point.EventID == point.Input {
-				t.Fatalf("fixture did not distinguish captured latest from concrete event: point=%+v at=%q", point, request.At)
+			if point.Kind != runfork.RunForkPointStateRevision || point.Validate() != nil || point.Revision < 1 || point.EventID != "" || point.Input != "" || request.At != "" {
+				t.Fatalf("fixture did not retain the exact eventless committed head: point=%+v at=%q", point, request.At)
 			}
 			owner := fixture.store.(forkWorkflowOwnershipStore)
 			child, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, request)

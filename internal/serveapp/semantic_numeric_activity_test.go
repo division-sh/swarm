@@ -159,6 +159,7 @@ collector:
         writes:
           - target_field: score
             value: payload.result.value + payload.result.nested.numbers[?0].value() + 2
+      advances_to: done
 `
 				for name, raw := range map[string]string{"nodes.yaml": targetNodes, "tools.yaml": targetTool} {
 					if err := os.WriteFile(filepath.Join(targetRoot, name), []byte(raw), 0600); err != nil {
@@ -187,6 +188,7 @@ collector:
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1 AND status='succeeded' AND execution_mode='mock' AND execution_binding IS NOT NULL`, child.ForkRunID).Scan(&attempts); err != nil || attempts != 1 {
 					t.Fatalf("fork mock attempts=%d err=%v", attempts, err)
 				}
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": child.ForkRunID, "idempotency_key": "numeric-result-pause-before-restart"})
 				rt = restart()
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 				requireNumericMockForkOutput(t, rt, child.ForkRunID)
