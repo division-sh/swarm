@@ -459,7 +459,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 				t.Fatalf("unsupported selected card store %T", cards)
 			}
 			now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
-			onboarding, activation := selectedChannelConfirmationAuthorityFixture(t, selected, now, runtimeeffects.StateAuthorized)
+			onboarding, activation := selectedChannelConfirmationAuthorityFixture(t, ctx, selected, now, runtimeeffects.StateAuthorized)
 			principal, err := selected.EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
 				t.Fatal(err)
