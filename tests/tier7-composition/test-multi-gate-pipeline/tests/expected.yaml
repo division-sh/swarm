@@ -13,7 +13,7 @@ expected:
 
   handler_outcome: success
   entity_state: approved
-  gates:
+  entity_fields:
     g1: true
     g2: true
     g3: true
