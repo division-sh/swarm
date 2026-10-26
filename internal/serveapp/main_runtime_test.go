@@ -870,13 +870,13 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 
 func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID string) {
 	t.Helper()
-	var waitingEntities, deliveredEvents int
+	var endedInstances, deliveredEvents int
 	var executionState string
 	err := db.QueryRowContext(context.Background(), `
 			SELECT
 					(SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
 					 ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
-					 WHERE es.run_id=$1 AND fi.current_state='waiting'),
+					 WHERE es.run_id=$1 AND fi.current_state='done'),
 				(SELECT COUNT(*)
 				 FROM events e
 				 JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
@@ -887,9 +887,9 @@ func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID strin
 				(SELECT state
 				 FROM run_fork_selected_contract_runtime_executions
 					 WHERE fork_run_id=$1)
-		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&waitingEntities, &deliveredEvents, &executionState)
-	if err != nil || waitingEntities != 1 || deliveredEvents != 1 || executionState != "closed" {
-		t.Fatalf("stopped replay for %s = waiting entities:%d deliveries:%d execution:%q err:%v", forkRunID, waitingEntities, deliveredEvents, executionState, err)
+		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&endedInstances, &deliveredEvents, &executionState)
+	if err != nil || endedInstances != 1 || deliveredEvents != 2 || executionState != "closed" {
+		t.Fatalf("stopped ordinary successor for %s = ended instances:%d deliveries:%d execution:%q err:%v", forkRunID, endedInstances, deliveredEvents, executionState, err)
 	}
 }
 

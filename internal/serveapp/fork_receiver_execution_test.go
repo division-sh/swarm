@@ -340,11 +340,16 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if !unavailable {
 					checkBusiness(t, rt.Endpoint, claim.RunID(), claimed.signal.EventID, receiver.ID)
 				}
-				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
+				if after := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID); !reflect.DeepEqual(sourceBefore, after) {
+					for table, before := range sourceBefore {
+						if !reflect.DeepEqual(before, after[table]) {
+							t.Logf("source %s changed: before=%+v after=%+v", table, before, after[table])
+						}
+					}
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
 				if !unavailable {
-					requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, request.ExpectedBundleHash, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
+					requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
 				}
 			})
 		}
@@ -432,6 +437,7 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, endpoint string, own
 	var result struct {
 		OK bool `json:"ok"`
 	}
+	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()})
 	requireServedJSONRPCResult(t, endpoint, "run.stop", map[string]any{"run_id": runID, "idempotency_key": "selected-exact-stop"}, &result)
 	if !result.OK {
 		t.Fatal("selected public stop did not return its terminal result")

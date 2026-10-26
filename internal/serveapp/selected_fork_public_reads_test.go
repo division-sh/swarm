@@ -30,7 +30,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 	}
 	hash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), owner, runID)
 	if err != nil || hash == loadedBundleHash {
-		t.Fatalf("public read fixture must target an unloaded different artifact: hash=%s err=%v", hash, err)
+		t.Fatalf("public read fixture must retain the child's different artifact: hash=%s err=%v", hash, err)
 	}
 	var runs struct {
 		Runs []operatorread.RunHeader `json:"runs"`
@@ -50,12 +50,12 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 		}
 	}
 	if matches != 1 {
-		t.Fatalf("unloaded target absent or replaced in run list: %+v", runs)
+		t.Fatalf("target absent or replaced in run list: %+v", runs)
 	}
 	var agents operatorread.OperatorAgentListResult
 	requireServedJSONRPCResult(t, endpoint, "agent.list", map[string]any{"flow": "consumer", "role": "observer"}, &agents)
 	if len(agents.Agents) != 1 || agents.Agents[0].AgentID != "same-name" || agents.Agents[0].FlowInstance != "consumer" {
-		t.Fatalf("unloaded target missing from agent list: %+v", agents)
+		t.Fatalf("target missing from agent list: %+v", agents)
 	}
 	var entities operatorread.OperatorEntityListResult
 	requireServedJSONRPCResult(t, endpoint, "entity.list", params, &entities)
