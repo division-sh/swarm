@@ -55,6 +55,7 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			sourceRunID := start("source", []byte("{\"account_id\":\"source\",\"document\":{\"version\":1}}\n"))
 			changedRows := []byte("{\"account_id\":\"changed\",\"document\":{\"version\":2}}\n")
 			changed := selectedDeploymentVersion(t, f, changedRows)
+			pauseDeploymentFixtureRun(t, f, sourceRunID)
 			_ = start("changed", changedRows)
 			gate := &selectedDeploymentClaimHold{Store: f.selected, entered: make(chan runtimedelivery.Claim, 1), release: make(chan struct{})}
 			var release sync.Once

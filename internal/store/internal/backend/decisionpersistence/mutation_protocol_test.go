@@ -19,7 +19,7 @@ import (
 
 type unusedCandidateWriter struct{}
 
-func (unusedCandidateWriter) WriteCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time) (runtimerunlifecycle.CandidateRequestResult, error) {
+func (unusedCandidateWriter) WriteCompletionCandidateTx(context.Context, *mutationprotocol.Attempt, string, *time.Time) (runtimerunlifecycle.CandidateRequestResult, error) {
 	panic("candidate writer must not run before decision schema admission")
 }
 

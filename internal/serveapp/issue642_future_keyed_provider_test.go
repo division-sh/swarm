@@ -42,7 +42,7 @@ func TestIssue642FutureMintedProviderStartsAfterEmptyCatalogBothStores(t *testin
 func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root string, minted bool) {
 	t.Helper()
 	observed := issue642ObserveKeyedProviderPreparation(t)
-	_, start := issue2564ServeHarness(t, backend, root, true)
+	_, start := issue2564LiveServeHarness(t, backend, root, "")
 	process, rt := start()
 	t.Cleanup(func() {
 		if code := process.stop(); code != 0 {
@@ -60,6 +60,7 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 	if err := json.Unmarshal(response.Result, &seed); err != nil {
 		t.Fatal(err)
 	}
+	requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 	issue642WaitKeyedProviderCompletion(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)

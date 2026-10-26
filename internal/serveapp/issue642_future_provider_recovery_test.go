@@ -212,7 +212,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 	mode := os.Getenv("TEST_642_PHASE")
 	minted := os.Getenv("TEST_642_MINTED") == "true"
 	probe := issue642InstallFutureRecoveryProbe(t, mode, minted, proof)
-	_, start := issue2564ServeHarnessAtLocation(t, os.Getenv("TEST_642_BACKEND"), os.Getenv("TEST_642_SOURCE"), true, os.Getenv("TEST_642_LOCATION"))
+	_, start := issue2564LiveServeHarness(t, os.Getenv("TEST_642_BACKEND"), os.Getenv("TEST_642_SOURCE"), os.Getenv("TEST_642_LOCATION"))
 	process, rt := start()
 	t.Cleanup(func() {
 		probe.release()
@@ -234,6 +234,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 		if err := json.Unmarshal(response.Result, &seed); err != nil {
 			t.Fatal(err)
 		}
+		requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		err := issue642WaitRecoveryBusiness(ctx, rt, seed.RunID)
 		cancel()

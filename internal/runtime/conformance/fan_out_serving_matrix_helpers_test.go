@@ -310,8 +310,8 @@ func (f *servingMatrixFixture) startRun(t *testing.T, runtimeIndex int) (context
 	}
 	eventID := publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, f.sources[runtimeIndex], runID, "portfolio.opened", map[string]any{"portfolio_id": runID, "threshold": 75})
 	event := storetest.LoadCanonicalEventRecord(t, ctx, f.selected, eventID)
-	if event.RunID() != runID || event.ExecutionMode() != executionposture.MockOnly.RootMode() {
-		t.Fatalf("private serving component changed its exact root mode: run=%s mode=%s", event.RunID(), event.ExecutionMode())
+	if event.RunID() != runID || event.ExecutionMode() != rt.posture.RootMode() {
+		t.Fatalf("serving component changed its exact root mode: run=%s mode=%s want=%s", event.RunID(), event.ExecutionMode(), rt.posture.RootMode())
 	}
 	ctx, err := rt.bus.AdmitSourceArtifactFact(ctx)
 	if err != nil {

@@ -33,6 +33,7 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			changedRows := []byte("{\"account_id\":\"changed\",\"document\":{\"version\":2}}\n")
 			sourceRunID := start("source", sourceRows)
 			changed := selectedDeploymentVersion(t, f, changedRows)
+			pauseDeploymentFixtureRun(t, f, sourceRunID)
 			_ = start("changed", changedRows)
 			gate := &selectedDeploymentClaimGate{kind: runtimedelivery.ExecutionAuthoritySelectedContractFork, entered: make(chan string, 16)}
 			gate.held.Store(true)

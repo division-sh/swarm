@@ -82,6 +82,45 @@ func TestCandidateHandoffResetAttemptPreservesOccurrenceAndOnlyCommitsCurrent(t 
 	if err := handoff.ResetAttempt(); err == nil {
 		t.Fatal("settled handoff admitted a reset")
 	}
+	t.Run("retained_live_activations", func(t *testing.T) {
+		liveHandoff, err := ReserveCandidateHandoff(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer liveHandoff.Rollback()
+		live := retryCandidate()
+		live.Disposition = runlifecycle.CandidateRetainedLive
+		live.Candidate.Revision, live.Candidate.DueAt = 0, time.Time{}
+		rolledBack, err := runlifecycle.NewCommittedGenericScheduleActivation("33333333-3333-4333-8333-333333333333")
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, err := runlifecycle.NewCommittedGenericScheduleActivation("44444444-4444-4444-8444-444444444444")
+		if err != nil {
+			t.Fatal(err)
+		}
+		live.GenericScheduleActivations = []runlifecycle.CommittedGenericScheduleActivation{rolledBack}
+		if err := liveHandoff.Prepare(coordinator, live); err != nil {
+			t.Fatal(err)
+		}
+		if err := liveHandoff.ResetAttempt(); err != nil {
+			t.Fatal(err)
+		}
+		live.GenericScheduleActivations[0] = committed
+		if err := liveHandoff.Prepare(coordinator, live); err != nil {
+			t.Fatal(err)
+		}
+		live.GenericScheduleActivations[0] = rolledBack
+		if len(sink.activations) != 0 {
+			t.Fatal("uncommitted live activation escaped its attempt")
+		}
+		if err := liveHandoff.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if sink.cancelled != 2 || len(sink.submitted) != 2 || len(sink.activations) != 1 || sink.activations[0] != committed {
+			t.Fatalf("live replay retained stale or mutable activation evidence: %+v", sink)
+		}
+	})
 }
 
 func TestCandidateHandoffResetAttemptReleasesPreRegistrationBarrier(t *testing.T) {

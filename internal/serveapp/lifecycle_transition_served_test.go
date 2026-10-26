@@ -213,7 +213,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			if backend == servedparity.BackendExplicitPostgres {
 				backendName = "postgres"
 			}
-			opts, start := issue2564ServeHarness(t, backendName, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmitsUntilObserverFinish), true)
+			opts, start := issue2564LiveServeHarness(t, backendName, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmitsUntilObserverFinish), "")
 			opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, _ string, evt events.Event) error {
 				if evt.Type() != "ordinary.finish" {
 					return nil
@@ -235,6 +235,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			var finish servedEventPublishRPCResult
 			var staleAdmitEventID string
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create"})
+			requireIssue2564LiveRootMode(t, rt, started.RunID, started.EventID)
 			entityID := rt.waitEntityStage(t, started.RunID, started.RunID, "waiting")
 			currentHistory := func() []pipeline.WorkflowTransitionRecord {
 				return decodeLifecycleTransitionHistory(t, storetest.ObserveWriterFlow(t, context.Background(), rt.selected, started.RunID, entityID).Config)

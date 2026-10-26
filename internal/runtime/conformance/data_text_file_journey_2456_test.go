@@ -94,16 +94,16 @@ func startTextFileRun2456(t *testing.T, f *deploymentResourceFixture, server *ht
 	return runID
 }
 
-func pauseTextFileRun2456(t *testing.T, f *deploymentResourceFixture, runID string) {
+func pauseDeploymentFixtureRun(t *testing.T, f *deploymentResourceFixture, runID string) {
 	t.Helper()
 	owner := f.selected.(interface {
 		PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 	})
 	result, err := owner.PauseRunControlOutcome(f.ctx, runcontrol.TransitionRequest{
-		RunID: runID, Now: time.Now().UTC(), Reason: "settled import before independent run", ControlledBy: "text-file fixture",
+		RunID: runID, Now: time.Now().UTC(), Reason: "exact fixture source before independent run", ControlledBy: "deployment fixture",
 	})
 	if err != nil || !result.Acknowledged || result.State.Status != "paused" {
-		t.Fatalf("pause exact settled import %s: result=%+v err=%v", runID, result, err)
+		t.Fatalf("pause exact fixture source %s: result=%+v err=%v", runID, result, err)
 	}
 }
 
@@ -254,7 +254,7 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 			if changedVersion.VersionID == version.VersionID {
 				t.Fatal("changed external file retained original version identity")
 			}
-			pauseTextFileRun2456(t, f, runID)
+			pauseDeploymentFixtureRun(t, f, runID)
 			changedRun := startTextFileRun2456(t, f, server, uuid.NewString(), "--data", "root.ready.body="+path)
 			assertTextFileRun2456(t, f, server, changedRun, changedVersion, changedRows)
 			owner, recovery := deploymentForkOwner(t, f)
@@ -319,7 +319,7 @@ func TestFileRow2456Keyed37DeltaOldPinBothStores(t *testing.T) {
 			if changed.VersionID == original.VersionID {
 				t.Fatal("changed-two directory reused the old version identity")
 			}
-			pauseTextFileRun2456(t, f, originalRun)
+			pauseDeploymentFixtureRun(t, f, originalRun)
 			changedRun := startTextFileRun2456(t, f, server, uuid.NewString(), "--data", "root.ready.body="+dir)
 			assertTextFileRun2456(t, f, server, changedRun, changed, rows)
 			dataStore, ok := f.selected.(apiv1.DurableDataStore)
@@ -345,7 +345,7 @@ func TestFileRow2456Keyed37DeltaOldPinBothStores(t *testing.T) {
 			for i := range originalRows {
 				originalRows[i] = map[string]any{"account_id": fmt.Sprintf("candidate-%02d", i), "body": fmt.Sprintf("Resume %02d\n", i)}
 			}
-			pauseTextFileRun2456(t, f, changedRun)
+			pauseDeploymentFixtureRun(t, f, changedRun)
 			oldPinRun := startTextFileRun2456(t, f, server, uuid.NewString(), "--pin", "root.ready@"+string(original.VersionID))
 			assertTextFileRun2456(t, f, server, oldPinRun, original, originalRows)
 			assertTextFileRun2456(t, f, server, originalRun, original, originalRows)
@@ -841,7 +841,7 @@ func TestFileRow2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
 			}
 			changedRows := []map[string]any{{"body": changedBody}}
 			changed := textFileVersion2456(t, f, changedRows)
-			pauseTextFileRun2456(t, f, runID)
+			pauseDeploymentFixtureRun(t, f, runID)
 			changedRun := startTextFileRun2456(t, f, server, uuid.NewString(), "--data", "root.ready.body="+changedPath)
 			assertTextFileRun2456(t, f, server, changedRun, changed, changedRows)
 			if original.VersionID == changed.VersionID {
@@ -889,6 +889,7 @@ func TestFileRow2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
 			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			pauseDeploymentFixtureRun(t, f, changedRun)
 			newRunID := uuid.NewString()
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo,
 				"run", "start", "--connect", server.URL,
@@ -927,7 +928,7 @@ func TestFileRow2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 			importArgs := []string{"run", "start", "--connect", server.URL, "--run-id", importRunID, "--data", "root.ready.body=" + path, "--no-follow"}
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo, importArgs...), importRunID)
 			assertTextFileRun2456(t, f, server, importRunID, version, rows)
-			pauseTextFileRun2456(t, f, importRunID)
+			pauseDeploymentFixtureRun(t, f, importRunID)
 			pinRunID := uuid.NewString()
 			pinArgs := []string{"run", "start", "--connect", server.URL, "--run-id", pinRunID, "--pin", "root.ready@head", "--no-follow"}
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo, pinArgs...), pinRunID)
@@ -944,7 +945,7 @@ func TestFileRow2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 			}
 			changedRows := []map[string]any{{"body": changedBody}}
 			changed := textFileVersion2456(t, f, changedRows)
-			pauseTextFileRun2456(t, f, pinRunID)
+			pauseDeploymentFixtureRun(t, f, pinRunID)
 			changedRun := startTextFileRun2456(t, f, server, uuid.NewString(), "--data", "root.ready.body="+changedPath)
 			assertTextFileRun2456(t, f, server, changedRun, changed, changedRows)
 			if changed.VersionID == version.VersionID {
@@ -1074,6 +1075,7 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				versions[item.name] = version
+				pauseDeploymentFixtureRun(t, f, seedRun)
 			}
 			const missingVersion = "resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			runID := uuid.NewString()

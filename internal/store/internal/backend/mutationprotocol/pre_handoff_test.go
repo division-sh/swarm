@@ -20,11 +20,14 @@ func (r testClaimRetirement) RetireCommittedClaim(ctx context.Context) error { r
 
 type preHandoffCandidateWriter struct{ candidate runtimelifecycle.Candidate }
 
-func (w preHandoffCandidateWriter) WriteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, _ *time.Time) (runtimelifecycle.CandidateRequestResult, error) {
+func (w preHandoffCandidateWriter) WriteCompletionCandidateTx(ctx context.Context, attempt *Attempt, runID string, _ *time.Time) (runtimelifecycle.CandidateRequestResult, error) {
 	if runID != w.candidate.RunID {
 		return runtimelifecycle.CandidateRequestResult{}, errors.New("candidate writer received a different run")
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mutation_protocol_probe (value) VALUES (?)`, runID); err != nil {
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO mutation_protocol_probe (value) VALUES (?)`, runID)
+		return err
+	}); err != nil {
 		return runtimelifecycle.CandidateRequestResult{}, err
 	}
 	return runtimelifecycle.CandidateRequestResult{Disposition: runtimelifecycle.CandidateRequested, Candidate: w.candidate}, nil

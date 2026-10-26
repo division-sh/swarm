@@ -18,7 +18,7 @@ func TestIssue642FutureKeyedProviderReusesConstructedInstanceBothStores(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			observed := issue642ObserveKeyedProviderPreparation(t)
-			_, start := issue2564ServeHarness(t, backend, canonicalrouting.CopySelectedFutureReusedProviderInput(t), true)
+			_, start := issue2564LiveServeHarness(t, backend, canonicalrouting.CopySelectedFutureReusedProviderInput(t), "")
 			process, rt := start()
 			t.Cleanup(func() {
 				if code := process.stop(); code != 0 {
@@ -36,6 +36,7 @@ func TestIssue642FutureKeyedProviderReusesConstructedInstanceBothStores(t *testi
 			if err := json.Unmarshal(response.Result, &seed); err != nil {
 				t.Fatal(err)
 			}
+			requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 			issue642WaitKeyedProviderCompletion(t, rt, seed.RunID)
 			rt.waitDeliveries(t, seed.RunID)
 			issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)

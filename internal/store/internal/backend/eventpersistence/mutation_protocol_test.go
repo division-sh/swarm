@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimelifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/lib/pq"
 )
 
@@ -59,7 +60,7 @@ func (p *standaloneCompletionProbe) IsStandaloneRuntimePlatformEventTx(context.C
 	return p.standalone, p.err
 }
 
-func (*standaloneCompletionProbe) WriteCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time) (runtimelifecycle.CandidateRequestResult, error) {
+func (*standaloneCompletionProbe) WriteCompletionCandidateTx(context.Context, *mutationprotocol.Attempt, string, *time.Time) (runtimelifecycle.CandidateRequestResult, error) {
 	panic("completion writer must not run before standalone classification")
 }
 

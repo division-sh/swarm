@@ -725,11 +725,25 @@ func (r CandidateRequest) Validate() error {
 }
 
 type CandidateRequestResult struct {
-	Disposition CandidateRequestDisposition
-	Candidate   Candidate
+	Disposition                CandidateRequestDisposition
+	Candidate                  Candidate
+	GenericScheduleActivations []CommittedGenericScheduleActivation
 }
 
 func (r CandidateRequestResult) Validate() error {
+	if len(r.GenericScheduleActivations) != 0 {
+		if r.Disposition != CandidateRetainedLive {
+			return errors.New("only retained live progress carries committed generic schedules")
+		}
+		if err := r.Candidate.Scope().Validate(); err != nil {
+			return err
+		}
+		for _, activation := range r.GenericScheduleActivations {
+			if err := activation.Validate(); err != nil {
+				return err
+			}
+		}
+	}
 	switch r.Disposition {
 	case CandidateRequested, CandidateAlreadyCurrent:
 		return r.Candidate.Validate()

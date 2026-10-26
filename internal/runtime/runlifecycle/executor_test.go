@@ -86,6 +86,37 @@ func TestExecutorHandsCommittedGenericScheduleToRecoveryBackedOwnerBeforeDroppin
 	}
 	awaitExecutorCandidates(t, executor, 0)
 	retireExecutorTestSubject(t, executor, occurrence)
+	t.Run("retained_live_admission", func(t *testing.T) {
+		wakeups := &recordingGenericScheduleWakeupOwner{activationIDs: make(chan string, 1)}
+		store := &executorTestStore{
+			list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+				return CandidatePage{Exhausted: true}, nil
+			},
+			execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
+				t.Error("retained live schedule handoff executed run completion")
+				return CompletionResult{}, errors.New("unexpected completion")
+			},
+		}
+		executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{GenericSchedules: wakeups})
+		reserved, err := executor.ReserveCompletionCandidate(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		admission := reserved.(*candidateAdmission)
+		if err := admission.SubmitGenericScheduleActivations([]CommittedGenericScheduleActivation{activation}); err != nil {
+			t.Fatal(err)
+		}
+		if got := receiveValue(t, wakeups.activationIDs, "live progress handoff"); got != activation.ID() {
+			t.Fatalf("live activation=%s want=%s", got, activation.ID())
+		}
+		if err := admission.Cancel(); err != nil {
+			t.Fatal(err)
+		}
+		if executor.pending != 0 || len(executor.chains) != 0 || occurrence.ActiveCount() != 0 {
+			t.Fatalf("live handoff leaked reservation or armed completion: pending=%d chains=%d active=%d", executor.pending, len(executor.chains), occurrence.ActiveCount())
+		}
+		retireExecutorTestSubject(t, executor, occurrence)
+	})
 }
 
 func TestExecutorAcceptsRecoveryOwnershipAfterImmediateGenericScheduleProjectionFailure(t *testing.T) {

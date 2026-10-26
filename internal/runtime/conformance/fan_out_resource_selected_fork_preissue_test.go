@@ -41,6 +41,7 @@ func TestDeploymentSourceSelectedForkBeforeFirstRow(t *testing.T) {
 			changedRows := []byte("{\"account_id\":\"after\",\"document\":{\"origin\":\"fork\"}}\n")
 			changed := selectedDeploymentVersion(t, f, changedRows)
 			sourceRunID := start("source", originalRows)
+			pauseDeploymentFixtureRun(t, f, sourceRunID)
 			_ = start("changed", changedRows)
 			owner, recovered := deploymentForkOwner(t, f)
 			if len(recovered) != 0 {

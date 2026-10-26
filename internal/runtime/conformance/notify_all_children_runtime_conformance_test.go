@@ -96,6 +96,7 @@ type notifyAllChildrenRuntime struct {
 	posture            executionposture.Posture
 	fanOutServing      *runtimestartupownership.FanOutServingRegistration
 	contextRuntime     *runtimepkg.Runtime
+	lifecycle          *notifyAllChildrenLifecycleOwner
 }
 
 type notifyAllChildrenRuntimeOptions struct {
@@ -2585,6 +2586,7 @@ func newNotifyAllChildrenRuntime(
 		bus:     eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
 		workOwner: workOwner, selected: backend, sourceArtifactFact: sourceArtifactFact, genericSchedules: genericSchedules,
 		fanOutServing: fanOutRegistration, contextRuntime: contextRuntime,
+		lifecycle: generationLifecycle,
 	}
 }
 

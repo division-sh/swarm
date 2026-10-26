@@ -66,7 +66,6 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 					once.Do(func() {
 						removalFault = &liveRemovalFaultCapability{ProcessCapability: req.RuntimeSupervisor.processCapability}
-						req.RuntimeSupervisor.processCapability = removalFault
 						supervisors <- req.RuntimeSupervisor
 					})
 					caps, err := prior(owner, req)
@@ -316,7 +315,19 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if nativeRead {
 				completionCount = 2
 			}
-			requireForkLivePublicControls(t, rt.Endpoint, supervisor, selected.RuntimeDeps().EventStore, seed.RunID, rt.BundleHash, fork.ForkRunID, childHash, removalFault)
+			func() {
+				supervisor.operationMu.Lock()
+				original := supervisor.processCapability
+				removalFault.ProcessCapability = original
+				supervisor.processCapability = removalFault
+				supervisor.operationMu.Unlock()
+				defer func() {
+					supervisor.operationMu.Lock()
+					supervisor.processCapability = original
+					supervisor.operationMu.Unlock()
+				}()
+				requireForkLivePublicControls(t, rt.Endpoint, supervisor, selected.RuntimeDeps().EventStore, seed.RunID, rt.BundleHash, fork.ForkRunID, childHash, removalFault)
+			}()
 			t.Run("live_public_readback", func(t *testing.T) {
 				requireSelectedForkDeclaredAgentReads(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, completionCount)
 				requireSelectedForkMixedBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent, rows["consumer"].ID)

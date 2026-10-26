@@ -606,6 +606,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if err := os.WriteFile(changedPath, changedRows, 0o600); err != nil {
 						t.Fatal(err)
 					}
+					pauseDeploymentFixtureRun(t, f, sourceRunID)
 					changedSourceID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+changedPath)
 					waitDeploymentForkRowEvent(t, f.ctx, f.selected, changedSourceID, f.runtime.fanOutServing.Wake)
 					assertSelectedDeploymentRows(t, f, server, changedSourceID, route, string(changed.VersionID), changedRows)
@@ -838,6 +839,7 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 				return startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
 			}
 			sourceRunID := start("source", "source")
+			pauseDeploymentFixtureRun(t, f, sourceRunID)
 			changedRunID := start("changed", "changed")
 			var changedVersion string
 			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, changedRunID).Scan(&changedVersion); err != nil {

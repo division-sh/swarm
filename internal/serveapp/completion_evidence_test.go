@@ -531,9 +531,10 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 	var replay apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 	requireCompletion2270BusinessInvocation(t, rt.AuthorContext, rt.Selected.Effects(), profileID, calls, proof, attemptID)
-	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(parent, readWorkspaceProofSourceDomain(t, owner, seed.RunID)) {
-		t.Fatal("served-selected replay changed parent evidence or repeated the provider effect")
+	if !reflect.DeepEqual(fork, replay) {
+		t.Fatal("served-selected replay changed its immutable acknowledgement")
 	}
+	requireForkSourceSelfReleaseConservation(t, owner, seed.RunID, parent)
 }
 
 func buildCompletion2270CLIImage(t *testing.T) string {

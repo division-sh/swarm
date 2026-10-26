@@ -47,6 +47,14 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 // An explicit native location lets process-death proofs reopen the same store.
 // Ordinary harness calls retain their original allocation and configuration.
 func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bool, location string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+	return issue2564ServeHarnessWithPosture(t, backend, root, mock, location, executionposture.MockOnly)
+}
+
+func issue2564LiveServeHarness(t *testing.T, backend, root, location string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+	return issue2564ServeHarnessWithPosture(t, backend, root, true, location, executionposture.Live)
+}
+
+func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock bool, location string, posture executionposture.Posture) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -97,9 +105,9 @@ func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bo
 	return opts, func() (*serveRuntimeTestProcess, issue2564ServedFixture) {
 		var process *serveRuntimeTestProcess
 		if mock {
-			t.Log("proof_surface=H in-process retained mock lifecycle with real authenticated HTTP/WS; not public serve/test")
+			t.Logf("proof_surface=H in-process retained owned lifecycle posture=%s with real authenticated HTTP/WS; not public serve/test", posture)
 			process = startRuntimeTestProcessWithRunner(t, repoRootForTest(), *opts, func(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
-				code, err := runOwnedLifecycle(ctx, repo, retained, opts, apiv1.AuthTokenResolution{Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Explicit: true, Source: "internal-lifecycle-parent"}, executionposture.MockOnly, "")
+				code, err := runOwnedLifecycle(ctx, repo, retained, opts, apiv1.AuthTokenResolution{Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Explicit: true, Source: "internal-lifecycle-parent"}, posture, "")
 				if err != nil {
 					fmt.Fprintf(opts.ErrorOutput, "internal mailbox lifecycle setup: %v\n", err)
 				}
@@ -118,6 +126,14 @@ func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bo
 			fixture.Runtime = servedTestProcessRuntime(t, process)
 		}
 		return process, fixture
+	}
+}
+
+func requireIssue2564LiveRootMode(t *testing.T, rt issue2564ServedFixture, runID, eventID string) {
+	t.Helper()
+	event := storetest.LoadCanonicalEventRecord(t, t.Context(), rt.selected, eventID)
+	if rt.Runtime == nil || rt.Runtime.ExecutionPosture != executionposture.Live || event.RunID() != runID || event.ExecutionMode() != executionposture.Live.RootMode() {
+		t.Fatalf("live lifecycle fixture changed its exact root: run=%s mode=%s", event.RunID(), event.ExecutionMode())
 	}
 }
 
