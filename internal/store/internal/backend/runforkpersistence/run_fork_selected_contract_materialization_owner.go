@@ -478,7 +478,12 @@ func inspectSelectedMaterializationReplay(plan runfork.RunForkPlan) ([]runfork.R
 	if err != nil {
 		return nil, err
 	}
-	return runForkSelectedMaterializationReplayBlockers(plan, admission)
+	// Projection only; the mutation projects and reads back its actual child.
+	destination := uuid.NewString()
+	for destination == plan.SourceRunID {
+		destination = uuid.NewString()
+	}
+	return runForkSelectedMaterializationBlockers(plan, destination, admission)
 }
 
 func runForkSelectedMaterializationReplayBlockers(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
