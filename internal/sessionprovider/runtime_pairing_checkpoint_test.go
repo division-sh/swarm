@@ -200,7 +200,7 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					t.Fatal("deployment pairing granted runtime execution")
 				}
 				account := pairedBootstrapStateFixture(t, f, op, types.NewJID("15550100123", types.DefaultUserServer))
-				ctx = f.peer.ctx
+				ctx = worklifetime.WithProcess(startupownership.CarryMutationAuthority(f.peer.ctx, ctx), process)
 				f.connection, err = OpenDeploymentConnection(ctx, opts)
 				if err != nil {
 					t.Fatal(err)
