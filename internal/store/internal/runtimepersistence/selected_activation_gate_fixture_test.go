@@ -82,6 +82,8 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 		}
 		original.InheritedSchedules = request.Readiness
 		phaseCtx, _, _ := admitSelectedForkNativePhaseForTest(t, correlation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), authorActivityReceiptFixture{store: selected.(authorActivityReceiptStore)}, original.ExecutionSource, child, request)
+		actualSource, _ := correlation.SourceArtifactFactFromContext(phaseCtx)
+		t.Logf("native component source: request=%s authority=%s child=%s", request.SourceArtifactFact.BundleHash(), actualSource.BundleHash(), child.ForkRunID)
 		// This fixture intentionally has no ordinary target: passing all native
 		// validation must still refuse an ACK at the durable-operation boundary.
 		original.ForkOperation = nil

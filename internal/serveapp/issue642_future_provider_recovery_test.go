@@ -118,7 +118,7 @@ type issue642FutureExecutionRow struct {
 type issue642FutureRecoveryProof struct {
 	SourceRunID, SourceKey string
 	ProcessBaseline        uint64
-	ACK                    runfork.ForkOperationRecord
+	Operation              runfork.ForkOperationRecord
 	Claim                  issue642FutureClaimFacts
 	RecoveredClaim         *issue642FutureClaimFacts
 	SourceDomain           map[string]storetest.SelectedForkStorageTableSnapshot
@@ -252,21 +252,27 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		emit("source")
-		fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
-			"source_run_id": seed.RunID, "at_start": true, "allow_source_freeze": true,
-			"idempotency_key": "future-recovery-start-cut",
-		})
-		if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
-			fork.ForkPointKind != string(runfork.RunForkPointRunStart) || fork.ForkEventID != "" || fork.ForkRunStatus != runfork.RunForkLiveStatus {
-			t.Fatalf("native start-cut ACK: %+v", fork)
-		}
+		forkCtx, cancelFork := context.WithCancel(t.Context())
+		defer cancelFork()
+		forkResponse := make(chan publicationAuditHTTPResult, 1)
+		go func() {
+			forkResponse <- publicationCompletionHTTPMethod(forkCtx, rt.Endpoint, "run.fork", map[string]any{
+				"source_run_id": seed.RunID, "at_start": true, "allow_source_freeze": true,
+				"idempotency_key": "future-recovery-start-cut",
+			})
+		}()
 		observation := probe.waitClaim(t)
 		if observation.err != nil {
 			t.Fatal(observation.err)
 		}
 		proof.Claim = observation.facts
-		if proof.Claim.RunID != fork.ForkRunID || (minted && proof.Claim.ConstructedKey == proof.SourceKey) {
+		if proof.Claim.RunID == "" || proof.Claim.RunID == seed.RunID || (minted && proof.Claim.ConstructedKey == proof.SourceKey) {
 			t.Fatalf("native construction escaped its child: %+v", proof.Claim)
+		}
+		select {
+		case result := <-forkResponse:
+			t.Fatalf("fork returned before its held physical provider work settled: %+v", result)
+		default:
 		}
 		probe.mu.Lock()
 		operationID, operations, preparation := probe.operationID, probe.operations, probe.preparation
@@ -276,15 +282,15 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 			t.Fatalf("start-cut preparation invented a future actor: operation=%s preparation=%+v", operationID, preparation)
 		}
 		var found bool
-		proof.ACK, found, err = operations.LoadForkOperationByID(t.Context(), operationID)
-		if err != nil || !found || proof.ACK.Validate() != nil || proof.ACK.Status != runfork.ForkOperationActivated ||
-			proof.ACK.ForkRunID != fork.ForkRunID || proof.ACK.Result.ForkRunStatus != fork.ForkRunStatus {
-			t.Fatalf("activation did not retain its permanent ACK: %+v err=%v", proof.ACK, err)
+		proof.Operation, found, err = operations.LoadForkOperationByID(t.Context(), operationID)
+		if err != nil || !found || proof.Operation.Validate() != nil || proof.Operation.Status != runfork.ForkOperationMaterialized || proof.Operation.Result != nil ||
+			proof.Operation.ForkRunID != proof.Claim.RunID || !proof.Operation.Request.AtStart || proof.Operation.Request.ResolvedPoint == nil || proof.Operation.Request.ResolvedPoint.Kind != runfork.RunForkPointRunStart {
+			t.Fatalf("pre-ACK claim lost its exact durable materialized operation: %+v err=%v", proof.Operation, err)
 		}
 		issue642RequireFutureClaimCut(t, rt, proof.Claim)
-		proof.Executions, err = issue642ReadFutureExecutions(t.Context(), rt.selected, fork.ForkRunID)
+		proof.Executions, err = issue642ReadFutureExecutions(t.Context(), rt.selected, proof.Claim.RunID)
 		if err != nil || len(proof.Executions) != 1 || proof.Executions[0].ExecutionID != proof.Claim.ExecutionID ||
-			proof.Executions[0].BindingID != proof.ACK.BindingID || proof.Executions[0].Generation != proof.Claim.Generation ||
+			proof.Executions[0].BindingID != proof.Operation.BindingID || proof.Executions[0].Generation != proof.Claim.Generation ||
 			proof.Executions[0].Fence != proof.Claim.Fence || proof.Executions[0].State != "running" || !proof.Executions[0].Clean {
 			t.Fatalf("claim cut lost its one running native executor: %+v err=%v", proof.Executions, err)
 		}
@@ -304,8 +310,8 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 		want = runfork.SelectedForkRecoveryTerminal
 	}
 	if len(recovered) != 1 || recovered[0].RunID != proof.Claim.RunID || recovered[0].Disposition != want ||
-		!reflect.DeepEqual(recovered[0].Operation, &proof.ACK) {
-		t.Fatalf("actual native recovery lost ACK/disposition: %+v", recovered)
+		!reflect.DeepEqual(recovered[0].Operation, &proof.Operation) {
+		t.Fatalf("actual native recovery lost Operation/disposition: %+v", recovered)
 	}
 	phase, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -341,9 +347,18 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 			t.Fatalf("native recovery process work=%d baseline=%d: %v", work, proof.ProcessBaseline, phase.Err())
 		}
 	}
-	ack, found, err := probe.operations.LoadForkOperationByID(t.Context(), proof.ACK.Request.OperationID)
-	if err != nil || !found || !reflect.DeepEqual(ack, proof.ACK) {
-		t.Fatalf("terminal child recast the permanent running ACK: %+v err=%v", ack, err)
+	ack, found, err := probe.operations.LoadForkOperationByID(t.Context(), proof.Operation.Request.OperationID)
+	if err != nil || !found {
+		t.Fatalf("recovered child lost its durable operation: %+v err=%v", ack, err)
+	}
+	if mode == "resume" {
+		if ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.Result.ForkRunID != proof.Claim.RunID || ack.Result.ForkRunStatus != runfork.RunForkLiveStatus ||
+			ack.BindingID != proof.Operation.BindingID || ack.SemanticHash != proof.Operation.SemanticHash || !reflect.DeepEqual(ack.Request, proof.Operation.Request) {
+			t.Fatalf("recovered work did not establish its one exact live ACK: %+v", ack)
+		}
+		proof.Operation = ack
+	} else if !reflect.DeepEqual(ack, proof.Operation) {
+		t.Fatalf("terminal recovery rewrote the immutable live ACK: %+v", ack)
 	}
 	issue642RequireKeyedProviderResult(t, rt, proof.Claim.RunID)
 	issue642RequireFutureRecoveredOutcome(t, rt, proof)
@@ -614,8 +629,8 @@ func (o *issue642FutureRecoveryOwner) RecoverSelectedForkContexts(ctx context.Co
 		return results, err
 	}
 	p := o.probe
-	if p.expected == nil || len(results) != 1 || results[0].RunID != p.expected.Claim.RunID || !reflect.DeepEqual(results[0].Operation, &p.expected.ACK) {
-		return results, fmt.Errorf("native recovery omitted the exact permanent selected ACK: %+v", results)
+	if p.expected == nil || len(results) != 1 || results[0].RunID != p.expected.Claim.RunID || !reflect.DeepEqual(results[0].Operation, &p.expected.Operation) {
+		return results, fmt.Errorf("native recovery omitted the exact permanent selected Operation: %+v", results)
 	}
 	// Observe the native acknowledgment without delaying ordinary startup.
 	// Pending dispatch and readiness consumers must start before we await work.
@@ -829,7 +844,7 @@ func issue642RequireFutureRecoveredOutcome(t *testing.T, fixture issue2564Served
 		} else if row.ExecutionID != next.ExecutionID {
 			t.Fatalf("recovery admitted an unobserved executor: %+v", row)
 		}
-		if row.BindingID != proof.ACK.BindingID || row.Generation != wantGeneration || row.Fence != wantFence || row.State != "closed" || !row.Terminal || !row.LeaseEmpty || !row.Clean {
+		if row.BindingID != proof.Operation.BindingID || row.Generation != wantGeneration || row.Fence != wantFence || row.State != "closed" || !row.Terminal || !row.LeaseEmpty || !row.Clean {
 			t.Fatalf("native executor did not fence and close cleanly: %+v", row)
 		}
 	}
