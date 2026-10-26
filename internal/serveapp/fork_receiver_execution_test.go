@@ -340,14 +340,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if !unavailable {
 					checkBusiness(t, rt.Endpoint, claim.RunID(), claimed.signal.EventID, receiver.ID)
 				}
-				if after := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID); !reflect.DeepEqual(sourceBefore, after) {
-					for table, before := range sourceBefore {
-						if !reflect.DeepEqual(before, after[table]) {
-							t.Logf("source %s changed: before=%+v after=%+v", table, before, after[table])
-						}
-					}
-					t.Fatal("fork receiver execution or settlement mutated source domain")
-				}
+				requireForkSourceSelfReleaseConservation(t, selected.RuntimeDeps().EventStore, seed.RunID, sourceBefore)
 				if !unavailable {
 					requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
 				}
