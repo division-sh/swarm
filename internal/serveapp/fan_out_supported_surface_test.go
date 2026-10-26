@@ -99,6 +99,9 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 					if after := issue2394SurfaceSnapshot(t, rt.DB, opened.RunID); !reflect.DeepEqual(before, after) {
 						t.Fatalf("supported reads/refusals mutated durable fan-out evidence: before=%v after=%v", before, after)
 					}
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
+						"run_id": opened.RunID, "idempotency_key": "surface-pause-" + opened.RunID,
+					})
 				})
 			}
 		})
