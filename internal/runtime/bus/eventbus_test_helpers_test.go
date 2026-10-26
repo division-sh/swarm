@@ -229,6 +229,15 @@ func ensureTestEventBusSourceArtifact(store runtimebus.EventStore, source semant
 	return sourceartifactfixture.EnsureArtifact(ctx, writer, artifact)
 }
 
+func retainedBusMutationContext(original context.Context) func(context.Context) (context.Context, error) {
+	return func(caller context.Context) (context.Context, error) {
+		if !startupownership.HasMutationAuthority(caller) {
+			caller = startupownership.CarryMutationAuthority(caller, original)
+		}
+		return startupownership.FreezeMutationAuthority(caller)
+	}
+}
+
 func nativeBusProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
 	ctx = originalEventBusFixtureContext(t, ctx, selected)
@@ -330,12 +339,7 @@ func newNativeScopedTestEventBus(t testing.TB, selected runtimebus.EventStore, o
 		opts.WorkOwner = nativeBusWorkOwner(t, ctx)
 	}
 	if opts.MutationContext == nil {
-		opts.MutationContext = func(caller context.Context) (context.Context, error) {
-			if !startupownership.HasMutationAuthority(caller) {
-				caller = startupownership.CarryMutationAuthority(caller, ctx)
-			}
-			return startupownership.FreezeMutationAuthority(caller)
-		}
+		opts.MutationContext = retainedBusMutationContext(ctx)
 	}
 	return newScopedTestEventBus(t, selected, opts)
 }

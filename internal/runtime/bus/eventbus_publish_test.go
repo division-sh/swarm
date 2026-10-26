@@ -1300,7 +1300,7 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 		},
 	}
 	logger := &recordingLoggerHook{}
-	eb, err := newScopedTestEventBus(t, failing, runtimebus.EventBusOptions{ContractBundle: source, Logger: logger, WorkOwner: nativeBusWorkOwner(t, ctx)})
+	eb, err := newScopedTestEventBus(t, failing, runtimebus.EventBusOptions{ContractBundle: source, Logger: logger, WorkOwner: nativeBusWorkOwner(t, ctx), MutationContext: retainedBusMutationContext(ctx)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2922,7 +2922,7 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 			t.Fatalf("exact replay changed terminal diagnostic: before=%+v after=%+v err=%v", view.DeadLetters, exactDiagnostic.DeadLetters, err)
 		}
 		freshStore := reopen(t)
-		freshBus, err := newScopedTestEventBus(t, freshStore, runtimebus.EventBusOptions{ContractBundle: source, WorkOwner: nativeBusWorkOwner(t, ctx)})
+		freshBus, err := newScopedTestEventBus(t, freshStore, runtimebus.EventBusOptions{ContractBundle: source, WorkOwner: nativeBusWorkOwner(t, ctx), MutationContext: retainedBusMutationContext(ctx)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2967,7 +2967,7 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 				owner.fault = errors.Join(owner.fault, context.Canceled)
 				owner.cancel = cancel
 			}
-			ordinary, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, PipelineObligations: owner, WorkOwner: nativeBusWorkOwner(t, ctx)})
+			ordinary, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, PipelineObligations: owner, WorkOwner: nativeBusWorkOwner(t, ctx), MutationContext: retainedBusMutationContext(ctx)})
 			if err != nil {
 				t.Fatal(err)
 			}

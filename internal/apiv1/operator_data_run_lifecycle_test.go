@@ -701,7 +701,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new amended data EventBus: %v", err)
 			}
-			amendedHandler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, amendedBus, amendedSource)
+			amendedHandler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, amendedBus, amendedSource, ctx)
 			mismatchRunID := uuid.NewString()
 			mismatchData := map[string]any{
 				"imports": []any{},

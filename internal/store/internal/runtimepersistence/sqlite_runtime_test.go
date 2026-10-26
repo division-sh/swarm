@@ -137,7 +137,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if item.Status != "pending" || item.Type != runtimetools.NotifyHumanMailboxItemType {
 		t.Fatalf("mailbox item status=%q type=%q, want pending operator notice", item.Status, item.Type)
 	}
-	if err := noticeAcknowledgmentFixture(t, store, itemID)(testAuthorActivityContext()); err != nil {
+	if err := noticeAcknowledgmentFixture(t, ctx, store, itemID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge informational notice: %v", err)
 	}
 	if unread, err := store.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {
@@ -280,7 +280,7 @@ func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t 
 	if err != nil || len(listed) != 1 || listed[0].ID != noticeID {
 		t.Fatalf("reopened pending informational notices = %#v, err=%v", listed, err)
 	}
-	if err := noticeAcknowledgmentFixture(t, reopened, noticeID)(testAuthorActivityContext()); err != nil {
+	if err := noticeAcknowledgmentFixture(t, ctx, reopened, noticeID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge reopened informational notice: %v", err)
 	}
 	if unread, countErr := reopened.CountUnreadInformationalNotices(ctx); countErr != nil || unread != 0 {

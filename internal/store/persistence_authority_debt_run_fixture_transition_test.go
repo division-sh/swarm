@@ -9,11 +9,14 @@ import (
 const debtSelectedFixtureOldSource = "d47682d5c0bf8c921b4468668cefda60d2ac0cbe"
 const debtSelectedFixtureCurrentSource = "ea11297ceb7a0213f2c113c0c17f93e88be8a529"
 
-// #2788/6375760610: the same five correspondences composed onto the landed source.
-const debtSelectedFixtureComposedOldSource = "97305834e727bab34ea5d2faf4e19d9192cad0df"
-const debtSelectedFixtureComposedCurrentSource = "d3fd1308470056da34276aaf08e212f1f4f19faa"
-const debtSelectedFixtureComposedOldSHA256 = "2abd9424b866dbda517bcd44726bf04179a5a53ca75443588c86742370285681"
-const debtSelectedFixtureComposedCurrentSHA256 = "cdb196a9aeb5f87d51e656249b6bb533003d0af1ed7322cc858a2d9bd9d81fae"
+// #2788/6375760610 composed 97305834e727bab34ea5d2faf4e19d9192cad0df
+// (2abd9424b866dbda517bcd44726bf04179a5a53ca75443588c86742370285681)
+// to d3fd1308470056da34276aaf08e212f1f4f19faa. R19 carries those same five
+// signature correspondences through S2's original-owner fixture composition.
+const debtSelectedFixtureComposedOldSource = "d3fd1308470056da34276aaf08e212f1f4f19faa"
+const debtSelectedFixtureComposedCurrentSource = "fc36d3977522ab4260a5c2570a8fa8d66b6761ca"
+const debtSelectedFixtureComposedOldSHA256 = "cdb196a9aeb5f87d51e656249b6bb533003d0af1ed7322cc858a2d9bd9d81fae"
+const debtSelectedFixtureComposedCurrentSHA256 = "9db75bc6f37985c762a53807f2b9e611f2055883f51ad46b46e917b9142ad870"
 const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
