@@ -17,11 +17,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/google/uuid"
 )
 
 type receiverForkPublicationBarrier struct {
@@ -225,10 +227,26 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					if !ok {
 						t.Fatal("missing fork owner")
 					}
-					result, err := family.Execute(forkCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
+					use, lookup, _, err := rt.Contexts.AcquireRun(forkCtx, request.RunID)
+					if err != nil || use == nil || !lookup.Loaded() {
+						t.Fatalf("acquire actual receiver runtime: loaded=%t err=%v", lookup.Loaded(), err)
+					}
+					defer func() {
+						if err := use.Done(); err != nil {
+							t.Error(err)
+						}
+					}()
+					selection := runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root)))
+					operation := runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "receiver-composition", IdempotencyKey: surface, TransportHash: surface,
+						SourceRunID: request.RunID, ForkEventID: forkPoint, TargetBundleHash: rt.BundleHash,
+						AllowSourceFreeze: true, ContractSelection: selection,
+					}
+					result, err := family.Execute(use.WorkContext(), runtimerunforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
-						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
+						ContractSelection: selection,
+						ForkOperation:     &operation,
 						AgentRuntime:      rt.ForkRuntime,
 						LiveRuntime:       rt.Runtime,
 						LiveContexts:      rt.Contexts,
