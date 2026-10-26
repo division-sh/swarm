@@ -33,6 +33,15 @@ const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-11111111111
 
 func originalStoreFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	if !startupownership.HasMutationAuthority(ctx) {
+		if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+			runtimeID := authorActivityTestRuntimeInstanceID
+			if scope, present := runtimeauthoractivity.ScopeFromContext(ctx); present {
+				runtimeID = scope.RuntimeInstanceID
+			}
+			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+		}
+	}
 	if _, found := worklifetime.ProcessFromContext(ctx); !found {
 		ctx = storeTestWorkContext(t, ctx)
 	}
@@ -144,8 +153,21 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	if opts.CarryMutationContext == nil {
 		opts.CarryMutationContext = startupownership.CarryMutationAuthority
 	}
+	if opts.RuntimeInstanceID == "" {
+		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
+	setupCtx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), opts.RuntimeInstanceID)
+	setupCtx = runtimeauthoractivity.WithScope(setupCtx, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, sourceartifactfixture.BundleHash))
+	if opts.MutationContext != nil {
+		var err error
+		setupCtx, err = opts.MutationContext(setupCtx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	setupCtx = originalStoreFixtureContext(t, setupCtx, selected)
 	if opts.MutationContext == nil {
-		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
+		original := setupCtx
 		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
 			if !startupownership.HasMutationAuthority(ctx) {
 				ctx = startupownership.CarryMutationAuthority(ctx, original)
@@ -158,9 +180,9 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 		opts.ExecutionPosture = executionposture.Live
 	}
 	if opts.SourceArtifactFact.Validate() != nil {
-		opts.SourceArtifactFact = sourceartifactfixture.Require(t, context.Background(), selected)
+		opts.SourceArtifactFact = sourceartifactfixture.Require(t, setupCtx, selected)
 	} else if opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
-		sourceartifactfixture.Require(t, context.Background(), selected)
+		sourceartifactfixture.Require(t, setupCtx, selected)
 	}
 	if opts.ContractBundle == nil && opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
 		repo := runtimepipeline.WorkflowRepoRoot()
@@ -169,9 +191,6 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 			return nil, err
 		}
 		opts.ContractBundle = semanticview.Wrap(bundle)
-	}
-	if opts.RuntimeInstanceID == "" {
-		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = storeTestWorkOwner(t)
