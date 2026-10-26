@@ -649,15 +649,6 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
-	for _, fixed := range []bool{false, true} {
-		query := runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID}
-		if fixed {
-			query.ResolvedPoint = &request.Preparation.ForkPoint
-		}
-		observed, planErr := pg.PlanRunFork(ctx, query)
-		fingerprint, hashErr := runfork.SelectedPreparationPlanFingerprint(observed, request.FrontierAdmission, request.RecipientPlanning, request.Preparation.DeclarationPlanFingerprint)
-		t.Logf("source coupling fixed=%t plan=%+v fingerprint=%s expected=%s errors=%v/%v", fixed, observed, fingerprint, request.Preparation.Coordinates.AdmittedPlanFingerprint, planErr, hashErr)
-	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
@@ -1244,6 +1235,21 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
+	observed, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := runfork.SelectedPreparationPlanFingerprint(observed, runfork.RunForkContractFrontierAdmission{}, runfork.RunForkSelectedContractRecipientPlanning{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blockers, err := pg.InspectSelectedMaterializationReplay(ctx, observed); err != nil || len(blockers) != 0 {
+		t.Fatalf("exact source coupling inspection: blockers=%+v err=%v", blockers, err)
+	}
+	after, err := runfork.SelectedPreparationPlanFingerprint(observed, runfork.RunForkContractFrontierAdmission{}, runfork.RunForkSelectedContractRecipientPlanning{}, "")
+	if err != nil || before != after {
+		t.Fatalf("read-only replay inspection changed the fixed preparation plan: before=%s after=%s err=%v", before, after, err)
+	}
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {

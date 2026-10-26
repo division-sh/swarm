@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -471,6 +472,8 @@ func (s *RunForkSQLiteOwner) InspectSelectedMaterializationReplay(ctx context.Co
 }
 
 func inspectSelectedMaterializationReplay(plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	plan.ReplayResumeAdmission.Dispositions = slices.Clone(plan.ReplayResumeAdmission.Dispositions)
+	plan.ReplayResumeAdmission.UnsupportedBlockers = slices.Clone(plan.ReplayResumeAdmission.UnsupportedBlockers)
 	admission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 	if err != nil {
 		return nil, err
