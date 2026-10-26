@@ -101,7 +101,7 @@ func issue642RetainedOrdinaryTimerFork(t *testing.T, backend string, selectedDel
 		t.Fatalf("post-arm marker lost the real creating-handler cause: marker=%+v ingress=%s", marker, seed.EventID)
 	}
 	rt.waitEntityStage(t, seed.RunID, seed.RunID, "checked")
-	sourceCompleted := issue2564H2CompletionWaitRun(t, rt, seed.RunID)
+	sourceCompleted := pauseIssue2564SettledSource(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	plan, sourceTimer := issue642TimerContinuationPlan(t, reader, seed.RunID, seed.EventID, marker.EventID)
@@ -148,11 +148,11 @@ func issue642RetainedOrdinaryTimerFork(t *testing.T, backend string, selectedDel
 	}
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 	if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
-		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "completed" {
+		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "paused" {
 		t.Fatalf("timer fork did not acknowledge the exact historical arm and independently completed source: %+v", fork)
 	}
 	rt.waitEntityStage(t, fork.ForkRunID, fork.ForkRunID, "checked")
-	completed := issue2564H2CompletionWaitRun(t, rt, fork.ForkRunID)
+	completed := waitIssue2564LiveRunSettlement(t, rt, fork.ForkRunID)
 	rt.waitDeliveries(t, fork.ForkRunID)
 	childReadback := rt
 	if targetHash != "" {
@@ -324,10 +324,10 @@ func issue642TimerContinuationReadback(t *testing.T, rt issue2564ServedFixture, 
 	if observed := storetest.ObserveWorkflowTimerReplayStorage(t, t.Context(), rt.selected, completed.RunID, completed.RunID); observed.Timers != 1 || observed.ActiveTimers != 0 {
 		t.Fatalf("child rearmed or retained an extra workflow timer: %+v", observed)
 	}
-	if completed.BundleHash != rt.BundleHash || completed.Status != "completed" || completed.EndedAt == nil || completed.Failure != nil {
+	if completed.BundleHash != rt.BundleHash || completed.Status != "live" || completed.EndedAt != nil || completed.Failure != nil {
 		t.Fatalf("child receiver quiescence is not actual run completion: %+v", completed)
 	}
-	t.Logf("ISSUE642_ORDINARY_TIMER_CONTINUED backend=%s source=%s child=%s cut=%d source_timer=%s child_timer=%s due=%s occurrence=%s completed=%s",
+	t.Logf("ISSUE642_ORDINARY_TIMER_CONTINUED backend=%s source=%s child=%s cut=%d source_timer=%s child_timer=%s due=%s occurrence=%s settled_run=%s",
 		rt.Backend, source.RunID, completed.RunID, point.Revision, source.Ref.ActivationID, actual.Ref.ActivationID,
-		source.FireAt.Format(time.RFC3339Nano), event.ID(), completed.EndedAt.Format(time.RFC3339Nano))
+		source.FireAt.Format(time.RFC3339Nano), event.ID(), completed.RunID)
 }
