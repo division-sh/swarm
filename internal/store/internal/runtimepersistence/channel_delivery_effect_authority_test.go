@@ -603,7 +603,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						t.Fatalf("current sent receipt = %#v, found=%t err=%v", previous, found, err)
 					}
 					if mode == "reply_matrix" {
-						proveChannelReplyTransfer(t, selected, runTx, current, authority, textFact, actions[0], postgres)
+						proveChannelReplyTransfer(t, ctx, selected, runTx, current, authority, textFact, actions[0], postgres)
 						return
 					}
 					if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
