@@ -152,11 +152,9 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() {
-					if err := f.connection.Close(context.Background()); err != nil {
-						t.Error(err)
-					}
-					process.Retire()
-					if _, err := process.Join(context.Background()); err != nil {
+					closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+					defer cancel()
+					if err := f.connection.Close(closeCtx); err != nil {
 						t.Error(err)
 					}
 				})
