@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -458,6 +459,40 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 	}
 	status(sourceRunID, "paused")
 	status(childRunID, "live")
+	// Refusing removal of a bundle with live work must not retire its service.
+	current, found, err := supervisor.processCapability.CurrentSourceSet(t.Context())
+	if err != nil || !found {
+		t.Fatalf("read live predecessor: found=%t err=%v", found, err)
+	}
+	target, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: sourceHash}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRuntime := supervisor.CurrentRuntime()
+	grant, err := beforeRuntime.CurrentStartupGrantEvidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor.operationMu.Lock()
+	_, removalErr := supervisor.replaceLiveSourceSet(t.Context(), supervisor.runtimeContexts, current, target, sourceHash, grant.RuntimeInstanceID)
+	supervisor.operationMu.Unlock()
+	if !errors.Is(removalErr, runcontrol.ErrNotPaused) {
+		t.Fatalf("source removal did not retain its live-work refusal: %v", removalErr)
+	}
+	use, lookup, err := supervisor.runtimeContexts.AcquireBundleHash(t.Context(), childHash)
+	if err != nil || !lookup.Loaded() || use == nil {
+		t.Fatalf("refused source removal retired the serving runtime: lookup=%+v err=%v", lookup, err)
+	}
+	if use.Runtime() != beforeRuntime {
+		t.Error("pre-shutdown refusal replaced the live runtime")
+	}
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, found, err := supervisor.processCapability.CurrentSourceSet(t.Context())
+	if err != nil || !found || unchanged.Revision != current.Revision {
+		t.Fatalf("refused source removal changed committed membership: %+v found=%t err=%v", unchanged, found, err)
+	}
 	conflict(sourceRunID, childRunID, childHash)
 	control("run.pause", childRunID)
 	status(childRunID, "paused")
