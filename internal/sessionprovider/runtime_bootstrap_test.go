@@ -102,7 +102,7 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.ctx = worklifetime.WithOccurrence(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.owner)
+	f.ctx = worklifetime.WithProcess(worklifetime.WithOccurrence(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.owner), process)
 	f.ctx = correlation.WithRuntimeInstanceID(f.ctx, runtimeID)
 	native, err := agentfixture.ProcessCapability(t, f.ctx, f.store.(agentfixture.Store))
 	if err != nil {
