@@ -128,7 +128,7 @@ func issue642SustainedRecurringTimerFork(t *testing.T, backend string) {
 	}
 	sourceTicks := issue642RecurringTimerOccurrences(t, rt, settledSource, sourceArm.FireAt)
 	issue642RequireRecurringProgress(t, sourceArm, settledSource, len(sourceTicks))
-	sourceEffects := issue642RequireSustainedEffects(t, rt, sourceCompleted, sourceTicks, marker.Source)
+	sourceEffects := issue642RequireSustainedEffects(t, rt, sourceCompleted, sourceTicks, marker.Source, "paused")
 	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.selected, seed.RunID)
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func issue642SustainedRecurringTimerFork(t *testing.T, backend string) {
 	if !actual.SourceArmedAt.Equal(sourceArm.CreatedAt) || actual.RecurrenceInterval != sourceArm.RecurrenceInterval {
 		t.Fatalf("sustained child reset the original arm or cadence: source=%+v child=%+v", sourceArm, actual)
 	}
-	childEffects := issue642RequireSustainedEffects(t, rt, completed, childTicks, marker.Source)
+	childEffects := issue642RequireSustainedEffects(t, rt, completed, childTicks, marker.Source, "live")
 	issue642WaitSustainedExecutionClosed(t, rt, fork.ForkRunID)
 	if observed := storetest.ObserveWorkflowTimerReplayStorage(t, t.Context(), rt.selected, fork.ForkRunID, fork.ForkRunID); observed.Timers != 1 || observed.ActiveTimers != 0 {
 		t.Fatalf("sustained child leaked an extra or active timer: %+v", observed)
@@ -202,7 +202,7 @@ func issue642SustainedInteger(t *testing.T, value any) int {
 	return count
 }
 
-func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, completed operatorread.RunHeader, occurrences []timeridentity.WorkflowTimerOccurrenceRef, node string) int {
+func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, completed operatorread.RunHeader, occurrences []timeridentity.WorkflowTimerOccurrenceRef, node, status string) int {
 	t.Helper()
 	entity, err := rt.selected.LoadOperatorEntity(t.Context(), completed.RunID, completed.RunID)
 	if err != nil || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != "checked" {
@@ -254,8 +254,8 @@ func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, co
 	if all := rt.events(t, completed.RunID, ""); completed.EventCount != len(all) || report.EventCount != len(all) {
 		t.Fatalf("sustained run count does not match exact persisted publications: header=%d report=%d publications=%d", completed.EventCount, report.EventCount, len(all))
 	}
-	if completed.BundleHash != rt.BundleHash || completed.Status != "live" || completed.EndedAt != nil || completed.Failure != nil {
-		t.Fatalf("sustained serving is not actual selected run completion: %+v", completed)
+	if completed.BundleHash != rt.BundleHash || completed.Status != status || completed.EndedAt != nil || completed.Failure != nil {
+		t.Fatalf("sustained effects changed the run's %s lifetime: %+v", status, completed)
 	}
 	summary, err := rt.selected.SummarizeRun(t.Context(), completed.RunID)
 	if err != nil || !summary.Settled() || summary.DeadLetter != 0 {

@@ -130,7 +130,14 @@ func TestServedSemanticNumericScenarioModes(t *testing.T) {
 				if out["fraction"] != fraction+0.5 {
 					t.Fatalf("fraction input=%#v output=%#v", in, out)
 				}
-				requireServedRunStatus(t, rt.Endpoint, run, "completed")
+				if mode == "authored" || mode == "generated" {
+					// The explicit parent-owned H lifecycle above publishes ordinary
+					// ingress; it is not the private swarm-test execution lifetime.
+					requireServedRunStatus(t, rt.Endpoint, run, "live")
+					waitIssue2564LiveRunSettlement(t, issue2564ServedFixture{Endpoint: rt.Endpoint}, run)
+				} else {
+					requireServedRunStatus(t, rt.Endpoint, run, "completed")
+				}
 			})
 		}
 	}
