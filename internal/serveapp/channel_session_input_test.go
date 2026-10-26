@@ -30,7 +30,7 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 			endpoint := process.endpoint(t) + "/v1/rpc"
 			peer.onACKTimeout = func(id string) { logServedNativeWait(t, endpoint, peer, "ordered_input_ack:"+id) }
 			ready := requireServedNativeProcessPairing(t, endpoint, peer)
-			pauseServedNativePairingRun(t, endpoint, ready.Operation.Coordinate.BundleHash)
+			pairingRunID := requireServedNativePairingRun(t, endpoint, ready.Operation.Coordinate.BundleHash)
 			reader, err := storetest.OpenChannelObservation(backend, location)
 			if err != nil {
 				t.Fatal(err)
@@ -41,7 +41,7 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 				}
 			})
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-				"event_name": "work.requested", "bundle_hash": ready.Operation.Coordinate.BundleHash,
+				"event_name": "work.requested", "bundle_hash": ready.Operation.Coordinate.BundleHash, "run_id": pairingRunID,
 				"payload": map[string]any{"detail": "Native ordered input"}, "idempotency_key": "native-ordered-input"})
 			cardID := waitServedNativePendingCard(t, endpoint)
 			card := awaitServedNativeInputMessage(t, peer, "\nReference: "+cardID+"\n")
@@ -111,7 +111,7 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 	}
 }
 
-func pauseServedNativePairingRun(t *testing.T, endpoint, bundleHash string) {
+func requireServedNativePairingRun(t *testing.T, endpoint, bundleHash string) string {
 	t.Helper()
 	var runs struct {
 		Runs       []operatorread.RunHeader `json:"runs"`
@@ -134,7 +134,7 @@ func pauseServedNativePairingRun(t *testing.T, endpoint, bundleHash string) {
 	if live == "" {
 		t.Fatal("pairing fixture has no live confirmation run")
 	}
-	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": live, "idempotency_key": "pairing-pause-" + live})
+	return live
 }
 
 func servedNativeInputActionObservation(t *testing.T, endpoint, bundleHash string, text render.IntentObservationQuery) render.IntentObservationQuery {

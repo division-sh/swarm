@@ -163,6 +163,9 @@ func issue642ObserveKeyedProviderPreparation(t *testing.T) <-chan runforkexecuti
 		execute := executor.ExecuteSelectedContractRunFork
 		executor.ExecuteSelectedContractRunFork = func(ctx context.Context, request runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 			result, err := execute(ctx, request)
+			if err != nil {
+				t.Logf("keyed-provider selected owner refused: %v", err)
+			}
 			if err == nil && result.AgentRuntimeMaterialization != nil {
 				observed <- *result.AgentRuntimeMaterialization
 			}

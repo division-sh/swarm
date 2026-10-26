@@ -133,7 +133,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			}
 			for table, rows := range after {
 				if !reflect.DeepEqual(before[table], rows) {
-					t.Fatalf("refused historical replay changed table %s", table)
+					t.Fatalf("refused historical replay changed table %s:\n%s", table, forkReceiverCapabilityRefusalSnapshotDelta(before, after))
 				}
 			}
 			once.Do(func() { close(release) })

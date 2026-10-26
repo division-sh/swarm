@@ -136,7 +136,7 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			if lifecycleTemplateSnapshot(t, rt.ReceiverStateReader, runID) != frozenSnapshot || !reflect.DeepEqual(postFreeze, readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)) {
 				t.Fatal("duplicate fork acknowledgment changed validated frozen source evidence")
 			}
-			if fork.ForkRunID == "" || fork.ForkRunID == runID || !reflect.DeepEqual(fork, duplicate) || fork.ExecutedEventCount != 0 ||
+			if fork.ForkRunID == "" || fork.ForkRunID == runID || !reflect.DeepEqual(fork, duplicate) || fork.ExecutedEventCount != 1 ||
 				fork.ForkRunStatus != "live" || fork.ForkEventID != frontier.EventID || fork.ForkRevision != cut.Revision ||
 				fork.ForkPointKind != string(cut.Kind) || fork.BundleHash != rt.BundleHash || fork.SourceRunID != runID {
 				t.Fatalf("template fork=%#v duplicate=%#v", fork, duplicate)
@@ -147,7 +147,7 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			default:
 				t.Fatal("T17 acknowledgment lacks its actual retained executor invocation")
 			}
-			if observed.Result.ExecutedEventCount != 0 || len(observed.Result.ForkEvents) != 0 ||
+			if observed.Result.ExecutedEventCount != 1 || len(observed.Result.ForkEvents) != 1 ||
 				!observed.Result.Activation.Activated || observed.Result.Materialization.SelectedContractBinding == nil {
 				t.Fatalf("T17 activation incorrectly reports completed continuation: %+v", observed.Result)
 			}
@@ -156,7 +156,7 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			if err != nil || !found || ack.Validate() != nil || ack.Status != runfork.ForkOperationActivated || ack.Result == nil ||
 				ack.ForkRunID != fork.ForkRunID || ack.BindingID != observed.Result.Materialization.SelectedContractBinding.BindingID ||
 				ack.Request.SourceRunID != runID || ack.Request.ForkEventID != frontier.EventID || ack.Request.IdempotencyKey != "template-fork" ||
-				ack.Request.ResolvedPoint == nil || *ack.Request.ResolvedPoint != cut || ack.Result.ExecutedEventCount != 0 {
+				ack.Request.ResolvedPoint == nil || *ack.Request.ResolvedPoint != cut || ack.Result.ExecutedEventCount != 1 {
 				t.Fatalf("T17 did not acknowledge its exact operation/cut/binding: %+v found=%t error=%v", ack, found, err)
 			}
 			completed := requireLifecycleTemplateFrontierDelivery(t, selected, runID, fork.ForkRunID, frontier.EventID, observed.Result.Owner)

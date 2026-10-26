@@ -141,6 +141,11 @@ func TestSelectedForkLatestPreparationRetainsCapturedSelectorBothStores(t *testi
 			if point.Kind != runfork.RunForkPointStateRevision || point.Validate() != nil || point.Revision < 1 || point.EventID != "" || point.Input != "" || request.At != "" {
 				t.Fatalf("fixture did not retain the exact eventless committed head: point=%+v at=%q", point, request.At)
 			}
+			request.ForkOperation = &runfork.ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "captured-head-native-fixture", IdempotencyKey: uuid.NewString(),
+				TransportHash: "captured-head-native-fixture", SourceRunID: request.SourceRunID, ResolvedPoint: &point,
+				TargetBundleHash: request.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
+			}
 			owner := fixture.store.(forkWorkflowOwnershipStore)
 			child, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			if err != nil || child.ForkRunID == "" || child.ForkPoint != point {

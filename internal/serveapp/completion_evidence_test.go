@@ -489,6 +489,7 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 		"payload": map[string]any{"token": "completion-2270"}, "idempotency_key": "completion-2270-selected-request"})
 	waitWorkspaceProofPipelineHandoff(t, workspaceProof, seed.RunID)
 	eventID := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, owner, seed.RunID)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "completion-2270-source-pause"})
 	parent := readWorkspaceProofSourceDomain(t, owner, seed.RunID)
 	root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 	writeSelectedForkAgentProofFixture(t, root, "selected observer", "[work.ready]", "Observe the admitted selected frontier.", "return {'text': 'observed', 'usage': {'input_tokens': 1, 'output_tokens': 1}}")

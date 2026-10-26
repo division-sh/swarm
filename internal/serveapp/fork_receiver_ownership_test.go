@@ -654,6 +654,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if err := waitExactOriginPublications(t.Context(), publication, siblingSeed.EventID, siblingRequest.EventID); err != nil {
 			t.Fatal(err)
 		}
+		requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": siblingSeed.RunID, "idempotency_key": "ownership-sibling-pause"})
 		siblingDomain, siblingCompanions := readServedForkRecipientSourceDomain(t, rt, siblingSeed.RunID), readForkReceiverCompanions(t, rt, siblingSeed.RunID)
 		siblingNotices := readForkReceiverNoticeDomain(t, rt, siblingSeed.RunID)
 		defer func() {

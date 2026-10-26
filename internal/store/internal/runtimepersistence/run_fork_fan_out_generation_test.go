@@ -290,6 +290,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					var repeated runfork.RunForkMaterialization
 					if selectedExecution {
+						selectedRequest.ForkOperation = nil
 						repeated, err = forkOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, child.ForkRunID, selectedRequest)
 					} else {
 						repeated, err = fixture.store.(runForkSelectedLifecycleStore).RequireMaterializedRunFork(ctx, child.ForkRunID, materializeRequest)

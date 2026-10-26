@@ -101,6 +101,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			releaseReadiness()
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			captured := make(chan map[string][][]string, 1)
+			var otherRunID string
 			go func() {
 				waitServedPublicationSettlement(t, probe, seed)
 				captured <- repeatedStaticRunSnapshot(t, rt.DB, runID)
@@ -122,6 +123,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				if other.RunID == seed.RunID || other.EventID == seed.EventID {
 					t.Fatal("negative control reused the original publication")
 				}
+				otherRunID = other.RunID
 				probe.Expect(other.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 				select {
 				case <-captured:
@@ -138,6 +140,8 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			}
 			if mode == "held_diagnostic" {
 				waitServedEventPublishedLog(t, rt.Endpoint, runID, seed.EventID)
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": otherRunID, "idempotency_key": "other-tree-pause"})
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": "held-tree-continue"})
 			}
 			refusal := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{"event_name": "right.work.requested", "run_id": runID, "payload": map[string]any{"seed": true}, "idempotency_key": "redundant-tree-seed"})
 			details, ok := refusal.Data["details"].(map[string]any)
