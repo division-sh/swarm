@@ -68,6 +68,7 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 	if minted {
 		sourceKey = issue642RequireMintedProviderIdentity(t, rt, seed.RunID)
 	}
+	pauseIssue2564SettledSource(t, rt, seed.RunID)
 	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.selected, seed.RunID)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +117,7 @@ func issue642WaitFutureProviderRetirement(t *testing.T, rt issue2564ServedFixtur
 			t.Fatal(err)
 		}
 		work := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
-		if last.State == "closed" && last.RunStatus == "completed" && last.Occurrences == 1 && work == baseline {
+		if last.State == "closed" && last.RunStatus == "live" && last.Occurrences == 1 && work == baseline {
 			t.Logf("future_provider_terminal_join run=%s execution=%s process_work=%d baseline=%d", runID, last.State, work, baseline)
 			return
 		}
@@ -181,15 +182,16 @@ func issue642WaitKeyedProviderCompletion(t *testing.T, rt issue2564ServedFixture
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Status == "completed" && header.EndedAt != nil && header.Failure == nil {
-			return
-		}
 		summary, err := rt.selected.SummarizeRun(t.Context(), runID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Status != "running" || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
+		if header.Status != "live" || header.EndedAt != nil || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
 			t.Fatalf("keyed-provider run cannot complete: header=%+v deliveries=%+v\n%s", header, summary, issue2564H2CompletionReceipt(t, rt, runID))
+		}
+		if summary.Pending == 0 && summary.InProgress == 0 && summary.RetryScheduled == 0 {
+			waitIssue2564LiveRunSettlement(t, rt, runID)
+			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

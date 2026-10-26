@@ -321,7 +321,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					var grantedOwner pipeline.FanOutObligationOwner
 					var selectedConsumer selectedForkFanOutConsumer
 					if selectedExecution {
-						ctx, grantedOwner, selectedConsumer = activateSelectedForkFanOutForTest(t, ctx, fixture, source, child, selectedRequest)
+						ctx, grantedOwner, selectedConsumer = admitSelectedForkFanOutForTest(t, ctx, fixture, source, child, selectedRequest)
 					} else {
 						// Ordinary materialization is paused; only its canonical activation
 						// may admit the child turn and freeze the immediate source run.

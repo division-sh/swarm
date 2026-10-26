@@ -14,5 +14,6 @@ func closeServedScenarioFixtureRun(t *testing.T, endpoint, bundleHash, runID str
 		"event_name": canonicalrouting.ScenarioFixtureCloseEvent,
 		"payload":    map[string]any{}, "idempotency_key": "close-scenario-" + runID,
 	}, &result)
-	requireServedRunStatus(t, endpoint, runID, "completed")
+	waitIssue2564LiveRunSettlement(t, issue2564ServedFixture{Endpoint: endpoint}, runID)
+	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "pause-scenario-" + runID})
 }

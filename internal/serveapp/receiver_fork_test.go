@@ -239,7 +239,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						SourceRunID: request.RunID, ForkEventID: forkPoint, TargetBundleHash: rt.BundleHash,
 						AllowSourceFreeze: true, ContractSelection: selection,
 					}
-					result, err := family.Execute(use.WorkContext(), runtimerunforkexecution.SelectedContractExecutionRequest{
+					execution := runtimerunforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 						ContractSelection: selection,
@@ -248,7 +248,14 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						LiveRuntime:       rt.Runtime,
 						LiveContexts:      rt.Contexts,
 						LiveRuns:          selected.LiveRuns(),
-					})
+					}
+					if !admitted {
+						// This pre-handoff refusal retains the component's discard reach,
+						// not a durable operation's separately retained failure history.
+						execution.ForkOperation = nil
+						execution.LiveRuntime, execution.LiveContexts, execution.LiveRuns = nil, nil, nil
+					}
+					result, err := family.Execute(use.WorkContext(), execution)
 					if admitted {
 						if err != nil {
 							t.Fatalf("canonical admitted fork failed: %v", err)

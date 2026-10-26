@@ -43,6 +43,7 @@ func startServedMailboxEntityFilterProof(t *testing.T, backend servedparity.Back
 		entities = append(entities, requireServedEventPublishEntityState(t, rt.DB, rt.Backend, published.RunID, "", "waiting"))
 		runs = append(runs, published.RunID)
 		events = append(events, published.EventID)
+		requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": published.RunID, "idempotency_key": "entity-filter-pause-" + published.RunID})
 	}
 	// Keep the global unread count nonzero outside the selected entity.
 	notice := runtimetools.MailboxItem{EventID: events[2], EntityID: entities[2], FlowInstance: runs[2],

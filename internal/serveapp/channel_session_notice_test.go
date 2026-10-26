@@ -101,11 +101,17 @@ func requireServedNativeNoticeAcknowledgment(t *testing.T, endpoint string, peer
 		Runs []operatorread.RunHeader `json:"runs"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 10}, &runs)
-	if len(runs.Runs) != 1 || runs.Runs[0].BundleHash != op.Coordinate.BundleHash || runs.Runs[0].Status != "live" {
+	var live []operatorread.RunHeader
+	for _, run := range runs.Runs {
+		if run.BundleHash == op.Coordinate.BundleHash && run.Status == "live" {
+			live = append(live, run)
+		}
+	}
+	if len(live) != 1 {
 		t.Fatalf("native notice requires its exact live service run: %+v", runs.Runs)
 	}
 	requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "notice.requested",
-		"run_id": runs.Runs[0].RunID, "bundle_hash": op.Coordinate.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "native-notice"})
+		"run_id": live[0].RunID, "bundle_hash": op.Coordinate.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "native-notice"})
 	var notice servedNativeMessage
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()

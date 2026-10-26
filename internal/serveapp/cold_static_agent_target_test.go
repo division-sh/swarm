@@ -124,15 +124,16 @@ func waitColdStaticProviderCompletion(t *testing.T, rt issue2564ServedFixture, r
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Status == "completed" && header.EndedAt != nil && header.Failure == nil {
-			return
-		}
 		summary, err := rt.selected.SummarizeRun(t.Context(), runID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Status != "running" || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
+		if header.Status != "live" || header.EndedAt != nil || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
 			t.Fatalf("cold-provider completion rejected: header=%+v deliveries=%+v\n%s", header, summary, issue2564H2CompletionReceipt(t, rt, runID))
+		}
+		if summary.Pending == 0 && summary.InProgress == 0 {
+			waitIssue2564LiveRunSettlement(t, rt, runID)
+			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

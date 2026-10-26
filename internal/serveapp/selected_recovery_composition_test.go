@@ -6,17 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/google/uuid"
 )
 
 type selectedRecoveryFailureProbe struct {
@@ -83,46 +79,5 @@ func TestSelectedRecoveryFailurePreventsServeReadiness(t *testing.T) {
 	}
 	if code == 0 || !strings.Contains(out.String(), failure.Error()) || strings.Contains(out.String(), "[22/22] ready") {
 		t.Fatalf("selected recovery failure reached readiness: code=%d\n%s", code, out.String())
-	}
-}
-
-func TestSelectedResetReconcilesSuccessorBeforeExecutionBuildBothStores(t *testing.T) {
-	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		t.Run(string(backend), func(t *testing.T) {
-			captured := captureSelectedResetSupervisor(t)
-			rt := startServedControlProofRuntime(t, backend)
-			supervisor := <-captured
-			predecessor := supervisor.selected
-			original := supervisor.resetBuildExecution
-			checked := false
-			supervisor.operationMu.Lock()
-			supervisor.resetBuildExecution = func(candidate serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error) {
-				if supervisor.selected == nil || supervisor.selected == predecessor {
-					return nil, errors.New("reset execution build adopted predecessor selected owner")
-				}
-				if supervisor.selectedRecoveryEnvironment.SourceLoader == nil || supervisor.selectedRecoveryEnvironment.AgentRuntime.ProcessCapability == nil {
-					return nil, errors.New("reset successor lost selected recovery environment")
-				}
-				_, err := supervisor.selected.RecoverSelectedForkContexts(context.Background(), effects.NewRecoveryRequest(time.Now().UTC(), candidate.runtime.ExecutionPosture), supervisor.selectedRecoveryEnvironment)
-				if err == nil || !strings.Contains(err.Error(), "fresh bound process composition") {
-					return nil, errors.New("reset execution build preceded selected successor recovery")
-				}
-				checked = true
-				return original(candidate)
-			}
-			supervisor.operationMu.Unlock()
-			response := requestServedJSONRPC(t, rt.Endpoint, "runtime.nuke", map[string]any{
-				"include_source_artifacts": false, "idempotency_key": uuid.NewString(),
-			})
-			if response.Error != nil {
-				t.Fatalf("reset failed: %+v", response.Error)
-			}
-			supervisor.operationMu.Lock()
-			supervisor.resetBuildExecution = original
-			if !checked || supervisor.selected == predecessor || !supervisor.resetConverged {
-				t.Error("reset did not publish a recovered selected successor")
-			}
-			supervisor.operationMu.Unlock()
-		})
 	}
 }

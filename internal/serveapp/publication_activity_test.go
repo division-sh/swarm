@@ -129,6 +129,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 								t.Fatalf("provider calls=%d want=%d", calls.Load()-beforeCalls, wantCalls)
 							}
 							completed = append(completed, completedCase{outcome: outcome, runID: seed.RunID, seedID: seed.EventID, eventID: eventID, local: local, readback: before, params: params, decisionParams: decisionParams})
+							requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "activity-pause-" + outcome})
 						})
 					}
 					if t.Failed() {

@@ -45,7 +45,7 @@ type selectedForkFanOutConsumer struct {
 	work     *worklifetime.SelectedForkOccurrence
 }
 
-func activateSelectedForkFanOutForTest(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, source semanticview.Source, child runfork.RunForkMaterialization, request runforkreadiness.MaterializeRequest) (context.Context, pipeline.FanOutObligationOwner, selectedForkFanOutConsumer) {
+func admitSelectedForkFanOutForTest(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, source semanticview.Source, child runfork.RunForkMaterialization, request runforkreadiness.MaterializeRequest) (context.Context, pipeline.FanOutObligationOwner, selectedForkFanOutConsumer) {
 	t.Helper()
 	store := fixture.store.(selectedCompletionAuthorityStore)
 	storeTestWorkOwner(t)
@@ -158,16 +158,6 @@ func activateSelectedForkFanOutForTest(t *testing.T, ctx context.Context, fixtur
 	_, sourceEvents, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
 	if err != nil || len(sourceEvents) != 0 {
 		t.Fatalf("settled fan-out source unexpectedly has replay frontier: %v err=%v", sourceEvents, err)
-	}
-	activation, err := fixture.store.(interface {
-		ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
-	}).ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		ForkRunID: child.ForkRunID, ExecutionSource: source,
-		DataPins: child.DataPins, InheritedSchedules: request.Readiness, AllowedSourceEventIDs: sourceEvents,
-		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
-	})
-	if err != nil || !activation.Activated || !activation.SourceFrozen || activation.ForkRunStatus != runfork.RunForkActivatedStatus {
-		t.Fatalf("activate selected fork before child serving: %+v err=%v", activation, err)
 	}
 	return ctx, owner, consumer
 }

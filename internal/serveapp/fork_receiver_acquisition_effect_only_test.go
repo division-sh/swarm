@@ -158,6 +158,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, started.EventID); err != nil {
 					t.Fatal(err)
 				}
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "acquisition-source-pause"})
 				before, companions := readServedForkRecipientSourceDomain(t, rt, seed.RunID), readForkReceiverCompanions(t, rt, seed.RunID)
 				defer func() {
 					if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
@@ -167,7 +168,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "acquisition-fork"}
 				var fork, replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
+				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 					t.Fatalf("supplemental acquisition fork identity: %+v", fork)
 				}
 				childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)

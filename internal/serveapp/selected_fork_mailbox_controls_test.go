@@ -53,6 +53,7 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 					// Public retirement joins execution and candidate maintenance. Only
 					// then is a whole-database comparison attributable to this request.
 					var stopped map[string]any
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": fork.ForkRunID, "idempotency_key": "selected-card-pause"})
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.stop", map[string]any{"run_id": fork.ForkRunID}, &stopped)
 				}
 				for _, operation := range []struct {

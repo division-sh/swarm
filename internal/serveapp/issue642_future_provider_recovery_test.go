@@ -242,6 +242,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 		rt.waitDeliveries(t, seed.RunID)
 		issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 		issue642RequireKeyedProviderResult(t, rt, seed.RunID)
+		pauseIssue2564SettledSource(t, rt, seed.RunID)
 		proof = &issue642FutureRecoveryProof{SourceRunID: seed.RunID, ProcessBaseline: rt.Runtime.Options.ProcessWorkOwner.ActiveCount()}
 		if minted {
 			proof.SourceKey = issue642RequireMintedProviderIdentity(t, rt, seed.RunID)
@@ -256,7 +257,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 			"idempotency_key": "future-recovery-start-cut",
 		})
 		if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
-			fork.ForkPointKind != string(runfork.RunForkPointRunStart) || fork.ForkEventID != "" || fork.ForkRunStatus != runfork.RunForkActivatedStatus {
+			fork.ForkPointKind != string(runfork.RunForkPointRunStart) || fork.ForkEventID != "" || fork.ForkRunStatus != runfork.RunForkLiveStatus {
 			t.Fatalf("native start-cut ACK: %+v", fork)
 		}
 		observation := probe.waitClaim(t)
@@ -643,10 +644,10 @@ func issue642WaitRecoveryBusiness(ctx context.Context, fixture issue2564ServedFi
 		if err != nil {
 			return err
 		}
-		if header.Status == "completed" && header.EndedAt != nil && header.Failure == nil && summary.Settled() && summary.DeadLetter+summary.Canceled == 0 {
+		if header.Status == "live" && header.EndedAt == nil && header.Failure == nil && summary.Settled() && summary.DeadLetter+summary.Canceled == 0 {
 			return nil
 		}
-		if header.Failure != nil || summary.DeadLetter+summary.Canceled != 0 || (header.Status != "running" && header.Status != "completed") {
+		if header.Failure != nil || summary.DeadLetter+summary.Canceled != 0 || header.Status != "live" || header.EndedAt != nil {
 			return fmt.Errorf("native future provider cannot complete: header=%+v deliveries=%+v", header, summary)
 		}
 		select {
@@ -833,7 +834,7 @@ func issue642RequireFutureRecoveredOutcome(t *testing.T, fixture issue2564Served
 		}
 	}
 	state, err := storetest.ReadSelectedExecutionStorage(t.Context(), fixture.selected, next.RunID)
-	if err != nil || state.State != "closed" || state.RunStatus != "completed" || state.Occurrences != 2 {
+	if err != nil || state.State != "closed" || state.RunStatus != "live" || state.Occurrences != 2 {
 		t.Fatalf("native recovered terminal state: %+v err=%v", state, err)
 	}
 	after, err := storetest.ReadSelectedForkSourceDomain(t.Context(), fixture.selected, proof.SourceRunID)

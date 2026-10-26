@@ -1345,7 +1345,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			requireStandingTelegramCalls(t, calls, selectedStore, 84)
 			waitForStandingDeliveryQuiescence(t, selectedStore)
 			assertNoStandingTelegramCall(t, calls, backend)
-			assertServedStandingState(t, db, backend, healthyService, healthyRun, healthyGeneration, "active", "running")
+			assertServedStandingState(t, db, backend, healthyService, healthyRun, healthyGeneration, "active", "live")
 			assertServedStandingState(t, db, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
 			if code := second.stop(); code != 0 {
 				t.Fatalf("%s second mixed standing serve exit = %d", backend, code)

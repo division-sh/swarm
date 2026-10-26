@@ -181,7 +181,11 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("served runtime has no selected fork owner")
 			}
-			plan, err := planner.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID})
+			var frontier string
+			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := planner.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -211,7 +215,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID, "allow_source_freeze": true, "idempotency_key": "recipient-fork"}
 			var fork, replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 0 {
+			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("fork lost exact source/child work identity: %+v", fork)
 			}
 			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, plan.ForkPoint.EventID)

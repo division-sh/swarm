@@ -140,7 +140,11 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				t.Fatal("served runtime has no selected fork owner")
 			}
 			ctx := servedControlProofAuthorActivityContext(t, rt)
-			plan, err := planner.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID})
+			var frontier string
+			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := planner.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 			if err != nil {
 				t.Fatalf("plan real connected source: %v", err)
 			}

@@ -1639,7 +1639,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		t.Fatalf("fork-point event.publish result = %#v", published)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, published.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
-	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "running")
+	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "live")
 
 	forkParams := map[string]any{
 		"source_run_id":       started.RunID,
@@ -1661,7 +1661,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := json.Unmarshal([]byte(stdout), &fork); err != nil {
 		t.Fatalf("decode swarm run fork result: %v\n%s", err, stdout)
 	}
-	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "running" || fork.ExecutedEventCount != 0 {
+	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ForkRunStatus != "live" || fork.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
 	var replay apiv1.RunForkExecutionResult
@@ -1695,30 +1695,19 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := waitExactOriginPublications(t.Context(), publication, started.EventID, published.EventID); err != nil {
 		t.Fatal(err)
 	}
-	beforeRefusal := snapshotForkReceiverApplication(t, rt)
-	// A selected fork cannot acquire future ordinary ingress from the loaded
-	// same-hash runtime. Retained controls still own its explicit terminal stop.
-	refused := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
+	// After the canonical ACK, fresh ordinary authority owns subsequent ingress.
+	continued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"bundle_hash":     rt.BundleHash,
 		"run_id":          fork.ForkRunID,
 		"event_name":      "item.processed",
 		"payload":         map[string]any{"item_id": "review"},
 		"idempotency_key": "issue-2361-" + rt.Backend + "-fork-completion",
 	})
-	if refused.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
-		t.Fatalf("selected ingress refusal = %+v", refused)
+	if continued.RunID != fork.ForkRunID || continued.NewRunCreated {
+		t.Fatalf("ordinary successor ingress changed the live child: %+v", continued)
 	}
-	var bindingID string
-	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, fork.ForkRunID).Scan(&bindingID); err != nil {
-		t.Fatal(err)
-	}
-	details, ok := refused.Data["details"].(map[string]any)
-	if !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != "event.publish" {
-		t.Fatalf("selected ingress refusal lost exact binding: %+v", refused)
-	}
-	if afterRefusal := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, afterRefusal) {
-		t.Fatalf("refused selected ingress changed persisted state: tables=%v", forkReceiverChangedTables(beforeRefusal, afterRefusal))
-	}
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": fork.ForkRunID, "idempotency_key": "fork-successor-pause"})
 	var stopped struct {
 		OK bool `json:"ok"`
 	}
@@ -2595,7 +2584,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		"run_id":          runID,
 		"idempotency_key": continueKey,
 	})
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "running", "running", "completed")
+	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "running", "live")
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
 		"run_id":          runID,
@@ -2604,11 +2593,13 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "delivered", 1)
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
-	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
+	requireServedRunStatus(t, rt.Endpoint, runID, "live")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": keyPrefix + "-settled-pause"})
 
 	stopRunID, pendingEventID, stopEntityID, stopCardID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
 	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": stopRunID, "idempotency_key": stopKey + "-pause"})
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
 		"run_id":          stopRunID,
 		"idempotency_key": stopKey,
@@ -2674,7 +2665,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	}
 
 	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
-	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "running")
+	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "live")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
 }
 

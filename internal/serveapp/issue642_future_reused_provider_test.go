@@ -40,6 +40,7 @@ func TestIssue642FutureKeyedProviderReusesConstructedInstanceBothStores(t *testi
 			rt.waitDeliveries(t, seed.RunID)
 			issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 			issue642RequireReusedProviderResult(t, rt, seed.RunID)
+			pauseIssue2564SettledSource(t, rt, seed.RunID)
 			sourceBefore, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.selected, seed.RunID)
 			if err != nil {
 				t.Fatal(err)

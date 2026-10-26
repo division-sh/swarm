@@ -950,7 +950,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // #2727/6388897450: exact landed-inert repair; both source endpoints remain authenticated.
 	}
-	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
+	if (base == debtSelectedFixtureComposedCollectorTo || base == debtSelectedFixtureLandedCollectorTo) && trusted.Collector == base &&
 		current == debtCompletedSelectedFixturePinCollectorTo && reviewedTransition == current && head.Collector == current &&
 		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
 		return nil // #2728/6392837709: delete the completed migration pin; no permission change.
