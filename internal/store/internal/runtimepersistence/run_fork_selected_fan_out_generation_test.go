@@ -47,6 +47,15 @@ type selectedForkFanOutConsumer struct {
 
 func admitSelectedForkFanOutForTest(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, source semanticview.Source, child runfork.RunForkMaterialization, request runforkreadiness.MaterializeRequest) (context.Context, pipeline.FanOutObligationOwner, selectedForkFanOutConsumer) {
 	t.Helper()
+	_, sourceEvents, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
+	if err != nil || len(sourceEvents) != 0 {
+		t.Fatalf("settled fan-out source unexpectedly has replay frontier: %v err=%v", sourceEvents, err)
+	}
+	return admitSelectedForkNativePhaseForTest(t, ctx, fixture, source, child, request)
+}
+
+func admitSelectedForkNativePhaseForTest(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, source semanticview.Source, child runfork.RunForkMaterialization, request runforkreadiness.MaterializeRequest) (context.Context, pipeline.FanOutObligationOwner, selectedForkFanOutConsumer) {
+	t.Helper()
 	store := fixture.store.(selectedCompletionAuthorityStore)
 	storeTestWorkOwner(t)
 	value, _ := storeTestWorkFixtures.Load(t)
@@ -157,10 +166,6 @@ func admitSelectedForkFanOutForTest(t *testing.T, ctx context.Context, fixture a
 	ctx, err = consumer.receiver.Bind(ctx, effects.ExecutionModeLive)
 	if err != nil {
 		t.Fatal(err)
-	}
-	_, sourceEvents, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
-	if err != nil || len(sourceEvents) != 0 {
-		t.Fatalf("settled fan-out source unexpectedly has replay frontier: %v err=%v", sourceEvents, err)
 	}
 	return ctx, owner, consumer
 }
