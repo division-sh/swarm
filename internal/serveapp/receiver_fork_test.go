@@ -207,12 +207,16 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					}
 				}
 				checkSource("before fork")
+				wantExecuted := 1
+				if fieldless {
+					wantExecuted = 0
+				}
 				if surface == "admitted_http" {
 					params := map[string]any{"source_run_id": request.RunID, "fork_event_id": request.EventID, "allow_source_freeze": true, "idempotency_key": "receiver-fork"}
 					var fork, duplicate apiv1.RunForkExecutionResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-					if fork.ForkRunID != duplicate.ForkRunID || fork.ExecutedEventCount != 0 || fork.SourceRunStatus != "paused" || duplicate.SourceRunStatus != "paused" || fork.SourceFrozen || duplicate.SourceFrozen {
+					if fork.ForkRunID != duplicate.ForkRunID || fork.ExecutedEventCount != wantExecuted || duplicate.ExecutedEventCount != wantExecuted || fork.SourceRunStatus != "paused" || duplicate.SourceRunStatus != "paused" || fork.SourceFrozen || duplicate.SourceFrozen {
 						t.Fatalf("fork replay disagreement: %#v / %#v", fork, duplicate)
 					}
 					forkRunID = fork.ForkRunID
@@ -226,12 +230,15 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
 						AgentRuntime:      rt.ForkRuntime,
+						LiveRuntime:       rt.Runtime,
+						LiveContexts:      rt.Contexts,
+						LiveRuns:          selected.LiveRuns(),
 					})
 					if admitted {
 						if err != nil {
 							t.Fatalf("canonical admitted fork failed: %v", err)
 						}
-						if result.ExecutedEventCount != 0 {
+						if result.ExecutedEventCount != wantExecuted {
 							t.Fatalf("fork execution count: %d", result.ExecutedEventCount)
 						}
 						forkRunID = result.Materialization.ForkRunID

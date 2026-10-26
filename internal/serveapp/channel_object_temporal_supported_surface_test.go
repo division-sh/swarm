@@ -56,6 +56,9 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 					h.start(t)
 					fragment = "The decision expired. No action was taken."
 				case "stop_supersedes":
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.pause", map[string]any{
+						"run_id": seed.RunID, "idempotency_key": "object-temporal-pause",
+					}, &result)
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{
 						"run_id": seed.RunID, "idempotency_key": "object-temporal-stop",
 					}, &result)
