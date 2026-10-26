@@ -2147,13 +2147,18 @@ func eventPublishTestHandlerWithObservability(t *testing.T, pg *store.PostgresSt
 	return eventPublishTestHandlerWithStores(t, pg, observability, pg, bus, source)
 }
 
-func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observability ObservabilityReadStore, idempotency APIIdempotencyStore, publisher EventPublisher, source semanticview.Source) *Handler {
+func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observability ObservabilityReadStore, idempotency APIIdempotencyStore, publisher EventPublisher, source semanticview.Source, originals ...context.Context) *Handler {
 	t.Helper()
+	var original context.Context
+	if len(originals) != 0 {
+		original = originals[0]
+	}
 	runBundleContext, _ := runs.(RunBundleContextStore)
 	entities, _ := runs.(EntityReadStore)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
+			OriginalContext:  original,
 			Now:              func() time.Time { return time.Now().UTC() },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},

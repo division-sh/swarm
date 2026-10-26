@@ -1183,7 +1183,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	if !foundNotice {
 		t.Fatalf("reopened pending mailbox list omitted informational notice %s: %#v", noticeID, listed)
 	}
-	if err := noticeAcknowledgmentFixture(t, reopened, noticeID)(testAuthorActivityContext()); err != nil {
+	if err := noticeAcknowledgmentFixture(t, ctx, reopened, noticeID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge informational notice: %v", err)
 	}
 	if unread, err := reopened.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {

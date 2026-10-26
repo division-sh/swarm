@@ -20,6 +20,7 @@ import (
 // testOperatorCapabilities is fixture assembly only. Production registration
 // must use the exact family option types in operator_capabilities.go.
 type testOperatorCapabilities struct {
+	OriginalContext           context.Context
 	ExecutionPosture          executionposture.Posture
 	Now                       func() time.Time
 	Ready                     func() bool
@@ -173,7 +174,11 @@ func testOperatorHandlers(t testing.TB, c testOperatorCapabilities) map[string]M
 		OperatorAgentControlHandlers(AgentControlHandlerOptions{Now: c.Now, Controller: c.AgentControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts, SelectedForkControls: c.SelectedForkControls}),
 	)
 	if selected, native := c.Idempotency.(agentfixture.Store); native {
-		original, err := agentfixture.ProcessContext(t, context.Background(), selected)
+		original := c.OriginalContext
+		if original == nil {
+			original = context.Background()
+		}
+		original, err := agentfixture.ProcessContext(t, original, selected)
 		if err != nil {
 			t.Fatal(err)
 		}
