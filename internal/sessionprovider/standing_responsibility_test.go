@@ -64,7 +64,7 @@ func TestWhatsAppStandingResponsibilityRequiresRealConfirmationBothStores(t *tes
 				native.CloseExecution()
 				t.Fatal("fenced occurrence retained fresh promotion authority through an unreleased handle", err)
 			}
-			if current, err := f.selected.SessionStandingBindingCurrent(context.Background(), f.operation); err != nil || !current {
+			if current, err := f.selected.SessionStandingBindingCurrent(f.ctx, f.operation); err != nil || !current {
 				native.CloseExecution()
 				t.Fatal("execution fencing erased confirmed retention", current, err)
 			}

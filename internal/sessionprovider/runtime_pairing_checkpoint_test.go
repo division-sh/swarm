@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -114,8 +115,12 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 			}
 			t.Run(label, func(t *testing.T) {
 				f := newRuntimeBootstrapFixture(t, backend)
-				ctx := f.peer.ctx // No runtime occurrence or source fact is carried.
-				process := worklifetime.NewProcess()
+				ctx := startupownership.CarryMutationAuthority(f.peer.ctx, f.ctx) // No runtime occurrence or source fact is carried.
+				process, found := worklifetime.ProcessFromContext(f.ctx)
+				if !found {
+					t.Fatal("deployment fixture lost its original process work owner")
+				}
+				ctx = worklifetime.WithProcess(ctx, process)
 				operations := f.store.(interface {
 					DeploymentChannelOperations() channelonboarding.OperationStore
 				}).DeploymentChannelOperations()

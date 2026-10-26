@@ -42,8 +42,16 @@ const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 func originalStoreFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	if _, found := worklifetime.ProcessFromContext(ctx); !found {
+		ctx = storeTestWorkContext(t, ctx)
+	}
 	if startupownership.HasMutationAuthority(ctx) {
-		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+		original, err := startupownership.CaptureMutationAuthority(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		process, _ := worklifetime.ProcessFromContext(ctx)
+		if err := process.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
 			t.Fatal(err)
 		}
 		return ctx
@@ -52,11 +60,7 @@ func originalStoreFixtureContext(t testing.TB, ctx context.Context, selected any
 	if !ok {
 		t.Fatalf("original fixture context requires its selected lifecycle owner: %T", selected)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +122,9 @@ func storeTestWorkOwner(t testing.TB, contexts ...context.Context) *worklifetime
 
 func storeTestWorkContext(t testing.TB, ctx context.Context) context.Context {
 	t.Helper()
-	return worklifetime.WithOccurrence(ctx, storeTestWorkOwner(t, ctx))
+	owner := storeTestWorkOwner(t, ctx)
+	fixture, _ := storeTestWorkFixtures.Load(t)
+	return worklifetime.WithProcess(worklifetime.WithOccurrence(ctx, owner), fixture.(*storeTestWorkFixture).process)
 }
 
 func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {

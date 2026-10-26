@@ -946,6 +946,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtSelectedFixtureLandedCollectorTo && trusted.Collector == base &&
+		current == debtS2FixtureCollectorTo && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // R19: exact native fixture body correspondence; debt identities are unchanged.
+	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {

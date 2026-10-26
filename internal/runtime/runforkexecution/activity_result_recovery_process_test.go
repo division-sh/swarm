@@ -339,6 +339,7 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			})
 			ctx := runForkTestContext(t)
 			capability := selectedContractTestProcessCapability(t, ctx, selected)
+			ctx = runForkOriginalContextForTest(t, ctx, capability)
 			owner := construct()
 			process, _ := worklifetime.ProcessFromContext(ctx)
 			if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {

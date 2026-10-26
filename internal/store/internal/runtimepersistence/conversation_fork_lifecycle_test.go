@@ -633,7 +633,7 @@ func seedConversationForkSourceWithContext(t *testing.T, ctx context.Context, st
 		run.BundleHash = source.bundleHash
 	}
 	if store == nil {
-		store = admitTestPostgresStore(t, db)
+		t.Fatal("conversation source fixture requires its original selected owner")
 	}
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireRunFixtureForTest(t, ctx, store, run)
