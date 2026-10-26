@@ -85,7 +85,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 		t.Fatalf("run.start error = %#v", started.Error)
 	}
 	result := asMap(t, started.Result)
-	if result["run_id"] != runID || result["status"] != "running" {
+	if result["run_id"] != runID || result["status"] != "live" {
 		t.Fatalf("run.start result = %#v", result)
 	}
 	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
@@ -100,7 +100,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	if replay.Error != nil {
 		t.Fatalf("run.start replay error = %#v", replay.Error)
 	}
-	if replayResult := asMap(t, replay.Result); replayResult["run_id"] != runID || replayResult["status"] != "running" {
+	if replayResult := asMap(t, replay.Result); replayResult["run_id"] != runID || replayResult["status"] != "live" {
 		t.Fatalf("run.start replay result = %#v", replayResult)
 	}
 	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
@@ -154,7 +154,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 		t.Fatalf("run.start active ephemeral bundle scope error = %#v", started.Error)
 	}
 	result := asMap(t, started.Result)
-	if result["run_id"] != runID || result["status"] != "running" {
+	if result["run_id"] != runID || result["status"] != "live" {
 		t.Fatalf("run.start result = %#v", result)
 	}
 	assertRunStartPersistence(t, db, runID, "scan.requested")
@@ -806,8 +806,8 @@ func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string
 	`, runID).Scan(&runStatus, &triggerType, &bundleHash); err != nil {
 		t.Fatalf("load run row: %v", err)
 	}
-	if runStatus != "running" || triggerType != eventName {
-		t.Fatalf("run row status=%q trigger=%q, want running/%s", runStatus, triggerType, eventName)
+	if runStatus != "live" || triggerType != eventName {
+		t.Fatalf("run row status=%q trigger=%q, want live/%s", runStatus, triggerType, eventName)
 	}
 	if bundleHash != runStartTestBundleHash {
 		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, runStartTestBundleHash)

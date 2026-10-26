@@ -1814,6 +1814,7 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 					t.Fatalf("%s rows after forbidden target = %d, want %d, err=%v", table, count, want, err)
 				}
 			}
+			pauseAPITestLiveRun(t, bus, selected, runID)
 			plain := rpcCall(t, handler, eventPublishBody("", bundleHash, "note.requested", `{"amount":52}`, "", "noncreating-identity-valid"))
 			if plain.Error != nil {
 				t.Fatalf("non-creation event rejected valid caller identity: %#v", plain.Error)
@@ -1913,6 +1914,7 @@ func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersi
 	firstRunID := stringValue(t, asMap(t, first.Result)["run_id"], "run_id")
 	firstEventID := stringValue(t, asMap(t, first.Result)["event_id"], "event_id")
 
+	pauseAPITestLiveRun(t, bus, pg, firstRunID)
 	second := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"second"}`, "", "idem-source-second"))
 	if second.Error != nil {
 		t.Fatalf("second event.publish error = %#v", second.Error)
@@ -2819,8 +2821,8 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	`, runID).Scan(&runStatus, &triggerType, &triggerID, &bundleHash); err != nil {
 		t.Fatalf("load event.publish run row: %v", err)
 	}
-	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
-		t.Fatalf("run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
+	if runStatus != "live" || triggerType != eventName || triggerID != eventID {
+		t.Fatalf("run row status=%q trigger=%q/%q, want live/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
 	if bundleHash != expectedBundleHash {
 		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, expectedBundleHash)
@@ -2884,8 +2886,8 @@ func assertSQLiteEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, even
 	`, runID).Scan(&runStatus, &triggerType, &triggerID); err != nil {
 		t.Fatalf("load sqlite event.publish run row: %v", err)
 	}
-	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
-		t.Fatalf("sqlite run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
+	if runStatus != "live" || triggerType != eventName || triggerID != eventID {
+		t.Fatalf("sqlite run row status=%q trigger=%q/%q, want live/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
 	assertSQLiteEventPublishEventRow(t, db, runID, eventID, producedBy)
 }

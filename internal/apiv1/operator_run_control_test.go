@@ -7,11 +7,30 @@ import (
 	"testing"
 	"time"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
+
+func pauseAPITestLiveRun(t *testing.T, bus *runtimebus.EventBus, selected any, runID string) {
+	t.Helper()
+	owner, ok := selected.(runtimeruncontrol.Store)
+	if !ok {
+		t.Fatalf("native API fixture lacks run control: %T", selected)
+	}
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtimeruncontrol.NewController(owner, bus, runtimeruncontrol.Options{}).Pause(ctx, runtimeruncontrol.TransitionRequest{
+		RunID: runID, Reason: "park independent API fixture cohort", ControlledBy: "test",
+	})
+	if err != nil || result.RunID != runID || result.Status != runtimeruncontrol.StatusPaused {
+		t.Fatalf("pause actual API fixture run: result=%+v err=%v", result, err)
+	}
+}
 
 type committedStopRecoveryProbe struct {
 	stopCalls int
