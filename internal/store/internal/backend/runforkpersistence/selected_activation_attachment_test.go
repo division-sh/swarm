@@ -121,12 +121,12 @@ func newSelectedAttachmentFixture(t *testing.T, kind runfork.RunForkPointKind) s
 
 func TestSelectedActivationAttachmentRequiresExactConstructedCensus(t *testing.T) {
 	f := newSelectedAttachmentFixture(t, runfork.RunForkPointRunStart)
-	if err := validateSelectedContractStagedConstruction(f.evidence); err != nil {
+	if err := validateSelectedContractStagedConstruction(context.Background(), nil, f.snapshot, f.evidence, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, ids := range [][]string{nil, {uuid.NewString()}, {f.evidence.lineage.ForkRunID, uuid.NewString()}, {f.evidence.lineage.ForkRunID, f.evidence.lineage.ForkRunID}} {
 		f.evidence.lineage.EntityIDs = ids
-		if err := validateSelectedContractStagedConstruction(f.evidence); err == nil {
+		if err := validateSelectedContractStagedConstruction(context.Background(), nil, f.snapshot, f.evidence, nil); err == nil {
 			t.Fatalf("inexact child census admitted: %v", ids)
 		}
 	}
@@ -146,7 +146,7 @@ func TestSelectedActivationConstructionCensusIsOrderIndependent(t *testing.T) {
 		for i := 0; i < 16; i++ {
 			f.evidence.lineage.EntityIDs = ids
 			before := append([]string(nil), ids...)
-			if err := validateSelectedContractStagedConstruction(f.evidence); err != nil {
+			if err := validateSelectedContractStagedConstruction(context.Background(), nil, f.snapshot, f.evidence, nil); err != nil {
 				t.Fatalf("same exact construction inventory changed with order %v: %v", ids, err)
 			}
 			if !reflect.DeepEqual(ids, before) {
@@ -156,7 +156,7 @@ func TestSelectedActivationConstructionCensusIsOrderIndependent(t *testing.T) {
 	}
 	for _, ids := range [][]string{{root}, {member}, {root, root}, {member, member}, {root, uuid.NewString()}, {root, member, uuid.NewString()}, {" " + root, member}} {
 		f.evidence.lineage.EntityIDs = ids
-		if err := validateSelectedContractStagedConstruction(f.evidence); err == nil {
+		if err := validateSelectedContractStagedConstruction(context.Background(), nil, f.snapshot, f.evidence, nil); err == nil {
 			t.Fatalf("inexact construction inventory admitted: %v", ids)
 		}
 	}
@@ -317,9 +317,9 @@ func TestSelectedActivationAttachmentRetainedEvidenceBeforeCurrentFence(t *testi
 					a.ExecutionOwner, a.FenceGeneration, a.SelectedFork.AdmissionFingerprint,
 					a.SelectedFork.ContainerPlanFingerprint, a.SelectedFork.ActorCensusFingerprint, a.SelectedFork.EffectiveConfigFingerprint).
 				WillReturnResult(sqlmock.NewResult(0, 0))
-			var owner selectedContractCurrentAuthorityOwner = &effectpersistence.EffectPostgresOwner{}
+			var owner selectedContractPreparedAttachmentOwner = &RunForkPostgresOwner{EffectPostgresOwner: &effectpersistence.EffectPostgresOwner{}}
 			if sqlite {
-				owner = &effectpersistence.EffectSQLiteOwner{}
+				owner = &RunForkSQLiteOwner{EffectSQLiteOwner: &effectpersistence.EffectSQLiteOwner{}}
 			}
 			ctx := effects.WithAuthority(context.Background(), f.authority)
 			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, f.snapshot, f.evidence, sqlite, owner); err == nil {

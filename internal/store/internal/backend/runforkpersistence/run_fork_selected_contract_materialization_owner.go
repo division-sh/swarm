@@ -429,6 +429,42 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 // A complete source inventory permits only materialization. Native child
 // readback, not this prospective filter, removes its execution blocker.
 func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, childRunID string, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
+	filtered, err := runForkSelectedMaterializationReplayBlockers(plan, admission)
+	if err != nil {
+		return nil, err
+	}
+	return runForkReplyProjectionBlockers(plan, childRunID, filtered)
+}
+
+func (s *RunForkPostgresOwner) InspectSelectedMaterializationReplay(ctx context.Context, plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrent(); err != nil {
+		return nil, err
+	}
+	return inspectSelectedMaterializationReplay(plan)
+}
+
+func (s *RunForkSQLiteOwner) InspectSelectedMaterializationReplay(ctx context.Context, plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrent(); err != nil {
+		return nil, err
+	}
+	return inspectSelectedMaterializationReplay(plan)
+}
+
+func inspectSelectedMaterializationReplay(plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	admission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+	if err != nil {
+		return nil, err
+	}
+	return runForkSelectedMaterializationReplayBlockers(plan, admission)
+}
+
+func runForkSelectedMaterializationReplayBlockers(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
 	eligible, err := runForkTimerHistoryMaterializable(plan)
 	if err != nil {
 		return nil, err
@@ -441,7 +477,7 @@ func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, childRunID
 		}
 		filtered = append(filtered, blocker)
 	}
-	return runForkReplyProjectionBlockers(plan, childRunID, filtered)
+	return filtered, nil
 }
 
 func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgres bool, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) (map[string]executionmode.Mode, error) {

@@ -50,6 +50,7 @@ type SelectedContractForkLifecycle interface {
 	StopSelectedFork(context.Context, runcontrol.SelectedStopRequest) (runcontrol.State, error)
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	InspectSelectedMaterializationReplay(context.Context, runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error)
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	RequireMaterializedRunForkForSelectedContractExecution(context.Context, string, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	DiscardMaterializedSelectedContractExecutionFork(context.Context, string) error

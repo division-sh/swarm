@@ -11,8 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -197,10 +199,16 @@ type selectedContractCurrentAuthorityOwner interface {
 	RequireCurrentExternalEffectAuthorityTx(context.Context, *sql.Tx, runtimeeffects.Authority) error
 }
 
+type selectedContractPreparedAttachmentOwner interface {
+	selectedContractCurrentAuthorityOwner
+	ReadNativeFlowConstructionsTx(context.Context, *sql.Tx, semanticview.Source, runtimerunlifecycle.Snapshot, []string) ([]pipeline.FlowInstanceObservation, error)
+	requireRunForkSelectedContractExecutionSettlementTx(context.Context, *sql.Tx, string, []string, semanticview.Source) error
+}
+
 // A running execution is an attached, fenced executor, not proof that its owed
 // business work has already completed. The retained reader owns the immutable
 // declaration/preparation decoding; the preparation owner proves currentness.
-func requireSelectedContractPreparedAttachmentTx(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, evidence runForkSelectedContractActivationEvidence, sqlite bool, owner selectedContractCurrentAuthorityOwner) error {
+func requireSelectedContractPreparedAttachmentTx(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, evidence runForkSelectedContractActivationEvidence, sqlite bool, owner selectedContractPreparedAttachmentOwner) error {
 	authority, err := selectedContractActivationAuthority(ctx, evidence.lineage.ForkRunID)
 	if err != nil {
 		return err
@@ -214,7 +222,7 @@ func requireSelectedContractPreparedAttachmentTx(ctx context.Context, tx *sql.Tx
 	if err := validateSelectedContractPreparedAttachment(record, authority, evidence); err != nil {
 		return err
 	}
-	if err := validateSelectedContractStagedConstruction(evidence); err != nil {
+	if err := validateSelectedContractStagedConstruction(ctx, tx, snapshot, evidence, owner); err != nil {
 		return err
 	}
 	if err := owner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
@@ -258,27 +266,58 @@ func validateSelectedContractPreparedAttachment(record selectedRecoveryRecord, a
 	return nil
 }
 
-func validateSelectedContractStagedConstruction(evidence runForkSelectedContractActivationEvidence) error {
+func validateSelectedContractStagedConstruction(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, evidence runForkSelectedContractActivationEvidence, owner selectedContractPreparedAttachmentOwner) error {
 	metadata, err := loadRunForkEntityMetadata(evidence.plan)
 	if err != nil {
 		return err
 	}
-	expected := make([]string, 0, len(metadata))
+	expected := make(map[string]bool, len(metadata))
 	for entityID, meta := range metadata {
 		projection, err := projectRunForkEntityOwnership(evidence.lineage.SourceRunID, evidence.lineage.ForkRunID, entityID, meta.FlowInstance)
 		if err != nil {
 			return err
 		}
-		expected = append(expected, projection.Fork.EntityID)
+		if expected[projection.Fork.EntityID] {
+			return fmt.Errorf("selected-contract projected inventory has a duplicate member")
+		}
+		expected[projection.Fork.EntityID] = true
 	}
-	// Construction is an exact owner inventory, not map or header iteration order.
-	actual := slices.Clone(evidence.lineage.EntityIDs)
-	slices.Sort(expected)
-	slices.Sort(actual)
-	if !slices.Equal(expected, actual) {
-		return fmt.Errorf("selected-contract staged construction differs from exact fixed-cut child inventory")
+	seen := make(map[string]bool, len(evidence.lineage.EntityIDs))
+	var extras []string
+	for _, id := range evidence.lineage.EntityIDs {
+		if id == "" || seen[id] {
+			return fmt.Errorf("selected-contract constructed inventory has a missing or duplicate member")
+		}
+		seen[id] = true
+		if expected[id] {
+			delete(expected, id)
+		} else {
+			extras = append(extras, id)
+		}
 	}
-	return nil
+	if len(expected) != 0 {
+		return fmt.Errorf("selected-contract staged construction lost fixed-cut child inventory")
+	}
+	if len(extras) == 0 {
+		return nil
+	}
+	if tx == nil || owner == nil {
+		return fmt.Errorf("selected-contract additional construction requires its activation transaction and native owner")
+	}
+	observations, err := owner.ReadNativeFlowConstructionsTx(ctx, tx, evidence.request.ExecutionSource, snapshot, extras)
+	if err != nil {
+		return err
+	}
+	for _, observation := range observations {
+		receipt, found, err := observation.NativeConstruction()
+		if err != nil {
+			return fmt.Errorf("selected-contract new child lacks its exact native creating input: %w", err)
+		}
+		if !found || receipt.CreatingInput.EventID == "" {
+			return fmt.Errorf("selected-contract new child lacks its exact native creating input")
+		}
+	}
+	return owner.requireRunForkSelectedContractExecutionSettlementTx(ctx, tx, evidence.lineage.ForkRunID, evidence.request.AllowedSourceEventIDs, evidence.request.ExecutionSource)
 }
 
 func completeSelectedForkOperationAtActivation(ctx context.Context, tx *sql.Tx, req runfork.RunForkSelectedContractExecutionActivateRequest, lineage runForkActivationLineage, sourceStatus string, frozen, postgres bool) error {
@@ -381,7 +420,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 			if err != nil {
 				return err
 			}
-			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, false, s.EffectPostgresOwner); err != nil {
+			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, false, s); err != nil {
 				return err
 			}
 			return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, true, evidence.lineage.ForkRunID, evidence.lineage.ForkBundleHash, s.durableData, evidence.plan, evidence.request.DataPins)
@@ -425,7 +464,7 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 			if err != nil {
 				return err
 			}
-			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, true, s.EffectSQLiteOwner); err != nil {
+			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, true, s); err != nil {
 				return err
 			}
 			return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, false, evidence.lineage.ForkRunID, evidence.lineage.ForkBundleHash, s.durableData, evidence.plan, evidence.request.DataPins)
