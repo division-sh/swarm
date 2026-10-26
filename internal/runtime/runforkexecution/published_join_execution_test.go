@@ -166,18 +166,32 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 		ExecutionPosture: executionposture.MockOnly, WorkOwner: work, PipelineObligations: owner.ports.pipelineObligations,
 		ContractBundle: loaded.Source, SourceArtifactFact: loaded.SourceArtifactFact, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 		DeliveryAuthority: authority, ReceiverExecution: eventreceiver.NormalExecution(), Durable: owner.ports.busDurable,
+		CarryMutationContext: startupownership.CarryMutationAuthority,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	driver, dispatch := &publishedJoinSourceDriver{}, &publishedJoinSourceDispatch{}
+	schedules := selected.(genericschedule.Store)
+	logger := rootruntime.NewGenericScheduleRuntimeLogger(rootruntime.NewRuntimeLogger(owner.ports.logs, executionposture.MockOnly, nil))
+	clock, err := genericschedule.NewLifecycle(schedules, driver, eventBus, dispatch, logger, executionposture.MockOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := clock.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 	coordinator := pipeline.NewPipelineCoordinatorWithOptions(eventBus, pipeline.PipelineCoordinatorOptions{
-		Module: selectedContractWorkflowModule{source: loaded.Source}, Persistence: owner.ports.workflow,
+		Module: loaded.Module, Persistence: owner.ports.workflow,
 		SourceArtifactFact: loaded.SourceArtifactFact, ExecutionPosture: executionposture.MockOnly,
 		ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: work, RunLifecycle: selected.(runlifecycle.OperationOwner),
 		PipelineObligations: owner.ports.pipelineObligations, DeliveryStore: owner.ports.busDurable.DeliveryLifecycle,
 		DeadLetters: selected.(deadletters.AcknowledgedRecorder), DeliveryRuntime: eventBus,
 		DecisionCards: owner.ports.decisionCards, ProposedEffects: owner.ports.proposedEffects, HumanTasks: owner.ports.humanTasks,
 		DecisionCardDraftExpiry: owner.ports.decisionCardDraftExpiry, HumanTaskExpiry: owner.ports.humanTaskExpiry,
+		GenericSchedules: clock,
 	})
 	if coordinator == nil {
 		t.Fatal("published join source lifecycle planner was not admitted")
@@ -264,18 +278,6 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	if result := eventBus.DispatchDeliveryContinuation(ctx, preparation, route); result.Failure() != nil {
 		t.Fatalf("native empty-join preparation: %v", result.Failure())
 	}
-	driver, dispatch := &publishedJoinSourceDriver{}, &publishedJoinSourceDispatch{}
-	schedules := selected.(genericschedule.Store)
-	logger := rootruntime.NewGenericScheduleRuntimeLogger(rootruntime.NewRuntimeLogger(owner.ports.logs, executionposture.MockOnly, nil))
-	clock, err := genericschedule.NewLifecycle(schedules, driver, eventBus, dispatch, logger, executionposture.MockOnly)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := clock.Stop(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
 	if err := clock.ReconcileRunWakeups(ctx, runID); err != nil {
 		t.Fatal(err)
 	}

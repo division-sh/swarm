@@ -5453,7 +5453,12 @@ func requireServedTraceReadback(t *testing.T, endpoint, runID, eventID, eventNam
 func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantState string) {
 	t.Helper()
 	if entityID != runID {
-		t.Fatalf("root stage readback requires canonical run identity: %s/%s", runID, entityID)
+		var result operatorread.OperatorEntityFull
+		requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"entity_id": entityID, "run_id": runID}, &result)
+		if result.Entity.EntityID != entityID || result.Entity.RunID != runID || result.Entity.CurrentState == nil || *result.Entity.CurrentState != wantState {
+			t.Fatalf("entity.get result = %#v, want %s/%s state %s", result.Entity, runID, entityID, wantState)
+		}
+		return
 	}
 	var result cliapp.DiagnosticRunDiagnosisResult
 	requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)

@@ -1,5 +1,2 @@
 account_id: text
-eng_roles: integer
-gem_score: number
-eligible: boolean
 last_command: text
