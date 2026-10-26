@@ -283,7 +283,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					rootType, childType, rootState = "", "", "pending"
 					rootFields, childFields = nil, nil
 				}
-				rootPhase := "planned"
+				rootPhase := "ready"
 				rootRevision := 2
 				if fieldless {
 					// The retained root is planned without inventing a field companion.

@@ -455,9 +455,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if scenario == "summary_open_many" {
 			count = 7
 		}
+		var runID string
 		for index := 0; index < count; index++ {
 			var published map[string]any
-			requireServedJSONRPCResult(t, rpcEndpoint, "event.publish", map[string]any{
+			params := map[string]any{
 				"bundle_hash":     identity.SourceArtifacts[0].BundleHash,
 				"event_name":      "inbound.telegram.text_message",
 				"idempotency_key": fmt.Sprintf("preconnection-notice-%d", index),
@@ -466,7 +467,16 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 					"conversation_reference": "1001", "conversation_scope": "direct",
 					"provider_message_reference": 9100 + index,
 				},
-			}, &published)
+			}
+			if runID != "" {
+				params["run_id"] = runID
+			}
+			requireServedJSONRPCResult(t, rpcEndpoint, "event.publish", params, &published)
+			var ok bool
+			runID, ok = published["run_id"].(string)
+			if !ok || runID == "" {
+				t.Fatalf("preconnection publication lacks its exact live run: %+v", published)
+			}
 			deadline := time.Now().Add(15 * time.Second)
 			for {
 				var listed map[string]any

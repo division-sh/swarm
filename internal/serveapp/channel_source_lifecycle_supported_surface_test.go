@@ -351,6 +351,9 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatalf("fork callback did not settle its exact selected card: status=%s err=%v", status, err)
 					}
 					postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
+					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+						"run_id": fork.ForkRunID, "idempotency_key": "selected-source-pause-before-ordinary",
+					})
 					ordinary := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
 					})
