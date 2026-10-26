@@ -45,12 +45,6 @@ func testLiveExecutionContext(ctx context.Context) context.Context {
 
 func originalRuntimeFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if runtimestartupownership.HasMutationAuthority(ctx) {
-		if _, err := runtimestartupownership.CaptureMutationAuthority(ctx); err != nil {
-			t.Fatal(err)
-		}
-		return ctx
-	}
 	owner, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("fixture requires its original selected lifecycle owner: %T", selected)
@@ -62,11 +56,7 @@ func originalRuntimeFixtureContext(t testing.TB, ctx context.Context, selected a
 		}
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, owner)
 	if err != nil {
 		t.Fatal(err)
 	}

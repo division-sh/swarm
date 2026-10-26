@@ -107,8 +107,12 @@ func runStatusAgentConfig(t *testing.T, source semanticview.Source, runID, agent
 	return resolved.Actor
 }
 
-func runStatusAuthorActivityContext(source runtimecorrelation.SourceArtifactFact) context.Context {
-	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
+func runStatusAuthorActivityContext(source runtimecorrelation.SourceArtifactFact, originals ...context.Context) context.Context {
+	ctx := context.Background()
+	if len(originals) > 0 {
+		ctx = originals[0]
+	}
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runStatusTestRuntimeInstanceID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runStatusTestRuntimeInstanceID, source.BundleHash()))
 }
@@ -138,13 +142,15 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore, runID string, w
 	workflow := runtimepipeline.NewWorkflowPersistence(pg)
 	source := runStatusSubscriptionSource(t, withAgent)
 	bundle, _ := semanticview.Bundle(source)
-	sourceFact := sourceartifactfixture.RequireArtifact(t, context.Background(), pg, bundle.SourceArtifact)
-	workOwner := newSupervisorTestRuntimeOccurrence(t, sourceFact.BundleHash())
+	sourceFact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+	process := newSupervisorTestProcessOwner(t)
+	original := serveFixtureProcessContext(t, worklifetime.WithProcess(runStatusAuthorActivityContext(sourceFact), process), pg)
+	sourceartifactfixture.RequireArtifact(t, original, pg, bundle.SourceArtifact)
+	workOwner := newSupervisorTestRuntimeOccurrence(t, sourceFact.BundleHash(), original)
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(sourceFact, runStatusTestRuntimeInstanceID, 1)
 	if err != nil {
 		t.Fatalf("construct run status delivery authority: %v", err)
 	}
-	original := serveFixtureProcessContext(t, runStatusAuthorActivityContext(sourceFact), pg)
 	capability, err := agentfixture.ProcessCapability(t, original, pg)
 	if err != nil {
 		t.Fatal(err)

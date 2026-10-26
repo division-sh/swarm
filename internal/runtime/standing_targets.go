@@ -618,7 +618,8 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	if rt == nil || rt.Options.WorkflowModule == nil {
 		return nil, fmt.Errorf("runtime workflow module is required")
 	}
-	admission, err := rt.standingCredentials(context.Background())
+	// Held-layer carriage exception: https://github.com/division-sh/swarm/pull/2794#issuecomment-6418146948.
+	admission, err := rt.standingCredentials(rt.authorActivityContext(context.Background()))
 	if err != nil {
 		return nil, err
 	}

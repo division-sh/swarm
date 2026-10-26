@@ -152,18 +152,11 @@ func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.Age
 
 func serveFixtureProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if runtimestartupownership.HasMutationAuthority(ctx) {
-		return ctx
-	}
 	store, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("serve fixture requires its native lifecycle owner: %T", selected)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}

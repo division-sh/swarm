@@ -33,6 +33,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -158,9 +160,16 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: workOwner.Identity().RuntimeInstanceID, ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog, DeclaredChannelPublication: declaredPublication,
 			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash)}}
 	selected := storetest.StartSQLiteRuntimeStore(t)
-	sourceartifactfixture.RequireArtifact(t, t.Context(), selected, bundle.SourceArtifact)
+	fixtureContext := worklifetime.WithOccurrence(correlation.WithRuntimeInstanceID(t.Context(), rt.Options.RuntimeInstanceID), workOwner)
+	fixtureContext = serveFixtureProcessContext(t, fixtureContext, selected)
+	var found bool
+	rt.Options.ProcessWorkOwner, found = worklifetime.ProcessFromContext(fixtureContext)
+	if !found {
+		t.Fatal("registration fixture requires its original process work owner")
+	}
+	sourceartifactfixture.RequireArtifact(t, fixtureContext, selected, bundle.SourceArtifact)
 	rt.Manager = runtimemanager.NewAgentManager(bus, nil)
-	grant := admitServeSessionProcessFixture(t, t.Context(), selected, rt.Options.RuntimeInstanceID, bundleHash)
+	grant := admitServeSessionProcessFixture(t, fixtureContext, selected, rt.Options.RuntimeInstanceID, bundleHash)
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)
 	}

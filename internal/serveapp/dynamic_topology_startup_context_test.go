@@ -76,10 +76,6 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 				loadServeDynamicTopologySource(t, selected, "context-b"),
 			}
 			facts := make([]runtimecorrelation.SourceArtifactFact, len(loaded))
-			for index, source := range loaded {
-				facts[index] = sourceartifactfixture.RequireArtifact(t, context.Background(),
-					selected.RuntimeDeps().EventStore.(sourceartifactfixture.Writer), source.bundle.SourceArtifact)
-			}
 			paths := []string{"worker/context-a", "worker/context-b"}
 			runIDs := []string{uuid.NewString(), uuid.NewString()}
 
@@ -99,6 +95,10 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 			original, err := runtimestartupownership.WithProcessMutationAuthority(context.Background(), capability)
 			if err != nil {
 				t.Fatal(err)
+			}
+			for index, source := range loaded {
+				facts[index] = sourceartifactfixture.RequireArtifact(t, original,
+					selected.RuntimeDeps().EventStore.(sourceartifactfixture.Writer), source.bundle.SourceArtifact)
 			}
 			providerRegistry := testProviderTriggerCatalog(t)
 			runtimes := make([]*runtimepkg.Runtime, 0, len(facts))
