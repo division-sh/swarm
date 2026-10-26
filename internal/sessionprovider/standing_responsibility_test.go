@@ -108,14 +108,14 @@ func TestWhatsAppStandingResponsibilityRequiresRealConfirmationBothStores(t *tes
 			if err := f.occurrence.join(f.ctx); err != nil {
 				t.Fatal(err)
 			}
-			if current, err := f.selected.SessionStandingBindingCurrent(context.Background(), f.operation); err != nil || !current {
+			if current, err := f.selected.SessionStandingBindingCurrent(f.ctx, f.operation); err != nil || !current {
 				t.Fatal("disconnection erased confirmed standing responsibility", current, err)
 			}
-			if _, _, err := f.identities.Unbind(context.Background(), f.operation.Interface.Selector,
+			if _, _, err := f.identities.Unbind(f.ctx, f.operation.Interface.Selector,
 				f.binding.Revision, uuid.NewString(), uuid.NewString(), time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
-			if current, err := f.selected.SessionStandingBindingCurrent(context.Background(), f.operation); err != nil || current {
+			if current, err := f.selected.SessionStandingBindingCurrent(f.ctx, f.operation); err != nil || current {
 				t.Fatal("unbind retained native standing authority", current, err)
 			}
 		})
