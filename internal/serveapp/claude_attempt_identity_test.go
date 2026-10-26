@@ -51,6 +51,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -622,8 +623,9 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		return claudeAttemptProofBackend{}
 	}
 	backend.fixture = backend.store
-	backend.source = requireServeTestSourceArtifactFact(t, backend.store)
+	backend.source = mustServeTestEphemeralSourceArtifactFact(sourceartifactfixture.BundleHash)
 	backend.original = serveFixtureProcessContext(t, backend.context(), backend.store)
+	backend.source = requireServeTestSourceArtifactFact(t, backend.original, backend.store)
 	process, err := agentfixture.ProcessCapability(t, backend.original, backend.store)
 	if err != nil {
 		t.Fatal(err)

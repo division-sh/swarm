@@ -9,9 +9,9 @@ import (
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
-func requireServeTestSourceArtifactFact(t testing.TB, selected storetest.DurableDataCatalogStore) runtimecorrelation.SourceArtifactFact {
+func requireServeTestSourceArtifactFact(t testing.TB, ctx context.Context, selected storetest.DurableDataCatalogStore) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
-	return sourceartifactfixture.Require(t, context.Background(), selected)
+	return sourceartifactfixture.Require(t, ctx, selected)
 }
 
 func mustServeTestEphemeralSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
