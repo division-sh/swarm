@@ -52,7 +52,7 @@ func proveReceiverMaterializationBothStores(t *testing.T, source func(testing.TB
 				if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='sink'`, started.RunID).Scan(&childID); err != nil {
 					t.Fatal(err)
 				}
-				if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$1::text`, started.RunID).Scan(&parentID); err != nil {
+				if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=CAST($1 AS TEXT)`, started.RunID).Scan(&parentID); err != nil {
 					t.Fatal(err)
 				}
 				if childID != flowidentity.EntityID("sink") || childID == parentID {

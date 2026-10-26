@@ -332,7 +332,7 @@ func registryProofWaitCompleted(t *testing.T, endpoint, runID string) {
 func registryProofBusinessResults(t *testing.T, endpoint, runID string, outputEvents []string, companies []registryProofCompany) ([]operatorread.OperatorEntitySummary, map[string]string) {
 	t.Helper()
 	var listed operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID, "type": "company", "limit": 10}, &listed)
+	requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID, "flow": "registry", "limit": 10}, &listed)
 	if len(listed.Entities) != 3 || listed.NextCursor != "" {
 		t.Fatalf("registry entity cardinality=%+v", listed)
 	}

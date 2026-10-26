@@ -101,7 +101,6 @@
         "source": "inferred",
         "agents": []
       },
-      "primary_entity_error": "flow producer has no state.yaml",
       "input_pins": [
         {
           "event": "account.requested",

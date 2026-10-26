@@ -979,8 +979,8 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, standingEntityID).Scan(&entities); err != nil {
 		t.Fatalf("count standing entities: %v", err)
 	}
-	if runs != 1 || instances != 1 || entities != 1 {
-		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
+	if runs != 1 || instances != 1 || entities != 0 {
+		t.Fatalf("fieldless standing authority counts = runs:%d instances:%d entities:%d, want 1/1/0", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
@@ -1210,8 +1210,8 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err := db.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = $1::uuid`, entity).Scan(&entities); err != nil {
 		t.Fatalf("count standing entities: %v", err)
 	}
-	if runs != 1 || instances != 1 || entities != 1 {
-		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
+	if runs != 1 || instances != 1 || entities != 0 {
+		t.Fatalf("fieldless standing authority counts = runs:%d instances:%d entities:%d, want 1/1/0", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
