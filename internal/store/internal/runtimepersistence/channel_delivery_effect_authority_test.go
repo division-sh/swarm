@@ -100,7 +100,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					return ok
 				}
 				now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
-				onboarding, activation := selectedChannelConfirmationAuthorityFixture(t, selected, now, runtimeeffects.StateAuthorized)
+				onboarding, activation := selectedChannelConfirmationAuthorityFixture(t, ctx, selected, now, runtimeeffects.StateAuthorized)
 				principal, err := selected.EnsureOperatorPrincipal(ctx, now)
 				if err != nil {
 					t.Fatal(err)
